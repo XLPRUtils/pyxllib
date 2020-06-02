@@ -2,776 +2,1416 @@
 # -*- coding: utf-8 -*-
 # @Author : 陈坤泽
 # @Email  : 877362867@qq.com
-# @Data   : 2020/05/30 20:23
+# @Data   : 2018/12/27
 
 
-____str = """
-文本处理相关功能
+"""
+文本处理、常用正则匹配模式
+
+下面大量的函数前缀含义：
+grp，generate regular pattern，生成正则模式字符串
+grr，generate regular replace，生成正则替换目标格式
+"""
+
+from pyxllib.util.mathlib import *
+
+
+import base64
+import bisect
+import itertools
+
+
+____section_0_import = """
+try ... except不影响效率的
+主要是导入特殊包，好像是比较耗费时间，这里要占用掉0.1秒多时间
 """
 
 
-def east_asian_len(s, ambiguous_width=None):
-    import pandas.io.formats.format as fmt
-    return fmt.EastAsianTextAdjustment().len(s)
+# 调用到的第三方库
 
 
-def east_asian_shorten(s, width=50, placeholder='...'):
-    """考虑中文情况下的域宽截断
-
-    :param s: 要处理的字符串
-    :param width: 宽度上限，仅能达到width-1的宽度
-    :param placeholder: 如果做了截断，末尾补足字符
-
-    # width比placeholder还小
-    >>> east_asian_shorten('a', 2)
-    'a'
-    >>> east_asian_shorten('a啊b'*4, 3)
-    '..'
-    >>> east_asian_shorten('a啊b'*4, 4)
-    '...'
-
-    >>> east_asian_shorten('a啊b'*4, 5, '...')
-    'a...'
-    >>> east_asian_shorten('a啊b'*4, 11)
-    'a啊ba啊...'
-    >>> east_asian_shorten('a啊b'*4, 16, '...')
-    'a啊ba啊ba啊b...'
-    >>> east_asian_shorten('a啊b'*4, 18, '...')
-    'a啊ba啊ba啊ba啊b'
-    """
-    # 一、如果字符串本身不到width设限，返回原值
-    s = textwrap.shorten(s, width * 3, placeholder='')  # 用textwrap的折行功能，尽量不删除文本
-    n = east_asian_len(s)
-    if n < width: return s
-
-    # 二、如果输入的width比placeholder还短
-    width -= 1
-    m = east_asian_len(placeholder)
-    if width <= m:
-        return placeholder[:width]
-
-    # 三、需要添加 placeholder
-    # 1、计算长度
-    width -= m
-
-    # 2、截取s
-    try:
-        s = s.encode('gbk')[:width].decode('gbk', errors='ignore')
-    except UnicodeEncodeError:
-        i, count = 0, m
-        while i < n and count <= width:
-            if ord(s[i]) > 127:
-                count += 2
-            else:
-                count += 1
-            i += 1
-        s = s[:i]
-
-    return s + placeholder
+try:
+    # MatchSimString计算编辑距离需要
+    import Levenshtein
+except ModuleNotFoundError:
+    subprocess.run(['pip3', 'install', 'python-levenshtein'])
+    import Levenshtein
 
 
-def dataframe_str(df, *args, ambiguous_as_wide=None, shorten=True):
-    """输出DataFrame
-    DataFrame可以直接输出的，这里是增加了对中文字符的对齐效果支持
-
-    :param df: DataFrame数据结构
-    :param args: option_context格式控制
-    :param ambiguous_as_wide: 是否对①②③这种域宽有歧义的设为宽字符
-        win32平台上和linux上①域宽不同，默认win32是域宽2，linux是域宽1
-    :param shorten: 是否对每个元素提前进行字符串化并控制长度在display.max_colwidth以内
-        因为pandas的字符串截取遇到中文是有问题的，可以用我自定义的函数先做截取
-        默认开启，不过这步比较消耗时间
-
-    >> df = pd.DataFrame({'哈哈': ['a'*100, '哈\n①'*10, 'a哈'*100]})
-                                                        哈哈
-        0  aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa...
-        1   哈 ①哈 ①哈 ①哈 ①哈 ①哈 ①哈 ①哈 ①哈 ①...
-        2  a哈a哈a哈a哈a哈a哈a哈a哈a哈a哈a哈a哈a哈a哈a哈a...
-    """
-    if ambiguous_as_wide is None:
-        ambiguous_as_wide = sys.platform == 'win32'
-    with pd.option_context('display.unicode.east_asian_width', True,  # 中文输出必备选项，用来控制正确的域宽
-                           'display.unicode.ambiguous_as_wide', ambiguous_as_wide,
-                           'max_columns', 20,  # 最大列数设置到20列
-                           'display.width', 200,  # 最大宽度设置到200
-                           *args):
-        if shorten:  # applymap可以对所有的元素进行映射处理，并返回一个新的df
-            df = df.applymap(lambda x: east_asian_shorten(str(x), pd.options.display.max_colwidth))
-        s = str(df)
-    return s
+# import textract     # ensure_content读取word文档需要
 
 
-class StrDecorator:
-    """将函数的返回值字符串化，仅调用朴素的str字符串化
-
-    装饰器开发可参考： https://mp.weixin.qq.com/s/Om98PpncG52Ba1ZQ8NIjLA
-    """
-
-    def __init__(self, func):
-        self.func = func  # 使用self.func可以索引回原始函数名称
-        self.last_raw_res = None  # last raw result，上一次执行函数的原始结果
-
-    def __call__(self, *args, **kwargs):
-        self.last_raw_res = self.func(*args, **kwargs)
-        return str(self.last_raw_res)
+try:  # 拼写检查库，即词汇库
+    from spellchecker import SpellChecker
+except ModuleNotFoundError:
+    subprocess.run(['pip3', 'install', 'pyspellchecker'])
+    from spellchecker import SpellChecker
 
 
-def prettifystr(s):
-    """对一个对象用更友好的方式字符串化
+____section_1_text = """
+一些文本处理函数和类
+"""
 
-    :param s: 输入类型不做限制，会将其以友好的形式格式化
-    :return: 格式化后的字符串
-    """
-    title = ''
-    if isinstance(s, str):
+
+class ContentLine(object):
+    """用行数的特性分析一段文本"""
+    def __init__(self, content):
+        """用一段文本初始化"""
+        self.content = ensure_content(content)  # 原始文本
+        self.linepos = list()  # linepos[i-1] = v：第i行终止位置（\n）所在下标为v
+        for i in range(len(self.content)):
+            if self.content[i] == '\n':
+                self.linepos.append(i)
+        self.linepos.append(len(self.content))
+        self.lines = self.content.splitlines()  # 每一行的文本内容
+
+    def line_start_pos(self, line):
+        """第line行的其实pos位置"""
         pass
-    elif isinstance(s, collections.Counter):  # Counter要按照出现频率显示
-        s = s.most_common()
-        title = f'collections.Counter长度：{len(s)}\n'
-        df = pd.DataFrame.from_records(s, columns=['value', 'count'])
-        s = dataframe_str(df)
-    elif isinstance(s, (list, tuple)):
-        title = f'{typename(s)}长度：{len(s)}\n'
-        s = pprint.pformat(s)
-    elif isinstance(s, (dict, set)):
-        title = f'{typename(s)}长度：{len(s)}\n'
-        s = pprint.pformat(s)
-    else:  # 其他的采用默认的pformat
-        s = pprint.pformat(s)
-    return title + s
 
+    def lines_num(self):
+        """返回总行数"""
+        return self.content.count('\n')
 
-class PrettifyStrDecorator:
-    """将函数的返回值字符串化（调用 prettifystr 美化）"""
+    def match_lines(self, pattern):
+        """返回符合正则规则的行号
 
-    def __init__(self, func):
-        self.func = func  # 使用self.func可以索引回原始函数名称
-        self.last_raw_res = None  # last raw result，上一次执行函数的原始结果
-
-    def __call__(self, *args, **kwargs):
-        self.last_raw_res = self.func(*args, **kwargs)
-        return prettifystr(self.last_raw_res)
-
-
-class PrintDecorator:
-    """将函数返回结果直接输出"""
-
-    def __init__(self, func):
-        self.func = func
-
-    def __call__(self, *args, **kwargs):
-        s = self.func(*args, **kwargs)
-        print(s)
-        return s  # 输出后仍然会返回原函数运行值
-
-
-def natural_sort_key(key):
-    def convert(text):
-        return int(text) if text.isdigit() else text.lower()
-
-    return [convert(c) for c in re.split('([0-9]+)', str(key))]
-
-
-def natural_sort(ls):
-    """自然排序"""
-    return sorted(ls, key=natural_sort_key)
-
-
-def realign(text, least_blank=4, tab2blank=4, support_chinese=False, sep=None):
-    r"""
-    :param text: 一段文本
-        支持每行列数不同
-    :param least_blank: 每列最少间距空格数
-    :param tab2blank:
-    :param support_chinese: 支持中文域宽计算
-    :param sep: 每列分隔符，默认为least_blank个空格
-    :return: 对齐美化的一段文本
-
-    >>> realign('  Aget      keep      hold         show\nmaking    selling    giving    collecting')
-    'Aget      keep       hold      show\nmaking    selling    giving    collecting'
-    """
-    # 1、预处理
-    s = text.replace('\t', ' ' * tab2blank)
-    s = re.sub(' {' + str(least_blank) + ',}', r'\t', s)  # 统一用\t作为分隔符
-    lenfunc = strwidth if support_chinese else len
-    if sep is None: sep = ' ' * least_blank
-
-    # 2、计算出每一列的最大宽度
-    lines = s.splitlines()
-    n = len(lines)
-    max_width = GrowingList()  # 因为不知道有多少列，用自增长的list来存储每一列的最大宽度
-    for i, line in enumerate(lines):
-        line = line.strip().split('\t')
-        m = len(line)
-        for j in range(m): max_width[j] = max(max_width[j] if max_width[j] else 0, lenfunc(line[j]))
-        lines[i] = line
-    if len(max_width) == 1: return '\n'.join(map(lambda x: x[0], lines))
-
-    # 3、重组内容
-    for i, line in enumerate(lines):
-        for j in range(len(line) - 1): line[j] += ' ' * (max_width[j] - lenfunc(line[j]))  # 注意最后一列就不用加空格了
-        lines[i] = sep.join(line)
-    return '\n'.join(lines)
-
-
-def strfind(fullstr, objstr, *, start=None, times=0, overlap=False):
-    r"""进行强大功能扩展的的字符串查找函数。
-    TODO 性能有待优化
-
-    :param fullstr: 原始完整字符串
-    >>> strfind('aabbaabb', 'bb')  # 函数基本用法
-    2
-
-    :param objstr: 需要查找的目标字符串，可以是一个list或tuple
-    TODO 有空看下AC自动机，看这里是否可以优化提速，或者找现成的库接口
-    >>> strfind('bbaaaabb', 'bb') # 查找第1次出现的位置
-    0
-    >>> strfind('aabbaabb', 'bb', times=1) # 查找第2次出现的位置
-    6
-    >>> strfind('aabbaabb', 'cc') # 不存在时返回-1
-    -1
-    >>> strfind('aabbaabb', ['aa', 'bb'], times=2)
-    4
-
-    :param start: 起始查找位置。默认值为0，当times<0时start的默认值为-1。
-    >>> strfind('aabbaabb', 'bb', start=2) # 恰好在起始位置
-    2
-    >>> strfind('aabbaabb', 'bb', start=3)
-    6
-    >>> strfind('aabbaabb', ['aa', 'bb'], start=5)
-    6
-
-    :param times: 定位第几次出现的位置，默认值为0，即从前往后第1次出现的位置。
-        如果是负数，则反向查找，并返回的是目标字符串的起始位置。
-    >>> strfind('aabbaabb', 'aa', times=-1)
-    4
-    >>> strfind('aabbaabb', 'aa', start=5, times=-1)
-    4
-    >>> strfind('aabbaabb', 'aa', start=3, times=-1)
-    0
-    >>> strfind('aabbaabb', 'bb', start=7, times=-1)
-    6
-
-    :param overlap: 重叠情况是否重复计数
-    >>> strfind('aaaa', 'aa', times=1)  # 默认不计算重叠部分
-    2
-    >>> strfind('aaaa', 'aa', times=1, overlap=True)
-    1
-
-    >>> strfind(r'\item=\item+', (r'\item', r'\test'), start=1)
-    6
-    """
-
-    def nonnegative_min_value(*arr):
-        """计算出最小非负整数，如果没有非负数，则返回-1"""
-        arr = tuple(filter(lambda x: x >= 0, arr))
-        return min(arr) if arr else -1
-
-    def nonnegative_max_value(*arr):
-        """计算出最大非负整数，如果没有非负数，则返回-1"""
-        arr = tuple(filter(lambda x: x >= 0, arr))
-        return max(arr) if arr else -1
-
-    # 1、根据times不同，start的初始默认值设置方式也不同
-    if times < 0 and start is None:
-        start = len(fullstr) - 1  # 反向查找start设到末尾字符-1
-    if start is None:
-        start = 0  # 正向查找start设为0
-    p = -1  # 记录答案位置，默认找不到
-
-    # 2、单串匹配
-    if isinstance(objstr, str):  # 单串匹配
-        offset = 1 if overlap else len(objstr)  # overlap影响每次偏移量
-
-        # A、正向查找
-        if times >= 0:
-            p = start - offset
-            for _ in range(times + 1):
-                p = fullstr.find(objstr, p + offset)
-                if p == -1:
-                    return -1
-
-        # B、反向查找
-        else:
-            p = start + offset + 1
-            for _ in range(-times):
-                p = fullstr.rfind(objstr, 0, p - offset)
-                if p == -1:
-                    return -1
-
-    # 3、多模式匹配（递归调用，依赖单串匹配功能）
-    else:
-        # A、正向查找
-        if times >= 0:
-            p = start - 1
-            for _ in range(times + 1):
-                # 把每个目标串都找一遍下一次出现的位置，取最近的一个
-                #   因为只找第一次出现的位置，所以overlap参数传不传都没有影响
-                # TODO 需要进行性能对比分析，有必要的话后续可以改AC自动机实现多模式匹配
-                ls = tuple(map(lambda x: strfind(fullstr, x, start=p + 1, overlap=overlap), objstr))
-                p = nonnegative_min_value(*ls)
-                if p == -1:
-                    return -1
-
-        # B、反向查找
-        else:
-            p = start + 1
-            for _ in range(-times):  # 需要循环处理的次数
-                # 使用map对每个要查找的目标调用strfind
-                ls = tuple(map(lambda x: strfind(fullstr, x, start=p - 1, times=-1, overlap=overlap), objstr))
-                p = nonnegative_max_value(*ls)
-                if p == -1:
-                    return -1
-
-    return p
-
-
-class Stdout:
-    """重定向标准输出流，切换print标准输出位置
-    使用with语法调用
-    """
-
-    def __init__(self, path=None, mode='w'):
+        180515扩展： pattern也能输入一个函数
         """
-        :param path: 可选参数
-            如果是一个合法的文件名，在__exit__时，会将结果写入文件
-            如果不合法不报错，只是没有功能效果
-        :param mode: 写入模式
-            'w': 默认模式，直接覆盖写入
-            'a': 追加写入
+        # 1、定义函数句柄
+        if not callable(pattern):
+            def f(s):
+                return re.search(pattern, s)
+        else:
+            f = pattern
+        # 2、循环判断
+        res = list()
+        for i, line in enumerate(self.lines):
+            if f(line):
+                res.append(i)
+        return res
+
+    def in_line(self, ob):
+        """输入关键词ob，返回行号"""
+
+        if hasattr(ob, 'span'):
+            return self.in_line(ob.span()[0])
+        elif isinstance(ob, int):
+            "如果给入一个下标值，如23，计算第23个字符处于原文中第几行"
+            return bisect.bisect_right(self.linepos, ob-1) + 1
+        elif isinstance(ob, str):
+            "输入一段文本，判断该文中有哪些行与该行内容相同"
+            res = list()
+            for i, line in enumerate(self.lines):
+                if line == ob:
+                    res.append(i+1)
+            return res
+        elif isinstance(ob, (list, tuple, collections.Iterable)):
+            return list(map(self.in_line, ob))
+        else:
+            dprint(typename(ob))  # 类型错误
+            raise ValueError
+
+    def regular_search(self, re_str):
+        """同InLine，但是支持正则搜索"""
+        return self.in_line(re.finditer(re_str, self.content))
+
+    def lines_content(self, lines) -> str:
+        """返回lines集合中数字所对行号的所有内容
+
+        注意输入的lines起始编号是1
         """
-        self.origin_stdout = sys.stdout
-        self._path = path
-        self._mode = mode
-        self.strout = io.StringIO()
-        self.result = None
-
-    def __enter__(self):
-        sys.stdout = self.strout
-        return self
-
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        sys.stdout = self.origin_stdout
-        self.result = str(self)
-
-        # 如果输入的是一个合法的文件名，则将中间结果写入
-        if not self._path:
-            return
-
-        try:
-            with open(self._path, self._mode) as f:
-                f.write(self.result)
-        except TypeError as e:
-            logging.exception(e)
-        except FileNotFoundError as e:
-            logging.exception(e)
-
-        self.strout.close()
+        lines = sorted(set(lines))  # 去重
+        res = map(lambda n: '{:6} {}'.format(n, self.lines[n-1]), lines)
+        return '\n'.join(res)
 
     def __str__(self):
-        """在这个期间获得的文本内容"""
-        if self.result:
-            return self.result
+        return self.content
+
+
+def binary_cut_str(s, fmt='0'):
+    """180801坤泽：“二分”切割字符串
+    :param s: 要截取的全字符串
+    :param fmt: 截取格式，本来是想只支持0、1的，后来想想支持23456789也行
+        0：左边一半
+        1：右边的1/2
+        2：右边的1/3
+        3：右边的1/4
+        ...
+        9：右边的1/10
+    :return: 截取后的字符串
+
+    >>> binary_cut_str('1234', '0')
+    '12'
+    >>> binary_cut_str('1234', '1')
+    '34'
+    >>> binary_cut_str('1234', '10')
+    '3'
+    >>> binary_cut_str('123456789', '20')
+    '7'
+    >>> binary_cut_str('123456789', '210')  # 向下取整，'21'获得了9，然后'0'取到空字符串
+    ''
+    """
+    for t in fmt:
+        t = int(t)
+        n = len(s) // (1 + max(1, t))
+        if t == 0:
+            s = s[:n]
         else:
-            return self.strout.getvalue()
-
-
-def shorten(s, width=200, placeholder='...'):
-    """
-    >>> shorten('aaa', 10)
-    'aaa'
-    >>> shorten('hell world! 0123456789 0123456789', 11)
-    'hell world!'
-    >>> shorten("Hello  world!", width=12)
-    'Hello world!'
-    >>> shorten("Hello  world!", width=11)
-    'Hello world'
-
-    textwrap.shorten有placeholder参数，但我这里暂时还没用这个参数值
-
-    我在textwrap.shorten使用中发现了一个bug，所以才打算自己写一个shorten的：
-    >>> textwrap.shorten('0123456789 0123456789', 11)  # 全部字符都被折叠了
-    '[...]'
-    >>> shorten('0123456789 0123456789', 11)  # 自己写的shorten
-    '0123456789 '
-    """
-    s = re.sub(r'\s+', ' ', str(s))
-    n = len(s)
-    if n > width:
-        s = s[:width]
+            s = s[(len(s)-n):]
     return s
 
-    # return textwrap.shorten(str(s), width)
 
-
-def strwidth(s):
-    """string width
-    中英字符串实际宽度
-    >>> strwidth('ab')
-    2
-    >>> strwidth('a⑪中⑩')
-    7
-
-    ⑩等字符的宽度还是跟字体有关的，不过在大部分地方好像都是域宽2，目前算法问题不大
+def digits2chinese(n):
+    """TODO：目前处理范围有限，还需要再扩展
     """
+    s = '十一二三四五六七八九'
+    if n == 0:
+        return '零'
+    elif n <= 10:
+        return s[n % 10]
+    elif n < 20:
+        return '十' + s[n % 10]
+    elif n < 100:
+        return s[n//10] + s[n % 10]
+    else:
+        raise NotImplementedError
+
+
+def chinese2digits(chinese_str):
+    """把汉字变为阿拉伯数字
+    https://blog.csdn.net/leon_wzm/article/details/78963082
+    """
+    def inner(m):
+        t = m.group()
+        if t is None or t.strip() == '':
+            raise ValueError(f'input error for {chinese_str}')
+        t = t.strip()
+        t = t.replace('百十', '百一十')
+        common_used_numerals = {'零': 0, '一': 1, '二': 2, '两': 2, '三': 3, '四': 4, '五': 5, '六': 6, '七': 7, '八': 8, '九': 9,
+                                '十': 10, '百': 100, '千': 1000, '万': 10000, '亿': 100000000}
+        total = 0
+        r = 1  # right，右边一位的值
+        for i in range(len(t) - 1, -1, -1):  # 从右往左一位一位读取
+            val = common_used_numerals.get(t[i])  # 使用get不存在会返回None
+            if val is None:
+                # dprint(chinese_str)
+                return chinese_str
+                # raise ValueError(f't[i]={t[i]} can not be accepted.')
+            if val >= 10 and i == 0:  # 最左位是“十百千万亿”这样的单位数词
+                if val > r:  # 一般是“十三”这类会进入这个if分支
+                    r = val
+                    total += val
+                else:
+                    r *= val
+            elif val >= 10:
+                if val > r:  # 跳了单位数词（正常情况都会跳），例如 一万一百零三
+                    r = val
+                else:  # 单位数词叠加情况，例如 一千亿
+                    r *= val
+            else:  # 不是单位数词的数词，如果上一步是单位数词，增加一个单位量
+                total += r * val
+        return str(total)
+    return re.sub(r'[零一二两三四五六七八九十百千万亿]+', inner, chinese_str)
+
+
+def digits2roman(d):
+    """
+    >>> digits2roman(2)
+    'Ⅱ'
+    >>> digits2roman(12)
+    'Ⅻ'
+    """
+    rmn = '~ⅠⅡⅢⅣⅤⅥⅦⅧⅨⅩⅪⅫ'  # roman数字number的缩写
+
+    d = int(d)  # 确保是整数类型
+    if d <= 12:
+        return rmn[d]
+    else:
+        raise NotImplementedError
+
+
+def roman2digits(d):
+    """
+    >>> roman2digits('Ⅱ')
+    2
+    >>> roman2digits('Ⅻ')
+    12
+    """
+    rmn = '~ⅠⅡⅢⅣⅤⅥⅦⅧⅨⅩⅪⅫ'
+    if d in rmn:
+        return rmn.index(d)
+    else:
+        raise NotImplemented
+
+
+def digits2circlednumber(d):
+    d = int(d)
+    if 0 < d <= 20:
+        return '①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮⑯⑰⑱⑲⑳'[d-1]
+    else:
+        raise NotImplemented
+
+
+def circlednumber2digits(d):
+    t = '①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮⑯⑰⑱⑲⑳'
+    if d in t:
+        return t.index(d) + 1
+    else:
+        raise NotImplemented
+
+
+def gettag_name(tagstr):
+    """
+    >>> gettag_name('%<topic type=danxuan description=单选题>')
+    'topic'
+    >>> gettag_name('</topic>')
+    'topic'
+    """
+    m = re.search(r'</?([a-zA-Z_]+)', tagstr)
+    if m:
+        return m.group(1)
+    else:
+        return None
+
+
+def settag_name(tagstr, *, new_name=None, switch=None):
+    """设置标签名称，或者将标签类型设为close类型
+
+    >>> settag_name('%<topic type=danxuan description=单选题>', new_name='mdzz')
+    '%<mdzz type=danxuan description=单选题>'
+    >>> settag_name('<topic type=danxuan description=单选题>', switch=False)
+    '</topic>'
+    """
+    if new_name:  # 是否设置新名称
+        tagstr = re.sub(r'(</?)([a-zA-Z_]+)', lambda m: m.group(1) + new_name, tagstr)
+
+    if switch is not None:  # 是否设置标签开关
+        if switch:  # 将标签改为开
+            tagstr = tagstr.replace('</', '<')
+        else:  # 将标签改为关
+            name = gettag_name(tagstr)
+            res = f'</{name}>'  # 会删除所有attr属性
+            tagstr = '%' + res if '%<' in tagstr else res
+
+    return tagstr
+
+
+def gettag_attr(tagstr, attrname):
+    r"""tagstr是一个标签字符串，attrname是要索引的名字
+    返回属性值，如果不存在该属性则返回None
+
+    >>> gettag_attr('%<topic type=danxuan description=单选题> 123\n<a b=c></a>', 'type')
+    'danxuan'
+    >>> gettag_attr('%<topic type="dan xu an" description=单选题>', 'type')
+    'dan xu an'
+    >>> gettag_attr("%<topic type='dan xu an' description=单选题>", 'type')
+    'dan xu an'
+    >>> gettag_attr('%<topic type=dan xu an description=单选题>', 'description')
+    '单选题'
+    >>> gettag_attr('%<topic type=dan xu an description=单选题>', 'type')
+    'dan'
+    >>> gettag_attr('%<topic type=danxuan description=单选题 >', 'description')
+    '单选题'
+    >>> gettag_attr('%<topic type=danxuan description=单选题 >', 'description123') is None
+    True
+    """
+    import bs4
+    soup = BeautifulSoup(tagstr, 'lxml')
     try:
-        res = len(s.encode('gbk'))
-    except UnicodeEncodeError:
-        count = len(s)
-        for x in s:
-            if ord(x) > 127:
-                count += 1
-        res = count
+        for tag in soup.p.contents:
+            if isinstance(tag, bs4.Tag):
+                return tag.get(attrname, None)
+    except AttributeError:
+        dprint(tagstr)
+    return None
+
+
+def settag_attr(tagstr, attrname, target_value):
+    r"""tagstr是一个标签字符串，attrname是要索引的名字
+    重设该属性的值，设置成功则返回新的tagstr；否则返回原始值
+
+    close类型不能用这个命令，用了的话不进行任何处理，直接返回
+
+    >>> settag_attr('%<topic type=danxuan> 123\n<a></a>', 'type', 'tiankong')
+    '%<topic type="tiankong"> 123\n<a></a>'
+    >>> settag_attr('%<topic>', 'type', 'tiankong')
+    '%<topic type="tiankong">'
+    >>> settag_attr('</topic>', 'type', 'tiankong')
+    '</topic>'
+    >>> settag_attr('<seq value="1">', 'value', '练习1.2')
+    '<seq value="练习1.2">'
+    >>> settag_attr('<seq type=123 value=1>', 'type', '')  # 删除attr操作
+    '<seq value=1>'
+    >>> settag_attr('<seq type=123 value=1>', 'value', '')  # 删除attr操作
+    '<seq type=123>'
+    >>> settag_attr('<seq type=123 value=1>', 'haha', '')  # 删除attr操作
+    '<seq type=123 value=1>'
+    """
+    # 如果是close类型是不处理的
+    if tagstr.startswith('</'): return tagstr
+
+    # 预处理targetValue的值，删除空白
+    target_value = re.sub(r'\s', '', target_value)
+    r = re.compile(r'(<|\s)(' + attrname + r'=)(.+?)(\s+\w+=|\s*>)')
+    gs = r.search(tagstr)
+    if target_value:
+        if not gs:  # 如果未找到则添加attr与value
+            n = tagstr.find('>')
+            return tagstr[:n] + ' ' + attrname + '="' + target_value + '"' + tagstr[n:]
+        else:  # 如果找到则更改value
+            # TODO: 目前的替换值是直接放到正则式里了，这样会有很大的风险，后续看看能不能优化这个处理算法
+            return r.sub(r'\1\g<2>"' + target_value + r'"\4', tagstr)
+    else:
+        if gs:
+            return r.sub(r'\4', tagstr)
+        else:
+            return tagstr
+
+
+def briefstr(s):
+    """对文本内容进行一些修改，从而简化其内容，提取关键信息
+    一般用于字符串近似对比
+    """
+    # 1、删除所有空白字符
+    # debuglib.dprint(debuglib.typename(s))
+    s = re.sub(r'\s+', '', s)
+    # 2、转小写字符
+    s = s.casefold()
+    return s
+
+
+def brieftexstr(s):
+    """对比两段tex文本
+    """
+    # 1、删除百分注
+    s = re.sub(r'%' + grp_bracket(2, '<', '>'), r'', s)
+    # 2、删除所有空白字符
+    # debuglib.dprint(debuglib.typename(s))
+    s = re.sub(r'\s+', '', s)
+    # 3、转小写字符
+    s = s.casefold()
+    return s
+
+
+class MatchSimString:
+    """匹配近似字符串
+
+    mss = MatchSimString()
+
+    # 1、添加候选对象
+    mss.append_candidate('福州+厦门2018初数暑假讲义-请录入-快乐学习\初一福厦培优-测试用')
+    mss.append_candidate('2018_快乐数学_六年级_秋季_第01讲_圆柱与圆锥_教案（教师版）')
+    mss.append_candidate('删除所有标签中间多余的空白')
+
+    # 2、需要匹配的对象1
+    s = '奕本初一福周厦门培油'
+
+    idx, sim = mss.match(s)
+    print('匹配目标：', mss[idx])  # 匹配目标： 福州+厦门2018初数暑假讲义-请录入-快乐学习\初一福厦培优-测试用
+    print('相似度：', sim)         # 相似度： 0.22
+
+    # 3、需要匹配的对象2
+    s = '圆柱与【圆锥】_教案空白版'
+
+    idx, sim = mss.match(s)
+    print('匹配目标：', mss[idx])  # 2018_快乐数学_六年级_秋季_第01讲_圆柱与圆锥_教案（教师版）
+    print('相似度：', sim)         # 相似度： 0.375
+
+    如果append_candidate有传递2个扩展信息参数，可以索引获取：
+    mss.ext_value[idx]
+    """
+    def __init__(self, method=briefstr):
+        self.preproc = method
+        self.origin_str = list()  # 原始字符串内容
+        self.key_str = list()     # 对原始字符串进行处理后的字符
+        self.ext_value = list()   # 扩展存储一些信息
+
+    def __getitem__(self, item):
+        return self.origin_str[item]
+
+    def __len__(self):
+        return len(self.key_str)
+
+    def append_candidate(self, k, v=None):
+        self.origin_str.append(k)
+        if callable(self.preproc):
+            k = self.preproc(k)
+        self.key_str.append(k)
+        self.ext_value.append(v)
+
+    def match(self, s):
+        """跟候选字符串进行匹配，返回最佳匹配结果
+        """
+        idx, sim = -1, 0
+        for i in range(len(self)):
+            k, v = self.key_str[i], self.ext_value[i]
+            sim_ = Levenshtein.ratio(k, s)
+            if sim_ > sim:
+                sim = sim_
+                idx = i
+            i += 1
+        return idx, sim
+
+    def match_test(self, s, count=-1, showstr=lambda x: x[:50]):
+        """输入一个字符串s，和候选项做近似匹配
+
+        :param s: 需要进行匹配的字符串s
+        :param count: 只输出部分匹配结果
+            -1：输出所有匹配结果
+            0 < count < 1：例如0.4，则只输出匹配度最高的40%结果
+            整数：输出匹配度最高的count个结果
+        :param showstr: 字符串显示效果
+        """
+        # 1、计算编辑距离，存储结果到res
+        res = []
+        n = len(self)
+        for i in range(n):
+            k, v = self.key_str[i], self.ext_value[i]
+            sim = Levenshtein.ratio(k, s)
+            res.append([i, v, sim, showstr(k)])  # 输出的时候从0开始编号
+            i += 1
+
+        # 2、排序、节选结果
+        res = sorted(res, key=lambda x: -x[2])
+        if 0 < count < 1:
+            n = max(1, int(n*count))
+        elif isinstance(count, int) and count > 0:
+            n = min(count, n)
+        res = res[:n]
+
+        # 3、输出
+        df = pd.DataFrame.from_records(res, columns=('序号', '标签', '编辑距离', '内容'))
+        s = dataframe_str(df)
+        s = s.replace('\u2022', '')  # texstudio无法显示会报错的字符
+        print(s)
+
+
+def endswith(s, tags):
+    """除了模拟str.endswith方法，输入的tag也可以是可迭代对象
+
+    >>> endswith('a.dvi', ('.log', '.aux', '.dvi', 'busy'))
+    True
+    """
+    if isinstance(tags, str):
+        return s.endswith(tags)
+    elif isinstance(tags, (list, tuple)):
+        for t in tags:
+            if s.endswith(t):
+                return True
+    else:
+        raise TypeError
+    return False
+
+
+def mydictstr(d, key_value_delimit='=', item_delimit=' '):
+    """将一个字典转成字符串"""
+    res = []
+    for k, v in d.items():
+        res.append(str(k) + key_value_delimit + str(v).replace('\n', r'\n'))
+    res = item_delimit.join(res)
     return res
 
 
-def strwidth_proc(s, fmt='r', chinese_char_width=1.8):
-    """ 此函数主要用于每个汉字域宽是w=1.8的情况
+def findnth(haystack, needle, n):
+    """https://stackoverflow.com/questions/1883980/find-the-nth-occurrence-of-substring-in-a-string"""
+    if n < 0:
+        n += haystack.count(needle)
+    if n < 0:
+        return -1
 
-    为了让字符串域宽为一个整数，需要补充中文空格，会对原始字符串进行修改。
-    故返回值有2个，第1个是修正后的字符串s，第2个是实际宽度w。
+    parts = haystack.split(needle, n + 1)
+    if len(parts) <= n + 1:
+        return -1
+    return len(haystack) - len(parts[-1]) - len(needle)
 
-    :param s: 一个字符串
-    :param fmt: 目标对齐格式
-    :param chinese_char_width: 每个汉字字符宽度
-    :return: (s, w)
-        s: 修正后的字符串值s
-        w: 修正后字符串的实际宽度
 
-    >>> strwidth_proc('哈哈a')
-    ('　　　哈哈a', 10)
+def refine_digits_set(digits):
+    """美化连续数字的输出效果
+
+    >>> refine_digits_set([210, 207, 207, 208, 211, 212])
+    '207,208,210-212'
     """
-    # 1、计算一些参数值
-    s = str(s)  # 确保是字符串类型
-    l1 = len(s)
-    l2 = strwidth(s)
-    y = l2 - l1  # 中文字符数
-    x = l1 - y  # 英文字符数
-    # ch = chr(12288)  # 中文空格
-    ch = chr(12288)  # 中文空格
-    w = x + y * chinese_char_width  # 当前字符串宽度
-    # 2、计算需要补充t个中文空格
-    error = 0.05  # 允许误差范围
-    t = 0  # 需要补充中文字符数
-    while error < w % 1 < 1 - error:  # 小数部分超过误差
-        t += 1
-        w += chinese_char_width
-    # 3、补充中文字符
-    if t:
-        if fmt == 'r':
-            s = ch * t + s
-        elif fmt == 'l':
-            s = s + ch * t
+    arr = sorted(list(set(digits)))  # 去重
+    n = len(arr)
+    res = ''
+    i = 0
+    while i < n:
+        j = i + 2
+        if j < n and arr[i] + 2 == arr[j]:
+            while j < n and arr[j] - arr[i] == j - i:
+                j += 1
+            j = j if j < n else n - 1
+            res += str(arr[i]) + '-' + str(arr[j]) + ','
+            i = j + 1
         else:
-            s = ch * (t - t // 2) + s + ch * (t // 2)
-    return s, int(w)
+            res += str(arr[i]) + ','
+            i += 1
+    return res[:-1]  # -1是去掉最后一个','
 
 
-def listalign(ls, fmt='r', *, width=None, fillchar=' ', prefix='', suffix='', chinese_char_width=2):
-    """文档： https://blog.csdn.net/code4101/article/details/80985218（不过文档有些过时了）
-    listalign列表对齐
-    py3中str的len是计算字符数量，例如len('ab') --> 2， len('a中b') --> 3。
-    但在对齐等操作中，是需要将每个汉字当成宽度2来处理，计算字符串实际宽度的。
-    所以我们需要开发一个strwidth函数，效果： strwidth('ab') --> 2，strwidth('a中b') --> 4。
-
-    :param ls:
-        要处理的列表，会对所有元素调用str处理，确保全部转为string类型
-            且会将换行符转为\n显示
-    :param fmt: （format）
-        l: left，左对齐
-        c: center，居中
-        r: right，右对齐
-        多个字符: 扩展fmt长度跟ls一样，每一个元素单独设置对齐格式。如果fmt长度小于ls，则扩展的格式按照fmt[-1]设置
-    :param width:
-        None或者设置值小于最长字符串: 不设域宽，直接按照最长的字符串为准
-    :param fillchar: 填充字符
-    :param prefix: 添加前缀
-    :param suffix: 添加后缀
-    :param chinese_char_width: 每个汉字字符宽度
-
-    :return:
-        对齐后的数组ls，每个元素会转为str类型
-
-    >>> listalign(['a', '哈哈', 'ccd'])
-    ['   a', '哈哈', ' ccd']
-    >>> listalign(['a', '哈哈', 'ccd'], chinese_char_width=1.8)
-    ['        a', '　　　哈哈', '      ccd']
-    """
-    # 1、处理fmt数组
-    if len(fmt) == 1:
-        fmt = [fmt] * len(ls)
-    elif len(fmt) < len(ls):
-        fmt = list(fmt) + [fmt[-1]] * (len(ls) - len(fmt))
-
-    # 2、算出需要域宽
-    if chinese_char_width == 2:
-        strs = list(map(lambda x: str(x).replace('\n', r'\n'), ls))  # 存储转成字符串的元素
-        lens = list(map(strwidth, strs))  # 存储每个元素的实际域宽
-    else:
-        strs = []  # 存储转成字符串的元素
-        lens = []  # 存储每个元素的实际域宽
-        for i, t in enumerate(ls):
-            t, n = strwidth_proc(t, fmt[i], chinese_char_width)
-            strs.append(t)
-            lens.append(n)
-    w = max(lens)
-    if width and isinstance(width, int) and width > w:
-        w = width
-
-    # 3、对齐操作
-    for i, s in enumerate(strs):
-        if fmt[i] == 'r':
-            strs[i] = fillchar * (w - lens[i]) + strs[i]
-        elif fmt[i] == 'l':
-            strs[i] = strs[i] + fillchar * (w - lens[i])
-        elif fmt[i] == 'c':
-            t = w - lens[i]
-            strs[i] = fillchar * (t - t // 2) + strs[i] + fillchar * (t // 2)
-        strs[i] = prefix + strs[i] + suffix
-    return strs
-
-
-def len_in_dim2(arr):
-    """计算类List结构在第2维上的长度
-
-    >>> len_in_dim2([[1,1], [2], [3,3,3]])
-    3
-
-    >>> len_in_dim2([1, 2, 3])  # TODO 是不是应该改成0合理？但不知道牵涉到哪些功能影响
-    1
-    """
-    if not isinstance(arr, (list, tuple)):
-        raise TypeError('类型错误，不是list构成的二维数组')
-
-    # 找出元素最多的列
-    column_num = 0
-    for i, item in enumerate(arr):
-        if isinstance(item, (list, tuple)):  # 该行是一个一维数组
-            column_num = max(column_num, len(item))
-        else:  # 如果不是数组，是指单个元素，当成1列处理
-            column_num = max(column_num, 1)
-
-    return column_num
-
-
-def ensure_array(arr, default_value=''):
-    """对一个由list、tuple组成的二维数组，确保所有第二维的列数都相同
-
-    >>> ensure_array([[1,1], [2], [3,3,3]])
-    [[1, 1, ''], [2, '', ''], [3, 3, 3]]
-    """
-    max_cols = len_in_dim2(arr)
-    if max_cols == 1:
-        return arr
-    dv = str(default_value)
-    a = [[]] * len(arr)
-    for i, ls in enumerate(arr):
-        if isinstance(ls, (list, tuple)):
-            t = list(arr[i])
-        else:
-            t = [ls]  # 如果不是数组，是指单个元素，当成1列处理
-        a[i] = t + [dv] * (max_cols - len(t))  # 左边的写list，是防止有的情况是tuple，要强制转list后拼接
-    return a
-
-
-def swap_rowcol(a, *, ensure_arr=False, default_value=''):
-    """矩阵行列互换
-
-    注：如果列数是不均匀的，则会以最小列数作为行数
-
-    >>> swap_rowcol([[1,2,3], [4,5,6]])
-    [[1, 4], [2, 5], [3, 6]]
-    """
-    if ensure_arr:
-        a = ensure_array(a, default_value)
-    # 这是非常有教学意义的行列互换实现代码
-    return list(map(list, zip(*a)))
-
-
-def int2excel_col_name(d):
-    """
-    >>> int2excel_col_name(1)
-    'A'
-    >>> int2excel_col_name(28)
-    'AB'
-    >>> int2excel_col_name(100)
-    'CV'
-    """
-    s = []
-    while d:
-        t = (d - 1) % 26
-        s.append(chr(65 + t))
-        d = (d - 1) // 26
-    return ''.join(reversed(s))
-
-
-def excel_col_name2int(s):
-    """
-    >>> excel_col_name2int('A')
-    1
-    >>> excel_col_name2int('AA')
-    27
-    >>> excel_col_name2int('AB')
-    28
-    """
-    d = 0
-    for ch in s:
-        d = d * 26 + (ord(ch) - 64)
-    return d
-
-
-def int2myalphaenum(n):
-    """
-    :param n: 0~52的数字
-    """
-    if 0 <= n <= 52:
-        return '_abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ'[n]
-    else:
-        dprint(n)  # 不在处理范围内的数值
-        raise ValueError
-
-
-def gentuple(n, tag):
-    """有点类似range函数，但生成的数列更加灵活
-    :param n:
-        数组长度
-    :param tag:
-        整数，从指定整数开始编号
-        int类型，从指定数字开始编号
-            0，从0开始编号
-            1，从1开始编号
-        'A'，用Excel的形式编号
-        tuple，按枚举值循环显示
-            ('A', 'B')：循环使用A、B编号
-
-    >>> gentuple(4, 'A')
-    ('A', 'B', 'C', 'D')
-    """
-    a = [''] * n
-    if isinstance(tag, int):
-        for i in range(n):
-            a[i] = i + tag
-    elif tag == 'A':
-        a = tuple(map(lambda x: int2excel_col_name(x + 1), range(n)))
-    elif isinstance(tag, (list, tuple)):
-        k = len(tag)
-        a = tuple(map(lambda x: tag[x % k], range(n)))
-    return a
-
-
-def ensure_gbk(s):
-    """检查一个字符串的所有内容是否能正常转为gbk，
-    如果不能则ignore掉不能转换的部分"""
+def printoneline(s):
+    """将输出控制在单行，适应终端大小"""
     try:
-        s.encode('gbk')
-    except UnicodeEncodeError:
-        origin_s = s
-        s = s.encode('gbk', errors='ignore').decode('gbk')
-        dprint(origin_s, s)  # 字符串存在无法转为gbk的字符
+        columns = os.get_terminal_size().columns - 3  # 获取终端的窗口宽度
+    except OSError:  # 如果没和终端相连，会抛出异常
+        # 这应该就是在PyCharm，直接来个大值吧
+        columns = 500
+    s = shorten(s, columns)
+    print(s)
+
+
+def del_tail_newline(s):
+    """删除末尾的换行"""
+    if len(s) > 1 and s[-1] == '\n':
+        s = s[:-1]
     return s
 
 
-def funcmsg(func):
-    """输出函数func所在的文件、函数名、函数起始行"""
-    # showdir(func)
-    if not hasattr(func, '__name__'):  # 没有__name__属性表示这很可能是一个装饰器去处理原函数了
-        if hasattr(func, 'func'):  # 我的装饰器常用func成员存储原函数对象
-            func = func.func
+____section_2_regular = """
+跟正则相关的一些文本处理函数和类
+"""
+
+
+def grp_bracket(depth=0, left='{', right=None):
+    r"""括号匹配，默认花括号匹配，也可以改为圆括号、方括号匹配。
+
+    效果类似于“{.*?}”，
+    但是左右花括号是确保匹配的，有可选参数可以提升支持的嵌套层级，
+    数字越大匹配嵌套能力越强，但是速度性能会一定程度降低。
+    例如“grp_bracket(5)”。
+
+    :param depth: 括号递归深度
+    :param left: 左边字符：(、[、{
+    :param right: 右边字符
+    :return:
+
+    先了解一下正则常识：
+    >>> re.sub(r'[^\[\]]', r'', r'a[b]a[]') # 删除非方括号
+    '[][]'
+    >>> re.sub(r'[^\(\)]', r'', r'a(b)a()') # 删除非圆括号
+    '()()'
+    >>> re.sub(r'[^()]', r'', r'a(b)a()') # 不用\也可以
+    '()()'
+
+    该函数使用效果：
+    >>> re.sub(grp_bracket(5), r'', r'x{aaa{b{d}b}ccc{d{{}e}ff}gg}y')
+    'xy'
+    >>> re.sub(grp_bracket(5, '(', ')'), r'', r'x(aaa(b(d)b)ccc(d(()e)ff)gg)y')
+    'xy'
+    >>> re.sub(grp_bracket(5, '[', ']'), r'', r'x[aaa[b[d]b]ccc[d[[]e]ff]gg]y')
+    'xy'
+    """
+    # 用a, b简化引用名称
+    a, b = left, right
+    if b is None:
+        if a == '(': b = ')'
+        elif a == '[': b = ']'
+        elif a == '{': b = '}'
+        else: raise NotImplementedError
+    # 特殊符号需要转义
+    if a in '([':
+        a = '\\' + a
+    if b in ')]':
+        b = '\\' + b
+    c = f'[^{a}{b}]'
+    # 建立匹配素材
+    pattern_0 = f'{a}{c}*{b}'
+    pat_left = f'{a}(?:{c}|'
+    pat_right = f')*{b}'
+
+    # 生成匹配规则的函数
+    def gen(pattern, depth=0):
+        while depth:
+            pattern = pat_left + pattern + pat_right
+            depth -= 1
+        return pattern
+
+    s = gen(pattern_0, depth=depth)
+    return s
+
+
+# 定义常用的几种格式，并且只匹配抓取花括号里面的值，不要花括号本身
+SQUARE3 = r'\\[(' + grp_bracket(3, '[')[3:-3] + r')\\]'
+BRACE1 = '{(' + grp_bracket(1)[1:-1] + ')}'
+BRACE2 = '{(' + grp_bracket(2)[1:-1] + ')}'
+BRACE3 = '{(' + grp_bracket(3)[1:-1] + ')}'
+BRACE4 = '{(' + grp_bracket(4)[1:-1] + ')}'
+BRACE5 = '{(' + grp_bracket(5)[1:-1] + ')}'
+"""使用示例
+>> m = re.search(r'\\multicolumn' + BRACE3*3, r'\multicolumn{2}{|c|}{$2^{12}$个数}')
+>> m.groups()
+('2', '|c|', '$2^{12}$个数')
+"""
+
+
+def grp_figure(cnt_groups=0, parpic=False):
+    """生成跟图片匹配相关的表达式
+
+    D:\2017LaTeX\D招培试卷\高中地理，用过  \captionfig{3-3.eps}{图~3}
+    奕本从2018秋季教材开始使用多种图片格式
+
+    191224周二18:20 更新：匹配到的图片名不带花括号
+    """
+    if cnt_groups == 0:  # 不分组
+        s = r'\\(?:includegraphics|figt|figc|figr|fig).*?' + grp_bracket(3)  # 注意第1组fig要放最后面
+    elif cnt_groups == 1:  # 只分1组，那么只对图片括号内的内容分组
+            s = r'\\(?:includegraphics|figt|figc|figr|fig).*?' + BRACE3
+    elif cnt_groups == 2:  # 只分2组，那么只对插图命令和图片分组
+        s = r'\\(includegraphics|figt|figc|figr|fig).*?' + BRACE3
+    elif cnt_groups == 3:
+        s = r'\\(includegraphics|figt|figc|figr|fig)(.*?)' + BRACE3
+    else:
+        s = None
+
+    if s and parpic:
+        s = r'{?\\parpic(?:\[.\])?{' + s + r'}*'
+
+    return s
+
+
+def grp_topic(*, type_value=None):
+    """定位topic
+
+    :param type_value: 设置题目类型（TODO: 功能尚未开发）
+    """
+    s = r'%<topic.*?%</topic>'  # 注意外部使用的re要开flags=re.DOTALL
+    return s
+
+
+def grp_chinese_char():
+    return r'[\u4e00-\u9fa5，。；？（）【】、①-⑨]'
+
+
+def grr_check(m):
+    """用来检查匹配情况"""
+    s0 = m.group()
+    pass  # 还没想好什么样的功能是和写到re.sub里面的repl
+    return s0
+
+
+def regularcheck(pattern, string, flags=0):
+    arr = []
+    cl = ContentLine(string)
+    for i, m in enumerate(re.finditer(pattern, string, flags)):
+        ss = map(lambda x: textwrap.shorten(x, 200), m.groups())
+        arr.append([i+1, cl.in_line(m.start(0)), *ss])
+    tablehead = ['行号'] + list(map(lambda x: f'第{x}组', range(len_in_dim2(arr) - 2)))
+    df = pd.DataFrame.from_records(arr, columns=tablehead)
+    res = f'正则模式：{pattern}，匹配结果：\n' + dataframe_str(df)
+    return res
+
+
+class StrIdxBack:
+    r"""字符串删除部分干扰字符后，对新字符串匹配并回溯找原字符串的下标
+
+    >>> ob = StrIdxBack('bxx  ax xbxax')
+    >>> ob.delchars(r'[ x]+')
+    >>> ob  # 删除空格、删除字符x
+    baba
+    >>> print(ob.idx)  # keystr中与原字符串对应位置：(0, 5, 9, 11)
+    (0, 5, 9, 11)
+    >>> m = re.match(r'b(ab)', ob.keystr)
+    >>> m = ob.matchback(m)
+    >>> m.group(1)
+    'ax xb'
+    >>> ob.search('ab')  # 找出原字符串中内容：'ax xb'
+    'ax xb'
+    """
+    def __init__(self, s):
+        self.oristr = s
+        self.idx = tuple(range(len(s)))  # 存储还保留着内容的下标
+        self.keystr = s
+
+    def delchars(self, pattern, flags=0):
+        """模仿正则的替换语法
+        但是不用输入替换目标s，以及目标格式，因为都是删除操作
+
+        利用正则可以知道被删除的是哪个区间范围
+        >>> ob = StrIdxBack('abc123df4a'); ob.delchars(r'\d+'); str(ob)
+        'abcdfa'
+        >>> ob.idx
+        (0, 1, 2, 6, 7, 9)
+        """
+        k = 0
+        idxs = []
+
+        def repl(m):
+            nonlocal k, idxs
+            idxs.append(self.idx[k:m.start(0)])
+            k = m.end(0)
+            return ''
+        self.keystr = re.sub(pattern, repl, self.keystr, flags=flags)
+        idxs.append(self.idx[k:])
+        self.idx = tuple(itertools.chain(*idxs))
+
+    def compare_newstr(self, limit=300):
+        r"""比较直观的比较字符串前后变化
+
+        newstr相对于oldnew作展开，比较直观的显示字符串前后变化差异
+        >>> ob = StrIdxBack('abab'); ob.delchars('b'); ob.compare_newstr()
+        'a a '
+        """
+        s1 = self.oristr
+        dd = set(self.idx)
+
+        s2 = []
+        k = 0
+        for i in range(min(len(s1), limit)):
+            if i in dd:
+                s2.append(s1[i])
+                k += 1
+            else:
+                if ord(s1[i]) < 128:
+                    if s1[i] == ' ':  # 原来是空格的，删除后要用_表示
+                        s2.append('_')
+                    else:  # 原始不是空格的，可以用空格表示已被删除
+                        s2.append(' ')
+                else:  # 中文字符要用两个空格表示才能对齐
+                    s2.append('  ')
+        s2 = ''.join(s2)
+        s2 = s2.replace('\n', r'\n')
+
+        return s2
+
+    def compare(self, limit=300):
+        """比较直观的比较字符串前后变化"""
+        s1 = self.oristr
+
+        s1 = s1.replace('\n', r'\n')[:limit]
+        s2 = self.compare_newstr(limit)
+
+        return s1 + '\n' + s2 + '\n'
+
+    def matchback(self, m):
+        """输入一个keystr匹配的match对象，将其映射回oristr的match对象"""
+        regs = []
+        for rs in getattr(m, 'regs'):
+            regs.append((self.idx[rs[0]], self.idx[rs[1]-1]+1))  # 注意右边界的处理有细节
+        return ReMatch(regs, self.oristr, m.pos, len(self.oristr), m.lastindex, m.lastgroup, m.re)
+
+    def search(self, pattern):
+        """在新字符串上查找模式，但是返回的是原字符串的相关下标数据"""
+        m = re.search(pattern, self.keystr)
+        if m:
+            m = self.matchback(m)  # pycharm这里会提示m没有regs的成员变量，其实是正常的，没问题
+            return m.group()
         else:
-            return f'装饰器：{type(func)}，无法定位'
-    return f'函数名：{func.__name__}，来自文件：{func.__code__.co_filename}，所在行号={func.__code__.co_firstlineno}'
+            return ''
+
+    def __repr__(self):
+        """返回处理后当前的新字符串"""
+        return self.keystr
 
 
-class GrowingList(list):
-    """可变长list"""
-
-    def __init__(self, default_value=None):
-        super().__init__(self)
-        self.default_value = default_value
-
-    def __getitem__(self, index):
-        if index >= len(self):
-            self.extend([self.default_value] * (index + 1 - len(self)))
-        return list.__getitem__(self, index)
-
-    def __setitem__(self, index, value):
-        if index >= len(self):
-            self.extend([self.default_value] * (index + 1 - len(self)))
-        list.__setitem__(self, index, value)
-
-
-def arr_hangclear(arr, depth=None):
-    """ 清除连续相同值，简化表格内容
-    >> arr_hangclear(arr, depth=2)
-    原表格：
-        A  B  D
-        A  B  E
-        A  C  E
-        A  C  E
-    新表格：
-        A  B  D
-              E
-           C  E
-              E
-
-    :param arr: 二维数组
-    :param depth: 处理列上限
-        例如depth=1，则只处理第一层
-        depth=None，则处理所有列
-
-    >>> arr_hangclear([[1, 2, 4], [1, 2, 5], [1, 3, 5], [1, 3, 5]])
-    [[1, 2, 4], ['', '', 5], ['', 3, 5], ['', '', 5]]
-    >>> arr_hangclear([[1, 2, 4], [1, 2, 5], [2, 2, 5], [1, 2, 5]])
-    [[1, 2, 4], ['', '', 5], [2, 2, 5], [1, 2, 5]]
+def bracket_match(s, idx):
+    """括号匹配位置
+    这里以{、}为例，注意也要适用于'[]', '()'
+    >>> bracket_match('{123}', 0)
+    4
+    >>> bracket_match('0{23{5}}89', 1)
+    7
+    >>> bracket_match('0{23{5}}89', 7)
+    1
+    >>> bracket_match('0{23{5}78', 1) is None
+    True
+    >>> bracket_match('0{23{5}78', 20) is None
+    True
+    >>> bracket_match('0[2[4]{7}]01', 9)
+    1
+    >>> bracket_match('0{[34{6}89}', -4)
+    5
     """
-    m = depth if depth else len_in_dim2(arr) - 1
-    a = deepcopy(arr)
+    key = '{[(<>)]}'
+    try:
+        if idx < 0:
+            idx += len(s)
+        ch1 = s[idx]
+        idx1 = key.index(ch1)
+    except ValueError:  # 找不到ch1
+        return None
+    except IndexError:  # 下标越界，表示没有匹配到右括号
+        return None
+    idx2 = len(key) - idx1 - 1
+    ch2 = key[idx2]
+    step = 1 if idx2 > idx1 else -1
+    cnt = 1
+    i = idx + step
+    if i < 0:
+        i += len(s)
+    while 0 <= i < len(s):
+        if s[i] == ch1:
+            cnt += 1
+        elif s[i] == ch2:
+            cnt -= 1
+        if cnt == 0:
+            return i
+        i += step
+    return None
 
-    # 算法原理：从下到上，从右到左判断与上一行重叠了几列数据
-    for i in range(len(arr) - 1, 0, -1):
-        for j in range(m):
-            if a[i][j] == a[i - 1][j]:
-                a[i][j] = ''
-            else:
-                break
-    return a
 
+def bracket_match2(s, idx):
+    r"""与“bracket_match”相比，会考虑"\{"转义字符的影响
 
-def arr2table(arr, rowmerge=False):
-    """数组转html表格代码
-    :param arr:  需要处理的数组
-    :param rowmerge: 行单元格合并
-    :return: html文本格式的<table>
-
-    这个arr2table是用来画合并单元格的
-    >> chrome(arr2table([['A', 1, 'a'], ['', 2, 'b'], ['B', 3, 'c'], ['', '', 'd'], ['', 5, 'e']], True), 'a.html')
-    效果图：http://i1.fuimg.com/582188/c452f40b5a072f8d.png
+    >>> bracket_match2('a{b{}b}c', 1)
+    6
+    >>> bracket_match2('a{b{\}b}c}d', 1)
+    9
     """
-    n = len(arr)
-    m = len_in_dim2(arr)
-    res = ['<table border="1"><tbody>']
-    for i, line in enumerate(arr):
-        res.append('<tr>')
-        for j, ele in enumerate(line):
-            if rowmerge:
-                if ele != '':
-                    cnt = 1
-                    while i + cnt < n and arr[i + cnt][j] == '':
-                        for k in range(j - 1, -1, -1):
-                            if arr[i + cnt][k] != '':
-                                break
-                        else:
-                            cnt += 1
-                            continue
-                        break
-                    if cnt > 1:
-                        res.append(f'<td rowspan="{cnt}">{ele}</td>')
-                    else:
-                        res.append(f'<td>{ele}</td>')
-                elif j == m - 1:
-                    res.append(f'<td>{ele}</td>')
+    key = '{[(<>)]}'
+    try:
+        if idx < 0:
+            idx += len(s)
+        ch1 = s[idx]
+        idx1 = key.index(ch1)
+    except ValueError:  # 找不到ch1
+        return None
+    except IndexError:  # 下标越界，表示没有匹配到右括号
+        return None
+    idx2 = len(key) - idx1 - 1
+    ch2 = key[idx2]
+    step = 1 if idx2 > idx1 else -1
+    cnt = 1
+    i = idx + step
+    if i < 0:
+        i += len(s)
+    while 0 <= i < len(s):
+        if i and s[i - 1] == '\\':
+            pass
+        elif s[i] == ch1:
+            cnt += 1
+        elif s[i] == ch2:
+            cnt -= 1
+        if cnt == 0:
+            return i
+        i += step
+    return None
+
+
+____section_3_ensure_content = """
+从任意类型文件读取文本数据的功能
+"""
+
+
+def readtext(filename, encoding=None):
+    """读取普通的文本文件
+    会根据tex、py文件情况指定默认编码
+    """
+    try:
+        with open(filename, 'rb') as f:  # 以二进制读取文件，注意二进制没有\r\n参数
+            bstr = f.read()
+    except FileNotFoundError:
+        return None
+
+    if not encoding:
+        encoding = get_encoding(bstr)
+    s = bstr.decode(encoding=encoding, errors='ignore')
+    if '\r' in s:  # 注意这个问题跟gb2312和gbk是独立的，用gbk编码也要做这个处理
+        s = s.replace('\r\n', '\n')  # 如果用\r\n作为换行符会有一些意外不好处理
+    return s
+
+
+def ensure_content(ob=None, encoding=None):
+    """
+    :param ob:
+        未输入：从控制台获取文本
+        存在的文件名：读取文件的内容返回
+            tex、py、
+            docx、doc
+            pdf
+        有read可调用成员方法：返回f.read()
+        其他字符串：返回原值
+    :param encoding: 强制指定编码
+    """
+    # TODO: 如果输入的是一个文件指针，也能调用f.read()返回所有内容
+    # TODO: 增加鲁棒性判断，如果输入的不是字符串类型也要有出错判断
+    if ob is None:
+        return sys.stdin.read()  # 注意输入是按 Ctrl + D 结束
+    elif Path(ob).is_file():  # 如果存在这样的文件，那就读取文件内容（bug点：如果输入是目录名会PermissionError）
+        if ob.endswith('.docx'):  # 这里还要再扩展pdf、doc文件的读取
+            try:
+                import textract
+            except ModuleNotFoundError:
+                dprint()  # 缺少textract模块，安装详见： https://blog.csdn.net/code4101/article/details/79328636
+                raise ModuleNotFoundError
+            text = textract.process(ob)
+            return text.decode('utf8', errors='ignore')
+        elif ob.endswith('.doc'):
+            raise NotImplementedError
+        elif ob.endswith('.pdf'):
+            raise NotImplementedError
+        else:  # 按照普通的文本文件读取内容
+            return readtext(ob, encoding)
+    else:  # 判断不了的情况，也认为是字符串
+        return ob
+
+
+def file_lastlines(fn, n):
+    """获得一个文件最后的几行内容
+    参考资料: https://stackoverflow.com/questions/136168/get-last-n-lines-of-a-file-with-python-similar-to-tail
+
+    >> s = FileLastLine('book.log', 1)
+    'Output written on book.dvi (2 pages, 7812 bytes).'
+    """
+    f = ensure_content(fn)
+    assert n >= 0
+    pos, lines = n + 1, []
+    while len(lines) <= n:
+        try:
+            f.seek(-pos, 2)
+        except IOError:
+            f.seek(0)
+            break
+        finally:
+            lines = list(f)
+        pos *= 2
+    f.close()
+    return ''.join(lines[-n:])
+
+
+____section_4_spell_check = """
+拼写检查
+190923周一21:54，源自 完形填空ocr 识别项目
+"""
+
+
+class MySpellChecker(SpellChecker):
+    def __init__(self, language="en", local_dictionary=None, distance=2, tokenizer=None, case_sensitive=False,
+                 df=None):
+        from collections import defaultdict, Counter
+
+        # 1、原初始化功能
+        super(MySpellChecker, self).__init__(language=language, local_dictionary=local_dictionary,
+                                             distance=distance, tokenizer=tokenizer,
+                                             case_sensitive=case_sensitive)
+
+        # 2、自己要增加一个分析用的字典
+        self.checkdict = defaultdict(Counter)
+        for k, v in self.word_frequency._dictionary.items():
+            self.checkdict[k][k] = v
+
+        # 3、如果输入了一个df对象要进行更新
+        if df: self.update_by_dataframe(df)
+
+    def update_by_dataframe(self, df, weight_times=1):
+        """
+        :param df: 这里的df有要求，是DataFrame对象，并且含有这些属性列：old、new、count
+        :param weight_times: 对要加的count乘以一个倍率
+        :return:
+        """
+        # 1、是否要处理大小写
+        #   如果不区分大小写，需要对df先做预处理，全部转小写
+        #   而大小写不敏感的时候，self.word_frequency._dictionary在init时已经转小写，不用操心
+        if not self._case_sensitive:
+            df.loc[:, 'old'] = df.loc[:, 'old'].str.lower()
+            df.loc[:, 'new'] = df.loc[:, 'new'].str.lower()
+
+        # 2、df对self.word_frequency._dictionary、self.check的影响
+        d = self.word_frequency._dictionary
+        for index, row in df.iterrows():
+            old, new, count = row['old'].decode(), row['new'].decode(), row['count']*weight_times
+            d[old] += count if old==new else -count
+            # if row['id']==300: dprint(old, new, count)
+            self.checkdict[old][new] += count
+
+        # 3、去除d中负值的key
+        self.word_frequency.remove_words([k for k in d.keys() if d[k] <= 0])
+
+    def _ensure_term(self, term):
+        if term not in self.checkdict:
+            d = {k: self.word_frequency._dictionary[k] for k in self.candidates(term)}
+            self.checkdict[term] = d
+
+    def correction(self, term):
+        # 1、本来就是正确的
+        w = term if self._case_sensitive else term.lower()
+        if w in self.word_frequency._dictionary: return term
+
+        # 2、如果是错的，且是没有记录的错误情况，则做一次候选项运算
+        self._ensure_term(w)
+
+        # 3、返回权重最大的结果
+        res = max(self.checkdict[w], key=self.checkdict[w].get)
+        val = self.checkdict[w].get(res)
+        if val <= 0: res = '^' + res  # 是一个错误单词，但是没有推荐修改结果，就打一个^标记
+        return res
+
+    def correction_detail(self, term):
+        """更加详细，给出所有候选项的纠正
+
+        >> a.correction_detail('d')
+        [('d', 9131), ('do', 1), ('old', 1)]
+        """
+        w = term if self._case_sensitive else term.lower()
+        self._ensure_term(w)
+        ls = [(k, v) for k, v in self.checkdict[w].items()]
+        ls = sorted(ls, key=lambda x: x[1], reverse=True)
+        return ls
+
+
+def demo_myspellchecker():
+    # 类的初始化大概要0.4秒
+    a = MySpellChecker()
+
+    # sql的加载更新大概要1秒
+    # hsql = HistudySQL('ckz', 'tr_develop')
+    # df = hsql.query('SELECT * FROM spell_check')
+    # a.update_by_dataframe(df)
+
+    # dprint(a.correction_detail('d'))
+    # dprint(a.correction_detail('wrod'))  # wrod有很多种可能性，但word权重是最大的
+    # dprint(a.correction_detail('ckzckzckzckzckzckz'))  # wrod有很多种可能性，但word权重是最大的
+    # dprint(a.correction('ckzckzckzckzckzckz'))  # wrod有很多种可能性，但word权重是最大的
+    dprint(a.correction_detail('ike'))
+    dprint(a.correction_detail('dean'))
+    dprint(a.correction_detail('stud'))
+    dprint(a.correction_detail('U'))
+
+
+____section_temp = """
+临时添加的新功能
+"""
+
+
+def count_word(s, *patterns):
+    """ 统计一串文本中，各种规律串出现的次数
+    :param s: 文本内容
+    :param patterns:
+        匹配的多个目标模式list
+        按优先级一个一个往后处理，被处理掉的部分会用\x00代替
+    :return: Counter.most_common() 对象
+    """
+    s = str(s)
+
+    if not patterns:  # 不写参数的时候，默认统计所有单个字符
+        return collections.Counter(list(s)).most_common()
+
+    ls = []
+    for t in patterns:
+        ls += re.findall(t, s)
+        s = re.sub(t, '\x00', s)
+        # s = re.sub(r'\x00+', '\x00', s)  # 将连续的特殊删除设为1，减短字符串长度，还未试验这段代码精确度与效率
+    ct = collections.Counter(ls)
+
+    ls = ct.most_common()
+    for i in range(len(ls)):
+        ls[i] = (ls[i][1], repr(ls[i][0])[1:-1])
+    return ls
+
+
+class Base85Coder:
+    """base85编码、解码器
+
+    对明文，加密/编码/encode 后已经是乱了看不懂，但是对这个结果还要二次转义
+    对乱码，解密/解码/decode 时顺序要反正来，先处理二次转义，再处理base85
+
+    使用示例：
+    key = 'xV~>Y|@muL<UK$*agCQp=t4c0R_y`Z2;q%s?o8S9(3D5W^-NA&}6v){Twj7MzGePJEfik1bBhn!d#I+HlXFOr'
+    coder = Base85Coder(key)
+    b = coder.encode('陈坤泽 abc')
+    dprint(b)  # b<str>=d@7;B}ww?}zfGP#;1
+    s = coder.decode(b)
+    dprint(s)  # s<str>=陈坤泽 abc
+    """
+    DEFAULT_KEY = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz!#$%&()*+-;<=>?@^_`{|}~'
+    CHARS_SET = set(DEFAULT_KEY)
+
+    def __init__(self, key=None):
+        """key，允许设置密钥，必须是"""
+        # 1、分析key是否合法
+        if key:
+            if len(key) != 85 or set(key) != Base85Coder.CHARS_SET:
+                dprint(key)  # 输入key无效
+                key = None
+        self.key = key
+
+        # 2、制作转换表 trantab
+        if key:
+            self.encode_trantab = str.maketrans(Base85Coder.DEFAULT_KEY, key)
+            self.decode_trantab = str.maketrans(key, Base85Coder.DEFAULT_KEY)
+        else:
+            self.encode_trantab = self.decode_trantab = None
+
+    def encode(self, s):
+        """将字符串转字节"""
+        b = base64.b85encode(s.encode('utf8'))
+        b = str(b)[2:-1]
+        if self.encode_trantab:
+            b = b.translate(self.encode_trantab)
+        return b
+
+    def decode(self, b):
+        if self.decode_trantab:
+            b = b.translate(self.decode_trantab)
+        b = b.encode('ascii')
+        s = base64.b85decode(b).decode('utf8')
+        return s
+
+
+class MyAipOcr:
+    """
+    需要安装：pip install baidu-aip
+
+    封装该类
+        目的1：合并输入文件和url的识别
+        目的2：带透明底的png百度api识别不了，要先转成RGB格式
+    """
+    client = None
+    client_id = 0
+
+    @staticmethod
+    def init(next_client=False):
+        # 0、安装，导入库
+        try:
+            from aip import AipOcr
+        except ModuleNotFoundError:
+            subprocess.run(['pip3', 'install', 'baidu-aip'])
+            from aip import AipOcr
+
+        # 1、收集账号信息
+        # 坤泽小号，陈坤泽，欧龙，韩锦锦
+        APP_ID = ['16936214', '16913345', '16933485', '16933339']
+        API_KEY = ['a0oNAv9FLhd6oXOm7zXzAkKn', 'fNAGzfHmLicbmnsFqTDlfDYM',
+                   'zATmQF0a1EwZFN7zUj58o1HB', '1TLzz0jLk9stbMo3lPBKv9yl']
+        SECRET_KEY = ['osS2zMSrYCnKgwAsIQ68XYdUvb5oOkI8', 'A6zdaoTNleKAGaM75THNRW8PtCjrLCkG',
+                      'FBgWnD239v3K7gr6vTqaCAzrj7C0WYxG', '8UL2AcDSBf99UqRH630aYv1tiDHpHAt6']
+
+        # 2、初始化client
+        if MyAipOcr.client is None or next_client:
+            t = MyAipOcr.client_id + next_client
+            if t > len(APP_ID): return None  # 所有账号都用完了
+            MyAipOcr.client = AipOcr(APP_ID[t], API_KEY[t], SECRET_KEY[t])
+            MyAipOcr.client_id = t
+        return MyAipOcr.client
+
+    @staticmethod
+    def get_img_content(in_):
+        """获取in_代表的图片的二进制数据"""
+        from PIL import Image
+        # 1、取不同来源的数据
+        if is_url(in_):
+            content = requests.get(in_).content
+            img = Image.open(io.BytesIO(content))
+        elif Path(in_).is_file():
+            with open(in_, 'rb') as f:
+                content = f.read()
+            img = Image.open(in_)
+        else:
+            raise ValueError
+
+        # 2、如果是RGBA类型，要把透明底变成白色
+        # img.mode: https://pillow.readthedocs.io/en/5.1.x/handbook/concepts.html#concept-modes
+        if img.mode in ('RGBA', 'P'):
+            # 判断图片mode模式，如果是RGBA或P等可能有透明底，则和一个白底图片合成去除透明底
+            background = Image.new('RGBA', img.size, (255, 255, 255))
+            # composite是合成的意思。将右图的alpha替换为左图内容
+            img = Image.alpha_composite(background, img.convert('RGBA')).convert('RGB')
+            file = io.BytesIO()
+            img.save(file, 'PNG')
+            content = file.getvalue()
+        # file = writefile(content, 'a.png', root=Path.TEMP)
+        # chrome(file)
+
+        return content
+
+    @staticmethod
+    def text(in_, options=None):
+        """ 调用baidu的普通文本识别
+        这个函数你们随便调用，每天5万次用不完
+
+        :param in_: 可以是图片路径，也可以是网页上的url
+        :param options: 可选参数
+            详见：https://cloud.baidu.com/doc/OCR/s/pjwvxzmtc
+        :return: 返回识别出的dict字典
+
+        >> baidu_accurate_ocr('0.png')
+        >> baidu_accurate_ocr(r'http://ksrc2.gaosiedu.com//...',
+                                 {'language_type': 'ENG'})
+        """
+        client = MyAipOcr.init()
+        content = MyAipOcr.get_img_content(in_)
+        return client.basicGeneral(content, options)
+
+    @staticmethod
+    def accurate_text(in_, options=None):
+        """ 调用baidu的高精度文本识别
+
+        :param in_: 可以是图片路径，也可以是url
+        :param options: 可选参数
+            详见：https://cloud.baidu.com/doc/OCR/s/pjwvxzmtc
+        :return: 返回识别出的dict字典
+
+        >> baidu_accurate_ocr('0.png')
+        >> baidu_accurate_ocr(r'http://ksrc2.gaosiedu.com//...',
+                                 {'language_type': 'ENG'})
+        """
+        client = MyAipOcr.init()
+        content = MyAipOcr.get_img_content(in_)
+        # 会自动转base64
+        while True:
+            t = client.basicAccurate(content, options)
+            # dprint(t)
+            if t.get('error_code', None) == 17:
+                client = MyAipOcr.init(next_client=True)
+                if client is None:
+                    raise ValueError('今天账号份额都用完啦！Open api daily request limit reached')
+            elif t.get('error_code', None) == 18:
+                # {'error_code': 18, 'error_msg': 'Open api qps request limit reached'}，继续尝试
+                continue
             else:
-                res.append(f'<td>{ele}</td>')
-        res.append('</tr>')
-    res.append('</tbody></table>')
-    return ''.join(res)
+                 break
+        return t
+
+
+def demo_spellchecker():
+    """演示如何使用spellchecker库
+    官方介绍文档 pyspellchecker · PyPI: https://pypi.org/project/pyspellchecker/
+    190909周一15:58，from 陈坤泽
+    """
+    # 0、安装库和导入库
+    #   spellchecker模块主要有两个类，SpellChecker和WordFrequency
+    #       WordFrequency是一个词频类
+    #       一般导入SpellChecker就行了：from spellchecker import SpellChecker
+    try:  # 拼写检查库，即词汇库
+        from spellchecker import SpellChecker
+    except ModuleNotFoundError:
+        subprocess.run(['pip3', 'install', 'pyspellchecker'])
+        from spellchecker import SpellChecker
+
+    # 1、创建对象
+    # 可以设置语言、大小写敏感、拼写检查的最大距离
+    #   默认'en'英语，大小写不敏感
+    spell = SpellChecker()
+    # 如果是英语，SpellChecker会自动加载语言包site-packages\spellchecker\resources\en.json.gz，大概12万个词汇，包括词频权重
+    d = spell.word_frequency  # 这里的d是WordFrequency对象，其底层用了Counter类进行数据存储
+    dprint(d.unique_words, d.total_words)  # 词汇数，权重总和
+
+    # 2、修改词频表 spell.word_frequency
+    dprint(d['ckz'])  # 不存在的词汇直接输出0
+    d.add('ckz')  # 可以添加ckz词汇的一次词频
+    d.load_words(['ckz', 'ckz', 'lyb'])  # 可以批量添加词汇
+    dprint(d['ckz'], d['lyb'])  # d['ckz']=3  d['lyb']=1
+    d.load_words(['ckz']*100 + ['lyb']*500)  # 可以用这种技巧进行大权重的添加
+    dprint(d['ckz'], d['lyb'])  # d['ckz']=103  d['lyb']=501
+
+    # 同理，去除也有remove和remove_words两种方法
+    d.remove('ckz')
+    # d.remove_words(['ckz', 'lyb'])  # 不过注意不能删除已经不存在的key（'ckz'），否则会报KeyError
+    dprint(d['ckz'], d['lyb'])  # d['ckz']=0  d['lyb']=501
+    # remove是完全去除单词，如果只是要减权重可以访问底层的_dictionary对象操作
+    d._dictionary['lyb'] -= 100  # 当然不太建议直接访问下划线开头的成员变量~~
+    dprint(d['lyb'])  # ['lyb']=401
+
+    # 还可以按阈值删除词频不超过设置阈值的词汇
+    d.remove_by_threshold(5)
+
+    # 3、spell的基本功能
+    # （1）用unknown可以找到可能拼写错误的单词，再用correction可以获得最佳修改意见
+    misspelled = spell.unknown(['something', 'is', 'hapenning', 'here'])
+    dprint(misspelled)  # misspelled<set>={'hapenning'}
+
+    for word in misspelled:
+        # Get the one `most likely` answer
+        dprint(spell.correction(word))  # <str>='happening'
+        # Get a list of `likely` options
+        dprint(spell.candidates(word))  # <set>={'henning', 'happening', 'penning'}
+
+    # 注意默认的spell不区分大小写，如果词库存储了100次'ckz'
+    #   此时判断任意大小写形式组合的'CKZ'都是返回原值
+    #   例如 spell.correction('ckZ') => 'ckZ'
+
+    # （2）可以通过修改spell.word_frequency影响correction的计算结果
+    dprint(d['henning'], d['happening'], d['penning'])
+    # d['henning']<int>=53    d['happening']<int>=4538    d['penning']<int>=23
+    d._dictionary['henning'] += 10000
+    dprint(spell.correction('hapenning'))  # <str>='henning'
+
+    # （3）词汇在整个字典里占的权重
+    dprint(spell.word_probability('henning'))  # <float>=0.0001040741914298211
+
+
+def check_text_row_column(s):
+    """对一段文本s，用换行符分割行，用至少4个空格或\t分割列，分析数据的行、列数
+    :return:
+        (n, m)，每列的列数相等，则会返回n、m>=0的tuple
+        (m1, m2, ...)，如果有列数不相等，则会返回每行的列数组成的tuple
+            每个元素用负值代表不匹配
+    """
+    # 拆开每行的列
+    if not s: return (0, 0)
+    lines = [re.sub(r'( {4,}|\t)+', r'\t', line.strip()).split('\t') for line in s.splitlines()]
+    cols = [len(line) for line in lines]  # 计算每行的列数
+    if min(cols) == max(cols):
+        return len(lines), cols[0]
+    else:
+        return [-col for col in cols]
+
+
+class ListingFormat:
+    r"""列表格式化工具
+
+    >>> li = ListingFormat('（1）')
+    >>> li
+    （1）
+    >>> li.next()
+    >>> li
+    （2）
+
+    >>> li = ListingFormat(('一、选择题', '二、填空题', '三、解答题'))
+    >>> li
+    一、选择题
+    >>> li.next()
+    >>> li
+    二、填空题
+    """
+    formats = {'[零一二三四五六七八九十]+': (chinese2digits, digits2chinese),
+               r'\d+': (int, str),
+               '[A-Z]': (lambda x: ord(x) - ord('A') + 1, lambda x: chr(ord('A') + x - 1)),
+               '[a-z]': (lambda x: ord(x) - ord('a') + 1, lambda x: chr(ord('a') + x - 1)),
+               '[①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮⑯⑰⑱⑲⑳]': (circlednumber2digits, digits2circlednumber),
+               '[ⅠⅡⅢⅣⅤⅥⅦⅧⅨⅩⅪⅫ]': (roman2digits, digits2roman)}
+
+    def __init__(self, s='1'):
+        """
+        :param s: 列表的格式，含数值和装饰
+            数值形式，目前有六种形式：一 1 A a ① Ⅰ
+                起始值可以不是1，例如写'三'、'D'等
+                装饰的格式，常见的有：'({})'  '（{}）'  '{}、'  '{}.' '{}. '
+            list或tuple，按顺序取用，用完后不再设置前缀
+        >> ListingFormat('一', '{}、')
+
+        TODO 目前只考虑值较小的情况，如果值太大，有些情况会出bug、报错
+        """
+        if isinstance(s, str):
+            for k, funcs in ListingFormat.formats.items():
+                if re.search(k, s):
+                    self.form = re.sub(k, '{}', s)
+                    self.value = int(funcs[0](re.search(k, s).group()))
+                    self.func = funcs[1]
+                    break
+            else:
+                raise ValueError('列表初始化格式不对 s=' + str(s))
+        elif isinstance(s, (list, tuple)):
+            self.form = s
+            self.value = 0
+            self.func = None
+        else:
+            raise ValueError('列表初始化格式不对 s=' + str(s))
+
+    def reset(self, start=1):
+        """重置初始值"""
+        self.value = start
+
+    def next(self):
+        self.value += 1
+
+    def __repr__(self):
+        if self.func:
+            return self.form.format(self.func(self.value))
+        else:
+            return self.form[self.value]
+
+
+def latexstrip(s):
+    """latex版的strip"""
+    return s.strip('\t\n ~')

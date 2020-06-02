@@ -1,25 +1,23 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
+# @Author : 陈坤泽
+# @Email  : 877362867@qq.com
+# @Data   : 2020/06/02 20:16
+
 
 """
 xml等网页结构方面的处理
 """
 
-__author__ = '陈坤泽'
-__email__ = '877362867@qq.com'
-__date__ = '2018/09/28 14:37'
 
-
-from code4101py.util.textlib import *
 from collections import defaultdict, Counter
 
-try:
-    import bs4
-    from bs4 import BeautifulSoup
-except ModuleNotFoundError:
-    subprocess.run(['pip3', 'install', 'BeautifulSoup4'])
-    import bs4
-    from bs4 import BeautifulSoup
+
+import bs4
+from bs4 import BeautifulSoup
+
+
+from pyxllib.util.textlib import *
 
 
 ____section_1_dfs_base = """

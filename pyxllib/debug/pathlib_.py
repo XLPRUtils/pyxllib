@@ -15,8 +15,8 @@ import subprocess
 import tempfile
 
 
-from pyxllib.extend.arrow_ import Datetime
-from pyxllib.extend.chardet_ import get_encoding
+from pyxllib.debug.arrow_ import Datetime
+from pyxllib.debug.chardet_ import get_encoding
 
 
 class Path:
@@ -45,6 +45,8 @@ class Path:
             rename可以理解成是move的一种特例，所以我的rename不仅能自动创建事先不存在的目录层级，还能跨磁盘操作。
 
     后续会基于Path，扩展多文件操作类Folder，图片ImageFile、EpsFile等类，集成更多功能。
+
+    TODO 这里的doctest过于针对自己的电脑了，应该改成更具适用性测试代码
     """
     __slots__ = ('_path',)
 
@@ -61,18 +63,22 @@ class Path:
         r"""初始化参数含义详见 abspath 函数解释
         TODO 这个初始化也有点过于灵活了，需要降低灵活性，增加使用清晰度
 
-        >>> Path('C:/pycode/code4101py')
-        Path('C:/pycode/code4101py')
-        >>> Path(Path('C:/pycode/code4101py'))
-        Path('C:/pycode/code4101py')
+        >>> Path('D:/pycode/code4101py')
+        Path('D:/pycode/code4101py')
+        >>> Path(Path('D:/pycode/code4101py'))
+        Path('D:/pycode/code4101py')
 
         >> Path()  # 不输入参数的时候，默认为当前工作目录
-        Path('C:/pycode/code4101py')
+        Path('D:/pycode/code4101py')
 
         >>> Path('a.txt', root=Path.TEMP)
         Path('F:/work/CreatorTemp/a.txt')
         >>> Path('F:/work/CreatorTemp')
         Path('F:/work/CreatorTemp')
+
+        注意！如果使用了符号链接（软链接），则路径是会解析转向实际位置的！例如
+        >> Path('D:/pycode/code4101py')
+        Path('D:/slns/pycode/code4101py')
         """
         path = str(path)
         self._path = None
@@ -160,9 +166,9 @@ class Path:
         r"""判断文件是否存在
         重置WindowsPath的bool逻辑，返回值变成存在True，不存在为False
 
-        >>> Path('C:/pycode/code4101py').exists()
+        >>> Path('D:/slns').exists()
         True
-        >>> Path('C:/pycode/code4101').exists()
+        >>> Path('D:/pycode/code4101').exists()
         False
         """
         return self._path and self._path.exists()
@@ -212,11 +218,11 @@ class Path:
     @property
     def name(self) -> str:
         r"""
-        >>> Path('C:/pycode/a.txt').name
+        >>> Path('D:/pycode/a.txt').name
         'a.txt'
-        >>> Path('C:/pycode/code4101py').name
+        >>> Path('D:/pycode/code4101py').name
         'code4101py'
-        >>> Path('C:/pycode/.gitignore').name
+        >>> Path('D:/pycode/.gitignore').name
         '.gitignore'
         """
         return self._path.name
@@ -228,16 +234,16 @@ class Path:
     @property
     def parent(self):
         r"""
-        >>> Path('C:/pycode/code4101py').parent
-        Path('C:/pycode')
+        >>> Path('D:/pycode/code4101py').parent
+        Path('D:/pycode')
         """
         return Path(self._path.parent) if self._path else None
 
     @property
     def dirname(self) -> str:
         r"""
-        >>> Path('C:/pycode/code4101py').dirname
-        'C:\\pycode'
+        >>> Path('D:/pycode/code4101py').dirname
+        'D:\\pycode'
         >>> Path(r'D:\toweb\a').dirname
         'D:\\toweb'
         """
@@ -249,11 +255,11 @@ class Path:
     @property
     def stem(self) -> str:
         r"""
-        >>> Path('C:/pycode/code4101py/ckz.py').stem
+        >>> Path('D:/pycode/code4101py/ckz.py').stem
         'ckz'
-        >>> Path('C:/pycode/.gitignore').stem  # os.path.splitext也是这种算法
+        >>> Path('D:/pycode/.gitignore').stem  # os.path.splitext也是这种算法
         '.gitignore'
-        >>> Path('C:/pycode/.123.45.6').stem
+        >>> Path('D:/pycode/.123.45.6').stem
         '.123.45'
         """
         return self._path.stem
@@ -269,25 +275,25 @@ class Path:
     @property
     def parts(self) -> tuple:
         r"""
-        >>> Path('C:/pycode/code4101py').parts
-        ('C:\\', 'pycode', 'code4101py')
+        >>> Path('D:/pycode/code4101py').parts
+        ('D:\\', 'pycode', 'code4101py')
         """
         return self._path.parts
 
     @property
     def suffix(self) -> str:
         r"""
-        >>> Path('C:/pycode/code4101py/ckz.py').suffix
+        >>> Path('D:/pycode/code4101py/ckz.py').suffix
         '.py'
-        >>> Path('C:/pycode/code4101py').suffix
+        >>> Path('D:/pycode/code4101py').suffix
         ''
-        >>> Path('C:/pycode/code4101py/ckz.').suffix
+        >>> Path('D:/pycode/code4101py/ckz.').suffix
         ''
-        >>> Path('C:/pycode/code4101py/ckz.123.456').suffix
+        >>> Path('D:/pycode/code4101py/ckz.123.456').suffix
         '.456'
-        >>> Path('C:/pycode/code4101py/ckz.123..456').suffix
+        >>> Path('D:/pycode/code4101py/ckz.123..456').suffix
         '.456'
-        >>> Path('C:/pycode/.gitignore').suffix
+        >>> Path('D:/pycode/.gitignore').suffix
         ''
         """
         return self._path.suffix if self._path else ''
@@ -296,11 +302,11 @@ class Path:
         """with_suffix和suffix.setter区别是，前者是生成一个新指向的类，后者是重命名
 
         >>> Path('a.txt').with_suffix('.py')  # 强制替换
-        Path('C:/pycode/code4101py/util/a.py')
+        Path('D:/slns/pyxllib/pyxllib/debug/a.py')
         >>> Path('a.txt').with_suffix('py')  # 参考替换
-        Path('C:/pycode/code4101py/util/a.txt')
+        Path('D:/slns/pyxllib/pyxllib/debug/a.txt')
         >>> Path('a.txt').with_suffix('')  # 删除
-        Path('C:/pycode/code4101py/util/a')
+        Path('D:/slns/pyxllib/pyxllib/debug/a')
         """
         if suffix and (suffix[0] == '.' or not self.suffix):
             if suffix[0] != '.': suffix = '.' + suffix
@@ -344,8 +350,8 @@ class Path:
         """计算文件、目录的大小，对于目录，会递归目录计算总大小
         https://stackoverflow.com/questions/1392413/calculating-a-directory-size-using-python
 
-        >>> Path('C:/pycode/code4101py').size  # 这个算的就是真实大小，不是占用空间
-        606234308
+        >> Path('D:/slns/pyxllib').size  # 这个算的就是真实大小，不是占用空间
+        2939384
         """
         path = str(self._path)
         if self._path.is_file():
@@ -381,13 +387,13 @@ class Path:
 
     def abs_dstpath(self, dst=None, suffix=None, root=None) -> str:
         r""" 参照当前Path的父目录，来确定dst的具体路径
-        >>> f = Path('C:/pycode/code4101py/ckz.py')
+        >>> f = Path('C:/Windows/System32/cmd.exe')
         >>> f.abs_dstpath('chen.py')
-        'C:\\pycode\\code4101py\\chen.py'
-        >>> f.abs_dstpath('D:/')
-        'D:/ckz.py'
+        'C:\\Windows\\System32\\chen.py'
+        >>> f.abs_dstpath('E:/')  # 原始文件必须存在，否则因为无法判断实际类型，目标路径可能会错
+        'E:/cmd.exe'
         >>> f.abs_dstpath('D:/aabbccdd.txt/')  # 并不存在aabbccdd.txt这样的对象，但末尾有个/表明这是个目录
-        'D:/aabbccdd.txt/ckz.py'
+        'D:/aabbccdd.txt/cmd.exe'
         """
         if not root: root = self.dirname
         dst = Path.abspath(dst, suffix, root)
@@ -398,10 +404,10 @@ class Path:
 
         return dst
 
-    def process(self, dst, func, if_exists=None, arg1=None, arg2=None):
+    def process(self, dst, func, if_exists='error', arg1=None, arg2=None):
         r"""copy或move的本质底层实现
         :param if_exists:
-            'error': 如果要替换的目标文件已经存在，则报错
+            'error': （默认）如果要替换的目标文件已经存在，则报错
             'replace': 替换
             'ignore': 忽略、不处理
             'backup': 备份后写入
@@ -412,11 +418,12 @@ class Path:
         need_run = True
 
         if dst.exists():
-            if dst == self:
+            if dst == self and arg1 is None and arg2 is None:
                 # 同一个文件，估计只是修改大小写名称，不做任何特殊处理，准备直接跑函数
+                # 200601周一19:23：要补arg1、arg2的判断，不然Path.write会出错
                 pass
-            elif if_exists == "error":
-                return FileExistsError(f'目标文件已存在： {self} — {func.__name__} —> {dst}')
+            elif if_exists == 'error':
+                raise FileExistsError(f'目标文件已存在： {self} — {func.__name__} —> {dst}')
             elif if_exists == 'replace':  # None的话相当于replace，但是不会事先delete，可能会报错
                 dst.delete()
             elif if_exists == 'ignore':
@@ -442,7 +449,7 @@ class Path:
             'None'：通过名称智能判断，如果能读取到suffix，则代表是Path类型，否则是dir类型
         :return:
 
-        >>> Path(r'D:\toweb\a\b.txt').ensure_dir()  # 只会创建toweb、a目录
+        >> Path(r'D:\toweb\a\b.txt').ensure_dir()  # 只会创建toweb、a目录
 
         # a和一个叫b.txt的目录都会创建
         # 当然，如果b.txt是一个已经存在的文件对象，则该函数不会进行操作
@@ -455,19 +462,19 @@ class Path:
             if not os.path.exists(dirname):
                 os.makedirs(dirname)
 
-    def copy(self, dst, if_exists=None):
+    def copy(self, dst, if_exists='error'):
         """复制文件"""
         if self.is_dir():
             return self.process(dst, shutil.copytree, if_exists)
         elif self.is_file():
             return self.process(dst, shutil.copy2, if_exists)
 
-    def move(self, dst, if_exists=None):
+    def move(self, dst, if_exists='error'):
         """移动文件"""
         if self.exists():
             return self.process(dst, shutil.move, if_exists)
 
-    def rename(self, dst, if_exists=None):
+    def rename(self, dst, if_exists='error'):
         r""" 文件重命名，或者也可以理解成文件移动
         :param dst: 如果使用相对目录，则是该类本身所在的目录作为工作环境
         :param if_exists:
@@ -476,25 +483,6 @@ class Path:
             'ignore': 忽略、不处理
             'backup': 备份后替换
         :return:
-
-        # 初始化一个空的测试目录
-        >>> f = Path('temp/', root='D:/pythontest')
-        >>> f.delete()
-        >>> f.ensure_dir()
-
-        # 建一个空文件
-        >>> f1 = f / 'a.txt'
-        >>> f1
-        Path('D:/pythontest/temp/a.txt')
-        >>> with open(f1.fullpath, 'wb') as Path: pass  # 写一个空文件
-
-        >>> f1.rename('A.tXt')  # 重命名
-        Path('D:/pythontest/temp/A.tXt')
-
-        >>> f1.rename('figs/b')  # 放到一个新的子目录里，并再次重命名
-        Path('D:/pythontest/temp/figs/b')
-
-        TODO 把目录下的1 2 3 4 5重命名为5 4 3 2 1时要怎么搞？
         """
         # rename是move的一种特殊情况
         return self.move(dst, if_exists)
@@ -509,7 +497,7 @@ class Path:
         # TODO 确保删除后再执行后续代码 但是一直觉得这样写很别扭
         while self.exists(): pass
 
-    def backup(self, tail=None, if_exists=None, move=False):
+    def backup(self, tail=None, if_exists='replace', move=False):
         r"""对文件末尾添加时间戳备份，也可以使用自定义标记tail
 
         :param tail: 自定义添加后缀
@@ -563,7 +551,7 @@ class Path:
         else:  # 非文件对象
             raise ValueError('文件不存在，无法读取。')
 
-    def write(self, ob, *, encoding='utf8', if_exists='backup', etag=False):
+    def write(self, ob, *, encoding='utf8', if_exists='error', etag=False):
         """
         :param ob: 写入的内容
             如果要写txt文本文件且ob不是文本对象，只会进行简单的字符串化
@@ -594,7 +582,7 @@ class Path:
         # 2、推导出目标文件的完整名，并判断是否存在，进行不同处理
         self.process(self, data2file, if_exists, arg1=ob, arg2=self)
         if etag:
-            from pyxllib.extend.qiniu_ import get_etag
+            from pyxllib.debug.qiniu_ import get_etag
             # TODO etag如果出现重复文件，是可以ignore的，但为了rename函数能成功返回目标Path，还是先执行replace吧
             return self.rename(get_etag(self.fullpath) + self.suffix, if_exists='replace')
         else:
@@ -606,7 +594,7 @@ class Path:
 
         :param proc: 可以自定义要执行的主程序
         """
-        subprocess.run(['explorer', self.fullpath])
+        subprocess.run([proc, self.fullpath])
 
 
 def demo_path():
@@ -618,12 +606,40 @@ def demo_path():
     p.delete()  # 如果存在先删除
     p.ensure_dir()  # 然后再创建一个空目录
 
-    print(Path('demo_path', '.py').fullpath)
+    print(Path('demo_path', '.py'))
     # F:\work\CreatorTemp\demo_path.py
 
-    print(Path('demo_path/', '.py').fullpath)
+    print(Path('demo_path/', '.py'))
     # F:\work\CreatorTemp\demo_path\tmp65m8mc0b.py
+
+    # 空字符串区别于None，会随机生成一个文件名
+    print(Path('', root=Path.TEMP))
+    # F:\work\CreatorTemp\tmpwp4g1692
+
+    # 可以在随机名称基础上，再指定文件扩展名
+    print(Path('', '.txt', root=Path.TEMP))
+    # F:\work\CreatorTemp\tmpimusjtu1.txt
+
+
+def demo_path_rename():
+    # 初始化一个空的测试目录
+    f = Path('temp/', root=Path.TEMP)
+    f.delete()
+    f.ensure_dir()
+
+    # 建一个空文件
+    f1 = f / 'a.txt'
+    # Path('F:/work/CreatorTemp/temp/a.txt')
+    with open(f1.fullpath, 'wb') as p: pass  # 写一个空文件
+
+    f1.rename('A.tXt')  # 重命名
+    # Path('F:/work/CreatorTemp/temp/a.txt')
+
+    f1.rename('figs/b')  # 放到一个新的子目录里，并再次重命名
+    # Path('F:/work/CreatorTemp/temp/figs/b')
+
+    # TODO 把目录下的1 2 3 4 5重命名为5 4 3 2 1时要怎么搞？
 
 
 if __name__ == '__main__':
-    demo_path()
+    demo_path_rename()

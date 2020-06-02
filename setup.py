@@ -10,7 +10,7 @@
 from setuptools import setup, find_packages
 import io
 
-VERSION = '0.0.3'
+VERSION = '0.0.4'
 
 with io.open("README.md", encoding='utf-8') as f:
     long_description = f.read()
@@ -26,7 +26,8 @@ setup(
     keyworads="pyxllib",
     description="厦门理工模式识别团队通用python代码工具库",
     long_description=long_description,
-    packages=find_packages(exclude=('tests', 'tests.*')),
+    long_description_content_type='text/markdown',
+    packages=find_packages(exclude=('tests', 'tests.*', '*account.pkl')),
     include_package_data=True,
     license='Apache License',
     classifiers=[],

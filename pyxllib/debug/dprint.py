@@ -5,6 +5,15 @@
 # @Data   : 2020/05/30 20:27
 
 
+"""
+调试相关功能
+
+TODO dprint是基于我个人目前的经验实现的，我还是要找个时间系统学习下python正规的日志是怎么做的
+    有些功能可能有现成标准库可以实现，不用我自己搞一套
+    以及我可能还要扩展高亮、写入文件日志等功能
+"""
+
+
 import inspect
 import os
 
@@ -163,16 +172,16 @@ def dprint(*args, **kwargs):
 def demo_dprint():
     """这里演示dprint常用功能
     """
-    from pyxllib.util.timer import Timer
+    from pyxllib.debug.pytictoc import TicToc
 
     # 1、查看程序是否运行到某个位置
     dprint()
-    # [05]debuglib.py/589:      意思：这是堆栈的第5层，所运行的位置是 debuglib.py文件的第589行
+    # [05]dprint.py/169:      意思：这是堆栈的第5层，所运行的位置是 dprint.py文件的第169行
 
     # 2、查看变量、表达式的 '<类型>' 和 ':值'
     a, b, s = 1, 2, 'ab'
     dprint(a, b, a ^ b, s * 2)
-    # [05]debuglib.py/594: a<int>=1    b<int>=2    a ^ b<int>=3    s*2<str>='abab'
+    # [05]dprint.py/174: a<int>=1    b<int>=2    a ^ b<int>=3    s*2<str>='abab'
 
     # 3、异常警告
     b = 0
@@ -181,13 +190,13 @@ def demo_dprint():
     else:
         c = 0
         dprint(a, b, c)  # b=0不能作为除数，c默认值暂按0处理
-    # [05]debuglib.py/603: a<int>=1    b<int>=0    c<int>=0    # b=0不能作为除数，c默认值暂按0处理
+    # [05]dprint.py/183: a<int>=1    b<int>=0    c<int>=0    # b=0不能作为除数，c默认值暂按0处理
 
     # 4、如果想在其他地方使用dprint的格式内容，可以调底层dformat函数实现
-    with Timer(dformat(fmt='[{depth:02}]{fullfilename}/{lineno}: {argmsg}')):
+    with TicToc(dformat(fmt='[{depth:02}]{fullfilename}/{lineno}: {argmsg}')):
         for _ in range(10 ** 7):
             pass
-    # [04]C:\pycode\code4101py\util\debuglib.py/613:  用时: 0.145s
+    # [04]D:\slns\pyxllib\pyxllib\debug\dprint.py/187:  0.173 秒.
 
 
 if __name__ == '__main__':

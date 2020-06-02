@@ -5,6 +5,7 @@
 # @Data   : 2020/05/21 15:59
 
 
+import os
 import subprocess
 
 
@@ -29,13 +30,14 @@ class AutoGui:
         self.grayscale = grayscale
         self.confidence = confidence
 
-    def find(self, name, grayscale=None):
+    def find(self, name, grayscale=None, confidence=None):
         """
         :param name: 判断当前屏幕中，是否存在图库中名为name的图
         :param grayscale: 这里如果设置了，会覆盖类中的默认设置
         :return: 如果存在，返回其中心坐标，否则返回None
         """
         grayscale = self.grayscale if grayscale is None else grayscale
+        # confidence = self.confidence if confidence is None else confidence
         return pyautogui.locateCenterOnScreen(os.path.join(self.figspath, name),
                                               grayscale=grayscale)
 

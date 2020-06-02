@@ -15,8 +15,8 @@ except ModuleNotFoundError:
     import chardet
 
 
-from pyxllib.util.ddprint import dprint
-from pyxllib.util.judge import is_file
+from pyxllib.debug.dprint import dprint
+from pyxllib.debug.judge import is_file
 
 
 def get_encoding(bstr):
