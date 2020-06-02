@@ -1,5 +1,6 @@
 # PyCharm项目Config目录
 .idea/
+
 *.pyc
 build/
 pyxllib.egg-info/

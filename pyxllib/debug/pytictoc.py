@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 # @Author : 陈坤泽
 # @Email  : 877362867@qq.com
-# @Data   : 2020/05/30 18:55
+# @Data   : 2020/05/30
 
 
 """
@@ -88,3 +88,16 @@ class TicToc:
         self.end = timeit.default_timer()
         self.elapsed = self.end - self.start
         print(f'{self.title} {self.elapsed:.3f} 秒.')
+
+
+if __name__ == '__main__':
+    # demo：每个脚本开头结尾都可以这样写来统计程序用时
+    TicToc.process_time(f'{__file__} 启动准备共用时')
+    # D:/slns/pyxllib/pyxllib/debug/pytictoc.py 启动准备共用时 0.031 秒
+
+    tictoc = TicToc(__file__)
+
+    time.sleep(2)
+
+    tictoc.toc()
+    # D:/slns/pyxllib/pyxllib/debug/pytictoc.py 用时 2.000 秒.

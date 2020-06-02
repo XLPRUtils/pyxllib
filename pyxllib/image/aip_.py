@@ -10,10 +10,7 @@
 
 
 import subprocess
-import io
 
-
-import requests
 import pandas as pd
 
 try:
@@ -23,11 +20,11 @@ except ModuleNotFoundError:
     import aip
 
 
-from pyxllib.extend.pathlib_ import Path
-from pyxllib.extend.pillow_ import get_img_content
+from pyxllib.debug.pathlib_ import Path
+from pyxllib.image.imlib import get_img_content
 
 
-def create_account_df(file='pyaipocraccount.pkl'):
+def create_account_df(file='aipocraccount.pkl'):
     """请在这里设置您个人的账户密码，并在运行完后，销毁明文信息"""
     df = pd.DataFrame.from_records([
         ['坤泽小号', '16936214', 'aaaaaa', '123456'],
@@ -51,9 +48,9 @@ class AipOcr:
     @classmethod
     def init(cls, next_client=False, account_file_path=None):
         # 1、账号信息
-        if not cls.account_df:
+        if cls.account_df is None:
             if not account_file_path:
-                cls.account_df = (Path(__file__).parent / 'pyaipocraccount.pkl').read()
+                cls.account_df = (Path(__file__).parent / 'aipocraccount.pkl').read()
 
         # 2、初始化client
         if cls.client is None or next_client:
@@ -70,7 +67,7 @@ class AipOcr:
         """ 调用baidu的普通文本识别
         这个函数你们随便调用，每天5万次用不完
 
-        :param in_: 可以是图片路径，也可以是网页上的url
+        :param in_: 可以是图片路径，也可以是网页上的url，也可以是Image对象
         :param options: 可选参数
             详见：https://cloud.baidu.com/doc/OCR/s/pjwvxzmtc
         :return: 返回识别出的dict字典

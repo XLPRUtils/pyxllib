@@ -14,54 +14,16 @@ test：测试代码，注重分析功能稳定性
 perf：性能测试，注重分析代码的运行效率
 """
 
-from code4101py.util.main import *
+
+import os
+import pprint
+import re
 import socket
+import sys
+import tempfile
 
 
-def demo_timer():
-    """该函数也可以用来测电脑性能
-    代码中附带的示例结果是我在自己小米笔记本上的测试结果
-    Intel（R） Core（TM） i7-10510U CPU@ 1.80GHz 2.30 GHz，15G 64位
-    """
-    print('1、普通用法（循环5*1000万次用时）')
-    timer = Timer('循环', start_now=True)  # 也可以写 timer = Timer('循环')
-    for _ in range(5):
-        for _ in range(10 ** 7):
-            pass
-    timer.stop_and_report()
-    # 循环 用时: 0.727s
-
-    print('2、循环多轮计时（循环5*1000万次用时）')
-    timer = Timer()
-    for _ in range(5):
-        timer.start()  # 该句可以省略
-        for _ in range(10 ** 7):
-            pass
-        timer.stop()  # 每轮结束时标记
-    timer.stop_and_report()
-    # 总耗时: 0.771s	均值标准差: 0.154±0.005s	总数: 5	最小值: 0.148s	最大值: 0.162s
-
-    print('3、with上下文用法')
-    with Timer('循环'):
-        for _ in range(5):
-            for _ in range(10 ** 6):
-                pass
-    # 循环 用时: 0.081s
-
-    print('4、with上下文用法2')
-    with Timer('循环') as t:
-        for _ in range(5):
-            for _ in range(10 ** 6):
-                pass
-            t.stop()
-    # 循环 总耗时: 0.082s	均值标准差: 0.016±0.000s	总数: 5	最小值: 0.016s	最大值: 0.017s
-
-    print('5、可以配合dformat输出定位信息')
-    with Timer(dformat()):
-        for _ in range(5):
-            for _ in range(10 ** 6):
-                pass
-    # [04]demolib.py/59:      用时: 0.087s
+from pyxllib.debug.main import *
 
 
 def demo_system():

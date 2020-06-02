@@ -15,7 +15,8 @@
 文档： https://histudy.yuque.com/docs/share/365f3a75-28d0-4595-bc80-5e9d6ab36f71#
 """
 
-from code4101py.util.debuglib import *
+
+from pyxllib.debug.all import *
 
 
 class Interval:

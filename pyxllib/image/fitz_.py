@@ -1,85 +1,140 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
+# @Author : 陈坤泽
+# @Email  : 877362867@qq.com
+# @Data   : 2020/06/02 16:06
 
-"""
-任何模块代码的第一个字符串用来写文档注释
-"""
 
-__author__ = '陈坤泽'
-__email__ = '877362867@qq.com'
-__date__ = '2018/07/11 19:14'
+import concurrent.futures
+import math
+import pprint
+import subprocess
+import tempfile
 
-import struct
-
-from code4101py.util.filelib import *
-
-try:
-    import PIL
-except ModuleNotFoundError:
-    subprocess.run(['pip3', 'install', 'pillow'])
-    import PIL
 
 try:
     import fitz
 except ModuleNotFoundError:
-    # subprocess.run(['pip3', 'install', 'PyMuPdf'])
-    pass
-
-# import fitz
-
-try:
-    from get_image_size import get_image_size
-except ModuleNotFoundError:
-    subprocess.run(['pip3', 'install', 'opsdroid-get-image-size'])
-    from get_image_size import get_image_size
+    subprocess.run(['pip3', 'install', 'PyMuPdf'])
+    import fitz
 
 
-# import PIL.ExifTags
-# from PIL import Image
+from pyxllib.debug.pathlib_ import Path
+from pyxllib.image.imlib import zoomsvg, get_image_size
+from pyxllib.debug.dirlib import *
+from pyxllib.debug.dprint import dprint
+from pyxllib.debug.chrome import chrome
 
 
-def magick(infile, *, outfile=None, force=True, transparent=None, trim=False, density=None, other_args=None):
-    """调用iamge magick的magick.exe工具
-    :param infile: 处理对象文件
-    :param outfile: 输出文件，可以不写，默认原地操作（只设置透明度、裁剪时可能会原地操作）
-    :param force:
-        True: 即使outfile已存在，也重新覆盖生成
-        False: 如果outfile已存在，不生成
-    :param transparent:
-        True: 将白底设置为透明底
-        可以传入颜色参数，控制要设置的为透明底的背景色，默认为'white'
-        注意也可以设置rgb：'rgb(164,192,167)'
-    :param trim: 裁剪掉四周空白
-    :param density: 设置图片的dpi值
-    :param other_args: 其他参数，输入格式如：['-quality', 100]
-    :return:
-        False：infile不存在或者不支持的文件扩展名
-        返回生成的文件名（outfile）
+class DemoFitz:
     """
-    # 1、条件判断，有些情况下不用处理
-    if not outfile: outfile = infile
-    # 所有转换参数都没有设置，则不处理
-    if not force and Path(outfile).is_file(): return outfile
-    # 判断是否是支持的输入文件类型
-    ext = os.path.splitext(infile)[1].lower()
-    if not Path(infile).is_file() or not ext in ('.png', '.eps', '.pdf', '.jpg', '.jpeg', '.wmf', '.emf'): return False
+    安装： pip install PyMuPdf
+    使用： import fitz
+    官方文档： https://pymupdf.readthedocs.io/en/latest/intro/
+        demo： https://github.com/rk700/PyMuPDF/tree/master/demo
+        examples： https://github.com/rk700/PyMuPDF/tree/master/examples
+    """
 
-    # 2、生成需要执行的参数
-    cmd = ['magick.exe']
-    # 透明、裁剪、density都是可以重复操作的
-    if density: cmd.extend(['-density', str(density)])
-    cmd.append(infile)
-    if transparent:
-        if not isinstance(transparent, str): transparent = 'white'
-        cmd.extend(['-transparent', transparent])
-    if trim: cmd.append('-trim')
-    if other_args: cmd.extend(other_args)
-    cmd.append(outfile)
+    def __init__(self, file):
+        self.doc = fitz.open(file)
 
-    # 3、生成目标png图片
-    print(' '.join(cmd))
-    subprocess.run(cmd, stderr=subprocess.PIPE, shell=True)  # 看不懂magick出错写的是啥，关了
-    return outfile
+    def message(self):
+        """查看pdf文档一些基础信息"""
+        dprint(fitz.version)  # fitz模块的版本
+        dprint(self.doc.pageCount)  # pdf页数
+        dprint(self.doc._getXrefLength())  # 文档的对象总数
+
+    def getToC(self):
+        """获得书签目录"""
+        toc = self.doc.getToC()
+        chrome(toc)
+
+    def setToC(self):
+        """设置书签目录
+        可以调层级、改名称、修改指向页码
+        """
+        toc = self.doc.getToC()
+        toc[1][1] = '改标题名称'
+        self.doc.setToC(toc)
+        file = Path('a.pdf', root=Path.TEMP).fullpath
+        self.doc.save(file, garbage=4)
+        chrome(file)
+
+    def setToC2(self):
+        """修改人教版教材的标签名"""
+        toc = self.doc.getToC()
+        newtoc = []
+        for i in range(len(toc)):
+            name = toc[i][1]
+            if '.' in name: continue
+            # m = re.search(r'\d+', name)
+            # if m: name = name.replace(m.group(), digits2chinese(int(m.group())))
+            m = re.search(r'([一二三四五六]年级).*?([上下])', name)
+            if i < len(toc) - 1:
+                pages = toc[i + 1][2] - toc[i][2] + 1
+            else:
+                pages = self.doc.pageCount - toc[i][2] + 1
+            toc[i][1] = m.group(1) + m.group(2) + '，' + str(pages)
+            newtoc.append(toc[i])
+        self.doc.setToC(newtoc)
+        file = writefile(b'', 'a.pdf', if_exists='replace')
+        self.doc.save(file, garbage=4)
+
+    def rearrange_pages(self):
+        """重新布局页面"""
+        self.doc.select([0, 0, 1])  # 第1页展示两次后，再跟第2页
+        file = writefile(b'', 'a.pdf', root=Path.TEMP, if_exists='replace')
+        self.doc.save(file, garbage=4)  # 注意要设置garbage，否则文档并没有实际删除内容压缩文件大小
+        chrome(file)
+
+    def page2png(self):
+        """查看单页渲染图片"""
+        page = self.doc.loadPage(0)  # 索引第i页，下标规律同py，支持-1索引最后页
+        dprint(page.bound())  # 页面边界，x,y轴同图像处理中的常识定义，返回Rect(x0, y0, x1, y1)
+
+        pix = page.getPixmap()  # 获得页面的RGBA图像，Pixmap类型；还可以用page.getSVGimage()获得矢量图
+        # pix.writePNG('page-0.png')  # 将Pixmal
+        pngdata = pix.getPNGData()  # 获png文件的bytes字节码
+        chrome(pngdata, 'a.png')  # 用我的工具函数打开图片
+        return pngdata
+
+    def pagetext(self):
+        """单页上的文本"""
+        page = self.doc[0]
+
+        # 获得页面上的所有文本，还支持参数： html，dict，xml，xhtml，json
+        text = page.getText('text')
+        dprint(text)
+
+        # 获得页面上的所有文本（返回字典对象）
+        textdict = page.getText('dict')
+        textdict['blocks'] = textdict['blocks'][:-1]
+        chrome(pprint.pformat(textdict))
+
+    def text(self):
+        """获得整份pdf的所有文本"""
+        return '\n'.join([page.getText('text') for page in self.doc])
+
+    def xrefstr(self):
+        """查看pdf文档的所有对象"""
+        xrefstr = []
+        n = self.doc._getXrefLength()
+        for i in range(1, n):  # 注意下标实际要从1卡开始
+            # 可以边遍历边删除，不影响下标位置，因为其本质只是去除关联引用而已
+            xrefstr.append(self.doc._getXrefString(i))
+        chrome('\n'.join(xrefstr))
+
+    def page_add_ele(self):
+        """往页面添加元素
+        添加元素前后xrefstr的区别： https://paste.ubuntu.com/p/Dxhnzp4XJ2/
+        """
+        self.doc.select([0])
+        page = self.doc.loadPage(0)
+        # page.insertText(fitz.Point(100, 200), 'test\ntest')
+        file = Path('a.pdf', root=Path.TEMP).fullpath
+        dprint(file)
+        self.doc.save(file, garbage=4)
+        chrome(file)
 
 
 def pdf2svg_oldversion(pdffile, target=None, *, trim=False):
@@ -138,7 +193,8 @@ def pdf2svg_oldversion(pdffile, target=None, *, trim=False):
 
 
 def pdf2imagebase(pdffile, target=None, scale=None, ext='.png'):
-    """使用python的PyMuPdf模块，不需要额外插件
+    """ 作者：梁奕本
+    使用python的PyMuPdf模块，不需要额外插件
     导出的图片从1开始编号
     TODO 要加多线程？效率影响大吗？
 
@@ -224,97 +280,6 @@ def pdf2svg(pdffile, target=None, scale=None, trim=False):
     pdf2imagebase(pdffile, target=target, scale=scale, ext='.svg')
 
 
-def ensure_pngs(folder, *, if_exists='ignore',
-                transparent=None, trim=False,
-                density=None, epsdensity=None,
-                max_workers=None):
-    """确保一个目录下的所有图片都有一个png版本格式的文件
-    :param folder: 目录名，会遍历直接目录下所有没png的stem名称生成png
-    :param if_exists: 如果文件已存在，要进行的操作
-        'replace'，直接替换
-        'backup'，备份后生成新文件
-        'ignore'，不写入
-
-    :param transparent: 设置转换后的图片是否要变透明
-    :param trim: 是否裁剪边缘空白
-    :param density: 缩放尺寸
-        TODO magick 和 inkscape 的dpi参考值是不同的，inkscape是真的dpi，magick有个比例差，我还没搞明白
-    :param epsdensity: eps转png时默认放大的比例，注意默认100%是72，写144等于长宽各放大一倍
-    :param max_workers: 并行的最大线程数
-    """
-
-    # 1、提取字典d，key<str>: 文件stem名称， value<set>：含有的扩展名
-    d = defaultdict(set)
-    for file in os.listdir(folder):
-        if file.endswith('-eps-converted-to.pdf'): continue
-        name, ext = os.path.splitext(file)
-        ext = ext.lower()
-        if ext in ('.png', '.eps', '.pdf', '.jpg', '.jpeg', '.wmf', '.emf', '.svg'):
-            d[name].add(ext)
-
-    # 2、遍历处理每个stem的图片
-    executor = concurrent.futures.ThreadPoolExecutor(max_workers)
-    for name, exts in d.items():
-        # 已经存在png格式的图片时，看if_exists参数
-        if '.png' in exts:
-            if if_exists == 'ignore':
-                continue
-            elif if_exists == 'backup':
-                Path(name, '.png', folder).backup(move=True)
-            elif if_exists == 'replace':
-                pass
-            else:
-                raise ValueError
-
-        # 注意这里必须按照指定的类型优先级顺序，找到母图后替换，不能用找到的文件类型顺序
-        for t in ('.eps', '.pdf', '.jpg', '.jpeg', '.wmf', '.emf', '.svg'):
-            if t in exts:
-                filename = os.path.join(folder, name)
-                if t == '.svg':  # svg用inkscape软件单独处理
-                    cmd = ['inkscape.exe', '-f', filename + t]  # 使用inkscape把svg转png
-                    if trim: cmd.append('-D')  # 裁剪参数
-                    if density: cmd.extend(['-d', str(density)])  # 设置dpi参数
-                    cmd.extend(['-e', filename + '.png'])
-                    executor.submit(subprocess.run, cmd)
-                elif t == '.eps':
-                    executor.submit(magick, filename + t, outfile=filename + '.png',
-                                    transparent=transparent, trim=trim, density=epsdensity)
-                else:
-                    executor.submit(magick, filename + t, outfile=filename + '.png',
-                                    transparent=transparent, trim=trim, density=density)
-                break
-    executor.shutdown()
-
-
-def zoomsvg(file, scale=1):
-    """
-    :param file:
-        如果输入一个目录，会处理目录下所有的svg图片
-        否则只处理指定的文件
-        如果是文本文件，则处理完文本后返回
-    :param scale: 缩放的比例，默认100%不调整
-    :return:
-    """
-    if scale == 1: return
-
-    def func(m):
-        def g(m): return m.group(1) + str(float(m.group(2)) * scale)
-
-        return re.sub(r'((?:height|width)=")(\d+(?:\.\d+)?)', g, m.group())
-
-    if os.path.isfile(file):
-        s = re.sub(r'<svg .+?>', func, Path(file).read(), flags=re.DOTALL)
-        writefile(s, file, if_exists='replace')
-    elif os.path.isdir(file):
-        for f in os.listdir(file):
-            if not f.endswith('.svg'): continue
-            f = os.path.join(file, f)
-            s = re.sub(r'<svg\s+.+?>', func, Path(f).read(), flags=re.DOTALL)
-            writefile(s, f, if_exists='replace')
-    elif isinstance(file, str) and '<svg ' in file:  # 输入svg的代码文本
-        return re.sub(r'<svg .+?>', func, file, flags=re.DOTALL)
-
-
 def pdfs2pngs(path, scale=None):
     """pdf教材批量转图片
     :param path: 要处理的目录
@@ -363,34 +328,3 @@ def pdfs2pngs(path, scale=None):
         executor.shutdown()
 
     os.chdir(cwd)  # 恢复原工作目录
-
-
-def reduce_image_filesize(path, filesize):
-    """
-    :param path: 图片路径，支持png、jpg等多种格式
-    :param filesize: 单位Bytes
-        可以用 300*1024 来表示 300KB
-    :return:
-
-    >> reduce_image_filesize('a.jpg', 300*1024)
-    """
-    from PIL import Image
-
-    path = Path(path)
-    # 1、无论什么情况，都先做个100%的resize处理，很可能会去掉一些没用的冗余信息
-    im = Image.open(f'{path}')
-    im.resize(im.size).save(f'{path}')
-
-    # 2、然后开始循环处理
-    while True:
-        r = path.size / filesize
-        if r <= 1: break
-        # 假设图片面积和文件大小成正比，如果r=4，表示长宽要各减小至1/(r**0.5)才能到目标文件大小
-        rate = min(1 / (r**0.5), 0.95)  # 并且限制每轮至少要缩小至95%，避免可能会迭代太多轮
-        im = Image.open(f'{path}')
-        im.resize((int(im.size[0]*rate), int(im.size[1]*rate))).save(f'{path}')
-
-
-____section_temp = """
-临时添加的新功能
-"""

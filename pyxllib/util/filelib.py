@@ -11,7 +11,8 @@
 """
 
 
-from code4101py.util.xmllib import *
+from pyxllib.util.xmllib import *
+
 
 # import glob
 from os.path import join as pathjoin
@@ -21,10 +22,8 @@ import shutil
 import io
 import tempfile
 
-import code4101py.stdlib.zipfile as zipfile  # 重写了标准库的zipfile文件，cp437改为gbk，解决zip中文乱码问题
+import pyxllib.util.zipfile as zipfile  # 重写了标准库的zipfile文件，cp437改为gbk，解决zip中文乱码问题
 
-
-# import code4101py.stdlib.bs4
 
 # 需要使用的第三方软件
 # BCompare.exe， bcompare函数要用

@@ -23,7 +23,7 @@ def get_etag(arg):
     :param arg: 支持bytes二进制、文件、url地址
     """
     from io import BytesIO
-    from pyxllib.util.judge import is_url, is_file
+    from pyxllib.debug.judge import is_url, is_file
 
     if isinstance(arg, bytes):  # 二进制数据
         return qiniu.utils.etag_stream(BytesIO(arg))

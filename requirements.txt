@@ -1,3 +1,8 @@
+numpy>=1.15.4
+arrow>=0.15.5
 Jinja2>=2.10
 pandas>=0.23.4
+chardet>=3.0.4
 requests>=2.21.0
+qiniu>=7.2.6
+beautifulsoup4>=4.9.1
