@@ -5,11 +5,17 @@
 # @Data   : 2020/06/03 09:52
 
 
+import math
 import subprocess
 
 
 import pandas as pd
 
+try:
+    from bidict import bidict
+except ModuleNotFoundError:
+    subprocess.run(['pip3', 'install', 'bidict'])
+    from bidict import bidict
 
 try:
     import sqlalchemy
@@ -65,12 +71,15 @@ class SqlEngine:
 
         :return:
         """
+
         # 1、读取地址、账号信息
         if alias:
             if account_file_path is None:
                 account_file_path = (Path(__file__).parent / 'sqllibaccount.pkl')
+            # dprint(alias,account_file_path)
             record = Path(account_file_path).read().loc[alias]  # 从文件读取账号信息
             user, passwd, host, port = record.user, record.passwd, record.host, record.port
+
         # 2、'数据库类型+数据库驱动名称://用户名:口令@机器地址:端口号/数据库名'
         address = f'mysql+mysqldb://{user}:{passwd}@{host}:{port}/{database}?charset=utf8mb4'
         # 3、存储成员
@@ -131,6 +140,66 @@ class SqlEngine:
         res = self.engine.execute(statement, *multiparams, **params)
         return res
 
+    def insert_from_df(self, df, table_name, patch_size=100, if_exists='append'):
+        """将df写入con数据库的table_name表格
+
+        190731周三18:51，TODO
+        可以先用：df.to_sql('formula_stat', HistudySQL('dev', 'tr_develop').con, if_exists='replace')
+        191017周四10:21，目前这函数改来改去，都还没严格测试呢~~
+
+        这个函数开发要参考：DataFrame.to_sql()
+            是因为其con参数好像不支持pymysql
+
+        :param df: DataFrane类型表格数据
+        :param table_name: 要写入的表格名
+        :param patch_size: 每轮要写入的数量
+            如果df很大，是无法一次性用sql语句写入的，一般要分批写
+            patch_size是设置每批导入多少条数据
+        :param if_exists: {'fail', 'replace', 'append'}, default 'append'
+                How to behave if the table already exists.
+
+                * fail: Raise a ValueError.
+                * replace: Drop the table before inserting new values.
+                * append: Insert new values to the existing table.
+        """
+        con = self.engine
+        # TODO 增加表格是否存在的判断；我这个函数本质上只能往已存在的表格插入数据
+        if if_exists == 'append':
+            pass
+        elif if_exists == 'replace':
+            con.query(f'TRUNCATE TABLE {table_name}')
+        elif if_exists == 'fail':
+            raise ValueError('表格已存在')
+        else:
+            raise NotImplementedError
+
+        # 1、删除table中不支持的df的列
+        cols = pd.read_sql(f'SHOW COLUMNS FROM {table_name}', con)['Field']
+        cols = list(set(df.columns) & set(cols))
+        df = df[cols]
+
+        # 2、将df每一行数据转成mysql语句文本
+        data = []  # data[i]是第i条数据的sql文本
+
+        # 除了nan，bool值、None值都能正常转换
+        def func(x):
+            # s = con.escape(str(x))
+            s = x
+            if s == 'nan': s = 'NULL'  # nan转为NULL
+            return s
+
+        for idx, row in df.iterrows():
+            t = ', '.join(map(func, row))
+            data.append('(' + t + ')')
+
+        # 3、分批导入
+        columns = '( ' + ', '.join(cols) + ' )'
+        for j in range(0, math.ceil(len(data) / patch_size)):
+            subdata = ',\n'.join(data[j * patch_size:(j + 1) * patch_size])
+            con.execute("INSERT IGNORE INTO :a :b VALUES :c",
+                        a=table_name, b=columns, c=subdata)
+        con.commit()  # 更新后才会起作用
+
 
 class SqlCodeGenerator:
     @staticmethod
@@ -152,6 +221,87 @@ def demo_sqlengine():
     db = SqlEngine('ckz', 'runoob')
     df = db.query('SELECT * FROM apps')
     print(df)
+
+
+class MultiEnumTable:
+    """多份枚举表的双向映射
+        目前是用来做数据库表中的枚举值映射，但实际可以通用于很多地方
+
+    >>> met = MultiEnumTable()
+    >>> met.add_enum_table('subject', [5, 8, 6], ['语文', '数学', '英语'])
+    >>> met.add_enum_table_from_dict('grade', {1: '小学', 2: '初中', 3: '高中'})
+
+    >>> met['subject'][6]
+    '英语'
+    >>> met['subject'].inverse['英语']
+    6
+
+    >>> met.decode('subject', 5)
+    '语文'
+    >>> met.encode('subject', '数学')
+    8
+
+    >>> met.decodes('grade', [1, 3, 3, 2, 1])
+    ['小学', '高中', '高中', '初中', '小学']
+    >>> met.encodes('grade', ['小学', '高中', '大学', '初中', '小学'])
+    [1, 3, None, 2, 1]
+    """
+    def __init__(self):
+        self.enum_tables = dict()
+
+    def __getitem__(self, table):
+        return self.enum_tables[table]
+
+    def add_enum_table(self, table, ids, values):
+        """增加一个映射表"""
+        self.enum_tables[table] = bidict({k: v for k, v in zip(ids, values)})
+
+    def add_enum_table_from_dict(self, table, d):
+        self.enum_tables[table] = bidict({k: v for k, v in d.items()})
+
+    def set_alias(self, table, alias):
+        """已有table的其他alias别名
+        :param alias: list
+        """
+        for a in alias:
+            self.enum_tables[a] = self.enum_tables[table]
+
+    def decode(self, table, id_, default=None):
+        """转明文"""
+        return self.enum_tables[table].get(id_, default)
+
+    def encode(self, table, value, default=None):
+        """转id"""
+        return self.enum_tables[table].inverse.get(value, default)
+
+    def decodes(self, table, ids, default=None):
+        d = self.enum_tables[table]
+        return [d.get(k, default) for k in ids]
+
+    def encodes(self, table, values, default=None):
+        d = self.enum_tables[table].inverse
+        return [d.get(v, default) for v in values]
+
+
+def adjust_repeat_data(li, suffix='+'):
+    """ 分析序列li里的值，对出现重复的值进行特殊标记去重
+    :param li: list，每个元素值一般是str
+    :param suffix: 通过增加什么后缀来去重
+    :return: 新的无重复数值的li
+
+    >>> adjust_repeat_data(['a', 'b', 'a', 'c'])
+    ['a', 'b', 'a+', 'c']
+    """
+    res = []
+    values = set()
+    for x in li:
+        while x in values:
+            x += suffix
+            # print(x)
+        res.append(x)
+        values.add(x)
+
+    return res
 
 
 if __name__ == '__main__':

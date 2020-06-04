@@ -8,11 +8,18 @@
 # Do imports like python3 so our package works for 2 and 3
 from __future__ import absolute_import
 
-from lxml import html
+import subprocess
+
+try:
+    from lxml import html
+except ModuleNotFoundError:
+    subprocess.run(['pip3', 'install', 'lxml'])
+    from lxml import html
+
 from openpyxl import Workbook
 from openpyxl.utils import get_column_letter
 from premailer import Premailer
-from tablepyxl.style import Table
+from pyxllib.util.tablepyxl.style import Table
 
 
 def string_to_int(s):
