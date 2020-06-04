@@ -85,7 +85,7 @@ class UsedRecords:
     def save(self):
         """保存记录文件"""
         Path(self.dirname + '/').ensure_dir()
-        Path(self.fullname).write('\n'.join(self.ls))
+        Path(self.fullname).write('\n'.join(self.ls), if_exists='replace')
 
     def add(self, s):
         """新增一个使用方法
