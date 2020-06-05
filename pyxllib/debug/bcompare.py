@@ -8,6 +8,7 @@
 from pyxllib.debug.dprint import func_input_message, dprint
 from pyxllib.debug.strlib import natural_sort_key, prettifystr
 from pyxllib.debug.pathlib_ import Path
+from pyxllib.debug.dirlib import refinepath
 from pyxllib.debug.chrome import viewfiles
 
 
@@ -93,7 +94,7 @@ def bcompare(oldfile, newfile=None, basefile=None, wait=True, named=True):
             if Path(file).is_file():
                 ls.append(file)
             else:
-                ls.append(Path(names[d] + ext, root=Path.TEMP).write(file, if_exists='replace').fullpath)
+                ls.append(Path(refinepath(names[d] + ext), root=Path.TEMP).write(file, if_exists='replace').fullpath)
 
     func(oldfile, 0)
     func(newfile, 1)
