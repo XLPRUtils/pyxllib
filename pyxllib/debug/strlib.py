@@ -339,7 +339,7 @@ def realign(text, least_blank=4, tab2blank=4, support_chinese=False, sep=None):
     for i, line in enumerate(lines):
         line = line.strip().split('\t')
         m = len(line)
-        for j in range(m): max_width[j] = max(max_width[j] if max_width[j] else 0, lenfunc(line[j]))
+        for j in range(m): max_width[j] = max(max_width[j] or 0, lenfunc(line[j]))
         lines[i] = line
     if len(max_width) == 1: return '\n'.join(map(lambda x: x[0], lines))
 

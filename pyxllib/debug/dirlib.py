@@ -47,7 +47,7 @@ class Dir(Path):
         >> Dir(r'C:/pycode/code4101py')  # 指定目录
         """
         super(Dir, self).__init__(path, root=root)
-        self.files = files if files else []  # 初始默认没有选中任何文件（文件夹）
+        self.files = files or []  # 初始默认没有选中任何文件（文件夹）
 
     @property
     def absfiles(self):

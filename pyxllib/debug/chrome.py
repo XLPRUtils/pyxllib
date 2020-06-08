@@ -116,8 +116,7 @@ def chrome(arg_):
         t = f'==== 类继承关系：{inspect.getmro(type(arg_))}，' \
             + f'内存消耗：{sys.getsizeof(arg_)}（递归子类总大小：{getasizeof(arg_)}）Byte ===='
         t = '<p>' + html.escape(t) + '</p>'
-        filename = Path(Datetime().strftime('%H%M%S_%f'), '.html', Path.TEMP).\
-            write(t + arg.to_html(), if_exists='replace')
+        filename = Path('', '.html', Path.TEMP).write(t + arg.to_html(), etag=True, if_exists='ignore')
         viewfiles('chrome.exe', str(filename))
     elif getattr(arg, 'render', None):  # pyecharts 等表格对象，可以用render生成html表格显示
         try:

@@ -573,6 +573,9 @@ class Path:
                 with open(name, 'w') as f:
                     json.dump(ob, f)
             elif isinstance(ob, bytes):
+                # print(name)  #  TODO 本少发现个bug：导出平台讲义到本地(r'https://tr.histudy.com/#/dtextbook/202005159c00ce57bdd342c3a879ebb1a2e5ed21', path=r'R:/平台挑题', download_pictures=True)
+                # 老师们从其它网站上抄来的题 可能是 \href{/tr/item/202006038365bfee56b244b2bfbd02e2b25b1500/image_41825807541591152423871.png}{\includegraphics{菁优网：http://www.jyeoo.com}}
+                # 而在这里  name = "菁优网：http://www.jyeoo.com" 含有 "/" 不能作为文件名，这应该是平台的锅
                 with open(name, 'wb') as f:
                     f.write(ob)
             else:  # 其他类型认为是文本类型
@@ -584,6 +587,7 @@ class Path:
         if etag:
             from pyxllib.debug.qiniu_ import get_etag
             # TODO etag如果出现重复文件，是可以ignore的，但为了rename函数能成功返回目标Path，还是先执行replace吧
+            #  同时也是为了去重，避免留下临时的冗余文件，还是replace比较好
             return self.rename(get_etag(self.fullpath) + self.suffix, if_exists='replace')
         else:
             return self

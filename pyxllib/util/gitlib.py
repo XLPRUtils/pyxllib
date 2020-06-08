@@ -147,7 +147,7 @@ class Git:
         ls.extend(self.commits_stat(n, file))
         ls.append(self.commits_author(n, file))
         ls = swap_rowcol(ls)
-        t = file if file else self.g.working_dir
+        t = file or self.g.working_dir
         col_tag = (t + ' / commit名称', '时间', 'sha', 'files_changed', 'insertions', 'deletions', 'author')
         df = pd.DataFrame.from_records(ls, columns=col_tag)
         return df
