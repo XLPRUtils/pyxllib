@@ -60,26 +60,26 @@ class Datetime(arrow.Arrow):
         <Datetime [2015-06-15T22:19:02+08:00]>
         """
         dt = None
-        # 1、没有参数则默认当前运行时间
+        # 1 没有参数则默认当前运行时间
         if not argv:
             dt = datetime.datetime.now()
         if not dt and isinstance(argv[0], datetime.date):
             dt = datetime.datetime(argv[0].year, argv[0].month, argv[0].day)
         if not dt and isinstance(argv[0], (datetime.datetime, arrow.Arrow, Datetime)): dt = argv[0]
         if not dt and isinstance(argv[0], float): dt = datetime.datetime.fromtimestamp(argv[0])
-        # 2、优先尝试用标准的datetime初始化方法
+        # 2 优先尝试用标准的datetime初始化方法
         if not dt:
             dt = Datetime._datetime(argv)
-        # 3、如果上述解析不了，且argv恰好为两个参数，则判断为使用strptime初始化
+        # 3 如果上述解析不了，且argv恰好为两个参数，则判断为使用strptime初始化
         if not dt and len(argv) == 2:
             dt = datetime.datetime.strptime(str(argv[0]), argv[1])
-        # 4、判断是否我个人特用的六位日期标记
+        # 4 判断是否我个人特用的六位日期标记
         if not dt:
             dt = Datetime._six_digits_date(argv[0])
-        # 5、如果仍然解析不了，开始使用一个智能推导算法
+        # 5 如果仍然解析不了，开始使用一个智能推导算法
         if not dt:
             dt = Datetime._parse_time_string(argv[0])
-        # 6、最后任何解析方案都失败，则报错
+        # 6 最后任何解析方案都失败，则报错
         if not dt:
             print(f'无法解析输入的时间标记 argv: {argv}，现重置为当前时间点')
             dt = datetime.datetime.now()

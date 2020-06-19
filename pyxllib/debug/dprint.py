@@ -53,7 +53,7 @@ def func_input_message(depth=2) -> dict:
             例如func(a)，以func(1+2)调用，inpect只能获得“a=3”，但我想要的是“1+2=3”的效果
     """
     res = {}
-    # 1、找出调用函数的代码
+    # 1 找出调用函数的代码
     ss = inspect.stack()
     frameinfo = ss[depth]
     arginfo = inspect.getargvalues(ss[depth - 1][0])
@@ -80,7 +80,7 @@ def func_input_message(depth=2) -> dict:
     # 这一行代码不一定是从“funcname(”开始，所以要用find找到开始位置
     code = code_line[code_line.find(funcname + '(') + len(funcname):]
 
-    # 2、先找到函数的()中参数列表，需要以')'作为分隔符分析
+    # 2 先找到函数的()中参数列表，需要以')'作为分隔符分析
     # TODO 可以考虑用ast重实现
     ls = code.split(')')
     logo, i = True, 1
@@ -95,13 +95,13 @@ def func_input_message(depth=2) -> dict:
             logo = False
     code = ')'.join(ls[:i])[1:]
 
-    # 3、获得注释
+    # 3 获得注释
     # 这个注释实现的不是很完美，不过影响应该不大，还没有想到比较完美的解决方案
     t = ')'.join(ls[i:])
     comment = t[t.find('#'):] if '#' in t else ''
     res['comment'] = comment
 
-    # 4、获得变量名
+    # 4 获得变量名
     ls = code.split(',')
     n = len(ls)
     argnames = list()
@@ -117,7 +117,7 @@ def func_input_message(depth=2) -> dict:
             i = j
             j = i + 1
 
-    # 5、获得变量值和类型
+    # 5 获得变量值和类型
     res['argvals'] = origin_args
     res['types'] = list(map(typename, origin_args))
 
@@ -174,16 +174,16 @@ def demo_dprint():
     """
     from pyxllib.debug.pytictoc import TicToc
 
-    # 1、查看程序是否运行到某个位置
+    # 1 查看程序是否运行到某个位置
     dprint()
     # [05]dprint.py/169:      意思：这是堆栈的第5层，所运行的位置是 dprint.py文件的第169行
 
-    # 2、查看变量、表达式的 '<类型>' 和 ':值'
+    # 2 查看变量、表达式的 '<类型>' 和 ':值'
     a, b, s = 1, 2, 'ab'
     dprint(a, b, a ^ b, s * 2)
     # [05]dprint.py/174: a<int>=1    b<int>=2    a ^ b<int>=3    s*2<str>='abab'
 
-    # 3、异常警告
+    # 3 异常警告
     b = 0
     if b:
         c = a / b
@@ -192,7 +192,7 @@ def demo_dprint():
         dprint(a, b, c)  # b=0不能作为除数，c默认值暂按0处理
     # [05]dprint.py/183: a<int>=1    b<int>=0    c<int>=0    # b=0不能作为除数，c默认值暂按0处理
 
-    # 4、如果想在其他地方使用dprint的格式内容，可以调底层dformat函数实现
+    # 4 如果想在其他地方使用dprint的格式内容，可以调底层dformat函数实现
     with TicToc(dformat(fmt='[{depth:02}]{fullfilename}/{lineno}: {argmsg}')):
         for _ in range(10 ** 7):
             pass

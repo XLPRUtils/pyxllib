@@ -87,7 +87,7 @@ def showdir(c, *, to_html=None, printf=True):
         默认是True，会输出到浏览器或控制条
         设为False则不输出
     """
-    # 1、输出类表头
+    # 1 输出类表头
     res = []
     object_name = func_input_message(2)['argnames'][0]
     if to_html is None:
@@ -102,7 +102,7 @@ def showdir(c, *, to_html=None, printf=True):
         t = html.escape(t) + '</p>'
     res.append(t + newline)
 
-    # 2、html的样式精调
+    # 2 html的样式精调
     def df2str(df):
         if to_html:
             df = df.applymap(str)  # 不转成文本经常有些特殊函数会报错
@@ -119,7 +119,7 @@ def showdir(c, *, to_html=None, printf=True):
             t = dataframe_str(df)
         return t
 
-    # 3、添加成员变量和成员函数
+    # 3 添加成员变量和成员函数
     # 成员变量
     members = getmembers(c)
     methods = filter(lambda m: not callable(getattr(c, m[0])), members)
@@ -147,7 +147,7 @@ def showdir(c, *, to_html=None, printf=True):
     res.append(df2str(df) + newline)
     res = newline.join(res)
 
-    # 4、使用chrome.exe浏览或输出到控制台
+    # 4 使用chrome.exe浏览或输出到控制台
     #   这里底层可以封装一个chrome函数来调用，但是这个chrome需要依赖太多功能，故这里暂时手动简单调用
     if to_html:
         filename = Path(object_name, suffix='.html', root=Path.TEMP).\

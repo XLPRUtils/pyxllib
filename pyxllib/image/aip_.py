@@ -47,12 +47,12 @@ class AipOcr:
 
     @classmethod
     def init(cls, next_client=False, account_file_path=None):
-        # 1、账号信息
+        # 1 账号信息
         if cls.account_df is None:
             if not account_file_path:
                 cls.account_df = (Path(__file__).parent / 'aipocraccount.pkl').read()
 
-        # 2、初始化client
+        # 2 初始化client
         if cls.client is None or next_client:
             t = cls.client_id + next_client
             if t > len(cls.account_df):

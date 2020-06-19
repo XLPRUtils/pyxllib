@@ -307,7 +307,7 @@ class Intervals:
         """
         :param li: 若干interval对象
         """
-        # 1、matches支持list等类型初始化
+        # 1 matches支持list等类型初始化
         if hasattr(li, 'intervals'):
             li = li.intervals
         if isinstance(li, Intervals):
@@ -320,7 +320,7 @@ class Intervals:
                     m = Interval(m)
                 if m: self.li.append(m)  # 只加入非空区间
             self.li.sort()  # 按顺序排
-            # 2、生成成员变量
+            # 2 生成成员变量
             # self._start = min([m.start() for m in self.li], default=math.inf)
             self._start = min([m.start() for m in self.li[:1]], default=math.inf)
             self._end = max([m.end() for m in self.li], default=-math.inf)
@@ -379,11 +379,11 @@ class Intervals:
         >>> a.true_intersect_subinterval(b)  # 在集合交的基础上，去掉完全包含的情况
         {[2]}
         """
-        # 0、区间 转 区间集
+        # 0 区间 转 区间集
         if isinstance(other, Interval):
             other = Intervals([other])
 
-        # 1、区间集和区间集做相交运算，生成一个新的区间集
+        # 1 区间集和区间集做相交运算，生成一个新的区间集
         """假设a、b都是从左到右按顺序取得，所以可以对b的遍历进行一定过滤简化"""
         A = self.merge_intersect_interval()
         B = other.merge_intersect_interval()
@@ -543,26 +543,26 @@ class Intervals:
         >>> ~Intervals([])  # 区间取反操作
         {}
         """
-        # 1、要先把有相交的区间合并了
+        # 1 要先把有相交的区间合并了
         itvs = self.merge_intersect_interval()
 
-        # 2、辅助变量
+        # 2 辅助变量
         li = []
         if maxn is None: maxn = itvs.end()  # 计算出坐标上限
 
-        # 3、第1个区间是否从0开始
+        # 3 第1个区间是否从0开始
         if len(itvs) and itvs[0].start() == 0:
             idx = itvs[0].end()
             i = 1
         else:
             i = idx = 0
 
-        # 4、循环取得新的区间值
+        # 4 循环取得新的区间值
         for m in itvs[i:]:
             li.append(Interval(idx, m.start()))
             idx = m.end()
 
-        # 5、最后一个区间特判
+        # 5 最后一个区间特判
         if idx != maxn: li.append(Interval(idx, maxn))
         res = Intervals(li)
         return res
@@ -589,11 +589,11 @@ class Intervals:
         >>> Intervals() & Intervals([(2, 11)])
         {}
         """
-        # 0、区间 转 区间集
+        # 0 区间 转 区间集
         if isinstance(other, Interval):
             other = Intervals([other])
 
-        # 1、区间集和区间集做相交运算，生成一个新的区间集
+        # 1 区间集和区间集做相交运算，生成一个新的区间集
         """假设a、b都是从左到右按顺序取得，所以可以对b的遍历进行一定过滤简化"""
         A = self.merge_intersect_interval()
         B = other.merge_intersect_interval()
@@ -624,15 +624,15 @@ class Intervals:
         这里具体实现，可以双循环暴力，但考虑区间集顺序性，其实只要双指针同时往前找就好了，
             设几个条件去对循环进行优化，跳出，能大大提高效率
         """
-        # 1、区间集 是否包含 区间，转为 区间集 是否包含 区间集 处理
+        # 1 区间集 是否包含 区间，转为 区间集 是否包含 区间集 处理
         if isinstance(other, (Interval, list, tuple)):
             other = Intervals([other])
 
-        # 2、合并相交区域
+        # 2 合并相交区域
         A = self.merge_intersect_interval()
         B = other.merge_intersect_interval()
 
-        # 3、看是否每个b，都能在A中找到一个a包含它
+        # 3 看是否每个b，都能在A中找到一个a包含它
         i = 0
         for b in B:
             for j in range(i, len(A)):
@@ -686,7 +686,7 @@ class Intervals:
         >>> Intervals([(0, 10), (20, 30)]) - Intervals([(2, 5), (7, 12), (25, 27)])
         {[0~1], [5~6], [20~24], [27~29]}
         """
-        # 1、
+        # 1 
         if isinstance(other, Interval):
             other = Intervals([other])
 
@@ -696,7 +696,7 @@ class Intervals:
 
         B = other.merge_intersect_interval()
 
-        # 2、
+        # 2 
         li, k = [], 0
         while A:
             a = A.pop()
@@ -762,11 +762,11 @@ def highlight_intervals(content, intervals, colors=None, background=True, showma
         True，渲染公式
         False，不渲染公式，只以文本展示
     """
-    # 1、存储要插入的html样式
+    # 1 存储要插入的html样式
     from collections import defaultdict
     d = defaultdict(str)
 
-    # 2、其他所有子组从颜色列表取颜色清单，每组一个颜色
+    # 2 其他所有子组从颜色列表取颜色清单，每组一个颜色
     if colors is None: colors = ('red', )
     elif isinstance(colors, str): colors = (colors, )
     n = len(colors)
@@ -781,7 +781,7 @@ def highlight_intervals(content, intervals, colors=None, background=True, showma
                 d[l] = d[l] + f'<font color={color}>'
                 d[r] = '</font>' + d[r]
 
-    # 3、拼接最终的html代码
+    # 3 拼接最终的html代码
     # （1）配一个特殊的pre样式
     head = r"""<!DOCTYPE html>
 <html>

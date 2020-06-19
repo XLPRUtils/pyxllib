@@ -238,11 +238,11 @@ class Git:
 
         还会在命令行输出这个文件的版本信息
         """
-        # 1、获取s1内容
+        # 1 获取s1内容
         sha1_id = self.sha_id(sha1)
         s1 = self.show(file, sha1_id)
 
-        # 2、获取s2内容
+        # 2 获取s2内容
         if sha2 is not None:
             sha2_id = self.sha_id(sha2)
             s2 = self.show(file, sha2_id)
@@ -250,7 +250,7 @@ class Git:
             sha2_id = None
             s2 = os.path.join(self.g.working_dir, file)  # 存储文件名而不是内容
 
-        # 3、对比
+        # 3 对比
         dprint(sha1, sha2, sha1_id, sha2_id)
         print(dataframe_str(self.list_commits(file=file)))
 
@@ -265,17 +265,17 @@ class Git:
         >> chrome(Git('C:/pycode/').find_pattern(re.compile(r'ssb等改明文')))
 
         """
-        # 1、主对象
+        # 1 主对象
         df = self.list_commits()
         all_shas = list(reversed(list(df['sha'])))
 
-        # 2、files没有设置则匹配所有文件
+        # 2 files没有设置则匹配所有文件
         # TODO 当前已经不存在的文件这样是找不到的，有办法把历史文件也挖出来？
         if not files:
             with Dir(self.g.working_dir):
                 files = filesmatch('**/*.py')
 
-        # 3、遍历文件
+        # 3 遍历文件
         for file in files:
             d = {}
             for sha in self.commits_sha(file=file):

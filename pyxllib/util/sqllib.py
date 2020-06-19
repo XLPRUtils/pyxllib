@@ -72,7 +72,7 @@ class SqlEngine:
         :return:
         """
 
-        # 1、读取地址、账号信息
+        # 1 读取地址、账号信息
         if alias:
             if account_file_path is None:
                 account_file_path = (Path(__file__).parent / 'sqllibaccount.pkl')
@@ -80,9 +80,9 @@ class SqlEngine:
             record = Path(account_file_path).read().loc[alias]  # 从文件读取账号信息
             user, passwd, host, port = record.user, record.passwd, record.host, record.port
 
-        # 2、'数据库类型+数据库驱动名称://用户名:口令@机器地址:端口号/数据库名'
+        # 2 '数据库类型+数据库驱动名称://用户名:口令@机器地址:端口号/数据库名'
         address = f'mysql+mysqldb://{user}:{passwd}@{host}:{port}/{database}?charset=utf8mb4'
-        # 3、存储成员
+        # 3 存储成员
         self.alias, self.database = alias, database
         connect_args = {"connect_timeout": connect_timeout} if connect_timeout else {}
         self.engine = sqlalchemy.create_engine(address, connect_args=connect_args)
@@ -111,7 +111,7 @@ class SqlEngine:
         :param chunksize: 如果提供了一个整数值，那么就会返回一个generator，每次输出的行数就是提供的值的大小
         :return: DataFrame类型的数据
         """
-        # 1、合并sql命令
+        # 1 合并sql命令
         if isinstance(sql, str): sql = [sql]
         sql = '\n'.join(sql)
 
@@ -119,7 +119,7 @@ class SqlEngine:
         # import sqlalchemy
         # sql = sqlalchemy.text(sql)
 
-        # 2、解析结果
+        # 2 解析结果
         res = pd.read_sql(sql, self.engine, index_col=index_col, coerce_float=coerce_float, params=params,
                           parse_dates=parse_dates, columns=columns, chunksize=chunksize)
         return res
@@ -131,12 +131,12 @@ class SqlEngine:
         hsql.execute('UPDATE spell_check SET count=:count WHERE old=:old AND new=:new',
                       count=count[0] + add, old=old, new=new)
         """
-        # 1、解析sql命令
+        # 1 解析sql命令
         if isinstance(statement, str): statement = [statement]
         statement = '\n'.join(statement)
         statement = sqlalchemy.text(statement)
 
-        # 2、如果设置了getdf参数
+        # 2 如果设置了getdf参数
         res = self.engine.execute(statement, *multiparams, **params)
         return res
 
@@ -173,12 +173,12 @@ class SqlEngine:
         else:
             raise NotImplementedError
 
-        # 1、删除table中不支持的df的列
+        # 1 删除table中不支持的df的列
         cols = pd.read_sql(f'SHOW COLUMNS FROM {table_name}', con)['Field']
         cols = list(set(df.columns) & set(cols))
         df = df[cols]
 
-        # 2、将df每一行数据转成mysql语句文本
+        # 2 将df每一行数据转成mysql语句文本
         data = []  # data[i]是第i条数据的sql文本
 
         # 除了nan，bool值、None值都能正常转换
@@ -192,7 +192,7 @@ class SqlEngine:
             t = ', '.join(map(func, row))
             data.append('(' + t + ')')
 
-        # 3、分批导入
+        # 3 分批导入
         columns = '( ' + ', '.join(cols) + ' )'
         for j in range(0, math.ceil(len(data) / patch_size)):
             subdata = ',\n'.join(data[j * patch_size:(j + 1) * patch_size])
@@ -309,7 +309,6 @@ if __name__ == '__main__':
     tictoc = TicToc(__file__)
 
     # create_account_df()
-    demo_sqlengine()
+    # demo_sqlengine()
 
     tictoc.toc()
-

@@ -134,10 +134,10 @@ class Path:
         >>> Path.abspath('C:/a.txt\\')  # 会保留最后的斜杠特殊标记
         'C:/a.txt\\'
         """
-        # 1、判断参考目录
+        # 1 判断参考目录
         if not root: root = os.getcwd()
 
-        # 2、判断主体文件名 path
+        # 2 判断主体文件名 path
         if str(path) == '':
             path = tempfile.mktemp(dir=root)
         elif not path:
@@ -145,7 +145,7 @@ class Path:
         else:
             path = os.path.join(root, str(path))
 
-        # 3、补充suffix
+        # 3 补充suffix
         if suffix:
             # 如果原来的path只是一个目录，则要新建一个文件
             # if os.path.isdir(path) or path[-1] in ('\\', '/'):
@@ -509,17 +509,17 @@ class Path:
         # TODO：有个小bug，如果在不同时间实际都是相同一个文件，也会被不断反复备份
         #    如果想解决这个，就要读取目录下最近的备份文件对比内容了
         """
-        # 1、判断自身文件是否存在
+        # 1 判断自身文件是否存在
         if not self.exists():
             return None
 
-        # 2、计算出新名称
+        # 2 计算出新名称
         if not tail:
             tail = self.mtime.strftime(' %y%m%d-%H%M%S')  # 时间戳
         name, ext = os.path.splitext(self.fullpath)
         dst = name + tail + ext
 
-        # 3、备份就是特殊的copy操作
+        # 3 备份就是特殊的copy操作
         if move:
             return self.move(dst, if_exists)
         else:
@@ -561,7 +561,7 @@ class Path:
         :return: 返回写入的文件名，这个主要是在写临时文件时有用
         """
 
-        # 1、核心写入功能
+        # 1 核心写入功能
         def data2file(ob, path):
             """将ob写入文件path，如果path已存在，也会被直接覆盖"""
             path.ensure_dir(pathtype='file')
@@ -582,7 +582,7 @@ class Path:
                 with open(name, 'w', errors='ignore', encoding=encoding) as f:
                     f.write(str(ob))
 
-        # 2、推导出目标文件的完整名，并判断是否存在，进行不同处理
+        # 2 推导出目标文件的完整名，并判断是否存在，进行不同处理
         self.process(self, data2file, if_exists, arg1=ob, arg2=self)
         if etag:
             from pyxllib.debug.qiniu_ import get_etag

@@ -173,17 +173,17 @@ class Openpyxl:
         """跨工作薄时复制表格内容的功能
         openpyxl自带的Workbook.copy_worksheet没法跨工作薄复制，很坑
         """
-        # 1、取每个单元格的值
+        # 1 取每个单元格的值
         for row in origin_ws:
             for cell in row:
                 try:
                     Openpyxl.copy_cell(cell, target_ws[cell.coordinate])
                 except AttributeError:
                     pass
-        # 2、合并单元格的处理
+        # 2 合并单元格的处理
         for rng in origin_ws.merged_cells.ranges:
             target_ws.merge_cells(rng.ref)
-        # 3、其他表格属性的复制
+        # 3 其他表格属性的复制
         # 这个从excel读取过来的时候，是不准的，例如D3可能因为关闭时停留窗口的原因误跑到D103
         # dprint(origin_ws.freeze_panes)
         # target_ws.freeze_panes = origin_ws.freeze_panes
@@ -220,14 +220,14 @@ def product(*iterables, order=None, repeat=1):
         return
 
     # 二、输入orders参数的调用方式
-    # 1、补全orders参数长度
+    # 1 补全orders参数长度
     n = len(iterables)
     for i in range(1, n + 1):
         if not (i in order or -i in order):
             order.append(i)
     if len(order) != n: return ValueError(f'orders参数值有问题 {order}')
 
-    # 2、生成新的迭代器组
+    # 2 生成新的迭代器组
     new_iterables = [(iterables[i-1] if i > 0 else reversed(iterables[-i-1])) for i in order]
     idx = numpy.argsort([abs(i) - 1 for i in order])
     for y in itertools.product(*new_iterables, repeat=repeat):
@@ -274,11 +274,11 @@ class Worksheet(openpyxl.worksheet.worksheet.Worksheet):
         >> ws.search('年段')
         <Cell '预算总表'.B2>
         """
-        # 1、定界
+        # 1 定界
         x1, x2 = max(min_row or 1, 1), min(max_row or self.max_row, self.max_row)
         y1, y2 = max(min_col or 1, 1), min(max_col or self.max_column, self.max_column)
 
-        # 2、遍历
+        # 2 遍历
         if isinstance(pattern, (list, tuple)):
             cel = None
             for p in pattern:
@@ -336,7 +336,7 @@ class Worksheet(openpyxl.worksheet.worksheet.Worksheet):
         if not isinstance(columns, (list, tuple)):
             columns = [columns]
 
-        # 1、找到所有标题位置，定位起始行
+        # 1 找到所有标题位置，定位起始行
         cels, names, start_line = [], [], -1
         for search_name in columns:
             cel = self.findcel(search_name)
@@ -355,7 +355,7 @@ class Worksheet(openpyxl.worksheet.worksheet.Worksheet):
             else:
                 dprint(search_name)  # 找不到指定列
 
-        # 2、获得每列的数据
+        # 2 获得每列的数据
         datas = {}
         for k, cel in enumerate(cels):
             if cel:
@@ -370,7 +370,7 @@ class Worksheet(openpyxl.worksheet.worksheet.Worksheet):
                 datas[names[k]] = [None]*(self.max_row + 1 - start_line)
         df = pd.DataFrame(datas)
 
-        # 3、去除所有空行数据
+        # 3 去除所有空行数据
         df.dropna(how='all', inplace=True)
 
         return df
@@ -385,7 +385,7 @@ class Worksheet(openpyxl.worksheet.worksheet.Worksheet):
         """
         from openpyxl.worksheet.cell_range import CellRange
         from itertools import product
-        # 1、预处理
+        # 1 预处理
         if isinstance(cell_range, str):
             cell_range = CellRange(cell_range)
         if not isinstance(cell_range, CellRange):
@@ -393,7 +393,7 @@ class Worksheet(openpyxl.worksheet.worksheet.Worksheet):
         if not rows and not cols:
             return
         min_col, min_row, max_col, max_row = cell_range.bounds
-        # 2、注意拷贝顺序跟移动方向是有关系的，要防止被误覆盖，复制了新的值，而非原始值
+        # 2 注意拷贝顺序跟移动方向是有关系的，要防止被误覆盖，复制了新的值，而非原始值
         r = sorted(range(min_row, max_row+1), reverse=rows > 0)
         c = sorted(range(min_col, max_col+1), reverse=cols > 0)
         for row, column in product(r, c):
@@ -435,11 +435,11 @@ def demo_openpyxl():
     # 取一个工作表
     ws = wb.active  # wb['Sheet']，取已知名称、下标的表格，excel不区分大小写，这里索引区分大小写
 
-    # 1、索引单元格的两种方法，及可以用.value获取值
+    # 1 索引单元格的两种方法，及可以用.value获取值
     ws['A2'] = '123'
     dprint(ws.cell(2, 1).value)  # 123
 
-    # 2、合并单元格
+    # 2 合并单元格
     ws.merge_cells('A1:C2')
     dprint(ws['A1'].value)  # None，会把原来A2的内容清除
 
@@ -459,7 +459,7 @@ def demo_openpyxl():
     dprint(ws['A1'].offset(1, 0).coordinate)  # A2
     dprint(Openpyxl.down(ws['A1']).coordinate)  # A3
 
-    # 3、设置单元格样式、格式
+    # 3 设置单元格样式、格式
     from openpyxl.comments import Comment
     cell = ws['A3']
     cell.font = Font(name='Courier', size=36)

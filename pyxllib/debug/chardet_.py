@@ -27,7 +27,7 @@ def get_encoding(bstr):
 
     200530周六21:31 附： 这个函数太别扭了，无特殊情况还是不要用吧，写的并不好
     """
-    # 1、读取编码
+    # 1 读取编码
     detect = None
     if isinstance(bstr, bytes):  # 如果输入是一个二进制字符串流则直接识别
         detect = chardet.detect(bstr[:1024])  # 截断一下，不然太长了，太影响速度
@@ -44,7 +44,7 @@ def get_encoding(bstr):
         return 'utf-8'
     # 检测结果存储在encoding
 
-    # 2、智能适应优化，最终应该只能是gbk、utf8两种结果中的一种
+    # 2 智能适应优化，最终应该只能是gbk、utf8两种结果中的一种
     if encoding in ('ascii', 'utf-8', 'ISO-8859-1'):
         # 对ascii类编码，理解成是utf-8编码；ISO-8859-1跟ASCII差不多
         encoding = 'utf-8'

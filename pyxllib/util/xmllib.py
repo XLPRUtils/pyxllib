@@ -55,7 +55,7 @@ def dfs_base(node, *,
         textwrap：用到shorten
         align.listalign：生成列编号时对齐
     """
-    # 1、子节点生成器，与配置
+    # 1 子节点生成器，与配置
     def bs4_child_generator(node):
         try:
             return node.children
@@ -66,7 +66,7 @@ def dfs_base(node, *,
     if not child_generator:
         child_generator = bs4_child_generator
 
-    # 2、dfs实际实现代码，获得节点清单
+    # 2 dfs实际实现代码，获得节点清单
     def inner(node, depth=0):
         """dfs实际实现代码
         TODO：把depth过滤写进inner不生成？！ 不过目前还是按照生成整棵树处理，能统计到一些信息。
@@ -80,7 +80,7 @@ def dfs_base(node, *,
     total_depth = max(map(lambda x: x[1], ls))
     head = f'总节点数：1~{total_node}，总深度：0~{total_depth}'
 
-    # 4、过滤与重新整理ls（select_depth）
+    # 4 过滤与重新整理ls（select_depth）
     logo = True
     cnt = 0
     tree_num = 0
@@ -118,7 +118,7 @@ def dfs_base(node, *,
         ''：已删除元素，但这里涉及父节点的删除，建议此处留一个空行
     """
 
-    # 5、格式处理
+    # 5 格式处理
     def default_mystr(node, depth):
         s1 = prefix * depth
         s2 = typename(node)+'，' if show_node_type else ''
@@ -192,7 +192,7 @@ def treetable(childreds, parents, arg3=None, nodename_colname=None):
         3        5        2        3           6         = = = = = = 5
         4        3        1        2           7         = = = = 3
     """
-    # 0、参数预处理
+    # 0 参数预处理
     if isinstance(childreds, pd.DataFrame):
         df = childreds
         child_colname = parents
@@ -203,7 +203,7 @@ def treetable(childreds, parents, arg3=None, nodename_colname=None):
     else:
         df = None
 
-    # 1、建立root根节点，确保除了root其他结点都存在记录
+    # 1 建立root根节点，确保除了root其他结点都存在记录
     lefts = set(parents) - set(childreds)  # parents列中没有在childreds出现的结点
     cs, ps = list(childreds), list(parents)
 
@@ -226,11 +226,11 @@ def treetable(childreds, parents, arg3=None, nodename_colname=None):
     n = len(cs)
     depth, tree_order, len_childs = [-1]*n, [-1]*n, [0]*n
 
-    # 2、构造父结点-孩子结点的字典dd
+    # 2 构造父结点-孩子结点的字典dd
     dd = defaultdict(list)
     for i in range(n): dd[ps[i]] += [i]
 
-    # 3、dfs
+    # 3 dfs
     cnt = 1
     def dfs(node, d):
         """找node的所有子结点"""
@@ -241,7 +241,7 @@ def treetable(childreds, parents, arg3=None, nodename_colname=None):
             dfs(cs[i], d+1)
     dfs(root, 1)
 
-    # 4、输出格式
+    # 4 输出格式
     tree_struct = list(map(lambda i: f"{'_ _ ' * depth[i]}{cs[i]}" + (f'[{len_childs[i]}]' if len_childs[i] else ''),
                            range(n)))
 
@@ -274,7 +274,7 @@ def treetable_flatten(df, *, reverse=False, childid_colname='id', parentid_colna
         str，某一列的名称，采用那一列的值（可以实现设置好格式）
     :return:
     """
-    # 1、构造辅助数组
+    # 1 构造辅助数组
     if format_colname is None: format_colname = parentid_colname
     parentid = dict()  # parentid[k] = v， 存储结点k对应的父结点v
     nodeval = dict()   # nodeval[k] = v，  存储结点k需要显示的数值情况
@@ -286,7 +286,7 @@ def treetable_flatten(df, *, reverse=False, childid_colname='id', parentid_colna
         parentid[row[childid_colname]] = row[parentid_colname]
         nodeval[row[childid_colname]] = str(row[format_colname])
 
-    # 2、每个结点往上遍历出所有父结点
+    # 2 每个结点往上遍历出所有父结点
     parents = []
     for idx, row in df.iterrows():
         ps = [nodeval[row[childid_colname]]]  # 包含结点自身的所有父结点名称
@@ -297,7 +297,7 @@ def treetable_flatten(df, *, reverse=False, childid_colname='id', parentid_colna
         parents.append(ps)
     num_depth = max(map(len, parents), default=0)
 
-    # 3、这里可以灵活调整最终要显示的格式效果
+    # 3 这里可以灵活调整最终要显示的格式效果
     df['parents'] = parents
     if reverse:
         for j in range(num_depth, 0, -1): df[f'depth-{j}'] = ''
@@ -382,7 +382,7 @@ class XmlParser:
         """查看树形结构的raw版本
         各参数含义详见dfs_base
         """
-        # 1、先用dfs获得基本结果
+        # 1 先用dfs获得基本结果
         s = dfs_base(self.node(), **kwargs)
         return s
 
@@ -435,13 +435,13 @@ class XmlParser:
         ls2 = []  # 这个重点是分析属性规律
         i = 1
         while t:
-            # 1、结点规律表
+            # 1 结点规律表
             d = depth(t)
             line = [i, d, '_'*d+str(d), tag_name(t.parent), tag_name(t),
                     text(mydictstr(t.attrs) if t.name else t),  # 结点存属性，字符串存值
                     subtag_names(t)]
             ls1.append(line)
-            # 2、属性规律表
+            # 2 属性规律表
             if t.name:
                 k = len(ls2)
                 for attr, value in t.attrs.items():
@@ -506,14 +506,14 @@ class XmlParser:
             else:
                 add('其他特殊结点', depth)
 
-        # 1、统计结点在每一层出现的次数
+        # 1 统计结点在每一层出现的次数
         if tagname:
             for t in self.node().find_all(tagname):
                 inner(t, 0)
         else:
             inner(self.node(), 0)
 
-        # 2、总出现次数和？
+        # 2 总出现次数和？
 
         return d
 
@@ -522,7 +522,7 @@ class XmlParser:
             1  cNvPr  pic:cNvPr(579)，wps:cNvPr(52)，wpg:cNvPr(15)
             2   spPr                   pic:spPr(579)，wps:spPr(52)
         """
-        # 1、获得所有名称
+        # 1 获得所有名称
         #    因为是采用node的原始xml文本，所以能保证会取得带有名称空间的文本内容
         ct0 = Counter(re.findall(r'<([a-zA-Z:]+)', str(self.node())))
         ct = defaultdict(str)
@@ -535,7 +535,7 @@ class XmlParser:
             else:
                 ct[k] = f'{key}({value})'
 
-        # 2、对有重复和无重复的元素划分存储
+        # 2 对有重复和无重复的元素划分存储
         ls1 = []  # 有重复的存储到ls1
         ls2 = []  # 没有重复的正常结果存储到ls2，可以不显示
         for k, v in ct.items():
@@ -544,7 +544,7 @@ class XmlParser:
             else:
                 ls2.append([k, v])
 
-        # 3、显示有重复的情况
+        # 3 显示有重复的情况
         # chrome(ls1, filename='检查名称空间问题')
         return ls1
 
@@ -601,7 +601,7 @@ def 自动制作网页标题的导航栏(html_content, title='temphtml'):
     >> chrome(str(file))
     http://i2.tiimg.com/582188/64f40d235705de69.png
     """
-    # 1、对原html，设置锚点，生成一个新的文件f2；生成导航目录文件f1。
+    # 1 对原html，设置锚点，生成一个新的文件f2；生成导航目录文件f1。
     cnt = 0
 
     # TODO 目前不支持跳级的情况
@@ -625,15 +625,15 @@ def 自动制作网页标题的导航栏(html_content, title='temphtml'):
 
     refs.append('</body>\n</html>')
 
-    f1 = Path(title + '_导航', '.html', Path.TEMP).write('\n'.join(refs))
-    f2 = f2.write(html_content)
+    f1 = Path(title + '_导航', '.html', Path.TEMP).write('\n'.join(refs), if_exists='replace')
+    f2 = f2.write(html_content, if_exists='replace')
 
-    # 2、生成首页 f0
+    # 2 生成首页 f0
     main_content = f"""<html>
 <frameset cols="20%,80%">
 	<frame src="{f1}">
 	<frame src="{f2}" name="showframe">
 </frameset></html>"""
 
-    f0 = Path(title, '.html', Path.TEMP).write(main_content)
+    f0 = Path(title, '.html', Path.TEMP).write(main_content, if_exists='replace')
     return f0

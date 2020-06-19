@@ -22,12 +22,12 @@ def intersection_split(a, b):
         ls3：b中，与a共有key的元素值
         ls4：b中，独有key的元素值
     """
-    # 1、获得集合的key关系
+    # 1 获得集合的key关系
     keys1 = set(a)
     keys2 = set(b)
     keys0 = keys1 & keys2  # 两个集合共有的元素
 
-    # 2、组合出ls1、ls2、ls3、ls4
+    # 2 组合出ls1、ls2、ls3、ls4
 
     def split(t, s, ks):
         """原始元素为t，集合化的值为s，共有key是ks"""
@@ -65,7 +65,7 @@ def bcompare(oldfile, newfile=None, basefile=None, wait=True, named=True):
 
     180913周四：如果第1、2个参数都是set或都是dict，会进行特殊的文本化后比较
     """
-    # 1、如果oldfile和newfile都是dict、set、list、tuple，则使用特殊方法文本化
+    # 1 如果oldfile和newfile都是dict、set、list、tuple，则使用特殊方法文本化
     #   如果两个都是list，不应该提取key后比较，所以限制第1个类型必须是dict或set，然后第二个类型可以适当放宽条件
     if not oldfile: oldfile = str(oldfile)
     if isinstance(oldfile, (dict, set)) and isinstance(newfile, (dict, set, list, tuple)):
@@ -73,7 +73,7 @@ def bcompare(oldfile, newfile=None, basefile=None, wait=True, named=True):
         oldfile = f'【共有部分】，{t[0]}\n\n【独有部分】，{t[1]}'
         newfile = f'【共有部分】，{t[2]}\n\n【独有部分】，{t[3]}'
 
-    # 2、获取文件扩展名ext
+    # 2 获取文件扩展名ext
     if Path(oldfile).is_file():
         ext = Path(oldfile).suffix
     elif Path(newfile).is_file():
@@ -83,7 +83,7 @@ def bcompare(oldfile, newfile=None, basefile=None, wait=True, named=True):
     else:
         ext = '.txt'  # 默认为txt文件
 
-    # 3、生成所有文件
+    # 3 生成所有文件
     ls = []
     names = func_input_message()['argnames']
     if not names[0]:
@@ -100,6 +100,6 @@ def bcompare(oldfile, newfile=None, basefile=None, wait=True, named=True):
     func(newfile, 1)
     func(basefile, 2)  # 注意这里不要写names[2]，因为names[2]不一定有存在
 
-    # 4、调用程序（并计算外部操作时间）
+    # 4 调用程序（并计算外部操作时间）
     viewfiles('BCompare.exe', *ls, wait=wait)
     return Path(ls[0]).read()
