@@ -210,7 +210,7 @@ def pdf2imagebase(pdffile, target=None, scale=None, ext='.png'):
     :param return: 返回生成的图片列表
     """
     import fitz
-    # 1、基本参数计算
+    # 1 基本参数计算
     pdf = fitz.open(pdffile)
     num_pages = pdf.pageCount
 
@@ -221,7 +221,7 @@ def pdf2imagebase(pdffile, target=None, scale=None, ext='.png'):
     if newfile.endswith('.pdf'): newfile = os.path.splitext(newfile)[0] + ext
     Path(newfile).ensure_dir()
 
-    # 2、图像数据的获取
+    # 2 图像数据的获取
     def get_svg_image(n):
         page = pdf.loadPage(n)
         txt = page.getSVGimage()
@@ -237,7 +237,7 @@ def pdf2imagebase(pdffile, target=None, scale=None, ext='.png'):
             pix = page.getPixmap()
         return pix.getPNGData()
 
-    # 3、分析导出的图片文件名
+    # 3 分析导出的图片文件名
     files = []
     if num_pages == 1:
         image = get_svg_image(0) if ext == '.svg' else get_png_image(0)
@@ -291,7 +291,7 @@ def pdfs2pngs(path, scale=None):
     """
     cwd = os.getcwd()
 
-    # 1、第1轮遍历，生成所有png
+    # 1 第1轮遍历，生成所有png
     for dirpath, dirnames, filenames in os.walk(path):
         os.chdir(dirpath)
         dprint(dirpath)
@@ -303,7 +303,7 @@ def pdfs2pngs(path, scale=None):
                 executor.submit(subprocess.run, ['magick.exe', file, file[:-4] + '.png'])
         executor.shutdown()
 
-    # 2、第2轮遍历，找出宽与高比例在1.3~1.6的png图片，只裁剪出右半部分
+    # 2 第2轮遍历，找出宽与高比例在1.3~1.6的png图片，只裁剪出右半部分
     dprint('2、第2轮遍历，找出宽与高比例在1.3~1.6的png图片，只裁剪出右半部分')
     for dirpath, dirnames, filenames in os.walk(path):
         os.chdir(dirpath)
@@ -316,7 +316,7 @@ def pdfs2pngs(path, scale=None):
                 executor.submit(subprocess.run, ['mogrify.exe', '-crop', f'{half_w}x{h}+{w - half_w}+0', file])
         executor.shutdown()
 
-    # 3、第3轮遍历，宽超过1000的，压缩到1000内
+    # 3 第3轮遍历，宽超过1000的，压缩到1000内
     dprint('3、第3轮遍历，宽超过1000的，压缩到1000内')
     for dirpath, dirnames, filenames in os.walk(path):
         os.chdir(dirpath)

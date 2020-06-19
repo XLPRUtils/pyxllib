@@ -61,7 +61,7 @@ def viewfiles(procname, *files, **kwargs):
     >> ls = list(range(100))
     >> viewfiles('notepad++', ls, save=True)
     """
-    # 1、生成文件名
+    # 1 生成文件名
     ls = []  # 将最终所有绝对路径文件名存储到ls
     save = kwargs.get('save')
 
@@ -76,7 +76,7 @@ def viewfiles(procname, *files, **kwargs):
             bn = basename or ''
             ls.append(Path(bn, ext, Path.TEMP).write(t, if_exists=kwargs.get('if_exists', 'error')).fullpath)
 
-    # 2、调用程序（并计算外部操作时间）
+    # 2 调用程序（并计算外部操作时间）
     tictoc = TicToc()
     try:
         if kwargs.get('wait'):
@@ -105,12 +105,12 @@ def chrome(arg_):
 
     这个函数可以浏览文本、list、dict、DataFrame表格数据、图片、html等各种文件的超级工具
     """
-    # 1、如果是文件、url，则直接打开
+    # 1 如果是文件、url，则直接打开
     if is_file(arg_) or is_url(arg_):
         viewfiles('chrome.exe', arg_)
         return
 
-    # 2、如果是其他类型，则先转成文件，再打开
+    # 2 如果是其他类型，则先转成文件，再打开
     arg = try2df(arg_)
     if isinstance(arg, pd.DataFrame):  # DataFrame在网页上有更合适的显示效果
         t = f'==== 类继承关系：{inspect.getmro(type(arg_))}，' \

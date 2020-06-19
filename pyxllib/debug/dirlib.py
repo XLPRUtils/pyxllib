@@ -250,11 +250,11 @@ def filesmatch(patter, *, root=os.curdir,
     """
     root = os.path.abspath(root)
 
-    # 0、规则匹配
+    # 0 规则匹配
     patter = str(patter)
     glob_chars_pos = strfind(patter, ('*', '?', '<', '>')) if isinstance(patter, str) else -1
 
-    # 1、普通文本匹配  （没有通配符，单文件查找）
+    # 1 普通文本匹配  （没有通配符，单文件查找）
     if isinstance(patter, str) and glob_chars_pos == -1:
         path = Path(os.path.join(root, patter))
         if path.exists():  # 文件存在
@@ -263,7 +263,7 @@ def filesmatch(patter, *, root=os.curdir,
             res = [p]
         else:  # 文件不存在
             res = []
-    # 2、glob通配符匹配
+    # 2 glob通配符匹配
     elif isinstance(patter, str) and glob_chars_pos != -1:
         patter = patter.replace('/', '\\')
         t = patter[:glob_chars_pos].rfind('\\')
@@ -277,18 +277,18 @@ def filesmatch(patter, *, root=os.curdir,
 
         n = len(root) + 1
         res = [(x[n:] if x.startswith(root) else x) for x in files]
-    # 3、正则匹配
+    # 3 正则匹配
     elif isinstance(patter, re.Pattern):
         files = filesmatch('**/*', root=root)
         res = list(filter(lambda x: patter.match(x), files))
-    # 4、list等迭代对象
+    # 4 list等迭代对象
     elif isinstance(patter, (list, tuple, set)):
         res = []
         for p in patter: res += filesmatch(p, root=root)
     else:
         raise TypeError
 
-    # 2、filetype的筛选
+    # 2 filetype的筛选
     res = filesfilter(res, root=root, type_=type_,
                       ignore_backup=ignore_backup, ignore_special=ignore_special,
                       min_size=min_size, max_size=max_size,
@@ -312,10 +312,10 @@ def filesdel(path, **kwargs):
 
 def _files_copy_move_base(src, dst, filefunc, dirfunc,
                           *, if_exists=None, treeroot=None, **kwargs):
-    # 1、辅助函数
+    # 1 辅助函数
     def proc_onefile(f, dst):
         # dprint(f, dst)
-        # 1、解析dst参数：对文件或目录不同情况做预处理
+        # 1 解析dst参数：对文件或目录不同情况做预处理
         #   （输入的时候dst_可以只是目标的父目录，要推算出实际要存储的目标名）
         if os.path.isfile(f):
             if os.path.isdir(dst) or dst[-1] in ('/', '\\'):
@@ -326,7 +326,7 @@ def _files_copy_move_base(src, dst, filefunc, dirfunc,
                 dst = os.path.join(dst, os.path.basename(f))
             func = dirfunc
 
-        # 2、根据目标是否已存在和if_exists分类处理
+        # 2 根据目标是否已存在和if_exists分类处理
         Path(dst).ensure_dir(pathtype='file')
         # 目前存在，且不是把文件移向文件夹的操作
         if os.path.exists(dst):
@@ -351,7 +351,7 @@ def _files_copy_move_base(src, dst, filefunc, dirfunc,
         else:
             func(f, dst)  # TODO 这里有bug \2020LaTeX\C春季教材\初数\初一上\Word+外包商原稿
 
-    # 2、主体代码
+    # 2 主体代码
     files = filesmatch(src, **kwargs)
 
     if len(files) == 1:
@@ -426,13 +426,13 @@ def refinepath(s, reserve=''):
     :param reserve: 保留的字符，例如输入'*?'，会保留这两个字符作为通配符
     """
     if not s: return s
-    # 1、去掉路径中的不可见字符，注意这里第1个参数里有一个不可见字符！别乱动这里的代码！
+    # 1 去掉路径中的不可见字符，注意这里第1个参数里有一个不可见字符！别乱动这里的代码！
     s = s.replace(chr(8234), '')
     chars = set(r'\/:*?"<>|') - set(reserve)
     for ch in chars:  # windows路径中不能包含的字符
         s = s.replace(ch, '')
 
-    # 2、去除目录、文件名前后的空格
+    # 2 去除目录、文件名前后的空格
     s = re.sub(r'\s+([/\\])', r'\1', s)
     s = re.sub(r'([/\\])\s+', r'\1', s)
 

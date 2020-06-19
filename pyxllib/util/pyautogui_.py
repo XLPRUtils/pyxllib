@@ -21,6 +21,7 @@ import pyscreeze
 
 from pyxllib.debug.qiniu_ import get_etag
 from pyxllib.debug.pathlib_ import Path
+from pyxllib.debug.dprint import dprint
 
 
 class AutoGui:
@@ -57,7 +58,10 @@ class AutoGui:
             p1.copy(p2, if_exists='ignore')  # 使用etag去重，出现相同etag则不用拷贝了
             file_path = p2.fullpath
             # print(file_path)
-        return pyautogui.locateCenterOnScreen(file_path, grayscale=grayscale, confidence=confidence)
+        pos = pyautogui.locateCenterOnScreen(file_path, grayscale=grayscale, confidence=confidence)
+        # pyautogui.screenshot().save('debug.jpg')
+        # dprint(name, pos)
+        return pos
 
     def move_to(self, name, grayscale=None):
         """找到则返回坐标，否则返回None"""
@@ -71,7 +75,7 @@ class AutoGui:
         """
         pos0 = pyautogui.position()
         while True:
-            if isinstance(name, tuple) and len(name) == 2:  # 直接输入坐标
+            if isinstance(name, (tuple, list)) and len(name) == 2:  # 直接输入坐标
                 pos = name
             else:
                 pos = self.find(name, grayscale, confidence)

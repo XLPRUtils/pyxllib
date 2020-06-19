@@ -40,7 +40,7 @@ def get_img_content(in_):
     """
     from pyxllib.debug.judge import is_url, is_file
 
-    # 1、取不同来源的数据
+    # 1 取不同来源的数据
     if is_url(in_):
         content = requests.get(in_).content
         img = Image.open(io.BytesIO(content))
@@ -50,24 +50,13 @@ def get_img_content(in_):
         img = Image.open(in_)
     elif isinstance(in_, Image.Image):
         img = in_
-        file = io.BytesIO()
-        img.save(file, 'JPEG')
-        content = file.getvalue()
     else:
         raise ValueError
 
-    # 2、如果是RGBA类型，要把透明底变成白色
-    # img.mode: https://pillow.readthedocs.io/en/5.1.x/handbook/concepts.html#concept-modes
-    if img.mode in ('RGBA', 'P'):
-        # 判断图片mode模式，如果是RGBA或P等可能有透明底，则和一个白底图片合成去除透明底
-        background = Image.new('RGBA', img.size, (255, 255, 255))
-        # composite是合成的意思。将右图的alpha替换为左图内容
-        img = Image.alpha_composite(background, img.convert('RGBA')).convert('RGB')
-        file = io.BytesIO()
-        img.save(file, 'JPEG')
-        content = file.getvalue()
-    # file = Path('a.png', root=Path.TEMP).write(content)
-    # chrome(str(file))
+    img = image_rgba2rgb(img)  # 如果是RGBA类型，要把透明底变成白色
+    file = io.BytesIO()
+    img.save(file, 'JPEG')
+    content = file.getvalue()
 
     return content
 
@@ -90,7 +79,7 @@ def magick(infile, *, outfile=None, force=True, transparent=None, trim=False, de
         False：infile不存在或者不支持的文件扩展名
         返回生成的文件名（outfile）
     """
-    # 1、条件判断，有些情况下不用处理
+    # 1 条件判断，有些情况下不用处理
     if not outfile: outfile = infile
     # 所有转换参数都没有设置，则不处理
     if not force and Path(outfile).is_file(): return outfile
@@ -98,7 +87,7 @@ def magick(infile, *, outfile=None, force=True, transparent=None, trim=False, de
     ext = os.path.splitext(infile)[1].lower()
     if not Path(infile).is_file() or not ext in ('.png', '.eps', '.pdf', '.jpg', '.jpeg', '.wmf', '.emf'): return False
 
-    # 2、生成需要执行的参数
+    # 2 生成需要执行的参数
     cmd = ['magick.exe']
     # 透明、裁剪、density都是可以重复操作的
     if density: cmd.extend(['-density', str(density)])
@@ -110,7 +99,7 @@ def magick(infile, *, outfile=None, force=True, transparent=None, trim=False, de
     if other_args: cmd.extend(other_args)
     cmd.append(outfile)
 
-    # 3、生成目标png图片
+    # 3 生成目标png图片
     print(' '.join(cmd))
     subprocess.run(cmd, stderr=subprocess.PIPE, shell=True)  # 看不懂magick出错写的是啥，关了
     return outfile
@@ -135,7 +124,7 @@ def ensure_pngs(folder, *, if_exists='ignore',
     :param max_workers: 并行的最大线程数
     """
 
-    # 1、提取字典d，key<str>: 文件stem名称， value<set>：含有的扩展名
+    # 1 提取字典d，key<str>: 文件stem名称， value<set>：含有的扩展名
     d = defaultdict(set)
     for file in os.listdir(folder):
         if file.endswith('-eps-converted-to.pdf'): continue
@@ -144,7 +133,7 @@ def ensure_pngs(folder, *, if_exists='ignore',
         if ext in ('.png', '.eps', '.pdf', '.jpg', '.jpeg', '.wmf', '.emf', '.svg'):
             d[name].add(ext)
 
-    # 2、遍历处理每个stem的图片
+    # 2 遍历处理每个stem的图片
     executor = concurrent.futures.ThreadPoolExecutor(max_workers)
     for name, exts in d.items():
         # 已经存在png格式的图片时，看if_exists参数
@@ -219,11 +208,11 @@ def reduce_image_filesize(path, filesize):
     from PIL import Image
 
     path = Path(path)
-    # 1、无论什么情况，都先做个100%的resize处理，很可能会去掉一些没用的冗余信息
+    # 1 无论什么情况，都先做个100%的resize处理，很可能会去掉一些没用的冗余信息
     im = Image.open(f'{path}')
     im.resize(im.size).save(f'{path}')
 
-    # 2、然后开始循环处理
+    # 2 然后开始循环处理
     while True:
         r = path.size / filesize
         if r <= 1: break
@@ -231,6 +220,15 @@ def reduce_image_filesize(path, filesize):
         rate = min(1 / (r**0.5), 0.95)  # 并且限制每轮至少要缩小至95%，避免可能会迭代太多轮
         im = Image.open(f'{path}')
         im.resize((int(im.size[0]*rate), int(im.size[1]*rate))).save(f'{path}')
+
+
+def image_rgba2rgb(im):
+    if im.mode in ('RGBA', 'P'):
+        # 判断图片mode模式，如果是RGBA或P等可能有透明底，则和一个白底图片合成去除透明底
+        background = Image.new('RGBA', im.size, (255, 255, 255))
+        # composite是合成的意思。将右图的alpha替换为左图内容
+        im = Image.alpha_composite(background, im.convert('RGBA')).convert('RGB')
+    return im
 
 
 ____section_temp = """

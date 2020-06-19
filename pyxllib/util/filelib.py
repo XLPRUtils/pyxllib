@@ -59,7 +59,7 @@ class UsedRecords:
         :param limit_num: 限制条目上限
         """
         from os.path import join, dirname, basename, exists
-        # 1、文件名处理
+        # 1 文件名处理
         if use_temp_root:
             dirname = join(os.getenv('TEMP'), 'code4101py_config')
             basename = basename(filename)
@@ -69,13 +69,13 @@ class UsedRecords:
             basename = basename(filename)
             fullname = filename
 
-        # 2、读取值
+        # 2 读取值
         if exists(fullname):
             ls = ensure_content(fullname).splitlines()
         else:
             ls = list(default_value)
 
-        # 3、存储到类
+        # 3 存储到类
         self.dirname = dirname
         self.basename = basename
         self.fullname = fullname
@@ -397,13 +397,13 @@ def genfilename(fd='.'):
         后面的6位记为数值d2，类似小时+分钟+秒的标签，但是在出现重名时，
         d2会一直自加1直到没有重名文件，所以秒上是可能会出现“99”之类的值的。
     """
-    # 1、获取前段标签
+    # 1 获取前段标签
     s1 = Datetime().briefdateweek()  # '180827周一'
 
-    # 2、获取后端数值标签
+    # 2 获取后端数值标签
     d2 = int(datetime.datetime.now().strftime('%H%M%S'))
 
-    # 3、获取目录下文件，并迭代确保生成一个不重名文件
+    # 3 获取目录下文件，并迭代确保生成一个不重名文件
     ls = os.listdir(fd)
     files = set(map(lambda x: os.path.basename(os.path.splitext(x)[0]), ls))  # 收集basename
 
@@ -426,7 +426,7 @@ class PackFile:
             'rar'：
             'zip'： docx后缀的，默认采用zip格式解压
         """
-        # 1、确定压缩格式
+        # 1 确定压缩格式
         name, ext = os.path.splitext(file)
         ext = ext.lower()
         if not mode:
@@ -439,7 +439,7 @@ class PackFile:
                 raise ValueError
         self.mode = mode
 
-        # 2、确定是用的解压“引擎”
+        # 2 确定是用的解压“引擎”
         if mode == 'zip':
             self.proc = zipfile.ZipFile(file)
         elif mode == 'rar':
@@ -449,7 +449,7 @@ class PackFile:
                 dprint()  # 缺少unrar模块，安装详见： https://blog.csdn.net/code4101/article/details/79328636
                 raise ModuleNotFoundError
             self.proc = RarFile(file)
-        # 3、解压文件夹目录，None表示还未解压
+        # 3 解压文件夹目录，None表示还未解压
         self.tempfolder = None
 
     def open(self, member, pwd=None):

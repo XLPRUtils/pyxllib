@@ -852,17 +852,17 @@ def sort_by_given_list(a, b):
     >>> sort_by_given_list(['初中', '小学', '高中', '幼儿'], ['少儿', '小学', '初中', '高中'])
     ['小学', '初中', '高中', '幼儿']
     """
-    # 1、从b数组构造一个d字典，d[k]=i，值为k的元素在第i位
+    # 1 从b数组构造一个d字典，d[k]=i，值为k的元素在第i位
     d = dict()
     for i, bb in enumerate(b): d[bb] = i
-    # 2、a数组分两部分，可以通过d排序的a1，和不能通过d排序的a2
+    # 2 a数组分两部分，可以通过d排序的a1，和不能通过d排序的a2
     a1, a2 = [], []
     for aa in a:
         if aa in d:
             a1.append(aa)
         else:
             a2.append(aa)
-    # 3、用不同的规则排序a1、a2后合并
+    # 3 用不同的规则排序a1、a2后合并
     a1 = sorted(a1, key=lambda x: d[x])
     a2 = sorted(a2)
     return a1 + a2

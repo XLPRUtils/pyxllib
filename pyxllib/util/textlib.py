@@ -78,13 +78,13 @@ class ContentLine(object):
 
         180515扩展： pattern也能输入一个函数
         """
-        # 1、定义函数句柄
+        # 1 定义函数句柄
         if not callable(pattern):
             def f(s):
                 return re.search(pattern, s)
         else:
             f = pattern
-        # 2、循环判断
+        # 2 循环判断
         res = list()
         for i, line in enumerate(self.lines):
             if f(line):
@@ -373,10 +373,10 @@ def briefstr(s):
     """对文本内容进行一些修改，从而简化其内容，提取关键信息
     一般用于字符串近似对比
     """
-    # 1、删除所有空白字符
+    # 1 删除所有空白字符
     # debuglib.dprint(debuglib.typename(s))
     s = re.sub(r'\s+', '', s)
-    # 2、转小写字符
+    # 2 转小写字符
     s = s.casefold()
     return s
 
@@ -384,12 +384,12 @@ def briefstr(s):
 def brieftexstr(s):
     """对比两段tex文本
     """
-    # 1、删除百分注
+    # 1 删除百分注
     s = re.sub(r'%' + grp_bracket(2, '<', '>'), r'', s)
-    # 2、删除所有空白字符
+    # 2 删除所有空白字符
     # debuglib.dprint(debuglib.typename(s))
     s = re.sub(r'\s+', '', s)
-    # 3、转小写字符
+    # 3 转小写字符
     s = s.casefold()
     return s
 
@@ -399,19 +399,19 @@ class MatchSimString:
 
     mss = MatchSimString()
 
-    # 1、添加候选对象
+    # 1 添加候选对象
     mss.append_candidate('福州+厦门2018初数暑假讲义-请录入-快乐学习\初一福厦培优-测试用')
     mss.append_candidate('2018_快乐数学_六年级_秋季_第01讲_圆柱与圆锥_教案（教师版）')
     mss.append_candidate('删除所有标签中间多余的空白')
 
-    # 2、需要匹配的对象1
+    # 2 需要匹配的对象1
     s = '奕本初一福周厦门培油'
 
     idx, sim = mss.match(s)
     print('匹配目标：', mss[idx])  # 匹配目标： 福州+厦门2018初数暑假讲义-请录入-快乐学习\初一福厦培优-测试用
     print('相似度：', sim)         # 相似度： 0.22
 
-    # 3、需要匹配的对象2
+    # 3 需要匹配的对象2
     s = '圆柱与【圆锥】_教案空白版'
 
     idx, sim = mss.match(s)
@@ -463,7 +463,7 @@ class MatchSimString:
             整数：输出匹配度最高的count个结果
         :param showstr: 字符串显示效果
         """
-        # 1、计算编辑距离，存储结果到res
+        # 1 计算编辑距离，存储结果到res
         res = []
         n = len(self)
         for i in range(n):
@@ -472,7 +472,7 @@ class MatchSimString:
             res.append([i, v, sim, showstr(k)])  # 输出的时候从0开始编号
             i += 1
 
-        # 2、排序、节选结果
+        # 2 排序、节选结果
         res = sorted(res, key=lambda x: -x[2])
         if 0 < count < 1:
             n = max(1, int(n*count))
@@ -480,7 +480,7 @@ class MatchSimString:
             n = min(count, n)
         res = res[:n]
 
-        # 3、输出
+        # 3 输出
         df = pd.DataFrame.from_records(res, columns=('序号', '标签', '编辑距离', '内容'))
         s = dataframe_str(df)
         s = s.replace('\u2022', '')  # texstudio无法显示会报错的字符
@@ -980,17 +980,17 @@ class MySpellChecker(SpellChecker):
                  df=None):
         from collections import defaultdict, Counter
 
-        # 1、原初始化功能
+        # 1 原初始化功能
         super(MySpellChecker, self).__init__(language=language, local_dictionary=local_dictionary,
                                              distance=distance, tokenizer=tokenizer,
                                              case_sensitive=case_sensitive)
 
-        # 2、自己要增加一个分析用的字典
+        # 2 自己要增加一个分析用的字典
         self.checkdict = defaultdict(Counter)
         for k, v in self.word_frequency._dictionary.items():
             self.checkdict[k][k] = v
 
-        # 3、如果输入了一个df对象要进行更新
+        # 3 如果输入了一个df对象要进行更新
         if df: self.update_by_dataframe(df)
 
     def update_by_dataframe(self, df, weight_times=1):
@@ -999,14 +999,14 @@ class MySpellChecker(SpellChecker):
         :param weight_times: 对要加的count乘以一个倍率
         :return:
         """
-        # 1、是否要处理大小写
+        # 1 是否要处理大小写
         #   如果不区分大小写，需要对df先做预处理，全部转小写
         #   而大小写不敏感的时候，self.word_frequency._dictionary在init时已经转小写，不用操心
         if not self._case_sensitive:
             df.loc[:, 'old'] = df.loc[:, 'old'].str.lower()
             df.loc[:, 'new'] = df.loc[:, 'new'].str.lower()
 
-        # 2、df对self.word_frequency._dictionary、self.check的影响
+        # 2 df对self.word_frequency._dictionary、self.check的影响
         d = self.word_frequency._dictionary
         for index, row in df.iterrows():
             old, new, count = row['old'].decode(), row['new'].decode(), row['count']*weight_times
@@ -1014,7 +1014,7 @@ class MySpellChecker(SpellChecker):
             # if row['id']==300: dprint(old, new, count)
             self.checkdict[old][new] += count
 
-        # 3、去除d中负值的key
+        # 3 去除d中负值的key
         self.word_frequency.remove_words([k for k in d.keys() if d[k] <= 0])
 
     def _ensure_term(self, term):
@@ -1023,14 +1023,14 @@ class MySpellChecker(SpellChecker):
             self.checkdict[term] = d
 
     def correction(self, term):
-        # 1、本来就是正确的
+        # 1 本来就是正确的
         w = term if self._case_sensitive else term.lower()
         if w in self.word_frequency._dictionary: return term
 
-        # 2、如果是错的，且是没有记录的错误情况，则做一次候选项运算
+        # 2 如果是错的，且是没有记录的错误情况，则做一次候选项运算
         self._ensure_term(w)
 
-        # 3、返回权重最大的结果
+        # 3 返回权重最大的结果
         res = max(self.checkdict[w], key=self.checkdict[w].get)
         val = self.checkdict[w].get(res)
         if val <= 0: res = '^' + res  # 是一个错误单词，但是没有推荐修改结果，就打一个^标记
@@ -1118,14 +1118,14 @@ class Base85Coder:
 
     def __init__(self, key=None):
         """key，允许设置密钥，必须是"""
-        # 1、分析key是否合法
+        # 1 分析key是否合法
         if key:
             if len(key) != 85 or set(key) != Base85Coder.CHARS_SET:
                 dprint(key)  # 输入key无效
                 key = None
         self.key = key
 
-        # 2、制作转换表 trantab
+        # 2 制作转换表 trantab
         if key:
             self.encode_trantab = str.maketrans(Base85Coder.DEFAULT_KEY, key)
             self.decode_trantab = str.maketrans(key, Base85Coder.DEFAULT_KEY)
@@ -1161,14 +1161,14 @@ class MyAipOcr:
 
     @staticmethod
     def init(next_client=False):
-        # 0、安装，导入库
+        # 0 安装，导入库
         try:
             from aip import AipOcr
         except ModuleNotFoundError:
             subprocess.run(['pip3', 'install', 'baidu-aip'])
             from aip import AipOcr
 
-        # 1、收集账号信息
+        # 1 收集账号信息
         # 坤泽小号，陈坤泽，欧龙，韩锦锦
         APP_ID = ['16936214', '16913345', '16933485', '16933339']
         API_KEY = ['a0oNAv9FLhd6oXOm7zXzAkKn', 'fNAGzfHmLicbmnsFqTDlfDYM',
@@ -1176,7 +1176,7 @@ class MyAipOcr:
         SECRET_KEY = ['osS2zMSrYCnKgwAsIQ68XYdUvb5oOkI8', 'A6zdaoTNleKAGaM75THNRW8PtCjrLCkG',
                       'FBgWnD239v3K7gr6vTqaCAzrj7C0WYxG', '8UL2AcDSBf99UqRH630aYv1tiDHpHAt6']
 
-        # 2、初始化client
+        # 2 初始化client
         if MyAipOcr.client is None or next_client:
             t = MyAipOcr.client_id + next_client
             if t > len(APP_ID): return None  # 所有账号都用完了
@@ -1188,7 +1188,7 @@ class MyAipOcr:
     def get_img_content(in_):
         """获取in_代表的图片的二进制数据"""
         from PIL import Image
-        # 1、取不同来源的数据
+        # 1 取不同来源的数据
         if is_url(in_):
             content = requests.get(in_).content
             img = Image.open(io.BytesIO(content))
@@ -1199,7 +1199,7 @@ class MyAipOcr:
         else:
             raise ValueError
 
-        # 2、如果是RGBA类型，要把透明底变成白色
+        # 2 如果是RGBA类型，要把透明底变成白色
         # img.mode: https://pillow.readthedocs.io/en/5.1.x/handbook/concepts.html#concept-modes
         if img.mode in ('RGBA', 'P'):
             # 判断图片mode模式，如果是RGBA或P等可能有透明底，则和一个白底图片合成去除透明底
@@ -1268,7 +1268,7 @@ def demo_spellchecker():
     官方介绍文档 pyspellchecker · PyPI: https://pypi.org/project/pyspellchecker/
     190909周一15:58，from 陈坤泽
     """
-    # 0、安装库和导入库
+    # 0 安装库和导入库
     #   spellchecker模块主要有两个类，SpellChecker和WordFrequency
     #       WordFrequency是一个词频类
     #       一般导入SpellChecker就行了：from spellchecker import SpellChecker
@@ -1278,7 +1278,7 @@ def demo_spellchecker():
         subprocess.run(['pip3', 'install', 'pyspellchecker'])
         from spellchecker import SpellChecker
 
-    # 1、创建对象
+    # 1 创建对象
     # 可以设置语言、大小写敏感、拼写检查的最大距离
     #   默认'en'英语，大小写不敏感
     spell = SpellChecker()
@@ -1286,7 +1286,7 @@ def demo_spellchecker():
     d = spell.word_frequency  # 这里的d是WordFrequency对象，其底层用了Counter类进行数据存储
     dprint(d.unique_words, d.total_words)  # 词汇数，权重总和
 
-    # 2、修改词频表 spell.word_frequency
+    # 2 修改词频表 spell.word_frequency
     dprint(d['ckz'])  # 不存在的词汇直接输出0
     d.add('ckz')  # 可以添加ckz词汇的一次词频
     d.load_words(['ckz', 'ckz', 'lyb'])  # 可以批量添加词汇
@@ -1305,7 +1305,7 @@ def demo_spellchecker():
     # 还可以按阈值删除词频不超过设置阈值的词汇
     d.remove_by_threshold(5)
 
-    # 3、spell的基本功能
+    # 3 spell的基本功能
     # （1）用unknown可以找到可能拼写错误的单词，再用correction可以获得最佳修改意见
     misspelled = spell.unknown(['something', 'is', 'hapenning', 'here'])
     dprint(misspelled)  # misspelled<set>={'hapenning'}

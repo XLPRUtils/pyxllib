@@ -43,7 +43,7 @@ def askstring(title='code4101py', prompt='void', **kwargs):
     #   tk的askstring默认最短有11个汉字多的长度
     #   标题非文本内容已经占掉大概13个汉字的宽度
     #   根据以上规律可推导出下述宽度控制算法
-    len1 = strwidth(title) + 26
+    len1 = strwidth(title)*2 + 26
     len2 = strwidth(prompt)
     if len2 < len1:
         prompt += ' '*(len1-len2)
@@ -93,7 +93,7 @@ class AskStringByList:
         self.tk.mainloop()
 
     def tk_init(self):
-        # 1、设置基本属性
+        # 1 设置基本属性
         from tkinter import Tk
         tk = Tk()
 
@@ -110,7 +110,7 @@ class AskStringByList:
         # 禁用窗口调整大小
         tk.resizable(False, False)
 
-        # 2、绑定快捷键
+        # 2 绑定快捷键
         tk.bind("<Return>", self.enter)  # 回车键跟 enter() 绑定
         tk.bind("<Escape>", self.esc)  # Esc键跟 esc() 绑定
 
@@ -135,14 +135,14 @@ class AskStringByList:
         from tkinter import Listbox, Scrollbar
         from tkinter.constants import END
 
-        # 1、创建listbox
+        # 1 创建listbox
         listbox = Listbox(self.frame, width=35)
         for t in self.ls:
             listbox.insert(END, t)
         listbox.place(relx=0.1, rely=0.3)
         listbox.bind('<<ListboxSelect>>', self.onselect)
 
-        # 2、为列表添加滚动条
+        # 2 为列表添加滚动条
         s = Scrollbar(listbox)
         s.place(relx=0.94, relheight=1)
         s.config(command=listbox.yview)

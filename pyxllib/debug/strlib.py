@@ -79,14 +79,14 @@ def strfind(fullstr, objstr, *, start=None, times=0, overlap=False):
         arr = tuple(filter(lambda x: x >= 0, arr))
         return max(arr) if arr else -1
 
-    # 1、根据times不同，start的初始默认值设置方式也不同
+    # 1 根据times不同，start的初始默认值设置方式也不同
     if times < 0 and start is None:
         start = len(fullstr) - 1  # 反向查找start设到末尾字符-1
     if start is None:
         start = 0  # 正向查找start设为0
     p = -1  # 记录答案位置，默认找不到
 
-    # 2、单串匹配
+    # 2 单串匹配
     if isinstance(objstr, str):  # 单串匹配
         offset = 1 if overlap else len(objstr)  # overlap影响每次偏移量
 
@@ -106,7 +106,7 @@ def strfind(fullstr, objstr, *, start=None, times=0, overlap=False):
                 if p == -1:
                     return -1
 
-    # 3、多模式匹配（递归调用，依赖单串匹配功能）
+    # 3 多模式匹配（递归调用，依赖单串匹配功能）
     else:
         # A、正向查找
         if times >= 0:
@@ -199,10 +199,10 @@ def east_asian_shorten(s, width=50, placeholder='...'):
         return placeholder[:width]
 
     # 三、需要添加 placeholder
-    # 1、计算长度
+    # 1 计算长度
     width -= m
 
-    # 2、截取s
+    # 2 截取s
     try:
         s = s.encode('gbk')[:width].decode('gbk', errors='ignore')
     except UnicodeEncodeError:
@@ -326,13 +326,13 @@ def realign(text, least_blank=4, tab2blank=4, support_chinese=False, sep=None):
     >>> realign('  Aget      keep      hold         show\nmaking    selling    giving    collecting')
     'Aget      keep       hold      show\nmaking    selling    giving    collecting'
     """
-    # 1、预处理
+    # 1 预处理
     s = text.replace('\t', ' ' * tab2blank)
     s = re.sub(' {' + str(least_blank) + ',}', r'\t', s)  # 统一用\t作为分隔符
     lenfunc = strwidth if support_chinese else len
     if sep is None: sep = ' ' * least_blank
 
-    # 2、计算出每一列的最大宽度
+    # 2 计算出每一列的最大宽度
     lines = s.splitlines()
     n = len(lines)
     max_width = GrowingList()  # 因为不知道有多少列，用自增长的list来存储每一列的最大宽度
@@ -343,7 +343,7 @@ def realign(text, least_blank=4, tab2blank=4, support_chinese=False, sep=None):
         lines[i] = line
     if len(max_width) == 1: return '\n'.join(map(lambda x: x[0], lines))
 
-    # 3、重组内容
+    # 3 重组内容
     for i, line in enumerate(lines):
         for j in range(len(line) - 1): line[j] += ' ' * (max_width[j] - lenfunc(line[j]))  # 注意最后一列就不用加空格了
         lines[i] = sep.join(line)
@@ -465,7 +465,7 @@ def strwidth_proc(s, fmt='r', chinese_char_width=1.8):
     >>> strwidth_proc('哈哈a')
     ('　　　哈哈a', 10)
     """
-    # 1、计算一些参数值
+    # 1 计算一些参数值
     s = str(s)  # 确保是字符串类型
     l1 = len(s)
     l2 = strwidth(s)
@@ -474,13 +474,13 @@ def strwidth_proc(s, fmt='r', chinese_char_width=1.8):
     # ch = chr(12288)  # 中文空格
     ch = chr(12288)  # 中文空格
     w = x + y * chinese_char_width  # 当前字符串宽度
-    # 2、计算需要补充t个中文空格
+    # 2 计算需要补充t个中文空格
     error = 0.05  # 允许误差范围
     t = 0  # 需要补充中文字符数
     while error < w % 1 < 1 - error:  # 小数部分超过误差
         t += 1
         w += chinese_char_width
-    # 3、补充中文字符
+    # 3 补充中文字符
     if t:
         if fmt == 'r':
             s = ch * t + s
@@ -521,13 +521,13 @@ def listalign(ls, fmt='r', *, width=None, fillchar=' ', prefix='', suffix='', ch
     >>> listalign(['a', '哈哈', 'ccd'], chinese_char_width=1.8)
     ['        a', '　　　哈哈', '      ccd']
     """
-    # 1、处理fmt数组
+    # 1 处理fmt数组
     if len(fmt) == 1:
         fmt = [fmt] * len(ls)
     elif len(fmt) < len(ls):
         fmt = list(fmt) + [fmt[-1]] * (len(ls) - len(fmt))
 
-    # 2、算出需要域宽
+    # 2 算出需要域宽
     if chinese_char_width == 2:
         strs = list(map(lambda x: str(x).replace('\n', r'\n'), ls))  # 存储转成字符串的元素
         lens = list(map(strwidth, strs))  # 存储每个元素的实际域宽
@@ -542,7 +542,7 @@ def listalign(ls, fmt='r', *, width=None, fillchar=' ', prefix='', suffix='', ch
     if width and isinstance(width, int) and width > w:
         w = width
 
-    # 3、对齐操作
+    # 3 对齐操作
     for i, s in enumerate(strs):
         if fmt[i] == 'r':
             strs[i] = fillchar * (w - lens[i]) + strs[i]
@@ -748,7 +748,7 @@ def arr_hangclear(arr, depth=None):
     >>> arr_hangclear([[1, 2, 4], [1, 2, 5], [2, 2, 5], [1, 2, 5]])
     [[1, 2, 4], ['', '', 5], [2, 2, 5], [1, 2, 5]]
     """
-    m = depth if depth else len_in_dim2(arr) - 1
+    m = depth or len_in_dim2(arr) - 1
     a = copy.deepcopy(arr)
 
     # 算法原理：从下到上，从右到左判断与上一行重叠了几列数据

@@ -19,22 +19,22 @@ ____main = """
 这里会加载好主要功能，但并不会加载所有功能
 """
 
-# 1、时间相关工具
+# 1 时间相关工具
 from pyxllib.debug.pytictoc import TicToc
 from pyxllib.debug.timer import Timer
 from pyxllib.debug.arrow_ import Datetime
 
-# 2、调试1
+# 2 调试1
 from pyxllib.debug.dprint import dprint
 
-# 3、文本
+# 3 文本
 from pyxllib.debug.strlib import strfind, natural_sort
 
-# 4、文件、目录工具
+# 4 文件、目录工具
 from pyxllib.debug.pathlib_ import Path
 from pyxllib.debug.dirlib import Dir  # Dir的代码还需要好好重新整理下
 
-# 5、调试2
+# 5 调试2
 from pyxllib.debug.chrome import chrome
 from pyxllib.debug.showdir import showdir
 from pyxllib.debug.bcompare import bcompare
