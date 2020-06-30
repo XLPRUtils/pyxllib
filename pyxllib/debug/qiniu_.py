@@ -5,6 +5,7 @@
 # @Data   : 2020/05/30 20:39
 
 
+import re
 import subprocess
 
 
@@ -37,12 +38,31 @@ def get_etag(arg):
         raise TypeError('不识别的数据类型')
 
 
+def is_etag(s):
+    """字母、数字和-、_共64种字符构成的长度28的字符串"""
+    return re.match(r'[a-zA-Z0-9\-_]{28}$', s)
+
+
 def test_etag():
     print(get_etag(r'\chematom{+8}{2}{8}{}'))
     # Fjnu-ZXyDxrqLoZmNJ2Kj8FcZGR-
 
     print(get_etag(__file__))
     # 每次代码改了这段输出都是不一样的
+
+
+def test_etag2():
+    """ 字符串值和写到文件判断的etag，是一样的
+    """
+    from pyxllib.debug.pathlib_ import Path
+
+    s = 'code4101'
+    print(get_etag(s))
+    # FkAD2McB6ugxTiniE8ebhlNHdHh9
+
+    f = Path('1.tex', root=Path.TEMP).write(s, if_exists='replace').fullpath
+    print(get_etag(f))
+    # FkAD2McB6ugxTiniE8ebhlNHdHh9
 
 
 if __name__ == '__main__':

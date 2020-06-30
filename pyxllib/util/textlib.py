@@ -34,7 +34,7 @@ try:
     # MatchSimString计算编辑距离需要
     import Levenshtein
 except ModuleNotFoundError:
-    subprocess.run(['pip3', 'install', 'python-levenshtein'])
+    subprocess.run(['pip3', 'install', 'python-Levenshtein'])  # 这个需要C++14编译器
     import Levenshtein
 
 
