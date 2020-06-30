@@ -299,14 +299,14 @@ class Path:
         return self._path.suffix if self._path else ''
 
     def with_suffix(self, suffix):
-        """with_suffix和suffix.setter区别是，前者是生成一个新指向的类，后者是重命名
+        r"""with_suffix和suffix.setter区别是，前者是生成一个新指向的类，后者是重命名
 
-        >>> Path('a.txt').with_suffix('.py')  # 强制替换
-        Path('D:/slns/pyxllib/pyxllib/debug/a.py')
-        >>> Path('a.txt').with_suffix('py')  # 参考替换
-        Path('D:/slns/pyxllib/pyxllib/debug/a.txt')
-        >>> Path('a.txt').with_suffix('')  # 删除
-        Path('D:/slns/pyxllib/pyxllib/debug/a')
+        >>> Path('a.txt').with_suffix('.py').fullpath.split('\\')[-1]  # 强制替换
+        'a.py'
+        >>> Path('a.txt').with_suffix('py').fullpath.split('\\')[-1]  # 参考替换
+        'a.txt'
+        >>> Path('a.txt').with_suffix('').fullpath.split('\\')[-1]  # 删除
+        'a'
         """
         if suffix and (suffix[0] == '.' or not self.suffix):
             if suffix[0] != '.': suffix = '.' + suffix
@@ -392,6 +392,8 @@ class Path:
         'C:\\Windows\\System32\\chen.py'
         >>> f.abs_dstpath('E:/')  # 原始文件必须存在，否则因为无法判断实际类型，目标路径可能会错
         'E:/cmd.exe'
+        >>> f.abs_dstpath('D:/aabbccdd.txt')
+        'D:/aabbccdd.txt'
         >>> f.abs_dstpath('D:/aabbccdd.txt/')  # 并不存在aabbccdd.txt这样的对象，但末尾有个/表明这是个目录
         'D:/aabbccdd.txt/cmd.exe'
         """
@@ -413,13 +415,15 @@ class Path:
             'backup': 备份后写入
         :param func: 传入arg1和arg2参数，可以自定义
             默认分别是self和dst的fullpath
+        :return : 返回dst
         """
         dst = Path(self.abs_dstpath(dst))
         need_run = True
 
         if dst.exists():
             if dst == self and arg1 is None and arg2 is None:
-                # 同一个文件，估计只是修改大小写名称，不做任何特殊处理，准备直接跑函数
+                # 同一个文件，估计只是修改大小写名称，或者就是要原地操作
+                # 不做任何特殊处理，准备直接跑函数
                 # 200601周一19:23：要补arg1、arg2的判断，不然Path.write会出错
                 pass
             elif if_exists == 'error':
@@ -437,9 +441,7 @@ class Path:
             if arg1 is None: arg1 = self.fullpath
             if arg2 is None: arg2 = dst.fullpath
             func(arg1, arg2)
-            return dst
-        else:
-            return self
+        return dst
 
     def ensure_dir(self, pathtype=None):
         r"""确保path中指定的dir都存在
@@ -549,7 +551,7 @@ class Path:
                 if '\r' in s: s = s.replace('\r\n', '\n')  # 如果用\r\n作为换行符会有一些意外不好处理
                 return s
         else:  # 非文件对象
-            raise ValueError('文件不存在，无法读取。')
+            raise FileNotFoundError('文件不存在，无法读取。')
 
     def write(self, ob, *, encoding='utf8', if_exists='error', etag=False):
         """
@@ -586,9 +588,7 @@ class Path:
         self.process(self, data2file, if_exists, arg1=ob, arg2=self)
         if etag:
             from pyxllib.debug.qiniu_ import get_etag
-            # TODO etag如果出现重复文件，是可以ignore的，但为了rename函数能成功返回目标Path，还是先执行replace吧
-            #  同时也是为了去重，避免留下临时的冗余文件，还是replace比较好
-            return self.rename(get_etag(self.fullpath) + self.suffix, if_exists='replace')
+            return self.rename(get_etag(self.fullpath) + self.suffix, if_exists='ignore')
         else:
             return self
 

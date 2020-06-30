@@ -56,10 +56,10 @@ class OssBucket:
             return False
 
     def download(self, key, localfile):
-        try:
+        if self.check_exists(key):
             return self.bucket.get_object_to_file(key, localfile)
-        except oss2.exceptions.NoSuchKey:
-            return False
+        else:
+            return None
 
     def ObjectIterator(self, **kwargs):
         """ 遍历某个目录下的所有文件（含子目录里的文件）
