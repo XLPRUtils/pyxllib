@@ -140,9 +140,17 @@ def natural_sort_key(key):
     return [convert(c) for c in re.split('([0-9]+)', str(key))]
 
 
-def natural_sort(ls):
-    """自然排序"""
-    return sorted(ls, key=natural_sort_key)
+def natural_sort(ls, only_use_digits=False):
+    """自然排序
+    :param only_use_digits: 正常会用数字作为分隔，切割每一部分进行比较
+        如果只想比较数值部分，可以only_use_digits=True
+    """
+    if only_use_digits:
+        def func(key):
+            return [int(c) for c in re.split('([0-9]+)', str(key)) if c.isdigit()]
+    else:
+        func = natural_sort_key
+    return sorted(ls, key=func)
 
 
 def typename(c):

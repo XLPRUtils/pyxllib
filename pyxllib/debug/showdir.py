@@ -17,6 +17,13 @@ import pandas as pd
 from bs4 import BeautifulSoup
 
 
+try:
+    import lxml
+except ModuleNotFoundError:
+    subprocess.run(['pip3', 'install', 'lxml'])
+    import lxml
+
+
 from pyxllib.debug.strlib import ensure_gbk, typename, dataframe_str
 from pyxllib.debug.pathlib_ import Path
 from pyxllib.debug.dprint import func_input_message, dprint

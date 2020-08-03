@@ -408,6 +408,7 @@ class Path:
 
     def process(self, dst, func, if_exists='error', arg1=None, arg2=None):
         r"""copy或move的本质底层实现
+        :param dst: 目标路径对象，注意如果使用相对路径，是相对于self的路径！
         :param if_exists:
             'error': （默认）如果要替换的目标文件已经存在，则报错
             'replace': 替换
@@ -417,9 +418,31 @@ class Path:
             默认分别是self和dst的fullpath
         :return : 返回dst
         """
-        dst = Path(self.abs_dstpath(dst))
-        need_run = True
+        # 1 分类处理，确定实际dst位置
+        # 不同转换类型，dst的具体路径计算方式不同
+        # f文件，d目录，v未知（不存在）
+        # ff: 文件到文件，不用处理
+        # fd: 文件到目录，精细到具体文件存放位置
+        # fv: 文件到未知，看末尾是否有'/'或'\\'提示，否则默认ff
+        # vx: 未知来源类型，按fx处理
+        # df: 目录到文件，报错
+        # dd: 目录到目录，精细到具体目录存放位置
+        # dv: 目录到未知，按dd处理
+        dst0 = str(dst)  # 保存原始输入值
+        dst = Path(self.abs_dstpath(dst0))
 
+        if self.is_dir():
+            if dst.is_file():
+                raise ValueError('dst是已存在的文件类型，不能对src目录执行指定操作')
+            else:  # 否则dst是目录，或者不存在，均视为目录处理
+                dst = dst / self.name
+        else:  # 否则self是文件，或者不存在，均视为文件处理
+            if dst.is_dir() or dst0[-1] in ('/', '\\'):
+                dst = dst / self.name
+            # 否则dst是文件，或者不存在的路径，均视为文件类型处理
+
+        # 2 判断目标是有已存在，进行不同的指定规则处理
+        need_run = True
         if dst.exists():
             if dst == self and arg1 is None and arg2 is None:
                 # 同一个文件，估计只是修改大小写名称，或者就是要原地操作
@@ -436,6 +459,7 @@ class Path:
                 dst.backup(if_exists='backup')
                 dst.delete()
 
+        # 3 执行特定功能
         if need_run:
             dst.ensure_dir(pathtype='dir' if self.is_dir() else 'Path')
             if arg1 is None: arg1 = self.fullpath
@@ -472,7 +496,10 @@ class Path:
             return self.process(dst, shutil.copy2, if_exists)
 
     def move(self, dst, if_exists='error'):
-        """移动文件"""
+        """移动文件
+
+        注意不要把move当rename用，会造成逻辑混乱，容易误用
+        """
         if self.exists():
             return self.process(dst, shutil.move, if_exists)
 
