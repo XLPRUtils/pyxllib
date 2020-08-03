@@ -9,6 +9,7 @@ oss2 · PyPI: https://pypi.org/project/oss2/
 """
 
 import subprocess
+from pyxllib.debug.pathlib_ import Path
 
 
 try:
@@ -41,6 +42,7 @@ class OssBucket:
                 oss2.resumable_upload(self.bucket, key, localfile)
                 done = True
             except Exception as e:
+                print('如果一直弹出这一条，则要检查oss账号是否设置正确')
                 if not force:
                     raise e
         return True
@@ -56,6 +58,7 @@ class OssBucket:
             return False
 
     def download(self, key, localfile):
+        Path(localfile).ensure_dir()
         if self.check_exists(key):
             return self.bucket.get_object_to_file(key, localfile)
         else:

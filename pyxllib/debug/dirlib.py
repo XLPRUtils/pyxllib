@@ -12,7 +12,7 @@ import shutil
 
 
 from pyxllib.debug.arrow_ import Datetime
-from pyxllib.debug.strlib import strfind
+from pyxllib.debug.strlib import strfind, natural_sort
 from pyxllib.debug.pathlib_ import Path
 
 
@@ -63,7 +63,8 @@ class Dir(Path):
                ignore_backup=False, ignore_special=False,
                min_size=None, max_size=None,
                min_ctime=None, max_ctime=None, min_mtime=None, max_mtime=None):
-        r"""增加选中文件，从filesmatch衍生而来
+        r""" 增加选中文件，从filesmatch衍生而来，参数含义见 filesfilter
+
         注意select和exclude的增减操作是不断叠加的，而不是每次重置！
         如果需要重置，应该重新定义一个Folder类
 
@@ -81,7 +82,7 @@ class Dir(Path):
                            ignore_backup=ignore_backup, ignore_special=ignore_special,
                            min_size=min_size, max_size=max_size,
                            min_ctime=min_ctime, max_ctime=max_ctime, min_mtime=min_mtime, max_mtime=max_mtime)
-        return Dir(self._path, files=self.files + files)
+        return Dir(self._path, files=natural_sort(self.files + files))
 
     def select_invert(self):
         """反选，在"全集"中，选中当前状态下没有被选中的那些文件"""

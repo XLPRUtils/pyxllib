@@ -24,6 +24,7 @@ from pyxllib.image.imlib import zoomsvg, get_image_size
 from pyxllib.debug.dirlib import *
 from pyxllib.debug.dprint import dprint
 from pyxllib.debug.chrome import chrome
+from pyxllib.debug.showdir import showdir
 
 
 class DemoFitz:
@@ -193,7 +194,7 @@ def pdf2svg_oldversion(pdffile, target=None, *, trim=False):
 
 
 def pdf2imagebase(pdffile, target=None, scale=None, ext='.png'):
-    """ 作者：梁奕本
+    """
     使用python的PyMuPdf模块，不需要额外插件
     导出的图片从1开始编号
     TODO 要加多线程？效率影响大吗？
@@ -242,20 +243,33 @@ def pdf2imagebase(pdffile, target=None, scale=None, ext='.png'):
     if num_pages == 1:
         image = get_svg_image(0) if ext == '.svg' else get_png_image(0)
         files.append(newfile)
-        writefile(image, newfile, if_exists='replace')
+        Path(newfile).write(image, if_exists='replace')
     else:  # 有多页
         number_width = math.ceil(math.log10(num_pages + 1))  # 根据总页数计算需要的对齐域宽
         stem, ext = os.path.splitext(newfile)
         for i in range(num_pages):
             image = get_svg_image(i) if ext == '.svg' else get_png_image(i)
-            name = ('-{:0' + str(number_width) + 'd}').format(i + 1)
+            name = ('-{:0' + str(number_width) + 'd}').format(i + 1)  # 前面的括号不要删，这样才是完整的一个字符串来使用format
             files.append(stem + name + ext)
-            writefile(image, stem + name + ext, if_exists='replace')
+            Path(stem + name + ext).write(image, if_exists='replace')
     return files
 
 
 def pdf2png(pdffile, target=None, scale=None):
-    pdf2imagebase(pdffile, target=target, scale=scale, ext='.png')
+    """
+    :param pdffile: pdf路径
+    :param target: 目标位置
+    :param scale: 缩放比例
+    :return: list，生成的png图片清单
+
+    # 可以不写target，默认处理：如果单张png则在同目录，多张则会建个同名目录存储
+    >> pdf2png(r'D:\slns+\immovables\immovables_data\test\X\A0001.pdf')
+
+    # 指定存放位置：
+    >> pdf2png(r'D:\slns+\immovables\immovables_data\test\X\A0001.pdf', r'D:\slns+\immovables\immovables_data\test\X')
+
+    """
+    return pdf2imagebase(pdffile, target=target, scale=scale, ext='.png')
 
 
 def pdf2svg(pdffile, target=None, scale=None, trim=False):
@@ -280,51 +294,20 @@ def pdf2svg(pdffile, target=None, scale=None, trim=False):
     pdf2imagebase(pdffile, target=target, scale=scale, ext='.svg')
 
 
-def pdfs2pngs(path, scale=None):
-    """pdf教材批量转图片
-    :param path: 要处理的目录
-    :param scale: 控制pdf2png的尺寸，一般要设1.2会清晰些
-    :return:
+def pdfs2pngs(from_, to_=None, scale=None, print_interval=None):
+    """ 将目录下所有pdf转png
+    :param from_: 原pdf数据路径
+    :param to_: 目标存储位置，可以不输入，默认放在原pdf所在目录
+    :param scale: 转图片时缩放比例，例如2表示长宽放大至2被
+    :param print_interval: 每隔多少个pdf输出处理进度
+        默认None，不输出
 
-    这个函数转换中，不要去删除原文件！不要去删除原文件！删除原文件请另外写功能。
-    警告：该函数针对pdf课本转图片上传有些定制功能，并不是纯粹的通用功能函数
+    TODO 本来想试多线程的，没有达到预期的效果，就关了
     """
-    cwd = os.getcwd()
-
-    # 1 第1轮遍历，生成所有png
-    for dirpath, dirnames, filenames in os.walk(path):
-        os.chdir(dirpath)
-        dprint(dirpath)
-        executor = concurrent.futures.ThreadPoolExecutor(4)
-        for file in filenames:
-            if file.endswith('.pdf'):
-                executor.submit(pdf2png, file, scale=scale)
-            if file.endswith('.jpg'):  # 大王物理中有jpg图片
-                executor.submit(subprocess.run, ['magick.exe', file, file[:-4] + '.png'])
-        executor.shutdown()
-
-    # 2 第2轮遍历，找出宽与高比例在1.3~1.6的png图片，只裁剪出右半部分
-    dprint('2、第2轮遍历，找出宽与高比例在1.3~1.6的png图片，只裁剪出右半部分')
-    for dirpath, dirnames, filenames in os.walk(path):
-        os.chdir(dirpath)
-        executor = concurrent.futures.ThreadPoolExecutor(4)
-        for file in filenames:
-            if not file.endswith('.png'): continue
-            w, h = get_image_size(file)
-            if 1.3 <= w / h <= 1.6:  # 有的文件太大PIL处理不了，所以还是让magick来搞~~
-                half_w = w // 2
-                executor.submit(subprocess.run, ['mogrify.exe', '-crop', f'{half_w}x{h}+{w - half_w}+0', file])
-        executor.shutdown()
-
-    # 3 第3轮遍历，宽超过1000的，压缩到1000内
-    dprint('3、第3轮遍历，宽超过1000的，压缩到1000内')
-    for dirpath, dirnames, filenames in os.walk(path):
-        os.chdir(dirpath)
-        executor = concurrent.futures.ThreadPoolExecutor(4)
-        for file in filenames:
-            if not file.endswith('.png'): continue
-            w, h = get_image_size(file)
-            if w > 1000: executor.submit(subprocess.run, ['mogrify.exe', '-resize', '1000x', file])
-        executor.shutdown()
-
-    os.chdir(cwd)  # 恢复原工作目录
+    if not to_: to_ = from_
+    files = Dir(from_).select('**/*.pdf').files  # 源文件
+    n = len(files)
+    for i, f in enumerate(files):
+        if print_interval and i and i % print_interval == 0: print(f'{i}/{n}')
+        target = os.path.join(to_, os.path.dirname(f)) + '/'
+        pdf2png(os.path.join(from_, f), target, scale=scale)
