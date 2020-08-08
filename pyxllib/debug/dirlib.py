@@ -55,7 +55,7 @@ class Dir(Path):
         return [self.fullpath + '/' + f for f in self.files]
 
     @property
-    def paths(self):
+    def filepaths(self):
         """返回所有files的path对象"""
         return [self / f for f in self.files]
 

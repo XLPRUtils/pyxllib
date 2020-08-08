@@ -135,7 +135,8 @@ class Path:
         'C:/a.txt\\'
         """
         # 1 判断参考目录
-        if not root: root = os.getcwd()
+        if root: root = str(root)
+        else: root = os.getcwd()
 
         # 2 判断主体文件名 path
         if str(path) == '':
@@ -387,6 +388,7 @@ class Path:
 
     def abs_dstpath(self, dst=None, suffix=None, root=None) -> str:
         r""" 参照当前Path的父目录，来确定dst的具体路径
+
         >>> f = Path('C:/Windows/System32/cmd.exe')
         >>> f.abs_dstpath('chen.py')
         'C:\\Windows\\System32\\chen.py'
@@ -396,15 +398,32 @@ class Path:
         'D:/aabbccdd.txt'
         >>> f.abs_dstpath('D:/aabbccdd.txt/')  # 并不存在aabbccdd.txt这样的对象，但末尾有个/表明这是个目录
         'D:/aabbccdd.txt/cmd.exe'
+
+        不同转换类型，dst的具体路径计算方式不同
+        f文件，d目录，v未知（不存在）
+        ff: 文件到文件，不用处理
+        fd: 文件到目录，精细到具体文件存放位置
+        fv: 文件到未知，看末尾是否有'/'或'\\'提示，否则默认ff
+        vx: 未知来源类型，按fx处理
+        df: 目录到文件，报错
+        dd: 目录到目录，精细到具体目录存放位置
+        dv: 目录到未知，按dd处理
         """
+        dst0 = str(dst)
         if not root: root = self.dirname
-        dst = Path.abspath(dst, suffix, root)
+        dst = Path(dst, suffix, root)
 
-        # 原始是一个文件，但这里目标只写了一个目录，则按照原名推导到目标文件名
-        if self.is_file() and (os.path.isdir(dst) or dst[-1] in ('\\', '/')):
-            dst = os.path.join(dst, self.name)
+        if self.is_dir():
+            if dst.is_file():
+                raise ValueError('dst是已存在的文件类型，不能对src目录执行指定操作')
+            else:  # 否则dst是目录，或者不存在，均视为目录处理
+                dst = dst / self.name
+        else:  # 否则self是文件，或者不存在，均视为文件处理
+            if dst.is_dir() or dst0[-1] in ('/', '\\'):
+                dst = dst / self.name
+            # 否则dst是文件，或者不存在的路径，均视为文件类型处理
 
-        return dst
+        return dst.fullpath
 
     def process(self, dst, func, if_exists='error', arg1=None, arg2=None):
         r"""copy或move的本质底层实现
@@ -419,27 +438,7 @@ class Path:
         :return : 返回dst
         """
         # 1 分类处理，确定实际dst位置
-        # 不同转换类型，dst的具体路径计算方式不同
-        # f文件，d目录，v未知（不存在）
-        # ff: 文件到文件，不用处理
-        # fd: 文件到目录，精细到具体文件存放位置
-        # fv: 文件到未知，看末尾是否有'/'或'\\'提示，否则默认ff
-        # vx: 未知来源类型，按fx处理
-        # df: 目录到文件，报错
-        # dd: 目录到目录，精细到具体目录存放位置
-        # dv: 目录到未知，按dd处理
-        dst0 = str(dst)  # 保存原始输入值
-        dst = Path(self.abs_dstpath(dst0))
-
-        if self.is_dir():
-            if dst.is_file():
-                raise ValueError('dst是已存在的文件类型，不能对src目录执行指定操作')
-            else:  # 否则dst是目录，或者不存在，均视为目录处理
-                dst = dst / self.name
-        else:  # 否则self是文件，或者不存在，均视为文件处理
-            if dst.is_dir() or dst0[-1] in ('/', '\\'):
-                dst = dst / self.name
-            # 否则dst是文件，或者不存在的路径，均视为文件类型处理
+        dst = Path(self.abs_dstpath(dst))
 
         # 2 判断目标是有已存在，进行不同的指定规则处理
         need_run = True
@@ -556,18 +555,26 @@ class Path:
 
     # 五、其他综合性功能
 
-    def read(self, *, encoding=None):
+    def read(self, *, encoding=None, mode=None):
+        """
+        :param encoding: 文件编码
+        :param mode: 读取模式，默认从扩展名识别，也可以强制指定
+        :return:
+        """
         if self.is_file():  # 如果存在这样的文件，那就读取文件内容
             # 获得文件扩展名，并统一转成小写
-            name, suffix = self.fullpath, self.suffix.lower()
-            if suffix == '.pkl':  # pickle库
+            name, suffix = self.fullpath, self.suffix
+            if not mode: mode = suffix
+            mode = mode.lower()
+            if mode == '.pkl':  # pickle库
                 with open(name, 'rb') as f:
                     return pickle.load(f)
-            elif suffix == '.json':
+            elif mode == '.json':
                 import json
-                with open(name, 'rb') as f:
+                # 先读成字符串，再解析，会比rb鲁棒性更强，能自动过滤掉开头可能非正文特殊标记的字节
+                with open(name, 'r', encoding=encoding) as f:
                     return json.loads(f.read())
-            elif suffix in ('.jpg', '.jpeg', '.png', '.bmp'):
+            elif mode in ('.jpg', '.jpeg', '.png', '.bmp'):
                 with open(name, 'rb') as fp:
                     return fp.read()
             else:
