@@ -28,11 +28,8 @@ from pyxllib.debug.typelib import *
 
 def getasizeof(*objs, **opts):
     """获得所有类的大小，底层用pympler.asizeof实现"""
-    try:
-        from pympler import asizeof
-    except ModuleNotFoundError:
-        subprocess.run(['pip3', 'install', 'pympler'])
-        from pympler import asizeof
+    from pympler import asizeof
+
     try:
         res = asizeof.asizeof(*objs, **opts)
     # except TypeError:  # sqlalchemy.exc.InvalidRequestError

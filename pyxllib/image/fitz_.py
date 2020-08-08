@@ -11,13 +11,7 @@ import pprint
 import subprocess
 import tempfile
 
-
-try:
-    import fitz
-except ModuleNotFoundError:
-    subprocess.run(['pip3', 'install', 'PyMuPdf'])
-    import fitz
-
+import fitz
 
 from pyxllib.debug.pathlib_ import Path
 from pyxllib.image.imlib import zoomsvg, get_image_size

@@ -8,22 +8,9 @@
 import math
 import subprocess
 
-
 import pandas as pd
-
-try:
-    from bidict import bidict
-except ModuleNotFoundError:
-    subprocess.run(['pip3', 'install', 'bidict'])
-    from bidict import bidict
-
-try:
-    import sqlalchemy
-except ModuleNotFoundError:
-    subprocess.run(['pip3', 'install', 'sqlalchemy'])
-    subprocess.run(['pip3', 'install', 'mysqlclient'])
-    import sqlalchemy
-
+from bidict import bidict
+import sqlalchemy
 
 from pyxllib.debug.pytictoc import TicToc
 from pyxllib.debug.dprint import dformat, dprint

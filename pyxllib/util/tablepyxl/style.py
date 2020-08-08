@@ -17,14 +17,6 @@ from lxml import html
 import subprocess
 
 
-try:
-    import openpyxl
-except ModuleNotFoundError:
-    subprocess.run(['pip3', 'install', 'premailer'])
-    subprocess.run(['pip3', 'install', 'openpyxl'])
-    import openpyxl
-
-
 from openpyxl.cell import cell
 from openpyxl.styles import Font, Alignment, PatternFill, NamedStyle, Border, Side, Color
 from openpyxl.styles.fills import FILL_SOLID

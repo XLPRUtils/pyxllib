@@ -5,16 +5,6 @@
 # @Data   : 2020/05/30 21:32
 
 
-import subprocess
-
-
-try:
-    import chardet
-except ModuleNotFoundError:
-    subprocess.run(['pip3', 'install', 'chardet'])
-    import chardet
-
-
 from pyxllib.debug.dprint import dprint
 from pyxllib.debug.judge import is_file
 

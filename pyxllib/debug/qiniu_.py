@@ -12,11 +12,7 @@ import subprocess
 import requests
 
 
-try:
-    import qiniu
-except ModuleNotFoundError:
-    subprocess.run(['pip3', 'install', 'qiniu'])
-    import qiniu
+import qiniu
 
 
 def get_etag(arg):

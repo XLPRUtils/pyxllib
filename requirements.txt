@@ -1,8 +1,41 @@
-numpy>=1.15.4
-arrow>=0.15.5
-Jinja2>=2.10
+# numerical processing
+numpy
+Jinja2
 pandas>=0.23.4
-chardet>=3.0.4
-requests>=2.21.0
-qiniu>=7.2.6
-beautifulsoup4>=4.9.1
+
+# get resources from web and parse xml
+requests
+qiniu
+beautifulsoup4
+lxml
+
+# basic component of pyxllib.debug
+arrow
+chardet
+Pympler
+
+# basic component of pyxllib.util
+# excel
+openpyxl
+premailer
+# sql
+bidict
+sqlalchemy
+mysqlclient
+# text
+pyspellchecker
+# autogui
+pyautogui
+keyboard
+# other
+oss2
+gitpython
+baidu-aip
+gitpython
+
+# basic component of pyxllib.image
+# pdf
+PyMuPdf
+# image
+pillow
+opsdroid-get-image-size

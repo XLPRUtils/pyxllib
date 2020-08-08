@@ -27,25 +27,19 @@ try ... except不影响效率的
 """
 
 
-# 调用到的第三方库
-
-
+# 这个需要C++14编译器 https://download.microsoft.com/download/5/f/7/5f7acaeb-8363-451f-9425-68a90f98b238/visualcppbuildtools_full.exe
+# 在需要的时候安装，防止只是想用pyxllib很简单的功能，但是在pip install阶段处理过于麻烦
 try:
     # MatchSimString计算编辑距离需要
     import Levenshtein
 except ModuleNotFoundError:
-    subprocess.run(['pip3', 'install', 'python-Levenshtein'])  # 这个需要C++14编译器
+    subprocess.run(['pip3', 'install', 'python-Levenshtein'])
     import Levenshtein
-
 
 # import textract     # ensure_content读取word文档需要
 
-
-try:  # 拼写检查库，即词汇库
-    from spellchecker import SpellChecker
-except ModuleNotFoundError:
-    subprocess.run(['pip3', 'install', 'pyspellchecker'])
-    from spellchecker import SpellChecker
+# 拼写检查库，即词汇库
+from spellchecker import SpellChecker
 
 
 ____section_1_text = """
@@ -1146,121 +1140,6 @@ class Base85Coder:
         b = b.encode('ascii')
         s = base64.b85decode(b).decode('utf8')
         return s
-
-
-class MyAipOcr:
-    """
-    需要安装：pip install baidu-aip
-
-    封装该类
-        目的1：合并输入文件和url的识别
-        目的2：带透明底的png百度api识别不了，要先转成RGB格式
-    """
-    client = None
-    client_id = 0
-
-    @staticmethod
-    def init(next_client=False):
-        # 0 安装，导入库
-        try:
-            from aip import AipOcr
-        except ModuleNotFoundError:
-            subprocess.run(['pip3', 'install', 'baidu-aip'])
-            from aip import AipOcr
-
-        # 1 收集账号信息
-        # 坤泽小号，陈坤泽，欧龙，韩锦锦
-        APP_ID = ['16936214', '16913345', '16933485', '16933339']
-        API_KEY = ['a0oNAv9FLhd6oXOm7zXzAkKn', 'fNAGzfHmLicbmnsFqTDlfDYM',
-                   'zATmQF0a1EwZFN7zUj58o1HB', '1TLzz0jLk9stbMo3lPBKv9yl']
-        SECRET_KEY = ['osS2zMSrYCnKgwAsIQ68XYdUvb5oOkI8', 'A6zdaoTNleKAGaM75THNRW8PtCjrLCkG',
-                      'FBgWnD239v3K7gr6vTqaCAzrj7C0WYxG', '8UL2AcDSBf99UqRH630aYv1tiDHpHAt6']
-
-        # 2 初始化client
-        if MyAipOcr.client is None or next_client:
-            t = MyAipOcr.client_id + next_client
-            if t > len(APP_ID): return None  # 所有账号都用完了
-            MyAipOcr.client = AipOcr(APP_ID[t], API_KEY[t], SECRET_KEY[t])
-            MyAipOcr.client_id = t
-        return MyAipOcr.client
-
-    @staticmethod
-    def get_img_content(in_):
-        """获取in_代表的图片的二进制数据"""
-        from PIL import Image
-        # 1 取不同来源的数据
-        if is_url(in_):
-            content = requests.get(in_).content
-            img = Image.open(io.BytesIO(content))
-        elif Path(in_).is_file():
-            with open(in_, 'rb') as f:
-                content = f.read()
-            img = Image.open(in_)
-        else:
-            raise ValueError
-
-        # 2 如果是RGBA类型，要把透明底变成白色
-        # img.mode: https://pillow.readthedocs.io/en/5.1.x/handbook/concepts.html#concept-modes
-        if img.mode in ('RGBA', 'P'):
-            # 判断图片mode模式，如果是RGBA或P等可能有透明底，则和一个白底图片合成去除透明底
-            background = Image.new('RGBA', img.size, (255, 255, 255))
-            # composite是合成的意思。将右图的alpha替换为左图内容
-            img = Image.alpha_composite(background, img.convert('RGBA')).convert('RGB')
-            file = io.BytesIO()
-            img.save(file, 'PNG')
-            content = file.getvalue()
-        # file = writefile(content, 'a.png', root=Path.TEMP)
-        # chrome(file)
-
-        return content
-
-    @staticmethod
-    def text(in_, options=None):
-        """ 调用baidu的普通文本识别
-        这个函数你们随便调用，每天5万次用不完
-
-        :param in_: 可以是图片路径，也可以是网页上的url
-        :param options: 可选参数
-            详见：https://cloud.baidu.com/doc/OCR/s/pjwvxzmtc
-        :return: 返回识别出的dict字典
-
-        >> baidu_accurate_ocr('0.png')
-        >> baidu_accurate_ocr(r'http://ksrc2.gaosiedu.com//...',
-                                 {'language_type': 'ENG'})
-        """
-        client = MyAipOcr.init()
-        content = MyAipOcr.get_img_content(in_)
-        return client.basicGeneral(content, options)
-
-    @staticmethod
-    def accurate_text(in_, options=None):
-        """ 调用baidu的高精度文本识别
-
-        :param in_: 可以是图片路径，也可以是url
-        :param options: 可选参数
-            详见：https://cloud.baidu.com/doc/OCR/s/pjwvxzmtc
-        :return: 返回识别出的dict字典
-
-        >> baidu_accurate_ocr('0.png')
-        >> baidu_accurate_ocr(r'http://ksrc2.gaosiedu.com//...',
-                                 {'language_type': 'ENG'})
-        """
-        client = MyAipOcr.init()
-        content = MyAipOcr.get_img_content(in_)
-        # 会自动转base64
-        while True:
-            t = client.basicAccurate(content, options)
-            # dprint(t)
-            if t.get('error_code', None) == 17:
-                client = MyAipOcr.init(next_client=True)
-                if client is None:
-                    raise ValueError('今天账号份额都用完啦！Open api daily request limit reached')
-            elif t.get('error_code', None) == 18:
-                # {'error_code': 18, 'error_msg': 'Open api qps request limit reached'}，继续尝试
-                continue
-            else:
-                 break
-        return t
 
 
 def demo_spellchecker():

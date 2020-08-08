@@ -8,14 +8,8 @@
 import datetime
 import os
 import re
-import subprocess
 
-
-try:
-    import arrow
-except ModuleNotFoundError:
-    subprocess.run(['pip3', 'install', 'arrow'])
-    import arrow
+import arrow
 
 
 class Datetime(arrow.Arrow):

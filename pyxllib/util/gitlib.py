@@ -19,15 +19,9 @@ TODO 清单
 3、将数据以图片的直观形式展现
 """
 
+import git
 
 from pyxllib.util.filelib import *
-
-
-try:
-    import git
-except ModuleNotFoundError:
-    subprocess.run(['pip3', 'install', 'gitpython'])
-    import git
 
 
 class Git:

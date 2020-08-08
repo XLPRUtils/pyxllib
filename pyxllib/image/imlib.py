@@ -12,23 +12,11 @@ import os
 import subprocess
 import re
 
-
 import requests
-
-try:
-    import PIL
-except ModuleNotFoundError:
-    subprocess.run(['pip3', 'install', 'pillow'])
-    import PIL
-
+import PIL
 from PIL import Image
 
-try:
-    from get_image_size import get_image_size
-except ModuleNotFoundError:
-    subprocess.run(['pip3', 'install', 'opsdroid-get-image-size'])
-    from get_image_size import get_image_size
-
+from get_image_size import get_image_size
 
 from pyxllib.debug.dprint import dprint
 from pyxllib.debug.pathlib_ import Path
