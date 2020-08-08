@@ -10,11 +10,7 @@ from __future__ import absolute_import
 
 import subprocess
 
-try:
-    from lxml import html
-except ModuleNotFoundError:
-    subprocess.run(['pip3', 'install', 'lxml'])
-    from lxml import html
+from lxml import html
 
 from openpyxl import Workbook
 from openpyxl.utils import get_column_letter

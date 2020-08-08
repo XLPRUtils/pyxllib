@@ -12,16 +12,8 @@ import logging
 import subprocess
 import sys
 
-
 import pandas as pd
 from bs4 import BeautifulSoup
-
-
-try:
-    import lxml
-except ModuleNotFoundError:
-    subprocess.run(['pip3', 'install', 'lxml'])
-    import lxml
 
 
 from pyxllib.debug.strlib import ensure_gbk, typename, dataframe_str

@@ -11,16 +11,7 @@
 
 import subprocess
 
-try:
-    import openpyxl
-except ModuleNotFoundError:
-    subprocess.run(['pip3', 'install', 'openpyxl'])
-    # subprocess.run(['pip3', 'install', 'premailer'])
-    import openpyxl
-
-
-# 可能缺openpyxl，需要执行这个先安装
-# from pyxllib.util.tablepyxl import tablepyxl
+import openpyxl
 
 
 from openpyxl.styles import Font

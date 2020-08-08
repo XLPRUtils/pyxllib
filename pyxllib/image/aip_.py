@@ -8,17 +8,9 @@
 百度人工智能API接口
 """
 
-
-import subprocess
-
 import pandas as pd
 
-try:
-    import aip
-except ModuleNotFoundError:
-    subprocess.run(['pip3', 'install', 'baidu-aip'])
-    import aip
-
+import aip
 
 from pyxllib.debug.pathlib_ import Path
 from pyxllib.image.imlib import get_img_content
