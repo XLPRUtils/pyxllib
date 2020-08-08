@@ -15,7 +15,7 @@ import tempfile
 
 import pandas as pd
 
-
+from pyxllib.debug.dirlib import Dir
 from pyxllib.debug.pytictoc import TicToc
 from pyxllib.debug.judge import *
 from pyxllib.debug.strlib import natural_sort_key
@@ -130,3 +130,22 @@ def chrome(arg_):
         name = Datetime().strftime('%H%M%S_%f')
         filename = Path(name, '.txt', Path.TEMP).write(arg).fullpath
         viewfiles('chrome.exe', filename)
+
+
+def view_jsons_kv(fd, files='**/*.json', encoding='utf8', max_items=10):
+    """ demo_keyvaluescounter，查看目录下json数据的键值对信息
+    :param fd: 目录
+    :param files: 匹配的文件格式
+    :param encoding: 文件编码
+    :param max_items: 项目显示上限，有些数据项目太多了，要精简下
+            设为假值则不设上限
+    :return:
+    """
+    kvc = KeyValuesCounter()
+    d = Dir(fd)
+    for p in d.select(files).filepaths:
+        data = p.read(encoding=encoding, mode='.json')
+        kvc.add(data)
+    p = Path(r'demo_keyvaluescounter.html', root=Path.TEMP)
+    p.write(kvc.to_html_table(max_items=max_items), if_exists='replace')
+    chrome(p.fullpath)
