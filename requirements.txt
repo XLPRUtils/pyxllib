@@ -20,18 +20,6 @@ openpyxl
 premailer
 # sql
 bidict
-sqlalchemy
-mysqlclient
-# text
-pyspellchecker
-# autogui
-pyautogui
-keyboard
-# other
-oss2
-gitpython
-baidu-aip
-gitpython
 
 # basic component of pyxllib.image
 # pdf

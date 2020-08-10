@@ -36,7 +36,6 @@ setup(
     license='Apache License 2.0',
     classifiers=[
         "Programming Language :: Python :: 3",
-        "License :: OSI Approved :: Apache License 2.0",
         "Operating System :: OS Independent",  # 大部分功能都是跨平台的
     ],
     python_requires='>=3.6',  # 我的项目大量使用f字符串
