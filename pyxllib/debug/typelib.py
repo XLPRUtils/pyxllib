@@ -9,7 +9,8 @@ from collections import defaultdict, Counter
 
 import pandas as pd
 
-from pyxllib.debug.strlib import natural_sort_key, typename
+from pyxllib.debug.dprint import dprint
+from pyxllib.debug.strlib import natural_sort_key, typename, shorten
 
 
 def dict2list(d: dict, *, nsort=False):
@@ -103,11 +104,11 @@ class NestedDict:
                 d = dict()
                 for k, v in data.items():
                     if cls.has_subdict(v):
-                        v = cls.to_html_table(v)
+                        v = cls.to_html_table(v, max_items=max_items)
                     d[k] = v
             res = tohtml(d)
         else:
-            li = [cls.to_html_table(x) for x in data]
+            li = [cls.to_html_table(x, max_items=max_items) for x in data]
             res = tohtml(li)
 
         return res.replace('\n', ' ')
@@ -122,7 +123,10 @@ class KeyValuesCounter:
     def __init__(self):
         self.kvs = defaultdict(Counter)
 
-    def add(self, data):
+    def add(self, data, max_value_length=100):
+        """
+        :param max_value_length: 添加的值，进行截断，防止有些值太长
+        """
         if not NestedDict.has_subdict(data):
             return
         elif isinstance(data, dict):
@@ -130,7 +134,7 @@ class KeyValuesCounter:
                 if NestedDict.has_subdict(v):
                     self.add(v)
                 else:
-                    self.kvs[k][str(v)] += 1
+                    self.kvs[k][shorten(str(v), max_value_length)] += 1
         else:  # 否则 data 应该是个可迭代对象，才可能含有dict
             for x in data:
                 self.add(x)

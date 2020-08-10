@@ -558,7 +558,7 @@ class Path:
     def read(self, *, encoding=None, mode=None):
         """
         :param encoding: 文件编码
-        :param mode: 读取模式，默认从扩展名识别，也可以强制指定
+        :param mode: 读取模式（例如 '.json'），默认从扩展名识别，也可以强制指定
         :return:
         """
         if self.is_file():  # 如果存在这样的文件，那就读取文件内容
@@ -587,27 +587,31 @@ class Path:
         else:  # 非文件对象
             raise FileNotFoundError('文件不存在，无法读取。')
 
-    def write(self, ob, *, encoding='utf8', if_exists='error', etag=False):
+    def write(self, ob, *, encoding='utf8', if_exists='error', etag=False, mode=None):
         """
         :param ob: 写入的内容
             如果要写txt文本文件且ob不是文本对象，只会进行简单的字符串化
         :param encoding: 强制写入的编码
         :param if_exists: 如果文件已存在，要进行的操作
         :param etag: 创建的文件，是否需要再进一步重命名为etag名称
+        :param mode: 写入模式（例如 '.json'），默认从扩展名识别，也可以强制指定
         :return: 返回写入的文件名，这个主要是在写临时文件时有用
         """
 
         # 1 核心写入功能
         def data2file(ob, path):
             """将ob写入文件path，如果path已存在，也会被直接覆盖"""
+            nonlocal mode
             path.ensure_dir(pathtype='file')
             name, suffix = path.fullpath, path.suffix
-            if suffix == '.pkl':
+            if not mode: mode = suffix
+            mode = mode.lower()
+            if mode == '.pkl':
                 with open(name, 'wb') as f:
                     pickle.dump(ob, f)
-            elif suffix == '.json':
-                with open(name, 'w') as f:
-                    json.dump(ob, f)
+            elif mode == '.json':
+                with open(name, 'w', encoding=encoding) as f:
+                    json.dump(ob, f, ensure_ascii=False, indent=2)
             elif isinstance(ob, bytes):
                 # print(name)  #  TODO 本少发现个bug：导出平台讲义到本地(r'https://tr.histudy.com/#/dtextbook/202005159c00ce57bdd342c3a879ebb1a2e5ed21', path=r'R:/平台挑题', download_pictures=True)
                 # 老师们从其它网站上抄来的题 可能是 \href{/tr/item/202006038365bfee56b244b2bfbd02e2b25b1500/image_41825807541591152423871.png}{\includegraphics{菁优网：http://www.jyeoo.com}}

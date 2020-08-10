@@ -10,7 +10,13 @@ import subprocess
 
 import pandas as pd
 from bidict import bidict
-import sqlalchemy
+
+try:
+    import sqlalchemy
+except ModuleNotFoundError:
+    subprocess.run(['pip3', 'install', 'sqlalchemy'])
+    subprocess.run(['pip3', 'install', 'mysqlclient'])
+    import sqlalchemy
 
 from pyxllib.debug.pytictoc import TicToc
 from pyxllib.debug.dprint import dformat, dprint

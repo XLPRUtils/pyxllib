@@ -15,17 +15,14 @@ grr，generate regular replace，生成正则替换目标格式
 
 from pyxllib.util.mathlib import *
 
-
 import base64
 import bisect
 import itertools
-
 
 ____section_0_import = """
 try ... except不影响效率的
 主要是导入特殊包，好像是比较耗费时间，这里要占用掉0.1秒多时间
 """
-
 
 # 这个需要C++14编译器 https://download.microsoft.com/download/5/f/7/5f7acaeb-8363-451f-9425-68a90f98b238/visualcppbuildtools_full.exe
 # 在需要的时候安装，防止只是想用pyxllib很简单的功能，但是在pip install阶段处理过于麻烦
@@ -38,9 +35,11 @@ except ModuleNotFoundError:
 
 # import textract     # ensure_content读取word文档需要
 
-# 拼写检查库，即词汇库
-from spellchecker import SpellChecker
-
+try:  # 拼写检查库，即词汇库
+    from spellchecker import SpellChecker
+except ModuleNotFoundError:
+    subprocess.run(['pip3', 'install', 'pyspellchecker'])
+    from spellchecker import SpellChecker
 
 ____section_1_text = """
 一些文本处理函数和类
@@ -49,6 +48,7 @@ ____section_1_text = """
 
 class ContentLine(object):
     """用行数的特性分析一段文本"""
+
     def __init__(self, content):
         """用一段文本初始化"""
         self.content = ensure_content(content)  # 原始文本
@@ -92,13 +92,13 @@ class ContentLine(object):
             return self.in_line(ob.span()[0])
         elif isinstance(ob, int):
             "如果给入一个下标值，如23，计算第23个字符处于原文中第几行"
-            return bisect.bisect_right(self.linepos, ob-1) + 1
+            return bisect.bisect_right(self.linepos, ob - 1) + 1
         elif isinstance(ob, str):
             "输入一段文本，判断该文中有哪些行与该行内容相同"
             res = list()
             for i, line in enumerate(self.lines):
                 if line == ob:
-                    res.append(i+1)
+                    res.append(i + 1)
             return res
         elif isinstance(ob, (list, tuple, collections.Iterable)):
             return list(map(self.in_line, ob))
@@ -116,7 +116,7 @@ class ContentLine(object):
         注意输入的lines起始编号是1
         """
         lines = sorted(set(lines))  # 去重
-        res = map(lambda n: '{:6} {}'.format(n, self.lines[n-1]), lines)
+        res = map(lambda n: '{:6} {}'.format(n, self.lines[n - 1]), lines)
         return '\n'.join(res)
 
     def __str__(self):
@@ -152,7 +152,7 @@ def binary_cut_str(s, fmt='0'):
         if t == 0:
             s = s[:n]
         else:
-            s = s[(len(s)-n):]
+            s = s[(len(s) - n):]
     return s
 
 
@@ -167,7 +167,7 @@ def digits2chinese(n):
     elif n < 20:
         return '十' + s[n % 10]
     elif n < 100:
-        return s[n//10] + s[n % 10]
+        return s[n // 10] + s[n % 10]
     else:
         raise NotImplementedError
 
@@ -176,6 +176,7 @@ def chinese2digits(chinese_str):
     """把汉字变为阿拉伯数字
     https://blog.csdn.net/leon_wzm/article/details/78963082
     """
+
     def inner(m):
         t = m.group()
         if t is None or t.strip() == '':
@@ -206,6 +207,7 @@ def chinese2digits(chinese_str):
             else:  # 不是单位数词的数词，如果上一步是单位数词，增加一个单位量
                 total += r * val
         return str(total)
+
     return re.sub(r'[零一二两三四五六七八九十百千万亿]+', inner, chinese_str)
 
 
@@ -242,7 +244,7 @@ def roman2digits(d):
 def digits2circlednumber(d):
     d = int(d)
     if 0 < d <= 20:
-        return '①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮⑯⑰⑱⑲⑳'[d-1]
+        return '①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮⑯⑰⑱⑲⑳'[d - 1]
     else:
         raise NotImplemented
 
@@ -415,11 +417,12 @@ class MatchSimString:
     如果append_candidate有传递2个扩展信息参数，可以索引获取：
     mss.ext_value[idx]
     """
+
     def __init__(self, method=briefstr):
         self.preproc = method
         self.origin_str = list()  # 原始字符串内容
-        self.key_str = list()     # 对原始字符串进行处理后的字符
-        self.ext_value = list()   # 扩展存储一些信息
+        self.key_str = list()  # 对原始字符串进行处理后的字符
+        self.ext_value = list()  # 扩展存储一些信息
 
     def __getitem__(self, item):
         return self.origin_str[item]
@@ -469,7 +472,7 @@ class MatchSimString:
         # 2 排序、节选结果
         res = sorted(res, key=lambda x: -x[2])
         if 0 < count < 1:
-            n = max(1, int(n*count))
+            n = max(1, int(n * count))
         elif isinstance(count, int) and count > 0:
             n = min(count, n)
         res = res[:n]
@@ -599,10 +602,14 @@ def grp_bracket(depth=0, left='{', right=None):
     # 用a, b简化引用名称
     a, b = left, right
     if b is None:
-        if a == '(': b = ')'
-        elif a == '[': b = ']'
-        elif a == '{': b = '}'
-        else: raise NotImplementedError
+        if a == '(':
+            b = ')'
+        elif a == '[':
+            b = ']'
+        elif a == '{':
+            b = '}'
+        else:
+            raise NotImplementedError
     # 特殊符号需要转义
     if a in '([':
         a = '\\' + a
@@ -650,7 +657,7 @@ def grp_figure(cnt_groups=0, parpic=False):
     if cnt_groups == 0:  # 不分组
         s = r'\\(?:includegraphics|figt|figc|figr|fig).*?' + grp_bracket(3)  # 注意第1组fig要放最后面
     elif cnt_groups == 1:  # 只分1组，那么只对图片括号内的内容分组
-            s = r'\\(?:includegraphics|figt|figc|figr|fig).*?' + BRACE3
+        s = r'\\(?:includegraphics|figt|figc|figr|fig).*?' + BRACE3
     elif cnt_groups == 2:  # 只分2组，那么只对插图命令和图片分组
         s = r'\\(includegraphics|figt|figc|figr|fig).*?' + BRACE3
     elif cnt_groups == 3:
@@ -689,7 +696,7 @@ def regularcheck(pattern, string, flags=0):
     cl = ContentLine(string)
     for i, m in enumerate(re.finditer(pattern, string, flags)):
         ss = map(lambda x: textwrap.shorten(x, 200), m.groups())
-        arr.append([i+1, cl.in_line(m.start(0)), *ss])
+        arr.append([i + 1, cl.in_line(m.start(0)), *ss])
     tablehead = ['行号'] + list(map(lambda x: f'第{x}组', range(len_in_dim2(arr) - 2)))
     df = pd.DataFrame.from_records(arr, columns=tablehead)
     res = f'正则模式：{pattern}，匹配结果：\n' + dataframe_str(df)
@@ -712,6 +719,7 @@ class StrIdxBack:
     >>> ob.search('ab')  # 找出原字符串中内容：'ax xb'
     'ax xb'
     """
+
     def __init__(self, s):
         self.oristr = s
         self.idx = tuple(range(len(s)))  # 存储还保留着内容的下标
@@ -735,6 +743,7 @@ class StrIdxBack:
             idxs.append(self.idx[k:m.start(0)])
             k = m.end(0)
             return ''
+
         self.keystr = re.sub(pattern, repl, self.keystr, flags=flags)
         idxs.append(self.idx[k:])
         self.idx = tuple(itertools.chain(*idxs))
@@ -781,7 +790,7 @@ class StrIdxBack:
         """输入一个keystr匹配的match对象，将其映射回oristr的match对象"""
         regs = []
         for rs in getattr(m, 'regs'):
-            regs.append((self.idx[rs[0]], self.idx[rs[1]-1]+1))  # 注意右边界的处理有细节
+            regs.append((self.idx[rs[0]], self.idx[rs[1] - 1] + 1))  # 注意右边界的处理有细节
         return ReMatch(regs, self.oristr, m.pos, len(self.oristr), m.lastindex, m.lastgroup, m.re)
 
     def search(self, pattern):
@@ -1003,8 +1012,8 @@ class MySpellChecker(SpellChecker):
         # 2 df对self.word_frequency._dictionary、self.check的影响
         d = self.word_frequency._dictionary
         for index, row in df.iterrows():
-            old, new, count = row['old'].decode(), row['new'].decode(), row['count']*weight_times
-            d[old] += count if old==new else -count
+            old, new, count = row['old'].decode(), row['new'].decode(), row['count'] * weight_times
+            d[old] += count if old == new else -count
             # if row['id']==300: dprint(old, new, count)
             self.checkdict[old][new] += count
 
@@ -1170,7 +1179,7 @@ def demo_spellchecker():
     d.add('ckz')  # 可以添加ckz词汇的一次词频
     d.load_words(['ckz', 'ckz', 'lyb'])  # 可以批量添加词汇
     dprint(d['ckz'], d['lyb'])  # d['ckz']=3  d['lyb']=1
-    d.load_words(['ckz']*100 + ['lyb']*500)  # 可以用这种技巧进行大权重的添加
+    d.load_words(['ckz'] * 100 + ['lyb'] * 500)  # 可以用这种技巧进行大权重的添加
     dprint(d['ckz'], d['lyb'])  # d['ckz']=103  d['lyb']=501
 
     # 同理，去除也有remove和remove_words两种方法

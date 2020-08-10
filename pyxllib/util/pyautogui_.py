@@ -7,10 +7,21 @@
 
 import os
 import re
+import subprocess
 import time
 
-import pyautogui
-import keyboard
+try:
+    import pyautogui
+except ModuleNotFoundError:
+    subprocess.run(['pip3', 'install', 'pyautogui'])
+    import pyautogui
+
+try:
+    import keyboard
+except ModuleNotFoundError:
+    subprocess.run(['pip3', 'install', 'keyboard'])
+    import keyboard
+
 import pyscreeze
 
 from pyxllib.debug.qiniu_ import get_etag

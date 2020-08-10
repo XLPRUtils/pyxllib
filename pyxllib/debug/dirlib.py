@@ -257,9 +257,9 @@ def filesmatch(patter, *, root=os.curdir,
 
     # 1 普通文本匹配  （没有通配符，单文件查找）
     if isinstance(patter, str) and glob_chars_pos == -1:
-        path = Path(os.path.join(root, patter))
+        path = Path(patter, root=root)
         if path.exists():  # 文件存在
-            p = str(Path(patter).resolve())
+            p = str(Path(patter, root=root).resolve())
             if p.startswith(root): p = p[len(root) + 1:]
             res = [p]
         else:  # 文件不存在
