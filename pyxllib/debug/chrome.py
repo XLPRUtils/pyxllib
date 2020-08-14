@@ -6,24 +6,9 @@
 
 
 import html
-import inspect
-import os
 import subprocess
-import sys
-import tempfile
 
-
-import pandas as pd
-
-from pyxllib.debug.dirlib import Dir
-from pyxllib.debug.pytictoc import TicToc
-from pyxllib.debug.judge import *
-from pyxllib.debug.strlib import natural_sort_key
-from pyxllib.debug.pathlib_ import Path
-from pyxllib.debug.dprint import dprint
-from pyxllib.debug.arrow_ import Datetime
-
-from pyxllib.debug.typelib import *
+from .typelib import *
 
 
 def getasizeof(*objs, **opts):

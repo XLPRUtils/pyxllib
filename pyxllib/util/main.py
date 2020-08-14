@@ -17,14 +17,15 @@ import shutil
 import sys, json
 import textwrap
 from os.path import getmtime
+from os.path import join as pathjoin
 from collections import OrderedDict, Counter, defaultdict
 
 
 from bs4 import BeautifulSoup
 
 
-from pyxllib.debug.all import *
-from pyxllib.image.imlib import *
+from pyxllib.debug import *
+from pyxllib.image import *
 from pyxllib.util.filelib import *
 
 
@@ -235,7 +236,7 @@ def EnsureContent(ob=None, encoding='utf8'):
         except:
             # 读取失败则返回原内容
             return ob
-    elif isinstance(ob, DataFrame):
+    elif isinstance(ob, pd.DataFrame):
         # 还未开发
         pass
     else:
@@ -563,7 +564,7 @@ def 文件重命名(源目录, 自定义正则规则, 新正则名称, *, 目标
 #             出现次数.append(len(lines))
 #             行号.append(str(lines))
 #
-#     pf = DataFrame({'文件名': 文件名, '出现次数': 出现次数, '行号': 行号}, columns=['文件名', '出现次数', '行号'])
+#     pf = pd.DataFrame({'文件名': 文件名, '出现次数': 出现次数, '行号': 行号}, columns=['文件名', '出现次数', '行号'])
 #     pf.sort_values(by=['出现次数'], ascending=False, inplace=True)
 #     PrintFullTable(pf, 最后一列左对齐=True)
 #     return pf
@@ -618,7 +619,7 @@ def 目录下统计单词出现频数(目录, 文件名筛选, 目标文本=r'(\
     # ls = re.findall(r'(\\?[a-zA-Z]+)(?![a-zA-Z])', s)  # tex和普通单词综合性搜索
     ls = re.findall(目标文本, s)
     d = OrderedDict(sorted(Counter(ls).items(), key=lambda t: -t[1]))
-    pf = DataFrame({'关键字': list(d.keys()), '出现次数': list(d.values())}, columns=['关键字', '出现次数'])
+    pf = pd.DataFrame({'关键字': list(d.keys()), '出现次数': list(d.values())}, columns=['关键字', '出现次数'])
     PrintFullTable(pf)
     return pf
 

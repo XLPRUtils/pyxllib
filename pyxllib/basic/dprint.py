@@ -172,7 +172,7 @@ def dprint(*args, **kwargs):
 def demo_dprint():
     """这里演示dprint常用功能
     """
-    from pyxllib.debug.pytictoc import TicToc
+    from .pytictoc import TicToc
 
     # 1 查看程序是否运行到某个位置
     dprint()

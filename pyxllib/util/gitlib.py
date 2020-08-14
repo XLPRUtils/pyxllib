@@ -222,7 +222,7 @@ class Git:
         if sha:
             s = self.g.show(f'{sha}:{file}')
         else:
-            s = ensure_content(pathjoin(self.g.working_dir, file))
+            s = ensure_content(os.path.join(self.g.working_dir, file))
         return s
 
     def bcompare(self, file, sha1=0, sha2=None):

@@ -16,7 +16,6 @@ __version__      = '1.4.0'
 __version_date__ = '29 April 2017'
 """
 
-
 import time
 import timeit
 

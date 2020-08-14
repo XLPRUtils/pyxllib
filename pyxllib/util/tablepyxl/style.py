@@ -14,8 +14,6 @@ tablepyxl.style的代码
 
 
 from lxml import html
-import subprocess
-
 
 from openpyxl.cell import cell
 from openpyxl.styles import Font, Alignment, PatternFill, NamedStyle, Border, Side, Color

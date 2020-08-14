@@ -6,11 +6,143 @@
 
 
 from collections import defaultdict, Counter
+import textwrap
 
 import pandas as pd
 
-from pyxllib.debug.dprint import dprint
-from pyxllib.debug.strlib import natural_sort_key, typename, shorten
+from pyxllib.basic import *
+
+
+def east_asian_len(s, ambiguous_width=None):
+    import pandas.io.formats.format as fmt
+    return fmt.EastAsianTextAdjustment().len(s)
+
+
+def east_asian_shorten(s, width=50, placeholder='...'):
+    """考虑中文情况下的域宽截断
+
+    :param s: 要处理的字符串
+    :param width: 宽度上限，仅能达到width-1的宽度
+    :param placeholder: 如果做了截断，末尾补足字符
+
+    # width比placeholder还小
+    >>> east_asian_shorten('a', 2)
+    'a'
+    >>> east_asian_shorten('a啊b'*4, 3)
+    '..'
+    >>> east_asian_shorten('a啊b'*4, 4)
+    '...'
+
+    >>> east_asian_shorten('a啊b'*4, 5, '...')
+    'a...'
+    >>> east_asian_shorten('a啊b'*4, 11)
+    'a啊ba啊...'
+    >>> east_asian_shorten('a啊b'*4, 16, '...')
+    'a啊ba啊ba啊b...'
+    >>> east_asian_shorten('a啊b'*4, 18, '...')
+    'a啊ba啊ba啊ba啊b'
+    """
+    # 一、如果字符串本身不到width设限，返回原值
+    s = textwrap.shorten(s, width * 3, placeholder='')  # 用textwrap的折行功能，尽量不删除文本
+    n = east_asian_len(s)
+    if n < width: return s
+
+    # 二、如果输入的width比placeholder还短
+    width -= 1
+    m = east_asian_len(placeholder)
+    if width <= m:
+        return placeholder[:width]
+
+    # 三、需要添加 placeholder
+    # 1 计算长度
+    width -= m
+
+    # 2 截取s
+    try:
+        s = s.encode('gbk')[:width].decode('gbk', errors='ignore')
+    except UnicodeEncodeError:
+        i, count = 0, m
+        while i < n and count <= width:
+            if ord(s[i]) > 127:
+                count += 2
+            else:
+                count += 1
+            i += 1
+        s = s[:i]
+
+    return s + placeholder
+
+
+def dataframe_str(df, *args, ambiguous_as_wide=None, shorten=True):
+    """输出DataFrame
+    DataFrame可以直接输出的，这里是增加了对中文字符的对齐效果支持
+
+    :param df: DataFrame数据结构
+    :param args: option_context格式控制
+    :param ambiguous_as_wide: 是否对①②③这种域宽有歧义的设为宽字符
+        win32平台上和linux上①域宽不同，默认win32是域宽2，linux是域宽1
+    :param shorten: 是否对每个元素提前进行字符串化并控制长度在display.max_colwidth以内
+        因为pandas的字符串截取遇到中文是有问题的，可以用我自定义的函数先做截取
+        默认开启，不过这步比较消耗时间
+
+    >> df = pd.DataFrame({'哈哈': ['a'*100, '哈\n①'*10, 'a哈'*100]})
+                                                        哈哈
+        0  aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa...
+        1   哈 ①哈 ①哈 ①哈 ①哈 ①哈 ①哈 ①哈 ①哈 ①...
+        2  a哈a哈a哈a哈a哈a哈a哈a哈a哈a哈a哈a哈a哈a哈a哈a...
+    """
+    import pandas as pd
+
+    if ambiguous_as_wide is None:
+        ambiguous_as_wide = sys.platform == 'win32'
+    with pd.option_context('display.unicode.east_asian_width', True,  # 中文输出必备选项，用来控制正确的域宽
+                           'display.unicode.ambiguous_as_wide', ambiguous_as_wide,
+                           'max_columns', 20,  # 最大列数设置到20列
+                           'display.width', 200,  # 最大宽度设置到200
+                           *args):
+        if shorten:  # applymap可以对所有的元素进行映射处理，并返回一个新的df
+            df = df.applymap(lambda x: east_asian_shorten(str(x), pd.options.display.max_colwidth))
+        s = str(df)
+    return s
+
+
+def prettifystr(s):
+    """对一个对象用更友好的方式字符串化
+
+    :param s: 输入类型不做限制，会将其以友好的形式格式化
+    :return: 格式化后的字符串
+    """
+    title = ''
+    if isinstance(s, str):
+        pass
+    elif isinstance(s, collections.Counter):  # Counter要按照出现频率显示
+        li = s.most_common()
+        title = f'collections.Counter长度：{len(s)}\n'
+        # 不使用复杂的pd库，先简单用pprint即可
+        # df = pd.DataFrame.from_records(s, columns=['value', 'count'])
+        # s = dataframe_str(df)
+        s = pprint.pformat(li)
+    elif isinstance(s, (list, tuple)):
+        title = f'{typename(s)}长度：{len(s)}\n'
+        s = pprint.pformat(s)
+    elif isinstance(s, (dict, set)):
+        title = f'{typename(s)}长度：{len(s)}\n'
+        s = pprint.pformat(s)
+    else:  # 其他的采用默认的pformat
+        s = pprint.pformat(s)
+    return title + s
+
+
+class PrettifyStrDecorator:
+    """将函数的返回值字符串化（调用 prettifystr 美化）"""
+
+    def __init__(self, func):
+        self.func = func  # 使用self.func可以索引回原始函数名称
+        self.last_raw_res = None  # last raw result，上一次执行函数的原始结果
+
+    def __call__(self, *args, **kwargs):
+        self.last_raw_res = self.func(*args, **kwargs)
+        return prettifystr(self.last_raw_res)
 
 
 def dict2list(d: dict, *, nsort=False):
@@ -41,7 +173,7 @@ def list2df(li):
     if li and isinstance(li[0], (list, tuple)):  # 有两维时按表格显示
         df = pd.DataFrame.from_records(li)
     else:  # 只有一维时按一列显示
-        df = pd.DataFrame(pd.Series(li), columns=(typename(li), ))
+        df = pd.DataFrame(pd.Series(li), columns=(typename(li),))
     return df
 
 
@@ -63,6 +195,7 @@ class NestedDict:
 
     TODO 感觉跟 pprint 的嵌套识别美化输出相关，可能有些代码是可以结合简化的~~
     """
+
     @classmethod
     def has_subdict(cls, data, include_self=True):
         """是否含有dict子结构
@@ -84,12 +217,13 @@ class NestedDict:
             设为假值则不设上限
         :return:
         """
+
         def tohtml(d):
             if max_items:
                 df = try2df(d)
                 if len(df) > max_items:
                     n = len(df)
-                    return df[:max_items].to_html(escape=False) + f'... {n-1}'
+                    return df[:max_items].to_html(escape=False) + f'... {n - 1}'
                 else:
                     return df.to_html(escape=False)
             else:
@@ -120,6 +254,7 @@ class KeyValuesCounter:
 
     应用场景：对未知的json结构，批量读取后，显示所有键值对的出现情况
     """
+
     def __init__(self):
         self.kvs = defaultdict(Counter)
 

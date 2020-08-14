@@ -17,8 +17,8 @@ except ModuleNotFoundError:
     subprocess.run(['pip3', 'install', 'baidu-aip'])
     import aip
 
-from pyxllib.debug.pathlib_ import Path
-from pyxllib.image.imlib import get_img_content
+from pyxllib.basic import Path
+from pyxllib.image import get_img_content
 
 
 def create_account_df(file='aipocraccount.pkl'):

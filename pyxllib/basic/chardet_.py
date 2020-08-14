@@ -5,8 +5,10 @@
 # @Data   : 2020/05/30 21:32
 
 
-from pyxllib.debug.dprint import dprint
-from pyxllib.debug.judge import is_file
+import chardet
+
+from .dprint import dprint
+from .judge import is_file
 
 
 def get_encoding(bstr):

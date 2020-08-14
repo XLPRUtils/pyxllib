@@ -7,24 +7,20 @@
 
 import enum
 import html
-import inspect
-import logging
 import subprocess
-import sys
 
 import pandas as pd
 from bs4 import BeautifulSoup
 
-
-from pyxllib.debug.strlib import ensure_gbk, typename, dataframe_str
-from pyxllib.debug.pathlib_ import Path
-from pyxllib.debug.dprint import func_input_message, dprint
-from pyxllib.debug.chrome import getasizeof
+from pyxllib.basic import *
+from .typelib import dataframe_str
+from .chrome import getasizeof
 
 
 def getmembers(object, predicate=None):
     """自己重写改动的 inspect.getmembers"""
-    from inspect import isclass, getmro, types
+    from inspect import isclass, getmro
+    import types
 
     if isclass(object):
         mro = (object,) + getmro(object)
@@ -149,7 +145,7 @@ def showdir(c, *, to_html=None, printf=True):
     # 4 使用chrome.exe浏览或输出到控制台
     #   这里底层可以封装一个chrome函数来调用，但是这个chrome需要依赖太多功能，故这里暂时手动简单调用
     if to_html:
-        filename = Path(object_name, suffix='.html', root=Path.TEMP).\
+        filename = Path(object_name, suffix='.html', root=Path.TEMP). \
             write(ensure_gbk(res), if_exists='replace').fullpath
         try:
             subprocess.run(['chrome.exe', filename])

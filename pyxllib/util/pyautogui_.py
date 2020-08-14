@@ -24,9 +24,7 @@ except ModuleNotFoundError:
 
 import pyscreeze
 
-from pyxllib.debug.qiniu_ import get_etag
-from pyxllib.debug.pathlib_ import Path
-from pyxllib.debug.dprint import dprint
+from pyxllib.basic import get_etag, Path, dprint
 
 
 class AutoGui:
@@ -34,6 +32,7 @@ class AutoGui:
 
     每帧处理要0.15秒左右，仅适用于一般的办公、回合制手游，不适合fps类游戏外挂
     """
+
     def __init__(self, figspath, grayscale=False, confidence=0.999):
         """
         :param figspath: 图片素材所在目录
@@ -99,6 +98,7 @@ class PosTran:
     应用场景： 原来在A窗口下的点p和区域r，
         在窗口位置、大小改成B后，p和r的坐标
     """
+
     def __init__(self, w1, w2):
         """
         :param w1: 原窗口位置 (x, y, w, h)
@@ -178,7 +178,7 @@ def lookup_mouse_position():
         elif k == 'alt':
             # 定位区域的右下角点，并输出区域
             p = pyautogui.position()
-            print('区域(x y w h)：', left_top_point.x, left_top_point.y, p.x-left_top_point.x, p.y-left_top_point.y)
+            print('区域(x y w h)：', left_top_point.x, left_top_point.y, p.x - left_top_point.x, p.y - left_top_point.y)
         elif k == 'esc':
             break
         # keyboard的监控太快了，需要暂停一下
@@ -209,7 +209,7 @@ def lookup_mouse_position2(w1, w2, reverse=False):
         elif k == 'alt':
             # 定位区域的右下角点，并输出区域
             p = pyautogui.position()
-            r1 = [left_top_point.x, left_top_point.y, p.x-left_top_point.x, p.y-left_top_point.y]
+            r1 = [left_top_point.x, left_top_point.y, p.x - left_top_point.x, p.y - left_top_point.y]
             r2 = postran.w2region(r1)
             if reverse: r1, r2 = r2, r1
             print('区域(x y w h)：', *r1, '-->', *r2)

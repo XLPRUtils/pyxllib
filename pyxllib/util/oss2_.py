@@ -9,7 +9,7 @@ oss2 · PyPI: https://pypi.org/project/oss2/
 """
 
 import subprocess
-from pyxllib.debug.pathlib_ import Path
+from pyxllib.basic import Path
 
 try:
     import oss2

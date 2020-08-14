@@ -7,26 +7,19 @@
 
 from collections import defaultdict
 import concurrent.futures
-import io
-import os
 import subprocess
-import re
 
 import requests
-import PIL
 from PIL import Image
 
-from get_image_size import get_image_size
-
-from pyxllib.debug.dprint import dprint
-from pyxllib.debug.pathlib_ import Path
+from pyxllib.basic import *
 
 
 def get_img_content(in_):
     """获取in_代表的图片的二进制数据
     :param in_: 可以是本地文件，也可以是图片url地址，也可以是Image对象
     """
-    from pyxllib.debug.judge import is_url, is_file
+    from pyxllib.basic import is_url, is_file
 
     # 1 取不同来源的数据
     if is_url(in_):

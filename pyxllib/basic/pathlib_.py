@@ -14,37 +14,16 @@ import shutil
 import subprocess
 import tempfile
 
-
-from pyxllib.debug.arrow_ import Datetime
-from pyxllib.debug.chardet_ import get_encoding
+from .arrow_ import Datetime
+from .chardet_ import get_encoding
 
 
 class Path:
     r"""通用文件、路径处理类，也可以处理目录，可以把目录对象理解为特殊类型的文件
+    document: https://www.yuque.com/code4101/python/pyxllib.debug.path
+
     大部分基础功能是从pathlib.Path衍生过来的
         但开发中该类不能直接从Path继承，会有很多问题
-
-    1、Path参考自pathlib.Path，很多接口也是直接引用过来的。
-    2、标准库的pathlib.Path已经带有大部分路径处理功能了，我主要是做了各种属性获取：
-        size大小，mtime最近修改时间等等。
-    3、以及文件方面操作的功能扩展：
-        copy复制，move移动，rename重命名，delete删除，backup备份等等
-    4、目录可以理解成是一个特殊的文件，Path类也支持对目录的处理。
-        这也是我没把这个类叫做File的原因，叫File并不准确，其实该类涵盖了各种路径、文件、目录处理的功能。
-
-    Path的初始化是非常特别的，除了一般要给第一个核心参数path，
-        还有suffix和root两个参数，可以非常灵活地去指明自己想要哪个文件。
-        其底层是abspath函数，里面有各种示例。copy和move等也是非常智能地去判断你所指定的目标位置的，
-        能避免很多繁琐、误操作。
-    因为pathlib.Path的扩展名叫suffix而不是ext，所以我把writefile的扩展名接口也改成suffix，代码的命名要上下文统一。
-    Path.rename有一段比较综合的演示代码
-        例如其中的rename，
-            你如果用os.rename功能，表明A.tXt，它默认放置的是当前工作目录，而并不是a.txt原来所在的f目录。
-            但我们重命名、移动、复制等一般是相对于原来所在的父目录操作的而并不是当前工作目录。
-            而且，os.rename是不支持跨磁盘操作的，我的rename则本质上是调用了move的实现，
-            rename可以理解成是move的一种特例，所以我的rename不仅能自动创建事先不存在的目录层级，还能跨磁盘操作。
-
-    后续会基于Path，扩展多文件操作类Folder，图片ImageFile、EpsFile等类，集成更多功能。
 
     TODO 这里的doctest过于针对自己的电脑了，应该改成更具适用性测试代码
     """
@@ -135,8 +114,10 @@ class Path:
         'C:/a.txt\\'
         """
         # 1 判断参考目录
-        if root: root = str(root)
-        else: root = os.getcwd()
+        if root:
+            root = str(root)
+        else:
+            root = os.getcwd()
 
         # 2 判断主体文件名 path
         if str(path) == '':
@@ -398,16 +379,6 @@ class Path:
         'D:/aabbccdd.txt'
         >>> f.abs_dstpath('D:/aabbccdd.txt/')  # 并不存在aabbccdd.txt这样的对象，但末尾有个/表明这是个目录
         'D:/aabbccdd.txt/cmd.exe'
-
-        不同转换类型，dst的具体路径计算方式不同
-        f文件，d目录，v未知（不存在）
-        ff: 文件到文件，不用处理
-        fd: 文件到目录，精细到具体文件存放位置
-        fv: 文件到未知，看末尾是否有'/'或'\\'提示，否则默认ff
-        vx: 未知来源类型，按fx处理
-        df: 目录到文件，报错
-        dd: 目录到目录，精细到具体目录存放位置
-        dv: 目录到未知，按dd处理
         """
         dst0 = str(dst)
         if not root: root = self.dirname
@@ -625,7 +596,7 @@ class Path:
         # 2 推导出目标文件的完整名，并判断是否存在，进行不同处理
         self.process(self, data2file, if_exists, arg1=ob, arg2=self)
         if etag:
-            from pyxllib.debug.qiniu_ import get_etag
+            from .qiniu_ import get_etag
             return self.rename(get_etag(self.fullpath) + self.suffix, if_exists='ignore')
         else:
             return self
