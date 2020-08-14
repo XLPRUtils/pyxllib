@@ -34,3 +34,6 @@ from .chardet_ import *
 from .qiniu_ import *
 from .pathlib_ import Path
 from .dirlib import *
+
+# 5 其他工具
+from .jsondata import *
