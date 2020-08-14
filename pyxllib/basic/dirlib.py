@@ -10,11 +10,9 @@ import os
 import re
 import shutil
 
-
-from pyxllib.debug.arrow_ import Datetime
-from pyxllib.debug.strlib import strfind, natural_sort
-from pyxllib.debug.pathlib_ import Path
-
+from .arrow_ import Datetime
+from .strlib import strfind, natural_sort
+from .pathlib_ import Path
 
 ____file = """
 路径、文件、目录相关操作功能

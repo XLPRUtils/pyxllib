@@ -6,12 +6,8 @@
 
 
 import re
-import subprocess
-
 
 import requests
-
-
 import qiniu
 
 
@@ -20,7 +16,7 @@ def get_etag(arg):
     :param arg: 支持bytes二进制、文件、url地址
     """
     from io import BytesIO
-    from pyxllib.debug.judge import is_url, is_file
+    from .judge import is_url, is_file
 
     if isinstance(arg, bytes):  # 二进制数据
         return qiniu.utils.etag_stream(BytesIO(arg))
@@ -50,7 +46,7 @@ def test_etag():
 def test_etag2():
     """ 字符串值和写到文件判断的etag，是一样的
     """
-    from pyxllib.debug.pathlib_ import Path
+    from .pathlib_ import Path
 
     s = 'code4101'
     print(get_etag(s))

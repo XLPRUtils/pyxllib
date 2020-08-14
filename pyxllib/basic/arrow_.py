@@ -236,7 +236,7 @@ class Datetime(arrow.Arrow):
 
 
 def demo_datetime():
-    from pyxllib.debug.dprint import dprint
+    from .dprint import dprint
 
     dprint(Datetime.now())
     # [05]arrow_.py/247: Datetime.now()<__main__.Datetime>=<Datetime [2020-06-01T16:54:45.365788+08:00]>

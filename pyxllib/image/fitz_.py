@@ -7,18 +7,14 @@
 
 import concurrent.futures
 import math
-import pprint
 import subprocess
 import tempfile
 
 import fitz
 
-from pyxllib.debug.pathlib_ import Path
-from pyxllib.image.imlib import zoomsvg, get_image_size
-from pyxllib.debug.dirlib import *
-from pyxllib.debug.dprint import dprint
-from pyxllib.debug.chrome import chrome
-from pyxllib.debug.showdir import showdir
+from pyxllib.basic import *
+from pyxllib.debug import chrome, showdir
+from .imlib import zoomsvg
 
 
 class DemoFitz:

@@ -23,7 +23,7 @@ import sys
 import tempfile
 
 
-from pyxllib.debug.main import *
+from pyxllib.basic import *
 
 
 def demo_system():

@@ -15,8 +15,9 @@
 文档： https://histudy.yuque.com/docs/share/365f3a75-28d0-4595-bc80-5e9d6ab36f71#
 """
 
+import math
 
-from pyxllib.debug.all import *
+from pyxllib.debug import *
 
 
 class Interval:
@@ -28,17 +29,17 @@ class Interval:
         正则里是用regs存储这些区间，所以这里的Interval跟正则Match的regs概念相同
     这里的形式统一为左闭右开
     """
-    __slots__ = ('regs', )
+    __slots__ = ('regs',)
 
     def __init__(self, arg1=None, arg2=None):
         if isinstance(arg1, int) and isinstance(arg2, int):
             # 正常的构建方式
-            self.regs = ((arg1, arg2), )
+            self.regs = ((arg1, arg2),)
         elif getattr(arg1, 'regs', None):
             # 有regs成员变量，则直接取用（一般是re的Match对象传过来转区间类的）
             self.regs = arg1.regs
         elif arg2 is None and arg1 and len(arg1) == 2 and isinstance(arg1[0], int):
-            self.regs = (tuple(arg1), )
+            self.regs = (tuple(arg1),)
         elif arg1:
             # 直接传入区间集
             self.regs = tuple(arg1)
@@ -180,7 +181,7 @@ class Interval:
         [16~20]
         """
         if isinstance(other, int):
-            regs = [(t[0]+other, t[1]+other) for t in self.regs]
+            regs = [(t[0] + other, t[1] + other) for t in self.regs]
             return Interval(regs)
         else:
             return self | other
@@ -212,9 +213,12 @@ class Interval:
             return Interval(a1, a2)
         else:
             c1, c2 = Interval(a1, b1), Interval(b2, a2)
-            if c1 and not c2: return c1
-            elif c2 and not c1: return c2
-            elif not c1 and not c2: return Interval()
+            if c1 and not c2:
+                return c1
+            elif c2 and not c1:
+                return c2
+            elif not c1 and not c2:
+                return Interval()
             else:
                 return Interval(((a1, a2), (c1.start(), c1.end()), (c2.start(), c2.end())))
 
@@ -257,7 +261,7 @@ class ReMatch(Interval):
             self.pos = pos
             self.endpos = endpos
             self.lastindex = lastindex
-            if not self.lastindex and len(self.regs)>1: self.lastindex = len(self.regs)-1
+            if not self.lastindex and len(self.regs) > 1: self.lastindex = len(self.regs) - 1
             self.lastgroup = lastgroup
             self.re = re
         self.update()
@@ -431,6 +435,7 @@ class Intervals:
         def str2func(a):
             # TODO，如果是str类型，应该要处理字符串标记中的编组和转义等信息的
             return (lambda s: a) if isinstance(a, str) else a
+
         repl, out_repl = str2func(repl), str2func(out_repl)
 
         def func1(regs):
@@ -438,7 +443,7 @@ class Intervals:
 
         def func2(start_, end_):
             if out_repl:
-                return out_repl(ReMatch(((start_, end_), ), s, 0, len(s)))
+                return out_repl(ReMatch(((start_, end_),), s, 0, len(s)))
             else:
                 return s[start_:end_]
 
@@ -477,6 +482,7 @@ class Intervals:
 
         def str2func(a):
             return (lambda s: a) if isinstance(a, str) else a
+
         repl, out_repl = str2func(arg1), str2func(out_repl)
         if arg2:
             repl = lambda a: a.replace(arg1, arg2)
@@ -723,6 +729,7 @@ class Intervals:
 
 def iter_intervals(arg):
     """从多种类区间类型来构造Interval对象，返回值可能有多组"""
+
     def judge_range(t):
         return hasattr(t, '__len__') and len(t) == 2 and isinstance(t[0], int) and isinstance(t[1], int)
 
@@ -767,8 +774,10 @@ def highlight_intervals(content, intervals, colors=None, background=True, showma
     d = defaultdict(str)
 
     # 2 其他所有子组从颜色列表取颜色清单，每组一个颜色
-    if colors is None: colors = ('red', )
-    elif isinstance(colors, str): colors = (colors, )
+    if colors is None:
+        colors = ('red',)
+    elif isinstance(colors, str):
+        colors = (colors,)
     n = len(colors)
     for i, arg in enumerate(intervals):
         color = colors[i % n]

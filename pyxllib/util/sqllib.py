@@ -9,7 +9,12 @@ import math
 import subprocess
 
 import pandas as pd
-from bidict import bidict
+
+try:
+    from bidict import bidict
+except ModuleNotFoundError:
+    subprocess.run(['pip3', 'install', 'bidict'])
+    from bidict import bidict
 
 try:
     import sqlalchemy
@@ -18,9 +23,7 @@ except ModuleNotFoundError:
     subprocess.run(['pip3', 'install', 'mysqlclient'])
     import sqlalchemy
 
-from pyxllib.debug.pytictoc import TicToc
-from pyxllib.debug.dprint import dformat, dprint
-from pyxllib.debug.pathlib_ import Path
+from pyxllib.basic import TicToc, dformat, dprint, Path
 
 
 def create_account_df(file='sqllibaccount.pkl'):
@@ -39,6 +42,7 @@ def create_account_df(file='sqllibaccount.pkl'):
 class SqlEngine:
     """mysql 通用基础类
     """
+
     def __init__(self, alias=None, database=None, *,
                  user='root', passwd='123456', host=None, port='3306',
                  connect_timeout=None, account_file_path=None):
@@ -239,6 +243,7 @@ class MultiEnumTable:
     >>> met.encodes('grade', ['小学', '高中', '大学', '初中', '小学'])
     [1, 3, None, 2, 1]
     """
+
     def __init__(self):
         self.enum_tables = dict()
 

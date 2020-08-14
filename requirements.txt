@@ -1,29 +1,4 @@
-# numerical processing
-numpy
-Jinja2
-pandas>=0.23.4
-
-# get resources from web and parse xml
-requests
-qiniu
-beautifulsoup4
-lxml
-
-# basic component of pyxllib.debug
 arrow
 chardet
-Pympler
-
-# basic component of pyxllib.util
-# excel
-openpyxl
-premailer
-# sql
-bidict
-
-# basic component of pyxllib.image
-# pdf
-PyMuPdf
-# image
-pillow
-opsdroid-get-image-size
+requests
+qiniu

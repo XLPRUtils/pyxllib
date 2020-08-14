@@ -11,13 +11,23 @@
 
 import subprocess
 
-import openpyxl
+try:
+    import openpyxl
+except ModuleNotFoundError:
+    subprocess.run(['pip3', 'install', 'openpyxl'])
+    import openpyxl
+
+
+try:
+    import premailer
+except ModuleNotFoundError:
+    subprocess.run(['pip3', 'install', 'premailer'])
+    import premailer
 
 
 from openpyxl.styles import Font
 
-
-from pyxllib.debug.all import *
+from pyxllib.debug import *
 
 
 class Openpyxl:
@@ -111,11 +121,11 @@ class Openpyxl:
             new_cell.alignment = copy(cell.alignment)  # 对齐格式
             # new_cell.style = cell.style
         # if cell.comment:
-            # 这个会引发AttributeError。。。
-            #       vml = fromstring(self.workbook.vba_archive.read(ws.legacy_drawing))
-            #   AttributeError: 'NoneType' object has no attribute 'read'
-            # new_cell.comment = copy(cell.comment)
-            # 就算开了keep_vba可以强制写入了，打开的时候文件可能还是会错
+        # 这个会引发AttributeError。。。
+        #       vml = fromstring(self.workbook.vba_archive.read(ws.legacy_drawing))
+        #   AttributeError: 'NoneType' object has no attribute 'read'
+        # new_cell.comment = copy(cell.comment)
+        # 就算开了keep_vba可以强制写入了，打开的时候文件可能还是会错
 
     @staticmethod
     def copy_cell(cell, new_cell):
@@ -131,7 +141,7 @@ class Openpyxl:
         """
         if cls.celltype(cell):  # 合并单元格
             rng = cls.in_range(cell)
-            return cell.parent.cell(rng.max_row+1, cell.column)
+            return cell.parent.cell(rng.max_row + 1, cell.column)
         else:
             return cell.offset(1, 0)
 
@@ -139,7 +149,7 @@ class Openpyxl:
     def right(cls, cell):
         if cls.celltype(cell):
             rng = cls.in_range(cell)
-            return cell.parent.cell(cell.row, rng.max_row+1)
+            return cell.parent.cell(cell.row, rng.max_row + 1)
         else:
             return cell.offset(0, 1)
 
@@ -147,7 +157,7 @@ class Openpyxl:
     def up(cls, cell):
         if cls.celltype(cell):
             rng = cls.in_range(cell)
-            return cell.parent.cell(rng.min_row-1, cell.column)
+            return cell.parent.cell(rng.min_row - 1, cell.column)
         else:
             return cell.offset(-1, 0)
 
@@ -155,7 +165,7 @@ class Openpyxl:
     def left(cls, cell):
         if cls.celltype(cell):
             rng = cls.in_range(cell)
-            return cell.parent.cell(cell.row, rng.min_row-1)
+            return cell.parent.cell(cell.row, rng.min_row - 1)
         else:
             return cell.offset(0, -1)
 
@@ -219,7 +229,7 @@ def product(*iterables, order=None, repeat=1):
     if len(order) != n: return ValueError(f'orders参数值有问题 {order}')
 
     # 2 生成新的迭代器组
-    new_iterables = [(iterables[i-1] if i > 0 else reversed(iterables[-i-1])) for i in order]
+    new_iterables = [(iterables[i - 1] if i > 0 else reversed(iterables[-i - 1])) for i in order]
     idx = numpy.argsort([abs(i) - 1 for i in order])
     for y in itertools.product(*new_iterables, repeat=repeat):
         yield [y[i] for i in idx]
@@ -333,9 +343,9 @@ class Worksheet(openpyxl.worksheet.worksheet.Worksheet):
             cel = self.findcel(search_name)
             if cel:
                 cels.append(cel)
-                if column_name=='searchkey':
+                if column_name == 'searchkey':
                     names.append(str(search_name))
-                elif column_name=='origin':
+                elif column_name == 'origin':
                     if isinstance(search_name, (list, tuple)) and len(search_name) > 1:
                         names.append('/'.join(list(search_name[:-1]) + [str(cel.value)]))
                     else:
@@ -352,13 +362,13 @@ class Worksheet(openpyxl.worksheet.worksheet.Worksheet):
             if cel:
                 col = cel.column
                 li = []
-                for i in range(start_line, self.max_row+1):
+                for i in range(start_line, self.max_row + 1):
                     v = Openpyxl.mcell(self.cell(i, col)).value  # 注意合并单元格的取值
                     li.append(v)
                 datas[names[k]] = li
             else:
                 # 如果没找到列，设一个空列
-                datas[names[k]] = [None]*(self.max_row + 1 - start_line)
+                datas[names[k]] = [None] * (self.max_row + 1 - start_line)
         df = pd.DataFrame(datas)
 
         # 3 去除所有空行数据
@@ -385,10 +395,10 @@ class Worksheet(openpyxl.worksheet.worksheet.Worksheet):
             return
         min_col, min_row, max_col, max_row = cell_range.bounds
         # 2 注意拷贝顺序跟移动方向是有关系的，要防止被误覆盖，复制了新的值，而非原始值
-        r = sorted(range(min_row, max_row+1), reverse=rows > 0)
-        c = sorted(range(min_col, max_col+1), reverse=cols > 0)
+        r = sorted(range(min_row, max_row + 1), reverse=rows > 0)
+        c = sorted(range(min_col, max_col + 1), reverse=cols > 0)
         for row, column in product(r, c):
-            Openpyxl.copy_cell(self.cell(row, column), self.cell(row + rows, column+cols))
+            Openpyxl.copy_cell(self.cell(row, column), self.cell(row + rows, column + cols))
 
     def reindex_columns(self, orders):
         """ 重新排列表格的列顺序
@@ -400,7 +410,7 @@ class Worksheet(openpyxl.worksheet.worksheet.Worksheet):
         max_row, max_column = self.max_row, self.max_column
         for j, col in enumerate(orders, 1):
             if not col: continue
-            self.copy_range(f'{col}1:{col}{max_row}', cols=max_column+j-column_index_from_string(col))
+            self.copy_range(f'{col}1:{col}{max_row}', cols=max_column + j - column_index_from_string(col))
         self.delete_cols(1, max_column)
 
 
@@ -459,9 +469,11 @@ def demo_openpyxl():
 
     styles = [['Number formats', 'Comma', 'Comma [0]', 'Currency', 'Currency [0]', 'Percent'],
               ['Informative', 'Calculation', 'Total', 'Note', 'Warning Text', 'Explanatory Text'],
-              ['Text styles', 'Title', 'Headline 1', 'Headline 2', 'Headline 3', 'Headline 4', 'Hyperlink', 'Followed Hyperlink', 'Linked Cell'],
+              ['Text styles', 'Title', 'Headline 1', 'Headline 2', 'Headline 3', 'Headline 4', 'Hyperlink',
+               'Followed Hyperlink', 'Linked Cell'],
               ['Comparisons', 'Input', 'Output', 'Check Cell', 'Good', 'Bad', 'Neutral'],
-              ['Highlights', 'Accent1', '20 % - Accent1', '40 % - Accent1', '60 % - Accent1', 'Accent2', 'Accent3', 'Accent4', 'Accent5', 'Accent6', 'Pandas']]
+              ['Highlights', 'Accent1', '20 % - Accent1', '40 % - Accent1', '60 % - Accent1', 'Accent2', 'Accent3',
+               'Accent4', 'Accent5', 'Accent6', 'Pandas']]
     for i, name in enumerate(styles, start=4):
         ws.cell(i, 1, name[0])
         for j, v in enumerate(name[1:], start=2):

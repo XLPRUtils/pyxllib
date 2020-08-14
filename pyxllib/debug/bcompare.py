@@ -5,11 +5,9 @@
 # @Data   : 2020/06/01 18:13
 
 
-from pyxllib.debug.dprint import func_input_message, dprint
-from pyxllib.debug.strlib import natural_sort_key, prettifystr
-from pyxllib.debug.pathlib_ import Path
-from pyxllib.debug.dirlib import refinepath
-from pyxllib.debug.chrome import viewfiles
+from pyxllib.basic import func_input_message, dprint, natural_sort_key, Path, refinepath
+from .typelib import prettifystr
+from .chrome import viewfiles
 
 
 def intersection_split(a, b):

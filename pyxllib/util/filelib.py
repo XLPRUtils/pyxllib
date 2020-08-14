@@ -10,20 +10,14 @@
 这里要强调，推荐os.walk功能
 """
 
-
-from pyxllib.util.xmllib import *
-
-
-# import glob
-from os.path import join as pathjoin
-import filecmp
-import pickle
 import shutil
-import io
+import datetime
 import tempfile
+import requests
 
+from pyxllib.debug import *
+from pyxllib.util.xmllib import *
 import pyxllib.util.zipfile as zipfile  # 重写了标准库的zipfile文件，cp437改为gbk，解决zip中文乱码问题
-
 
 # 需要使用的第三方软件
 # BCompare.exe， bcompare函数要用
@@ -51,6 +45,7 @@ def recreate_folders(*dsts):
 
 class UsedRecords:
     """存储用户的使用记录到一个文件"""
+
     def __init__(self, filename, default_value=None, *, use_temp_root=False, limit_num=30):
         """记录存储文件
         :param filename: 文件路径与名称
