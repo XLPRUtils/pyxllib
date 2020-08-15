@@ -21,6 +21,9 @@ from pyxllib.basic import Path
 from pyxllib.image import get_img_content
 
 
+AIP_OCR_ACCOUNT_FILE = Path(__file__).parent / 'aipocraccount.pkl'
+
+
 def create_account_df(file='aipocraccount.pkl'):
     """请在这里设置您个人的账户密码，并在运行完后，销毁明文信息"""
     df = pd.DataFrame.from_records([
@@ -47,7 +50,7 @@ class AipOcr:
         # 1 账号信息
         if cls.account_df is None:
             if not account_file_path:
-                cls.account_df = (Path(__file__).parent / 'aipocraccount.pkl').read()
+                cls.account_df = Path(AIP_OCR_ACCOUNT_FILE).read()
 
         # 2 初始化client
         if cls.client is None or next_client:
