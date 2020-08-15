@@ -26,6 +26,9 @@ except ModuleNotFoundError:
 from pyxllib.basic import TicToc, dformat, dprint, Path
 
 
+SQL_LIB_ACCOUNT_FILE = Path(__file__).parent / 'sqllibaccount.pkl'
+
+
 def create_account_df(file='sqllibaccount.pkl'):
     """请在这里设置您个人的账户密码，并在运行完后，销毁明文信息"""
     df = pd.DataFrame.from_records([
@@ -72,7 +75,7 @@ class SqlEngine:
         # 1 读取地址、账号信息
         if alias:
             if account_file_path is None:
-                account_file_path = (Path(__file__).parent / 'sqllibaccount.pkl')
+                account_file_path = Path(SQL_LIB_ACCOUNT_FILE)
             # dprint(alias,account_file_path)
             record = Path(account_file_path).read().loc[alias]  # 从文件读取账号信息
             user, passwd, host, port = record.user, record.passwd, record.host, record.port
