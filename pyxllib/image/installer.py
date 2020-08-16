@@ -36,7 +36,7 @@ except ModuleNotFoundError:
     try:
         subprocess.run(['conda', 'install', 'shapely'])
         import shapely
-    except ModuleNotFoundError:
+    except FileNotFoundError:
         # 这个库用pip安装是不够的，正常要用conda，有些dll才会自动配置上
         subprocess.run(['pip', 'install', 'shapely'])
         import shapely
