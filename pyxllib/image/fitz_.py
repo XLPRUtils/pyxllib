@@ -206,7 +206,11 @@ def pdf2imagebase(pdffile, target=None, scale=None, ext='.png'):
     num_pages = pdf.pageCount
 
     # 大于1页的时候，默认新建一个文件夹来存储图片
-    if target is None and num_pages > 1: target = Path(pdffile).stem + '/'
+    if target is None:
+        if num_pages > 1:
+            target = Path(pdffile).stem + '/'
+        else:
+            target = Path(pdffile).dirname + '/'
 
     newfile = Path(pdffile).abs_dstpath(target)
     if newfile.endswith('.pdf'): newfile = os.path.splitext(newfile)[0] + ext

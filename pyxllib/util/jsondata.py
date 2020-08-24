@@ -4,7 +4,7 @@
 # @Email  : 877362867@qq.com
 # @Data   : 2020/08/15 00:59
 
-from .pathlib_ import Path
+from pyxllib.basic import get_encoding, Path
 
 
 def is_labelme_json_data(data):
@@ -15,8 +15,10 @@ def is_labelme_json_data(data):
     return set(data.keys()) == set('version flags shapes imagePath imageData imageHeight imageWidth'.split())
 
 
-def reduce_labelme_jsonfile(jsonpath, encoding='utf8'):
+def reduce_labelme_jsonfile(jsonpath, encoding=None):
     p = Path(jsonpath)
+    if not encoding:
+        encoding = get_encoding(p.fullpath)
     data = p.read(encoding=encoding, mode='.json')
     if is_labelme_json_data(data) and data['imageData']:
         data['imageData'] = None

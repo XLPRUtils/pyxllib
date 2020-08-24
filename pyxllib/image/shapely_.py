@@ -29,6 +29,7 @@ def divide_quadrangle(coords, r1=0.5, r2=None):
     一般用在改标注结果中，把一个框拆成两个框
     TODO 把接口改成切分一个四边形为任意多个四边形？即把r1、r2等整合为一个list参数输入
     """
+
     # 1 计算分割点工具
     def segment_point(pt1, pt2, rate=0.5):
         """ 两点间的分割点
@@ -60,3 +61,21 @@ def rect_bounds(coords, dtype=int):
     p = Polygon(coords2d(coords)).bounds
     x1, y1, x2, y2 = [dtype(v) for v in p]
     return [[x1, y1], [x2, y2]]
+
+
+def rect_bounds1d(coords, dtype=int):
+    """ 多边形的最大外接矩形
+    :param coords: 任意多边形的一维值[x1, y1, x2, y2, ...]，或者二维结构[(x1, y1), (x2, y2), ...]
+    :param dtype: 默认存储的数值类型
+    :return: rect的两个点坐标
+    """
+    p = Polygon(coords2d(coords)).bounds
+    x1, y1, x2, y2 = [dtype(v) for v in p]
+    return [x1, y1, x2, y2]
+
+
+def rect2polygon(x1, y1, x2, y2):
+    """
+    TODO 这个可能要用类似多进制的方式，做多种格式间的来回转换
+    """
+    return [[x1, y1], [x2, y1], [x2, y2], [x1, y2]]

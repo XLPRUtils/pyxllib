@@ -362,7 +362,7 @@ def _files_copy_move_base(src, dst, filefunc, dirfunc,
             if treeroot[-1] not in ('/', '\\'):
                 treeroot += '/'
         n = len(treeroot) if treeroot else 0
-        treeroot = treeroot.replace('\\', '/')
+        if treeroot: treeroot = treeroot.replace('\\', '/')
 
         # 迭代操作
         for f in files:

@@ -20,9 +20,7 @@ from os.path import getmtime
 from os.path import join as pathjoin
 from collections import OrderedDict, Counter, defaultdict
 
-
 from bs4 import BeautifulSoup
-
 
 from pyxllib.debug import *
 from pyxllib.image import *
@@ -633,7 +631,6 @@ def GetFullPathClass(s):
     return p
 
 
-
 def ________E_图像处理________():
     pass
 
@@ -769,104 +766,7 @@ def MakeColorTransparent(image, color, thresh2=0):
 
 ____other = """"""
 
-
 mydecrypt = base64.b64decode
-
-
-class MultistepPrice:
-    """计算阶梯式价格的类
-    阶梯式价格 - 腾讯文档: https://docs.qq.com/doc/DSElmd3FkQkxnTnVV
-    """
-    def __init__(self, vec_x, vec_a):
-        """
-        :param vec_x: 向量x，表示在定义域内的区间切分
-            x0是最小取值，x1是第1个划分点
-        :param vec_a: 向量a，各个区间内的单价、乘因数
-            a0是>=x0时的乘因子，a1是>=x1时的乘因子
-            即第1个区间总价格：y0 = a0 * (x1 - x0)
-            而>=x[-1]的单价统一为a[-1]
-        """
-        assert len(vec_x) == len(vec_a)
-        n = len(vec_x)
-
-        vec_sum = [0]*n  # vec_sum[i]=val，表示累加到x[i]的总和（所以vec_sum[0]恒为0）
-        for i in range(1, n):
-            vec_sum[i] = vec_a[i-1]*(vec_x[i]-vec_x[i-1]) + vec_sum[i-1]
-        self.vec_x, self.vec_a, self.vec_sum = vec_x, vec_a, vec_sum
-
-    def y(self, x):
-        """
-        :param x: 输入特定的取值x，x可以是列表对象
-        :return: 返回函数值y
-        """
-        from bisect import bisect_right
-
-        def single_x(x):
-            i = bisect_right(self.vec_x, x)
-            if not i: return None
-            return self.vec_sum[i-1] + (x-self.vec_x[i-1])*self.vec_a[i-1]
-
-        if isinstance(x, (list, tuple, set, range)):
-            return [single_x(t) for t in x]
-        else:
-            return single_x(x)
-
-    def latex(self):
-        """方程公式的latex写法"""
-        x, a, s = self.vec_x, self.vec_a, self.vec_sum
-        n = len(x)
-        ls = ['$y=\\begin{cases}',
-              (f'{a[0]}x' if a[0] else '0') + rf' & {x[0]} \le x \lt {x[1]} \\']
-        for i in range(1, n):
-            t = ''
-            if a[i]:
-                tmp1 = f'-{x[i]}' if x[i] else ''
-                t = rf'{a[i]}(x{tmp1})'
-            tmp2 = (f'+{s[i]}' if s[i] > 0 and t else f'{s[i]}') if s[i] else ''
-            t += f'{tmp2}'
-            tmp3 = rf'{x[i]} \le x \lt {x[i+1]}' if i+1 < n else rf'x \ge {x[i]}'
-            t += rf' & {tmp3} \\'
-            ls.append(t)
-        ls.append('\\end{cases}$')
-        return '\n'.join(ls)
-
-    def key_node_value(self, times=2):
-        """ 作图用的几个关键节点值
-        :param times: 最后一个x值要放大的倍率，函数要画到的最远距离
-        :return: 返回[(x1,y1), (x2,y2), ...]这样结构的数据
-        """
-        x = self.vec_x + [times*self.vec_x[-1]]
-        y = self.y(x)
-        return [(xx, yy) for xx, yy in zip(x, y)]
-
-
-def sort_by_given_list(a, b):
-    r"""本函数一般用在数据透视表中，分组中元素名为中文，没有按指定规律排序的情况
-    :param a: 需要排序的对象
-    :param b: 参照的排序数组
-    :return: 排序后的a
-
-    >>> sort_by_given_list(['初中', '小学', '高中'], ['少儿', '小学', '初中', '高中'])
-    ['小学', '初中', '高中']
-
-    # 不在枚举项目里的，会统一列在最后面
-    >>> sort_by_given_list(['初中', '小学', '高中', '幼儿'], ['少儿', '小学', '初中', '高中'])
-    ['小学', '初中', '高中', '幼儿']
-    """
-    # 1 从b数组构造一个d字典，d[k]=i，值为k的元素在第i位
-    d = dict()
-    for i, bb in enumerate(b): d[bb] = i
-    # 2 a数组分两部分，可以通过d排序的a1，和不能通过d排序的a2
-    a1, a2 = [], []
-    for aa in a:
-        if aa in d:
-            a1.append(aa)
-        else:
-            a2.append(aa)
-    # 3 用不同的规则排序a1、a2后合并
-    a1 = sorted(a1, key=lambda x: d[x])
-    a2 = sorted(a2)
-    return a1 + a2
 
 
 class LengthFormatter:
@@ -887,23 +787,23 @@ class LengthFormatter:
     """
 
     # 所有其他单位长度与参照长度mm之间比例关系
-    ratio = {'pt': 0.351,       # 点
-             'bp': 0.353,       # 大点，≈1pt
-             'dd': 0.376,       # 迪多，=1.07pt
-             'pc': 4.218,       # 派卡，=12pt
-             'sp': 1/65536,     # 定标点，65536sp=1pt
-             'cm': 10,          # 厘米
-             'cc': 4.513,       # 西塞罗
-             'in': 25.4,        # 英寸，=72.27pt
-             'em': 18,          # 1em≈当前字体中M的宽度，在正文12pt情况下，一般为18pt
-             'ex': 12,          # 1ex≈当前字体中x的高度，暂按12pt处理
+    ratio = {'pt': 0.351,  # 点
+             'bp': 0.353,  # 大点，≈1pt
+             'dd': 0.376,  # 迪多，=1.07pt
+             'pc': 4.218,  # 派卡，=12pt
+             'sp': 1 / 65536,  # 定标点，65536sp=1pt
+             'cm': 10,  # 厘米
+             'cc': 4.513,  # 西塞罗
+             'in': 25.4,  # 英寸，=72.27pt
+             'em': 18,  # 1em≈当前字体中M的宽度，在正文12pt情况下，一般为18pt
+             'ex': 12,  # 1ex≈当前字体中x的高度，暂按12pt处理
              }
 
     def __init__(self, v=0):
         if isinstance(v, (int, float)):
             self.__dict__['mm'] = v
         elif isinstance(v, str):
-            m = re.match(r'(-?\d+(?:\.\d*)?)\s*(' + '|'.join(list(self.ratio.keys())+['mm']) + ')$', v)
+            m = re.match(r'(-?\d+(?:\.\d*)?)\s*(' + '|'.join(list(self.ratio.keys()) + ['mm']) + ')$', v)
             if not m: raise ValueError(f'不存在的长度单位类型：{v}')
             self.__dict__['mm'] = 0
             self.__setitem__(m.group(2), float(m.group(1)))

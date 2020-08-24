@@ -431,7 +431,9 @@ class Path:
 
         # 3 执行特定功能
         if need_run:
-            dst.ensure_dir(pathtype='dir' if self.is_dir() else 'Path')
+            # 此时dst已是具体路径，哪怕是"目录"也可以按照"文件"对象理解，避免目录会重复生成，多层嵌套
+            #   本来是 a --> C:/target/a ，避免 C:/target/a/a 的bug
+            dst.ensure_dir('file')
             if arg1 is None: arg1 = self.fullpath
             if arg2 is None: arg2 = dst.fullpath
             func(arg1, arg2)
