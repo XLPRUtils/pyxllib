@@ -328,6 +328,15 @@ class Path:
         return self._path and self._path.is_file()
 
     @property
+    def encoding(self):
+        """文件的编码
+        非文件、不存在时返回 None
+        """
+        if self.is_file():
+            return get_encoding(self.fullpath)
+        return None
+
+    @property
     def size(self) -> int:
         """计算文件、目录的大小，对于目录，会递归目录计算总大小
         https://stackoverflow.com/questions/1392413/calculating-a-directory-size-using-python
@@ -531,6 +540,7 @@ class Path:
     def read(self, *, encoding=None, mode=None):
         """
         :param encoding: 文件编码
+            默认None，则在需要使用encoding参数的场合，会使用self.encoding自动判断编码
         :param mode: 读取模式（例如 '.json'），默认从扩展名识别，也可以强制指定
         :return:
         """
@@ -539,12 +549,16 @@ class Path:
             name, suffix = self.fullpath, self.suffix
             if not mode: mode = suffix
             mode = mode.lower()
-            if mode == '.pkl':  # pickle库
+            if mode == 'bytes':
+                with open(name, 'rb') as f:
+                    return f.read()
+            elif mode == '.pkl':  # pickle库
                 with open(name, 'rb') as f:
                     return pickle.load(f)
             elif mode == '.json':
                 import json
                 # 先读成字符串，再解析，会比rb鲁棒性更强，能自动过滤掉开头可能非正文特殊标记的字节
+                if not encoding: encoding = self.encoding
                 with open(name, 'r', encoding=encoding) as f:
                     return json.loads(f.read())
             elif mode in ('.jpg', '.jpeg', '.png', '.bmp'):
@@ -553,7 +567,7 @@ class Path:
             else:
                 with open(name, 'rb') as f:
                     bstr = f.read()
-                if not encoding: encoding = get_encoding(bstr)
+                if not encoding: encoding = self.encoding
                 s = bstr.decode(encoding=encoding, errors='ignore')
                 if '\r' in s: s = s.replace('\r\n', '\n')  # 如果用\r\n作为换行符会有一些意外不好处理
                 return s
