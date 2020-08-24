@@ -12,51 +12,54 @@ from .judge import is_file
 
 
 def get_encoding(bstr):
-    """输入二进制字符串，返回字符编码，并会把GB2312改为GBK
-    :return: 'utf-8' 或 'GBK'
+    """ 输入二进制字符串或文本文件，返回字符编码
 
-    备注：又想正常情况用chardet快速识别，又想异常情况暴力编码试试，代码就写的这么又臭又长了~~
+    https://www.yuque.com/xlpr/pyxllib/get_encoding
 
-    200530周六21:31 附： 这个函数太别扭了，无特殊情况还是不要用吧，写的并不好
+    :param bstr: 二进制字符串、文本文件
+    :return: utf8, utf-8-sig, gbk, utf16
     """
     # 1 读取编码
-    detect = None
     if isinstance(bstr, bytes):  # 如果输入是一个二进制字符串流则直接识别
-        detect = chardet.detect(bstr[:1024])  # 截断一下，不然太长了，太影响速度
-        encoding = detect['encoding']
+        encoding = chardet.detect(bstr[:1024])['encoding']  # 截断一下，不然太长了，太影响速度
     elif is_file(bstr):  # 如果是文件，则按二进制打开
         # 如果输入是一个文件名则进行读取
         if bstr.endswith('.pdf'):
             dprint(bstr)  # 二进制文件，不应该进行编码分析，暂且默认返回utf8
-            return 'utf-8'
+            return 'utf8'
         with open(bstr, 'rb') as f:  # 以二进制读取文件，注意二进制没有\r\n的值
             bstr = f.read()
-        encoding = get_encoding(bstr)
+        encoding = chardet.detect(bstr[:1024])['encoding']
     else:  # 其他类型不支持
-        return 'utf-8'
+        return 'utf8'
     # 检测结果存储在encoding
 
     # 2 智能适应优化，最终应该只能是gbk、utf8两种结果中的一种
     if encoding in ('ascii', 'utf-8', 'ISO-8859-1'):
         # 对ascii类编码，理解成是utf-8编码；ISO-8859-1跟ASCII差不多
-        encoding = 'utf-8'
+        encoding = 'utf8'
     elif encoding in ('GBK', 'GB2312'):
-        encoding = 'GBK'
-    elif bstr.strip():  # 如果bstr非空
-        # 进入这个if分支算是比较异常的情况，会输出原识别结果detect
-        try:  # 先尝试utf8编码，如果编码成功则认为是utf8
-            bstr.decode('utf8')
-            encoding = 'utf-8'
-            dprint(detect)  # chardet编码识别异常，根据文件内容已优化为utf8编码
-        except UnicodeDecodeError:
-            try:  # 否则尝试gbk编码
-                bstr.decode('gbk')
-                encoding = 'GBK'
-                dprint(detect)  # chardet编码识别异常，根据文件内容已优化为gbk编码
-            except UnicodeDecodeError:  # 如果两种都有问题
-                encoding = 'utf-8'
-                dprint(detect)  # 警告：chardet编码识别异常，已强制使用utf8处理
+        encoding = 'gbk'
+    elif encoding == 'UTF-16':
+        encoding = 'utf16'
+    elif encoding == 'UTF-8-SIG':
+        # 保留原值的一些正常识别结果
+        encoding = 'utf-8-sig'
+    elif bstr.strip():  # 如果不在预期结果内，且bstr非空，则用常见的几种编码尝试
+        # dprint(encoding)
+        type_ = ('utf8', 'gbk', 'utf16')
+
+        def try_encoding(bstr, encoding):
+            try:
+                bstr.decode(encoding)
+                return encoding
+            except UnicodeDecodeError:
+                return False
+
+        for t in type_:
+            encoding = try_encoding(bstr, t)
+            if encoding: break
     else:
-        encoding = 'utf-8'
+        encoding = 'utf8'
 
     return encoding
