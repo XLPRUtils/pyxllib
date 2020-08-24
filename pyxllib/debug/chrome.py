@@ -127,6 +127,7 @@ def view_jsons_kv(fd, files='**/*.json', encoding='utf8', max_items=10, max_valu
     kvc = KeyValuesCounter()
     d = Dir(fd)
     for p in d.select(files).filepaths:
+        # print(p)
         data = p.read(encoding=encoding, mode='.json')
         kvc.add(data, max_value_length=max_value_length)
     p = Path(r'demo_keyvaluescounter.html', root=Path.TEMP)

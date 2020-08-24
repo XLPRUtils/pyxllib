@@ -18,6 +18,8 @@ basic中依赖的三方库有直接写到 requirements.txt 中
 
 # 1 时间相关工具
 from .pytictoc import TicToc
+
+tt = TicToc()
 from .timer import Timer
 from .arrow_ import Datetime
 
@@ -33,6 +35,3 @@ from .chardet_ import *
 from .qiniu_ import *
 from .pathlib_ import Path
 from .dirlib import *
-
-# 5 其他工具
-from .jsondata import *

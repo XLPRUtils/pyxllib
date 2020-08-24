@@ -18,5 +18,3 @@ zipfile: py3.6在windows处理zip，解压中文文件会乱码，要改一个�
 onepy: 做了些中文注解，其他修改了啥我也忘了~~可能是有改源码功能的
 pyautogui: 封装扩展了自己的一个 AutoGui 类
 """
-
-import pyxllib.debug.installer
