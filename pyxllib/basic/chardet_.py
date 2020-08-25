@@ -11,17 +11,18 @@ from .dprint import dprint
 from .judge import is_file
 
 
-def get_encoding(bstr):
+def get_encoding(bstr, maxn=1024):
     """ 输入二进制字符串或文本文件，返回字符编码
 
     https://www.yuque.com/xlpr/pyxllib/get_encoding
 
     :param bstr: 二进制字符串、文本文件
+    :param maxn: 分析字节数上限，越小速度越快，但也会降低精准度
     :return: utf8, utf-8-sig, gbk, utf16
     """
     # 1 读取编码
     if isinstance(bstr, bytes):  # 如果输入是一个二进制字符串流则直接识别
-        encoding = chardet.detect(bstr[:1024])['encoding']  # 截断一下，不然太长了，太影响速度
+        encoding = chardet.detect(bstr[:maxn])['encoding']  # 截断一下，不然太长了，太影响速度
     elif is_file(bstr):  # 如果是文件，则按二进制打开
         # 如果输入是一个文件名则进行读取
         if bstr.endswith('.pdf'):
@@ -29,7 +30,7 @@ def get_encoding(bstr):
             return 'utf8'
         with open(bstr, 'rb') as f:  # 以二进制读取文件，注意二进制没有\r\n的值
             bstr = f.read()
-        encoding = chardet.detect(bstr[:1024])['encoding']
+        encoding = chardet.detect(bstr[:maxn])['encoding']
     else:  # 其他类型不支持
         return 'utf8'
     # 检测结果存储在encoding
