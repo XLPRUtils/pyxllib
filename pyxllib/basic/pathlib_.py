@@ -19,7 +19,8 @@ from .chardet_ import get_encoding
 
 
 class Path:
-    r"""通用文件、路径处理类，也可以处理目录，可以把目录对象理解为特殊类型的文件
+    r""" 通用文件、路径处理类，也可以处理目录，可以把目录对象理解为特殊类型的文件
+
     document: https://www.yuque.com/code4101/python/pyxllib.debug.path
 
     大部分基础功能是从pathlib.Path衍生过来的
@@ -27,7 +28,7 @@ class Path:
 
     TODO 这里的doctest过于针对自己的电脑了，应该改成更具适用性测试代码
     """
-    __slots__ = ('_path',)
+    __slots__ = ('_path', 'assume_dir')
 
     # 零、常用的目录类
     TEMP = tempfile.gettempdir()
@@ -39,7 +40,8 @@ class Path:
     # 一、基础功能
 
     def __init__(self, path=None, suffix=None, root=None):
-        r"""初始化参数含义详见 abspath 函数解释
+        r""" 初始化参数含义详见 abspath 函数解释
+
         TODO 这个初始化也有点过于灵活了，需要降低灵活性，增加使用清晰度
 
         >>> Path('D:/pycode/code4101py')
@@ -61,6 +63,9 @@ class Path:
         """
         path = str(path)
         self._path = None
+        self.assume_dir = False  # 假设是一个目录
+        if len(path) and path[-1] in r'\/':
+            self.assume_dir = True
 
         try:
             self._path = pathlib.Path(self.abspath(path, suffix, root)).resolve()
@@ -75,6 +80,7 @@ class Path:
     @staticmethod
     def abspath(path=None, suffix=None, root=None) -> str:
         r""" 根据各种不同的组合参数信息，推导出具体的路径位置
+
         (即把人常识易理解的指定思维，转成计算机能清晰明白的具体指向对象)
         :param path: 主要的参数，如果后面的参数有矛盾，以path为最高参考标准
             ''，可以输入空字符串，效果跟None是不一样的，意思是显示地指明要生成一个随机名称的文件名
@@ -145,7 +151,8 @@ class Path:
         return bool(self._path)
 
     def exists(self):
-        r"""判断文件是否存在
+        r""" 判断文件是否存在
+
         重置WindowsPath的bool逻辑，返回值变成存在True，不存在为False
 
         >>> Path('D:/slns').exists()
@@ -159,7 +166,7 @@ class Path:
         return 'Path' + self._path.__repr__()[11:]
 
     def __str__(self):
-        return str(self._path)
+        return str(self._path) + ('/' if self.assume_dir else '')
 
     def __eq__(self, other):
         if not isinstance(other, Path):
@@ -167,7 +174,8 @@ class Path:
         return self._path == other._path
 
     def __truediv__(self, key):
-        r"""路径拼接功能
+        r""" 路径拼接功能
+
         >>> Path('C:/a') / 'b.txt'
         Path('C:/a/b.txt')
         """
@@ -281,7 +289,7 @@ class Path:
         return self._path.suffix if self._path else ''
 
     def with_suffix(self, suffix):
-        r"""with_suffix和suffix.setter区别是，前者是生成一个新指向的类，后者是重命名
+        r""" with_suffix和suffix.setter区别是，前者是生成一个新指向的类，后者是重命名
 
         >>> Path('a.txt').with_suffix('.py').fullpath.split('\\')[-1]  # 强制替换
         'a.py'
@@ -300,7 +308,8 @@ class Path:
 
     @property
     def backup_time(self):
-        r"""返回文件的备份时间戳，如果并不是备份文件，则返回空字符串
+        r""" 返回文件的备份时间戳，如果并不是备份文件，则返回空字符串
+
         备份文件都遵循特定的命名规范
         如果是文件，是：'chePre 171020-153959.tex'
         如果是目录，是：'figs 171020-153959'
@@ -329,7 +338,8 @@ class Path:
 
     @property
     def encoding(self):
-        """文件的编码
+        """ 文件的编码
+
         非文件、不存在时返回 None
         """
         if self.is_file():
@@ -338,7 +348,8 @@ class Path:
 
     @property
     def size(self) -> int:
-        """计算文件、目录的大小，对于目录，会递归目录计算总大小
+        """ 计算文件、目录的大小，对于目录，会递归目录计算总大小
+
         https://stackoverflow.com/questions/1392413/calculating-a-directory-size-using-python
 
         >> Path('D:/slns/pyxllib').size  # 这个算的就是真实大小，不是占用空间
@@ -360,6 +371,7 @@ class Path:
     @property
     def mtime(self) -> Datetime:
         r""" 文件的最近修改时间
+
         >> Path(r"C:\pycode\code4101py").mtime
         2020-03-10 17:32:37
         """
@@ -368,6 +380,7 @@ class Path:
     @property
     def ctime(self) -> Datetime:
         r""" 文件的创建时间
+
         >> Path(r"C:\pycode\code4101py").ctime
         2018-05-25 10:46:37
         """
@@ -389,24 +402,27 @@ class Path:
         >>> f.abs_dstpath('D:/aabbccdd.txt/')  # 并不存在aabbccdd.txt这样的对象，但末尾有个/表明这是个目录
         'D:/aabbccdd.txt/cmd.exe'
         """
-        dst0 = str(dst)
         if not root: root = self.dirname
         dst = Path(dst, suffix, root)
+        # print(dst, dst.assume_dir)
 
-        if self.is_dir():
+        if self.is_dir() or (self.assume_dir and not self.is_file()):
             if dst.is_file():
-                raise ValueError('dst是已存在的文件类型，不能对src目录执行指定操作')
-            else:  # 否则dst是目录，或者不存在，均视为目录处理
+                raise ValueError(f'{dst}是已存在的文件类型，不能对{self}目录执行指定操作')
+            elif dst.assume_dir:  # 明确要把目录放到另一个目录下
                 dst = dst / self.name
         else:  # 否则self是文件，或者不存在，均视为文件处理
-            if dst.is_dir() or dst0[-1] in ('/', '\\'):
+            if dst.is_dir() or dst.assume_dir:
                 dst = dst / self.name
             # 否则dst是文件，或者不存在的路径，均视为文件类型处理
 
         return dst.fullpath
 
     def process(self, dst, func, if_exists='error', arg1=None, arg2=None):
-        r"""copy或move的本质底层实现
+        r""" copy或move的本质底层实现
+
+        文件复制等操作中src、dst不同组合下的效果：https://www.yuque.com/xlpr/pyxllib/mgwe19
+
         :param dst: 目标路径对象，注意如果使用相对路径，是相对于self的路径！
         :param if_exists:
             'error': （默认）如果要替换的目标文件已经存在，则报错
@@ -449,7 +465,8 @@ class Path:
         return dst
 
     def ensure_dir(self, pathtype=None):
-        r"""确保path中指定的dir都存在
+        r""" 确保path中指定的dir都存在
+
         :param pathtype: 如果self.path的对象不存在，根据self.path的类型不同，有不同的处理方案
             'dir'：则包括自身也会创建一个空目录
             'file'： 只会创建到dirname所在目录，并不会创建自身的Path
@@ -464,28 +481,30 @@ class Path:
         """
         if not self.exists():
             if not pathtype:
-                pathtype = 'file' if self.suffix else 'dir'
+                pathtype = 'file' if (not self.assume_dir and self.suffix) else 'dir'
             dirname = self.fullpath if pathtype == 'dir' else self.dirname
             if not os.path.exists(dirname):
                 os.makedirs(dirname)
 
     def copy(self, dst, if_exists='error'):
-        """复制文件"""
+        """ 复制文件
+
+        """
         if self.is_dir():
             return self.process(dst, shutil.copytree, if_exists)
         elif self.is_file():
             return self.process(dst, shutil.copy2, if_exists)
 
     def move(self, dst, if_exists='error'):
-        """移动文件
+        """ 移动文件
 
-        注意不要把move当rename用，会造成逻辑混乱，容易误用
         """
         if self.exists():
             return self.process(dst, shutil.move, if_exists)
 
     def rename(self, dst, if_exists='error'):
         r""" 文件重命名，或者也可以理解成文件移动
+
         :param dst: 如果使用相对目录，则是该类本身所在的目录作为工作环境
         :param if_exists:
             'error': 如果要替换的目标文件已经存在，则报错
@@ -499,6 +518,7 @@ class Path:
 
     def delete(self):
         r""" 删除自身文件
+
         """
         if self.is_file():
             os.remove(self.fullpath)
@@ -508,7 +528,7 @@ class Path:
         while self.exists(): pass
 
     def backup(self, tail=None, if_exists='replace', move=False):
-        r"""对文件末尾添加时间戳备份，也可以使用自定义标记tail
+        r""" 对文件末尾添加时间戳备份，也可以使用自定义标记tail
 
         :param tail: 自定义添加后缀
             tail为None时，默认添加特定格式的时间戳
@@ -538,7 +558,8 @@ class Path:
     # 五、其他综合性功能
 
     def read(self, *, encoding=None, mode=None):
-        """
+        """ 读取文件
+
         :param encoding: 文件编码
             默认None，则在需要使用encoding参数的场合，会使用self.encoding自动判断编码
         :param mode: 读取模式（例如 '.json'），默认从扩展名识别，也可以强制指定
@@ -575,7 +596,8 @@ class Path:
             raise FileNotFoundError('文件不存在，无法读取。')
 
     def write(self, ob, *, encoding='utf8', if_exists='error', etag=False, mode=None):
-        """
+        """ 保存为文件
+
         :param ob: 写入的内容
             如果要写txt文本文件且ob不是文本对象，只会进行简单的字符串化
         :param encoding: 强制写入的编码
@@ -618,7 +640,8 @@ class Path:
             return self
 
     def explorer(self, proc='explorer'):
-        """使用windows的explorer命令打开文件
+        """ 使用windows的explorer命令打开文件
+
         还有个类似的万能打开命令 start
 
         :param proc: 可以自定义要执行的主程序
