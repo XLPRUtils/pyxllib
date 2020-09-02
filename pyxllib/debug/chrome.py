@@ -114,7 +114,7 @@ def chrome(arg_):
         viewfiles('chrome.exe', filename)
 
 
-def view_jsons_kv(fd, files='**/*.json', encoding='utf8', max_items=10, max_value_length=100):
+def view_jsons_kv(fd, files='**/*.json', encoding=None, max_items=10, max_value_length=100):
     """ demo_keyvaluescounter，查看目录下json数据的键值对信息
     :param fd: 目录
     :param files: 匹配的文件格式
