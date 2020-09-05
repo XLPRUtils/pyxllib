@@ -454,3 +454,24 @@ def writefile(ob, path='', *, encoding='utf8', if_exists='backup', suffix=None, 
     return Path(path, suffix, root).write(ob,
                                           encoding=encoding, if_exists=if_exists,
                                           etag=etag).fullpath
+
+
+def merge_dir(src, dst, if_exists='ignore'):
+    """ 将src目录下的数据拷贝到dst目录
+    """
+    d1, d2 = Dir(src), Dir(dst)
+
+    # 只拷文件和空目录，不然逻辑会乱
+    for f in d1.select('*', type_='dir', max_size=0).select('*', type_='file').files:
+        p1, p2 = Path(d1 / f), Path(d2 / f)
+        p1.copy(p2, if_exists=if_exists)
+
+
+def extract_files(src, dst, pattern, if_exists='replace'):
+    """ 提取满足pattern模式的文件
+    """
+    d1, d2 = Dir(src), Dir(dst)
+    files = d1.select(pattern).files
+    for f in files:
+        p1, p2 = Path(d1 / f), Path(d2 / f)
+        p1.copy(p2, if_exists=if_exists)

@@ -17,7 +17,8 @@ from .dprint import dprint
 
 
 def strfind(fullstr, objstr, *, start=None, times=0, overlap=False):
-    r"""进行强大功能扩展的的字符串查找函数。
+    r"""进行强大功能扩展的的字符串查找函数
+
     TODO 性能有待优化
 
     :param fullstr: 原始完整字符串
@@ -227,6 +228,7 @@ def realign(text, least_blank=4, tab2blank=4, support_chinese=False, sep=None):
 
 class Stdout:
     """重定向标准输出流，切换print标准输出位置
+
     使用with语法调用
     """
 

@@ -17,13 +17,17 @@ except ModuleNotFoundError:
     subprocess.run(['pip3', 'install', 'openpyxl'])
     import openpyxl
 
-
 try:
     import premailer
 except ModuleNotFoundError:
     subprocess.run(['pip3', 'install', 'premailer'])
     import premailer
 
+try:
+    import xlrd2
+except ModuleNotFoundError:
+    subprocess.run(['pip3', 'install', 'xlrd2'])
+    import xlrd2
 
 from openpyxl.styles import Font
 
