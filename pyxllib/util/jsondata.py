@@ -6,20 +6,22 @@
 
 from pyxllib.basic import get_encoding, Path
 
+____labelme_json = """
+"""
+
 
 def is_labelme_json_data(data):
     """ 是labelme的标注格式
     :param data: dict
     :return: True or False
     """
-    return set(data.keys()) == set('version flags shapes imagePath imageData imageHeight imageWidth'.split())
+    has_keys = set('version flags shapes imagePath imageData imageHeight imageWidth'.split())
+    return not (has_keys - data.keys())
 
 
-def reduce_labelme_jsonfile(jsonpath, encoding=None):
+def reduce_labelme_jsonfile(jsonpath):
     p = Path(jsonpath)
-    if not encoding:
-        encoding = get_encoding(p.fullpath)
-    data = p.read(encoding=encoding, mode='.json')
+    data = p.read(mode='.json')
     if is_labelme_json_data(data) and data['imageData']:
         data['imageData'] = None
-        p.write(data, if_exists='replace')
+        p.write(data, encoding=p.encoding, if_exists='replace')

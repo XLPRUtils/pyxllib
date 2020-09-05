@@ -25,6 +25,8 @@ def intersection_split(a, b):
     keys2 = set(b)
     keys0 = keys1 & keys2  # 两个集合共有的元素
 
+    # TODO 如果是字典，希望能保序
+
     # 2 组合出ls1、ls2、ls3、ls4
 
     def split(t, s, ks):
@@ -101,3 +103,23 @@ def bcompare(oldfile, newfile=None, basefile=None, wait=True, named=True):
     # 4 调用程序（并计算外部操作时间）
     viewfiles('BCompare.exe', *ls, wait=wait)
     return Path(ls[0]).read()
+
+
+def refine_file(file, func, *args, file_mode=None, debug=False, **kwargs):
+    """ 对单个labelme的json文件就行优化的功能函数
+
+    :param file_mode: 指定文件读取类型格式，例如'.json'是json文件，读取为字典
+    :param debug: 如果设置 debug=True，则会打开BC比较差异，否则就是静默替换
+
+    TODO 这种refine_labelme的函数格式，可以写一个工厂函数来生成
+    """
+    p = Path(file)
+    data = p.read(mode=file_mode)
+    origin_content = str(data)
+    new_data = func(data, *args, **kwargs)
+
+    if debug and origin_content != str(new_data):
+        temp_file = Path('refine_file', p.suffix, root=Path.TEMP).write(new_data, if_exists='replace').fullpath
+        bcompare(file, temp_file)  # 使用beyond compare软件打开对比查看
+    else:
+        p.write(new_data, mode=file_mode, if_exists='replace')  # 直接原地替换
