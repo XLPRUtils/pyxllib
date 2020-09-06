@@ -1,10 +1,15 @@
+# 1 install
 
-document: https://www.yuque.com/xlpr/pyxllib
-
-pypi: https://pypi.org/project/pyxllib/
-
-推荐使用0.0.14以上的版本，并且考虑大部分人把pip默认都改成清华源了，有时候版本更新还没有第一时间同步到清华源，所以加了一个pypi官方的--extra-index-url作为备用。
+工具包已经提交到pypi: https://pypi.org/project/pyxllib/
+可以直接安装：
 
 ```
-pip install pyxllib>=0.0.14 --extra-index-url=https://pypi.python.org/simple/
+pip install pyxllib
 ```
+
+更详细的安装问题见：https://www.yuque.com/xlpr/pyxllib/install
+
+# 2 document
+
+使用文档: https://www.yuque.com/xlpr/pyxllib，
+正在努力完善中，欢迎更多小伙伴一起助力

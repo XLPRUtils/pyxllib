@@ -288,20 +288,13 @@ def pdf2svg(pdffile, target=None, scale=None, trim=False):
     pdf2imagebase(pdffile, target=target, scale=scale, ext='.svg')
 
 
-def pdfs2pngs(from_, to_=None, scale=None, print_interval=None):
+def pdfs2pngs(src, scale=None, pinterval=None):
     """ 将目录下所有pdf转png
-    :param from_: 原pdf数据路径
-    :param to_: 目标存储位置，可以不输入，默认放在原pdf所在目录
+    :param src: 原pdf数据路径
     :param scale: 转图片时缩放比例，例如2表示长宽放大至2被
-    :param print_interval: 每隔多少个pdf输出处理进度
+    :param pinterval: 每隔多少个pdf输出处理进度
         默认None，不输出
-
-    TODO 本来想试多线程的，没有达到预期的效果，就关了
     """
-    if not to_: to_ = from_
-    files = Dir(from_).select('**/*.pdf').files  # 源文件
-    n = len(files)
-    for i, f in enumerate(files):
-        if print_interval and i and i % print_interval == 0: print(f'{i}/{n}')
-        target = os.path.join(to_, os.path.dirname(f)) + '/'
-        pdf2png(os.path.join(from_, f), target, scale=scale)
+    from functools import partial
+    func = partial(pdf2png, scale=scale)
+    Dir(src).select('**/*.pdf').procfiles(func, pinterval=pinterval)

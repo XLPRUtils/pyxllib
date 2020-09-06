@@ -162,47 +162,6 @@ ____perf = """
 """
 
 
-def perf_nlargest():
-    """ 测试10万找最小的3个值速度
-    """
-
-    import heapq
-    import time
-
-    import numpy as np
-
-    n = 100
-    a = np.random.randn(100000)
-
-    start = time.time()
-    for i in range(n):
-        b = sorted(a)
-    print(b[:3])
-    print(f'普通方法：全量排序后切片 During Time: {time.time() - start:.3f} s')
-
-    start = time.time()
-    for i in range(n):
-        b = heapq.nsmallest(2, a)
-    print(b)
-    print(f'使用堆排 During Time: {time.time() - start:.3f} s')
-
-    start = time.time()
-    for i in range(n):
-        b = np.sort(a)
-    print(b[:3])
-    print(f'使用numpy的sort During Time: {time.time() - start:.3f} s')
-
-    # 本机速度
-    # During Time: 6.303 s
-    # During Time: 0.648 s
-    # During Time: 1.616 s
-
-    # 服务器速度（比cpu，服务器还不如本机~~）
-    # During Time: 8.465 s
-    # During Time: 0.889 s
-    # During Time: 1.640 s
-
-
 def perf_gpu_speed():
     """ 测试CPU和GPU的矩阵乘法速度差
     """
