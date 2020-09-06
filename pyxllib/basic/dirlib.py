@@ -6,13 +6,14 @@
 
 
 import filecmp
+import logging
 import os
 import re
 import shutil
 
 from .arrow_ import Datetime
 from .strlib import strfind, natural_sort
-from .pathlib_ import Path
+from .pathlib_ import Path, get_xllog
 
 ____file = """
 路径、文件、目录相关操作功能
@@ -39,12 +40,10 @@ class Dir(Path):
     def __init__(self, path=None, *, root=None, files=None):
         """根目录、工作目录
 
-        # TODO 用枚举类做个temp、destop等“常用目录清单”？
-
         >> Dir()  # 以当前文件夹作为root
         >> Dir(r'C:/pycode/code4101py')  # 指定目录
         """
-        super(Dir, self).__init__(path, root=root)
+        super().__init__(path, root=root)
         self.files = files or []  # 初始默认没有选中任何文件（文件夹）
 
     @property
@@ -81,6 +80,33 @@ class Dir(Path):
                            min_size=min_size, max_size=max_size,
                            min_ctime=min_ctime, max_ctime=max_ctime, min_mtime=min_mtime, max_mtime=max_mtime)
         return Dir(self._path, files=natural_sort(self.files + files))
+
+    def procfiles(self, func, pinterval=None):
+        """ 对选中的文件迭代处理
+
+        :param func: 对每个文件进行处理的自定义接口函数
+            输入参数 Path 对象
+        :param pinterval: print interval，是否输出处理进度，输入一个正整数值，则每个间隔的倍数，会显示处理进度
+            当间隔为1时，会输出每个正在执行的具体文件名
+        :return:
+
+        TODO 支持多线程？
+        TODO 增设可以bfs还是dfs的功能？
+        """
+        xllog = get_xllog()
+        n_files = len(self.files)
+        if pinterval: xllog.info(f"Dir('{self.fullpath}') 使用 {func} 处理 {n_files} 个文件(夹)")
+        for i, p in enumerate(self.filepaths):
+            if pinterval and (i or pinterval == 1) and i % pinterval == 0:
+                # 如果间隔是一个文件，则输出具体的每个文件路径
+                message = f' {self.files[i]}' if pinterval == 1 else ''
+                xllog.info(f'文件处理进度 {i}/{n_files}={i / n_files:.2%}{message}')
+            try:
+                func(p)
+            except Exception as e:
+                # 子函数里如果保存，不一定有记录文件路径信息，所以这里补充一下
+                xllog.info(f'处理到该文件出现错误：{p}')
+                raise e
 
     def select_invert(self):
         """反选，在"全集"中，选中当前状态下没有被选中的那些文件"""

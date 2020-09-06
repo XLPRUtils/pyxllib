@@ -61,10 +61,10 @@ class Path:
         >> Path('D:/pycode/code4101py')
         Path('D:/slns/pycode/code4101py')
         """
-        path = str(path)
+        strpath = str(path)
         self._path = None
         self.assume_dir = False  # 假设是一个目录
-        if len(path) and path[-1] in r'\/':
+        if len(strpath) and strpath[-1] in r'\/':
             self.assume_dir = True
 
         try:
@@ -582,6 +582,10 @@ class Path:
                 if not encoding: encoding = self.encoding
                 with open(name, 'r', encoding=encoding) as f:
                     return json.loads(f.read())
+            elif mode == '.yaml':
+                import yaml
+                with open(name, 'r', encoding=encoding) as f:
+                    return yaml.safe_load(f.read())
             elif mode in ('.jpg', '.jpeg', '.png', '.bmp'):
                 with open(name, 'rb') as fp:
                     return fp.read()
@@ -621,6 +625,10 @@ class Path:
             elif mode == '.json':
                 with open(name, 'w', encoding=encoding) as f:
                     json.dump(ob, f, ensure_ascii=False, indent=2)
+            elif mode == '.yaml':
+                import yaml
+                with open(name, 'w', encoding=encoding) as f:
+                    yaml.dump(ob, f)
             elif isinstance(ob, bytes):
                 # print(name)  #  TODO 本少发现个bug：导出平台讲义到本地(r'https://tr.histudy.com/#/dtextbook/202005159c00ce57bdd342c3a879ebb1a2e5ed21', path=r'R:/平台挑题', download_pictures=True)
                 # 老师们从其它网站上抄来的题 可能是 \href{/tr/item/202006038365bfee56b244b2bfbd02e2b25b1500/image_41825807541591152423871.png}{\includegraphics{菁优网：http://www.jyeoo.com}}
@@ -647,6 +655,42 @@ class Path:
         :param proc: 可以自定义要执行的主程序
         """
         subprocess.run([proc, self.fullpath])
+
+
+XLLOG_CONF_FILE = 'xllog.yaml'
+
+
+def get_xllog():
+    """ 获得pyxllib库的日志类
+
+    由于日志类可能要读取yaml配置文件，需要使用Path类，所以实现代码先放在pathlib_.py
+
+    TODO 类似企业微信机器人的机制怎么设？或者如何配置出问题发邮件？
+    """
+    import logging
+
+    if 'pyxllib.xllog' in logging.root.manager.loggerDict:
+        # 1 判断xllog是否已存在，直接返回
+        pass
+    elif os.path.isfile(XLLOG_CONF_FILE):
+        # 2 若不存在，尝试在默认位置是否有自定义配置文件，读取配置文件来创建
+        import logging.config
+        data = Path(XLLOG_CONF_FILE).read()
+        if isinstance(data, dict):
+            # 推荐使用yaml的字典结构，格式更简洁清晰
+            logging.config.dictConfig(data)
+        else:
+            # 但是普通的conf配置文件也支持
+            logging.config.fileConfig(XLLOG_CONF_FILE)
+    else:
+        # 3 否则生成一个非常简易版的xllog
+        xllog = logging.getLogger('pyxllib.xllog')
+        xllog.setLevel(logging.DEBUG)
+        ch = logging.StreamHandler()
+        ch.setLevel(logging.DEBUG)
+        ch.setFormatter(logging.Formatter('%(asctime)s %(message)s', datefmt='%H:%M:%S'))
+        xllog.addHandler(ch)
+    return logging.getLogger('pyxllib.xllog')
 
 
 def demo_path():
