@@ -8,10 +8,11 @@
 import collections
 import copy
 import io
+import logging
+import math
 import pprint
 import re
 import sys
-import logging
 
 from .dprint import dprint
 
@@ -434,8 +435,32 @@ def listalign(ls, fmt='r', *, width=None, fillchar=' ', prefix='', suffix='', ch
     return strs
 
 
+def len_in_dim2_min(arr):
+    """ 计算类List结构在第2维上的最小长度
+
+    >>> len_in_dim2([[1,1], [2], [3,3,3]])
+    3
+
+    >>> len_in_dim2([1, 2, 3])  # TODO 是不是应该改成0合理？但不知道牵涉到哪些功能影响
+    1
+    """
+    if not isinstance(arr, (list, tuple)):
+        raise TypeError('类型错误，不是list构成的二维数组')
+
+    # 找出元素最多的列
+    column_num = math.inf
+    for i, item in enumerate(arr):
+        if isinstance(item, (list, tuple)):  # 该行是一个一维数组
+            column_num = min(column_num, len(item))
+        else:  # 如果不是数组，是指单个元素，当成1列处理
+            column_num = min(column_num, 1)
+            break  # 只要有个1，最小长度就一定是1了
+
+    return column_num
+
+
 def len_in_dim2(arr):
-    """计算类List结构在第2维上的长度
+    """ 计算类List结构在第2维上的最大长度
 
     >>> len_in_dim2([[1,1], [2], [3,3,3]])
     3
