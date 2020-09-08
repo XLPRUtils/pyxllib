@@ -7,16 +7,70 @@
 
 import numpy as np
 from shapely.geometry import Polygon
+import cv2
 
 
-def coords2d(coords, dtype=int):
-    """一维的点数据转成二维点数据
-        [x1, y1, x2, y2, ...] --> [(x1, y1), (x2, y2), ...]
+def ndim(coords):
+    coords = coords if isinstance(coords, np.ndarray) else np.array(coords)
+    return coords.ndim
+
+
+def coords1d(coords, dtype=None):
+    """ 转成一维点数据
+
+    [(x1, y1), (x2, y2), ...] --> [x1, y1, x2, y2, ...]
+    会尽量遵循原始的array、list等结构返回
+
+    >>> coords1d([(1, 2), (3, 4)])
+    [1, 2, 3, 4]
+    >>> coords1d(np.array([[1, 2], [3, 4]]))
+    array([1, 2, 3, 4])
+    >>> coords1d([1, 2, 3, 4])
+    [1, 2, 3, 4]
+
+    >>> coords1d([[1.5, 2], [3.5, 4]])
+    [1.5, 2.0, 3.5, 4.0]
+    >>> coords1d([1, 2, [3, 4], [5, 6, 7]])  # 这种情况，[3,4]、[5,6,7]都是一个整体
+    [1, 2, [3, 4], [5, 6, 7]]
+    >>> coords1d([[[1, 2, 3], [4, 5, 6]], [[7, 8, 9], [10, 11, 12]]])
+    [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
     """
-    if not isinstance(coords[0], (np.ndarray, list, tuple)):
-        return np.array(coords, dtype=dtype).reshape((-1, 2)).tolist()
+
+    if isinstance(coords, (list, tuple)):
+        return np.array(coords, dtype=dtype).reshape(-1).tolist()
+    elif isinstance(coords, np.ndarray):
+        return np.array(coords, dtype=dtype).reshape(-1)
     else:
-        return coords
+        raise TypeError(f'未知类型 {coords}')
+
+
+def coords2d(coords, m=2, dtype=None):
+    """ 一维的点数据转成二维点数据
+
+    :param m: 转成行列结构后，每列元素数，默认2个
+
+    [x1, y1, x2, y2, ...] --> [(x1, y1), (x2, y2), ...]
+    会尽量遵循原始的array、list等结构返回
+
+    >>> coords2d([1, 2, 3, 4])
+    [[1, 2], [3, 4]]
+    >>> coords2d(np.array([1, 2, 3, 4]))
+    array([[1, 2],
+           [3, 4]])
+    >>> coords2d([[1, 2], [3, 4]])
+    [[1, 2], [3, 4]]
+
+    >>> coords2d([1.5, 2, 3.5, 4])
+    [[1.5, 2.0], [3.5, 4.0]]
+    >>> coords2d([1.5, 2, 3.5, 4], dtype=int)  # 数据类型转换
+    [[1, 2], [3, 4]]
+    """
+    if isinstance(coords, (list, tuple)):
+        return np.array(coords, dtype=dtype).reshape((-1, m)).tolist()
+    elif isinstance(coords, np.ndarray):
+        return np.array(coords, dtype=dtype).reshape((-1, m))
+    else:
+        raise TypeError(f'未知类型 {coords}')
 
 
 def divide_quadrangle(coords, r1=0.5, r2=None):
@@ -79,3 +133,79 @@ def rect2polygon(x1, y1, x2, y2):
     TODO 这个可能要用类似多进制的方式，做多种格式间的来回转换
     """
     return [[x1, y1], [x2, y1], [x2, y2], [x1, y2]]
+
+
+____warp_points = """
+仿射、透视变换相关功能
+"""
+
+
+def get_warp_mat(src, dst):
+    """
+    :param src: 原点集，支持多种格式输入
+    :param dst: 变换后的点集
+    :return: np.ndarray，3*3的变换矩阵
+    """
+
+    def cvt_data(pts):
+        # opencv的透视变换，输入的点集有类型限制，必须使用float32
+        return np.array(pts, dtype='float32').reshape((-1, 2))
+
+    src, dst = cvt_data(src), cvt_data(dst)
+    n = src.shape[0]
+    if n == 3:
+        # 只有3个点，则使用仿射变换
+        warp_mat = cv2.getAffineTransform(src, dst)
+        warp_mat = np.concatenate([warp_mat, [[0, 0, 1]]], axis=0)
+    elif n == 4:
+        # 有4个点，则使用透视变换
+        warp_mat = cv2.getPerspectiveTransform(src, dst)
+    else:
+        raise ValueError('点集数量过多')
+    return warp_mat
+
+
+def warp_points(pts, warp_mat):
+    """ 透视等点集坐标转换
+
+    :param pts: 支持list、tuple、np.ndarray等结构，支持1d、2d的维度
+        其实这个坐标变换就是一个简单的矩阵乘法，只是pts的数据结构往往比较特殊，
+        并不是一个n*3的矩阵结构，所以需要进行一些简单的格式转换
+        例如 [x1, y1, x2, y2, x3, y3] --> [[x1, x2, x3], [y1, y2, y3], [1, 1, 1]]
+    :param warp_mat: 变换矩阵，一般是个3*3的矩阵，但是只输入2*3的矩阵也行，因为第3行并用不到
+    :return: 会遵循原始的 pts 数据类型、维度结构返回
+
+    >>> warp_mat = [[0, 1, 0], [1, 0, 0], [0, 0, 1]]  # 对换x、y
+    >>> warp_points([[1, 2], [11, 22]], warp_mat)  # 处理两个点
+    [[2, 1], [22, 11]]
+    >>> warp_points([[1, 2], [11, 22]], [[0, 1, 0], [1, 0, 0]])  # 输入2*3的变换矩阵也可以
+    [[2, 1], [22, 11]]
+    >>> warp_points([1, 2, 11, 22], warp_mat)  # 也可以用一维的结构来输入点集
+    [2, 1, 22, 11]
+    >>> warp_points([1, 2, 11, 22, 111, 222], warp_mat)  # 点的数量任意，返回的结构同输入的结构形式
+    [2, 1, 22, 11, 222, 111]
+    >>> warp_points(np.array([1, 2, 11, 22, 111, 222]), warp_mat)  # 也可以用np.ndarray等结构
+    array([  2,   1,  22,  11, 222, 111])
+    """
+    pts1 = np.array(pts).reshape(-1, 2).T
+    pts1 = np.concatenate([pts1, [[1] * pts1.shape[1]]], axis=0)
+    pts2 = np.dot(warp_mat[:2], pts1)
+    pts2 = pts2.T
+    if ndim(pts) == 1:
+        pts2 = pts2.reshape(-1)
+    if not isinstance(pts, np.ndarray):
+        pts2 = pts2.tolist()
+    return pts2
+
+
+def warp_image(img, warp_mat, dsize=None):
+    """ 对图像进行透视变换
+
+    :param img: np.ndarray的图像数据
+    :param warp_mat: 变换矩阵
+    :param dsize: 目标图片尺寸，默认同原图（注意是先输入列，在输入行）
+    """
+    if dsize is None:
+        dsize = (img.shape[1], img.shape[0])
+    dst = cv2.warpPerspective(img, warp_mat, dsize)
+    return dst

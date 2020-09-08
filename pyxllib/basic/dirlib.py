@@ -7,6 +7,7 @@
 
 import filecmp
 import logging
+import math
 import os
 import re
 import shutil
@@ -81,13 +82,18 @@ class Dir(Path):
                            min_ctime=min_ctime, max_ctime=max_ctime, min_mtime=min_mtime, max_mtime=max_mtime)
         return Dir(self._path, files=natural_sort(self.files + files))
 
-    def procfiles(self, func, pinterval=None):
+    def procfiles(self, func, ref_dir=None, pinterval=None):
         """ 对选中的文件迭代处理
 
         :param func: 对每个文件进行处理的自定义接口函数
-            输入参数 Path 对象
+            参数 p: 输入参数 Path 对象
+            return: 可以没有返回值，当有返回值时，会作为信息，表示要输出查看
+                TODO 以后可以返回字典结构，用不同的key表示不同的功能，可以控制些高级功能
+        :param ref_dir: 是否有个相对的目录，对比同子结构下的文件情况
+            使用该参数时，func的接口会变成两个参数，会输入原p1、目标p2两个文件参数
         :param pinterval: print interval，是否输出处理进度，输入一个正整数值，则每个间隔的倍数，会显示处理进度
             当间隔为1时，会输出每个正在执行的具体文件名
+            TODO 增加了按照进度比例作为间距的参数，例如每1%显示一次
         :return:
 
         TODO 支持多线程？
@@ -95,16 +101,22 @@ class Dir(Path):
         """
         xllog = get_xllog()
         n_files = len(self.files)
+        width = math.ceil(math.log10(n_files + 1))
+        if ref_dir is not None: dst_dir = Dir(ref_dir)
         if pinterval: xllog.info(f"Dir('{self.fullpath}') 使用 {func} 处理 {n_files} 个文件(夹)")
         for i, p in enumerate(self.filepaths):
             if pinterval and (i or pinterval == 1) and i % pinterval == 0:
                 # 如果间隔是一个文件，则输出具体的每个文件路径
                 message = f' {self.files[i]}' if pinterval == 1 else ''
-                xllog.info(f'文件处理进度 {i}/{n_files}={i / n_files:.2%}{message}')
+                xllog.info(f'{i:{width}d}/{n_files}={i / n_files:6.2%}{message}')
             try:
-                func(p)
+                if ref_dir:
+                    res = func(p, ref_dir / self.files[i])
+                else:
+                    res = func(p)
+                if res is not None: print(res)
             except Exception as e:
-                # 子函数里如果保存，不一定有记录文件路径信息，所以这里补充一下
+                # 子函数里如果报错，不一定有记录文件路径信息，所以这里补充一下
                 xllog.info(f'处理到该文件出现错误：{p}')
                 raise e
 
@@ -485,12 +497,12 @@ def writefile(ob, path='', *, encoding='utf8', if_exists='backup', suffix=None, 
 def merge_dir(src, dst, if_exists='ignore'):
     """ 将src目录下的数据拷贝到dst目录
     """
-    d1, d2 = Dir(src), Dir(dst)
+
+    def func(p1, p2):
+        p1.copy(p2, if_exists=if_exists)
 
     # 只拷文件和空目录，不然逻辑会乱
-    for f in d1.select('*', type_='dir', max_size=0).select('*', type_='file').files:
-        p1, p2 = Path(d1 / f), Path(d2 / f)
-        p1.copy(p2, if_exists=if_exists)
+    Dir(src).select('*', type_='dir', max_size=0).select('*', type_='file').procfiles(func, ref_dir=func)
 
 
 def extract_files(src, dst, pattern, if_exists='replace'):
