@@ -4,10 +4,13 @@
 # @Email  : 877362867@qq.com
 # @Data   : 2020/08/13 14:53
 
+import copy
 
 import numpy as np
 from shapely.geometry import Polygon
 import cv2
+
+from pyxllib.debug import dprint
 
 
 def ndim(coords):
@@ -106,26 +109,29 @@ def divide_quadrangle(coords, r1=0.5, r2=None):
     return [pt1, pt5, pt6, pt4], [pt7, pt2, pt3, pt8]
 
 
+def rect_bounds1d(coords, dtype=int):
+    """ 多边形的最大外接矩形
+    :param coords: 任意多边形的一维值[x1, y1, x2, y2, ...]，或者二维结构[(x1, y1), (x2, y2), ...]
+    :param dtype: 默认存储的数值类型
+    :return: rect的两个点坐标，同时也是 [left, top, right, bottom]
+    """
+    pts = coords2d(coords)
+    if len(pts) > 2:
+        p = Polygon(pts).bounds
+    else:
+        pts = coords1d(pts)
+        p = [min(pts[::2]), min(pts[1::2]), max(pts[::2]), max(pts[1::2])]
+    return [dtype(v) for v in p]
+
+
 def rect_bounds(coords, dtype=int):
     """ 多边形的最大外接矩形
     :param coords: 任意多边形的一维值[x1, y1, x2, y2, ...]，或者二维结构[(x1, y1), (x2, y2), ...]
     :param dtype: 默认存储的数值类型
     :return: rect的两个点坐标
     """
-    p = Polygon(coords2d(coords)).bounds
-    x1, y1, x2, y2 = [dtype(v) for v in p]
+    x1, y1, x2, y2 = rect_bounds1d(coords, dtype=dtype)
     return [[x1, y1], [x2, y2]]
-
-
-def rect_bounds1d(coords, dtype=int):
-    """ 多边形的最大外接矩形
-    :param coords: 任意多边形的一维值[x1, y1, x2, y2, ...]，或者二维结构[(x1, y1), (x2, y2), ...]
-    :param dtype: 默认存储的数值类型
-    :return: rect的两个点坐标
-    """
-    p = Polygon(coords2d(coords)).bounds
-    x1, y1, x2, y2 = [dtype(v) for v in p]
-    return [x1, y1, x2, y2]
 
 
 def rect2polygon(x1, y1, x2, y2):
@@ -135,8 +141,10 @@ def rect2polygon(x1, y1, x2, y2):
     return [[x1, y1], [x2, y1], [x2, y2], [x1, y2]]
 
 
-____warp_points = """
+____warp_perspective = """
 仿射、透视变换相关功能
+
+https://www.yuque.com/xlpr/pyxllib/warpperspective
 """
 
 
@@ -165,6 +173,28 @@ def get_warp_mat(src, dst):
     return warp_mat
 
 
+def retain_pts_struct(pts, ref_pts):
+    """ 参考ref_pts的数据结构，设置pts的结构
+    :return: 更新后的pts
+    """
+    # 1 确保都是np.ndarray，好分析问题
+    if not isinstance(pts, np.ndarray):
+        pts = np.array(pts)
+    if not isinstance(ref_pts, np.ndarray):
+        ref_pts2 = np.array(ref_pts)
+    else:
+        ref_pts2 = ref_pts
+
+    # 2 参照ref_pts的结构
+    if ref_pts2.ndim == 1:
+        pts = pts.reshape(-1)
+    elif ref_pts2.ndim == 2:
+        pts = pts.reshape((-1, ref_pts2.shape[1]))
+    if not isinstance(ref_pts, np.ndarray):
+        pts = pts.tolist()
+    return pts
+
+
 def warp_points(pts, warp_mat):
     """ 透视等点集坐标转换
 
@@ -172,7 +202,8 @@ def warp_points(pts, warp_mat):
         其实这个坐标变换就是一个简单的矩阵乘法，只是pts的数据结构往往比较特殊，
         并不是一个n*3的矩阵结构，所以需要进行一些简单的格式转换
         例如 [x1, y1, x2, y2, x3, y3] --> [[x1, x2, x3], [y1, y2, y3], [1, 1, 1]]
-    :param warp_mat: 变换矩阵，一般是个3*3的矩阵，但是只输入2*3的矩阵也行，因为第3行并用不到
+    :param warp_mat: 变换矩阵，一般是个3*3的矩阵，但是只输入2*3的矩阵也行，因为第3行并用不到（点集只要取前两个维度X'Y'的结果值）
+        TODO 不过这里我有个点也没想明白，如果不用第3行，本质上不是又变回仿射变换了，如何达到透视变换效果？第三维的深度信息能完全舍弃？
     :return: 会遵循原始的 pts 数据类型、维度结构返回
 
     >>> warp_mat = [[0, 1, 0], [1, 0, 0], [0, 0, 1]]  # 对换x、y
@@ -191,21 +222,137 @@ def warp_points(pts, warp_mat):
     pts1 = np.concatenate([pts1, [[1] * pts1.shape[1]]], axis=0)
     pts2 = np.dot(warp_mat[:2], pts1)
     pts2 = pts2.T
-    if ndim(pts) == 1:
-        pts2 = pts2.reshape(-1)
-    if not isinstance(pts, np.ndarray):
-        pts2 = pts2.tolist()
-    return pts2
+    return retain_pts_struct(pts2, pts)
 
 
-def warp_image(img, warp_mat, dsize=None):
+def warp_image(img, warp_mat, dsize=None, *, view_rate=False, max_zoom=1):
     """ 对图像进行透视变换
 
     :param img: np.ndarray的图像数据
+        TODO 支持PIL.Image格式？
     :param warp_mat: 变换矩阵
-    :param dsize: 目标图片尺寸，默认同原图（注意是先输入列，在输入行）
+    :param dsize: 目标图片尺寸
+        没有任何输入时，同原图
+        如果有指定，则会决定最终的图片大小
+        如果使用了view_rate、max_zoom，会改变变换矩阵所展示的内容
+    :param view_rate: 视野比例，默认不开启，当输入非0正数时，几个数值功能效果如下
+        1，关注原图四个角点位置在变换后的位置，确保新的4个点依然在目标图中
+            为了达到该效果，会增加【平移】变换，以及自动控制dsize
+        2，将原图依中心面积放到至2倍，记录新的4个角点变换后的位置，确保变换后的4个点依然在目标图中
+        0.5，同理，只是只关注原图局部的一半位置
+    :param max_zoom: 默认1倍，当设置时（只在开启view_rate时有用），会增加【缩小】变换，限制view_rate扩展的上限
     """
+    from math import sqrt
+
+    # 1 得到3*3的变换矩阵
+    if not isinstance(warp_mat, np.ndarray):
+        warp_mat = np.array(warp_mat)
+    if warp_mat.shape[0] == 2:
+        warp_mat = np.concatenate([warp_mat, [[0, 0, 1]]], axis=0)
+
+    # 2 view_rate，视野比例改变导致的变换矩阵规则变化
+    if view_rate:
+        # 2.1 视野变化后的四个角点
+        h, w = img.shape[:2]
+        y, x = h / 2, w / 2  # 图片中心点坐标
+        h1, w1 = view_rate * h / 2, view_rate * w / 2
+        l, t, r, b = [-w1 + x, -h1 + y, w1 + x, h1 + y]
+        pts1 = np.array([[l, t], [r, t], [r, b], [l, b]])
+        # 2.2 变换后角点位置产生的外接矩形
+        left, top, right, bottom = rect_bounds1d(warp_points(pts1, warp_mat))
+        # 2.3 增加平移变换确保左上角在原点
+        warp_mat = np.dot(np.array([[1, 0, -left], [0, 1, -top], [0, 0, 1]]), warp_mat)
+        # 2.4 控制面积变化率
+        h2, w2 = (bottom - top, right - left)
+        if max_zoom:
+            rate = w2 * h2 / w / h  # 目标面积比原面积
+            if rate > max_zoom:
+                r = 1 / sqrt(rate / max_zoom)
+                warp_mat = np.dot(np.array([[r, 0, 0], [0, r, 0], [0, 0, 1]]), warp_mat)
+                h2, w2 = round(h2 * r), round(w2 * r)
+        if not dsize:
+            dsize = (w2, h2)
+
+    # 3 标准操作，不做额外处理，按照原图默认的图片尺寸展示
     if dsize is None:
         dsize = (img.shape[1], img.shape[0])
     dst = cv2.warpPerspective(img, warp_mat, dsize)
+    return dst
+
+
+def quad_warp_wh(pts, method='average'):
+    """ 四边形转为矩形的宽、高
+    :param pts: 四个点坐标
+        TODO 暂时认为pts是按点集顺时针顺序输入的
+        TODO 暂时认为pts[0]就是第一个坐标点
+    :param method:
+        记四条边分别为w1, h1, w2, h2
+        average: 平均宽、高
+        max: 最大宽、高
+        min: 最小宽、高
+    :return: (w, h) 变换后的矩形宽、高
+    """
+    # 1 计算四边长
+    from math import hypot
+    pts = coords2d(pts)
+    lens = [0] * 4
+    for i in range(4):
+        pt1, pt2 = pts[i], pts[(i + 1) % 4]
+        lens[i] = hypot(pt1[0] - pt2[0], pt1[1] - pt2[1])
+
+    # 2 目标宽、高
+    if method == 'average':
+        w, h = (lens[0] + lens[2]) / 2, (lens[1] + lens[3]) / 2
+    elif method == 'max':
+        w, h = max(lens[0], lens[2]), max(lens[1], lens[3])
+    elif method == 'min':
+        w, h = min(lens[0], lens[2]), min(lens[1], lens[3])
+    else:
+        raise ValueError(f'不支持的方法 {method}')
+    # 这个主要是用于图像变换的，而图像一般像素坐标要用整数，所以就取整运算了
+    return round(w), round(h)
+
+
+def warp_quad_pts(pts, method='average'):
+    """ 将不规则四边形转为矩形
+    :param pts: 不规则四边形的四个点坐标
+    :param method: 计算矩形宽、高的算法
+    :return: 规则矩形的四个点坐标
+
+    >>> warp_quad_pts([[89, 424], [931, 424], [399, 290], [621, 290]])
+    [[0, 0], [532, 0], [532, 549], [0, 549]]
+    >>> warp_quad_pts([89, 424, 931, 424, 399, 290, 621, 290])
+    [0, 0, 532, 0, 532, 549, 0, 549]
+    """
+    w, h = quad_warp_wh(pts, method)
+    pts2 = np.array([[0, 0], [w, 0], [w, h], [0, h]])
+    return retain_pts_struct(pts2, pts)
+
+
+def get_sub_image(src_image, pts, warp_quad=False):
+    """ 从src_image取一个子图
+
+    :param src_image: 原图
+        可以是图片路径、np.ndarray、PIL.Image对象
+        TODO 目前先只支持np.ndarray格式
+    :param pts: 子图位置信息
+        只有两个点，认为是矩形的两个角点
+        只有四个点，认为是任意四边形
+        同理，其他点数量，默认为
+    :param warp_quad: 变形的四边形
+        默认是截图pts的外接四边形区域，使用该参数
+            且当pts为四个点时，是否强行扭转为矩形
+    :return: 子图
+        文件、np.ndarray --> np.ndarray
+        PIL.Image --> PIL.Image
+    """
+    pts = coords2d(pts)
+    if not warp_quad or len(pts) != 4:
+        x1, y1, x2, y2 = rect_bounds1d(pts)
+        dst = src_image[y1:y2, x1:x2]
+    else:
+        w, h = quad_warp_wh(pts, method=warp_quad)
+        pts2 = np.array([[0, 0], [w, 0], [w, h], [0, h]])
+        warp_mat = get_warp_mat(pts, pts2)
+        dst = warp_image(src_image, warp_mat, (w, h))
     return dst
