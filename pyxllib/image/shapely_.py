@@ -7,14 +7,20 @@
 import copy
 
 import numpy as np
-from shapely.geometry import Polygon
 import cv2
+import PIL.Image
+from shapely.geometry import Polygon
 
 from pyxllib.debug import dprint
 
+____base = """
 
-def ndim(coords):
-    coords = coords if isinstance(coords, np.ndarray) else np.array(coords)
+"""
+
+
+def get_ndim(coords):
+    # 注意 np.array(coords[:1])，只需要取第一个元素就可以判断出ndim
+    coords = coords if isinstance(coords, np.ndarray) else np.array(coords[:1])
     return coords.ndim
 
 
@@ -76,39 +82,6 @@ def coords2d(coords, m=2, dtype=None):
         raise TypeError(f'未知类型 {coords}')
 
 
-def divide_quadrangle(coords, r1=0.5, r2=None):
-    """ 切分一个四边形为两个四边形
-    :param coords: 1*8的坐标，或者4*2的坐标
-    :param r1: 第一个切分比例，0.5相当于中点（即第一个四边形右边位置）
-    :param r2: 第二个切分比例，即第二个四边形左边位置
-    :return: 返回切割后所有的四边形
-
-    一般用在改标注结果中，把一个框拆成两个框
-    TODO 把接口改成切分一个四边形为任意多个四边形？即把r1、r2等整合为一个list参数输入
-    """
-
-    # 1 计算分割点工具
-    def segment_point(pt1, pt2, rate=0.5):
-        """ 两点间的分割点
-        :param rate: 默认0.5是二分点，rate为0时即pt1，rate为1时为pt2，取值可以小于0、大于-1
-        :return:
-        """
-        x1, y1 = pt1
-        x2, y2 = pt2
-        x, y = x1 + rate * (x2 - x1), y1 + rate * (y2 - y1)
-        return int(x), int(y)
-
-    # 2 优化参数值
-    coords = coords2d(coords)
-    if not r2: r2 = 1 - r1
-
-    # 3 计算切分后的四边形坐标
-    pt1, pt2, pt3, pt4 = coords
-    pt5, pt6 = segment_point(pt1, pt2, r1), segment_point(pt4, pt3, r1)
-    pt7, pt8 = segment_point(pt1, pt2, r2), segment_point(pt4, pt3, r2)
-    return [pt1, pt5, pt6, pt4], [pt7, pt2, pt3, pt8]
-
-
 def rect_bounds1d(coords, dtype=int):
     """ 多边形的最大外接矩形
     :param coords: 任意多边形的一维值[x1, y1, x2, y2, ...]，或者二维结构[(x1, y1), (x2, y2), ...]
@@ -135,10 +108,95 @@ def rect_bounds(coords, dtype=int):
 
 
 def rect2polygon(x1, y1, x2, y2):
-    """
-    TODO 这个可能要用类似多进制的方式，做多种格式间的来回转换
-    """
     return [[x1, y1], [x2, y1], [x2, y2], [x1, y2]]
+
+
+def reset_arr_struct(src, target):
+    """ 参考 target 的数据结构，重设src的结构
+
+    目前支持的数据结构
+        PIL.Image.Image
+        np.ndarray
+        list
+    对后两者，还会进一步判断维度信息 （目前维度信息还考虑比较简单，如果超过2维等场合，可能会有些未知、意外效果）
+        1d，例如[x1 ,y1, x2, y2]
+        2d，例如[[x1, y1], [x2, y2]]
+
+    本库默认策略，图片是存np.ndarray，点集是存成np.ndarray 2d结构：[[x1, y1], [x2, y2]]
+    如果希望一些函数接口功能，能输入什么类型，就返回原来什么类型，就需要这个函数来实现格式判断、转换
+
+    本函数实现上，还是为了效率考虑，分支比较多，能不进行中间类型转换的，尽量去避免了，所以代码比较冗长
+    否则直接用np结构中转，实现代码还是比较简洁的
+
+    :param src: 原数据
+    :param target: 正常是指定一个type类型，
+        但是也可以输入一个【实例对象】作为参考，可以分析到更多细节信息
+    :return: 重置结构后的src数据
+
+    >>> reset_arr_struct([1, 2, 3, 4], [[1, 1], [2, 2]])
+    [[1, 2], [3, 4]]
+    >>> reset_arr_struct([1, 2, 3, 4], np.array([[1, 1], [2, 2]]))
+    array([[1, 2],
+           [3, 4]])
+    >>> reset_arr_struct([1, 2, 3, 4], np.ndarray)
+    array([1, 2, 3, 4])
+    >>> reset_arr_struct(np.array([[1, 2], [3, 4]]), [10, 20, 30, 40])
+    [1, 2, 3, 4]
+
+    其他测试：
+    # np矩阵转PIL图像
+    img = cv2.imread(r'textline.jpg')
+    dst = reset_arr_struct(img, PIL.Image.Image)
+    print(type(dst))  # <class 'PIL.Image.Image'>
+
+    # PIL图像转np矩阵
+    img = Image.open('textline.jpg')
+    dst = reset_arr_struct(img, np.ndarray)
+    print(type(dst))  # <class 'numpy.ndarray'>
+    """
+    # 1 判断输入数据原始的类型，和目标类型
+    type1 = type(src)
+    if isinstance(target, type):
+        type2 = target
+        target = None
+    else:
+        type2 = type(target)
+
+    # 2 一些辅助功能
+    def np2np(a, b):
+        """np.ndarray 维度细节信息的统一
+
+        很多转换，底层都会变成一个np和np矩阵的对比问题
+        """
+        if b is None: return a
+        # b 只需要取出第1个维度转np.ndarray就行，只是作为一个维度参考，不需要全解析
+        if not isinstance(b, np.ndarray): b = np.array(b[:1])
+        if (a.ndim == b.ndim) or (b.ndim > 2):
+            return a
+        if b.ndim == 1:
+            return a.reshape(-1)
+        elif b.ndim == 2:
+            return a.reshape((-1, b.shape[1]))
+        else:
+            raise ValueError
+
+    # 3 根据不同的目标数据类型，进行格式转换
+    if type2 == np.ndarray:
+        # 3.1 需要转成 np.ndarray
+        return np2np(np.array(src), target)
+    elif type2 in (list, tuple):
+        # 3.2 需要转成lis嵌套list
+        return np2np(np.array(src), target).tolist()
+    elif isinstance(target, PIL.Image.Image):
+        # 3.3 需要转成 Image 结构
+        if type1 in (list, tuple):
+            src = np.ndarray(src)
+        if isinstance(src, np.ndarray):
+            src = PIL.Image.fromarray(src)
+        return src
+    else:
+        # TODO 可以增加Polygon的类型判断、转换；暂时还没有这需求，所以就没做
+        raise TypeError(f'未知类型 {type2}')
 
 
 ____warp_perspective = """
@@ -173,29 +231,7 @@ def get_warp_mat(src, dst):
     return warp_mat
 
 
-def retain_pts_struct(pts, ref_pts):
-    """ 参考ref_pts的数据结构，设置pts的结构
-    :return: 更新后的pts
-    """
-    # 1 确保都是np.ndarray，好分析问题
-    if not isinstance(pts, np.ndarray):
-        pts = np.array(pts)
-    if not isinstance(ref_pts, np.ndarray):
-        ref_pts2 = np.array(ref_pts)
-    else:
-        ref_pts2 = ref_pts
-
-    # 2 参照ref_pts的结构
-    if ref_pts2.ndim == 1:
-        pts = pts.reshape(-1)
-    elif ref_pts2.ndim == 2:
-        pts = pts.reshape((-1, ref_pts2.shape[1]))
-    if not isinstance(ref_pts, np.ndarray):
-        pts = pts.tolist()
-    return pts
-
-
-def warp_points(pts, warp_mat):
+def warp_points(pts, warp_mat, reserve_struct=True):
     """ 透视等点集坐标转换
 
     :param pts: 支持list、tuple、np.ndarray等结构，支持1d、2d的维度
@@ -204,6 +240,8 @@ def warp_points(pts, warp_mat):
         例如 [x1, y1, x2, y2, x3, y3] --> [[x1, x2, x3], [y1, y2, y3], [1, 1, 1]]
     :param warp_mat: 变换矩阵，一般是个3*3的矩阵，但是只输入2*3的矩阵也行，因为第3行并用不到（点集只要取前两个维度X'Y'的结果值）
         TODO 不过这里我有个点也没想明白，如果不用第3行，本质上不是又变回仿射变换了，如何达到透视变换效果？第三维的深度信息能完全舍弃？
+    :param reserve_struct: 是否保留原来pts的结构返回，默认True
+        关掉该功能可以提高性能，此时返回结果统一为 n*2 的np矩阵
     :return: 会遵循原始的 pts 数据类型、维度结构返回
 
     >>> warp_mat = [[0, 1, 0], [1, 0, 0], [0, 0, 1]]  # 对换x、y
@@ -217,15 +255,20 @@ def warp_points(pts, warp_mat):
     [2, 1, 22, 11, 222, 111]
     >>> warp_points(np.array([1, 2, 11, 22, 111, 222]), warp_mat)  # 也可以用np.ndarray等结构
     array([  2,   1,  22,  11, 222, 111])
+    >>> warp_points([1, 2, 11, 22], warp_mat, reserve_struct=False)  # 也可以用一维的结构来输入点集
+    array([[ 2,  1],
+           [22, 11]])
     """
     pts1 = np.array(pts).reshape(-1, 2).T
     pts1 = np.concatenate([pts1, [[1] * pts1.shape[1]]], axis=0)
     pts2 = np.dot(warp_mat[:2], pts1)
     pts2 = pts2.T
-    return retain_pts_struct(pts2, pts)
+    if reserve_struct:
+        pts2 = reset_arr_struct(pts2, pts)
+    return pts2
 
 
-def warp_image(img, warp_mat, dsize=None, *, view_rate=False, max_zoom=1):
+def warp_image(img, warp_mat, dsize=None, *, view_rate=False, max_zoom=1, reserve_struct=True):
     """ 对图像进行透视变换
 
     :param img: np.ndarray的图像数据
@@ -241,8 +284,16 @@ def warp_image(img, warp_mat, dsize=None, *, view_rate=False, max_zoom=1):
         2，将原图依中心面积放到至2倍，记录新的4个角点变换后的位置，确保变换后的4个点依然在目标图中
         0.5，同理，只是只关注原图局部的一半位置
     :param max_zoom: 默认1倍，当设置时（只在开启view_rate时有用），会增加【缩小】变换，限制view_rate扩展的上限
+    :param reserve_struct: 是否保留原来img的数据类型返回，默认True
+        关掉该功能可以提高性能，此时返回结果统一为 np 矩阵
+    :return: 见 reserve_struct
     """
     from math import sqrt
+
+    # 0 参数整理
+    img0 = img
+    if not isinstance(img, np.ndarray):
+        img = reset_arr_struct(img, np.ndarray)
 
     # 1 得到3*3的变换矩阵
     if not isinstance(warp_mat, np.ndarray):
@@ -277,7 +328,16 @@ def warp_image(img, warp_mat, dsize=None, *, view_rate=False, max_zoom=1):
     if dsize is None:
         dsize = (img.shape[1], img.shape[0])
     dst = cv2.warpPerspective(img, warp_mat, dsize)
+
+    # 4 返回值
+    if reserve_struct:
+        dst = reset_arr_struct(dst, img0)
+
     return dst
+
+
+____get_sub_image = """
+"""
 
 
 def quad_warp_wh(pts, method='average'):
@@ -325,8 +385,7 @@ def warp_quad_pts(pts, method='average'):
     [0, 0, 532, 0, 532, 549, 0, 549]
     """
     w, h = quad_warp_wh(pts, method)
-    pts2 = np.array([[0, 0], [w, 0], [w, h], [0, h]])
-    return retain_pts_struct(pts2, pts)
+    return reset_arr_struct(rect2polygon(0, 0, w, h), pts)
 
 
 def get_sub_image(src_image, pts, warp_quad=False):
@@ -336,7 +395,7 @@ def get_sub_image(src_image, pts, warp_quad=False):
         可以是图片路径、np.ndarray、PIL.Image对象
         TODO 目前先只支持np.ndarray格式
     :param pts: 子图位置信息
-        只有两个点，认为是矩形的两个角点
+        只有两个点，认为是矩形的两个对角点
         只有四个点，认为是任意四边形
         同理，其他点数量，默认为
     :param warp_quad: 变形的四边形
@@ -352,7 +411,43 @@ def get_sub_image(src_image, pts, warp_quad=False):
         dst = src_image[y1:y2, x1:x2]
     else:
         w, h = quad_warp_wh(pts, method=warp_quad)
-        pts2 = np.array([[0, 0], [w, 0], [w, h], [0, h]])
-        warp_mat = get_warp_mat(pts, pts2)
+        warp_mat = get_warp_mat(pts, rect2polygon(0, 0, w, h))
         dst = warp_image(src_image, warp_mat, (w, h))
     return dst
+
+
+____other = """
+"""
+
+
+def divide_quadrangle(coords, r1=0.5, r2=None):
+    """ 切分一个四边形为两个四边形
+    :param coords: 1*8的坐标，或者4*2的坐标
+    :param r1: 第一个切分比例，0.5相当于中点（即第一个四边形右边位置）
+    :param r2: 第二个切分比例，即第二个四边形左边位置
+    :return: 返回切割后所有的四边形
+
+    一般用在改标注结果中，把一个框拆成两个框
+    TODO 把接口改成切分一个四边形为任意多个四边形？即把r1、r2等整合为一个list参数输入
+    """
+
+    # 1 计算分割点工具
+    def segment_point(pt1, pt2, rate=0.5):
+        """ 两点间的分割点
+        :param rate: 默认0.5是二分点，rate为0时即pt1，rate为1时为pt2，取值可以小于0、大于-1
+        :return:
+        """
+        x1, y1 = pt1
+        x2, y2 = pt2
+        x, y = x1 + rate * (x2 - x1), y1 + rate * (y2 - y1)
+        return int(x), int(y)
+
+    # 2 优化参数值
+    coords = coords2d(coords)
+    if not r2: r2 = 1 - r1
+
+    # 3 计算切分后的四边形坐标
+    pt1, pt2, pt3, pt4 = coords
+    pt5, pt6 = segment_point(pt1, pt2, r1), segment_point(pt4, pt3, r1)
+    pt7, pt8 = segment_point(pt1, pt2, r2), segment_point(pt4, pt3, r2)
+    return [pt1, pt5, pt6, pt4], [pt7, pt2, pt3, pt8]
