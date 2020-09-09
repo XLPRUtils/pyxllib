@@ -114,7 +114,7 @@ class Dir(Path):
                     res = func(p, ref_dir / self.files[i])
                 else:
                     res = func(p)
-                if res is not None: print(res)
+                # if res is not None: print(res)
             except Exception as e:
                 # 子函数里如果报错，不一定有记录文件路径信息，所以这里补充一下
                 xllog.info(f'处理到该文件出现错误：{p}')
