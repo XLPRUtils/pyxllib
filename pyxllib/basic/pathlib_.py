@@ -21,7 +21,7 @@ from .chardet_ import get_encoding
 class Path:
     r""" 通用文件、路径处理类，也可以处理目录，可以把目录对象理解为特殊类型的文件
 
-    document: https://www.yuque.com/code4101/python/pyxllib.debug.path
+    document: https://www.yuque.com/xlpr/python/pyxllib.debug.path
 
     大部分基础功能是从pathlib.Path衍生过来的
         但开发中该类不能直接从Path继承，会有很多问题
