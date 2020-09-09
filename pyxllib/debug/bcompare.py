@@ -118,9 +118,12 @@ def refine_file(file, func, *args, file_mode=None, debug=False, **kwargs):
     origin_content = str(data)
     new_data = func(data, *args, **kwargs)
 
-    if origin_content != str(new_data):
+    isdiff = origin_content != str(new_data)
+    if isdiff:
         if debug:
             temp_file = Path('refine_file', p.suffix, root=Path.TEMP).write(new_data, if_exists='replace').fullpath
             bcompare(file, temp_file)  # 使用beyond compare软件打开对比查看
         else:
             p.write(new_data, mode=file_mode, if_exists='replace')  # 直接原地替换
+
+    return isdiff
