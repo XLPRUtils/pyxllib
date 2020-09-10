@@ -102,7 +102,7 @@ class Dir(Path):
         xllog = get_xllog()
         n_files = len(self.files)
         width = math.ceil(math.log10(n_files + 1))
-        if ref_dir is not None: dst_dir = Dir(ref_dir)
+        if ref_dir is not None: ref_dir = Dir(ref_dir)
         if pinterval: xllog.info(f"Dir('{self.fullpath}') 使用 {func} 处理 {n_files} 个文件(夹)")
         for i, p in enumerate(self.filepaths):
             if pinterval and (i or pinterval == 1) and i % pinterval == 0:
@@ -502,7 +502,7 @@ def merge_dir(src, dst, if_exists='ignore'):
         p1.copy(p2, if_exists=if_exists)
 
     # 只拷文件和空目录，不然逻辑会乱
-    Dir(src).select('*', type_='dir', max_size=0).select('*', type_='file').procfiles(func, ref_dir=func)
+    Dir(src).select('**/*', type_='dir', max_size=0).select('**/*', type_='file').procfiles(func, ref_dir=dst)
 
 
 def extract_files(src, dst, pattern, if_exists='replace'):

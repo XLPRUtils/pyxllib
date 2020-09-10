@@ -2,4 +2,4 @@ arrow
 chardet
 requests
 qiniu
-pyymal
+pyyaml

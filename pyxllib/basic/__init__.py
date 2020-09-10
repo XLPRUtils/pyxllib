@@ -18,7 +18,7 @@ basic中依赖的三方库有直接写到 requirements.txt 中
 
 # 1 时间相关工具
 from .pytictoc import TicToc
-from .timer import Timer
+from .timer import *
 from .arrow_ import Datetime
 
 # 2 调试1
@@ -33,3 +33,62 @@ from .chardet_ import *
 from .qiniu_ import *
 from .pathlib_ import Path
 from .dirlib import *
+
+
+# 5 其他一些好用的基础功能
+
+def sort_by_given_list(a, b):
+    r"""本函数一般用在数据透视表中，分组中元素名为中文，没有按指定规律排序的情况
+    :param a: 需要排序的对象
+    :param b: 参照的排序数组
+    :return: 排序后的a
+
+    >>> sort_by_given_list(['初中', '小学', '高中'], ['少儿', '小学', '初中', '高中'])
+    ['小学', '初中', '高中']
+
+    # 不在枚举项目里的，会统一列在最后面
+    >>> sort_by_given_list(['初中', '小学', '高中', '幼儿'], ['少儿', '小学', '初中', '高中'])
+    ['小学', '初中', '高中', '幼儿']
+    """
+    # 1 从b数组构造一个d字典，d[k]=i，值为k的元素在第i位
+    d = dict()
+    for i, bb in enumerate(b): d[bb] = i
+    # 2 a数组分两部分，可以通过d排序的a1，和不能通过d排序的a2
+    a1, a2 = [], []
+    for aa in a:
+        if aa in d:
+            a1.append(aa)
+        else:
+            a2.append(aa)
+    # 3 用不同的规则排序a1、a2后合并
+    a1 = sorted(a1, key=lambda x: d[x])
+    a2 = sorted(a2)
+    return a1 + a2
+
+
+class RunOnlyOnce:
+    """ 被装饰的函数，不同的参数输入形式，只会被执行一次，
+            重复执行时会从内存直接调用上次相同参数调用下的运行的结果
+        可以使用reset成员函数重置，下一次调用该函数时则会重新执行
+
+        文档用途：https://www.yuque.com/xlpr/pyxllib/RunOnlyOnce
+    """
+
+    def __init__(self, func, distinct_args=True):
+        """
+        :param func: 封装的函数
+        :param distinct_args: 默认不同输入参数形式，都会保存一个结果
+            设为False，则不管何种参数形式，函数就真的只会保存第一次运行的结果
+        """
+        self.func = func
+        self.distinct_args = distinct_args
+        self.results = {}
+
+    def __call__(self, *args, **kwargs):
+        tag = f'{args}{kwargs}' if self.distinct_args else ''
+        if tag not in self.results:
+            self.results[tag] = self.func(*args, **kwargs)
+        return self.results[tag]
+
+    def reset(self):
+        self.results = {}

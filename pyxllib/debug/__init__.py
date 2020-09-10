@@ -39,6 +39,7 @@ class SingletonForEveryInitArgs(type):
 
     def __call__(cls, *args, **kwargs):
         tag = f'{cls}{args}{kwargs}'  # id加上所有参数的影响来控制单例类
+        # 其实转字符串来判断是不太严谨的，例如数字1和字符串'1'并不是等价的输入参数
         # dprint(tag)
         if tag not in cls._instances:
             cls._instances[tag] = super(SingletonForEveryInitArgs, cls).__call__(*args, **kwargs)
