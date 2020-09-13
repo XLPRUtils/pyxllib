@@ -68,10 +68,13 @@ def sort_by_given_list(a, b):
 
 class RunOnlyOnce:
     """ 被装饰的函数，不同的参数输入形式，只会被执行一次，
-            重复执行时会从内存直接调用上次相同参数调用下的运行的结果
-        可以使用reset成员函数重置，下一次调用该函数时则会重新执行
 
-        文档用途：https://www.yuque.com/xlpr/pyxllib/RunOnlyOnce
+    重复执行时会从内存直接调用上次相同参数调用下的运行的结果
+    可以使用reset成员函数重置，下一次调用该函数时则会重新执行
+
+    文档：https://www.yuque.com/xlpr/pyxllib/RunOnlyOnce
+
+    使用好该装饰器，可以让很多动态规划dp问题、搜索问题变得异常简洁
     """
 
     def __init__(self, func, distinct_args=True):
@@ -86,6 +89,10 @@ class RunOnlyOnce:
 
     def __call__(self, *args, **kwargs):
         tag = f'{args}{kwargs}' if self.distinct_args else ''
+        # TODO 思考更严谨，考虑了值类型的tag标记
+        #   目前的tag规则，是必要不充分条件。还可以使用id，则是充分不必要条件
+        #   能找到充要条件来做是最好的，不行的话，也应该用更严谨的充分条件来做
+        # TODO kwargs的顺序应该是没影响的，要去掉顺序干扰
         if tag not in self.results:
             self.results[tag] = self.func(*args, **kwargs)
         return self.results[tag]

@@ -160,29 +160,3 @@ def demo_timer():
 
 ____perf = """
 """
-
-
-def perf_gpu_speed():
-    """ 测试CPU和GPU的矩阵乘法速度差
-    """
-    import torch
-    import time
-
-    print(f'{torch.__version__ = }')
-    print(f'{torch.cuda.is_available() = }')
-
-    a = torch.randn(10000, 1000)
-    b = torch.randn(1000, 20000)
-    start = time.time()
-    c = torch.matmul(a, b)
-    print(f'CPU During Time: {time.time() - start:.3f} s')  # 大概要2秒
-
-    if torch.cuda.is_available():
-        # 测试两轮，因为第一轮可能要初始化硬件所以变慢了
-        for _ in range(2):
-            device = torch.device('cuda')
-            a = a.to(device)
-            b = b.to(device)
-            start = time.time()
-            c = torch.matmul(a, b)
-            print(f'GPU During Time: {time.time() - start:.3f} s')  # 0.084秒（TITAN X和1050ti差不了多少~）

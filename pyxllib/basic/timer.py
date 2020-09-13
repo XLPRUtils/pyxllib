@@ -7,6 +7,7 @@
 
 import math
 import re
+import textwrap
 import timeit
 
 
@@ -43,10 +44,10 @@ def shorten(s, width=200, placeholder='...'):
 def parse_perf(data):
     """ 输出性能分析报告，data是每次运行得到的时间数组
     """
-    # np有标准差等公式，但这是debug底层库，不想依赖太多第三方库，所以手动实现
     n, sum_ = len(data), sum(data)
 
     if n > 1:  # 有多轮，则应该输出些参考统计指标
+        # np有标准差等公式，但这是basic底层库，不想依赖太多第三方库，所以手动实现
         mean = sum_ / n
         std = math.sqrt((sum([(x - mean) ** 2 for x in data]) / n))
         li = [f'总耗时: {sum_:.3f}s', f'均值标准差: {mean:.3f}±{std:.3f}s',
@@ -111,9 +112,9 @@ class Timer:
         msg = f'{self.title} {msg}'
         n = len(self.data)
 
-        if n > 1:  # 有多轮，则应该输出些参考统计指标
-            print(parse_perf(self.data))
-        elif n == 1:  # 只有一轮，则简单地输出耗时即可
+        if n >= 1:
+            print(msg, parse_perf(self.data))
+        elif n == 1:
             sum_ = sum(self.data)
             print(f'{msg} 用时: {sum_:.3f}s')
         else:  # 没有统计数据，则补充执行一次stop后汇报
