@@ -18,6 +18,17 @@ ____base = """
 """
 
 
+def ensure_nparr(x, dtype=None):
+    """确保数据是np.ndarray结构，如果不是则做一个转换
+
+    如果x已经是np.ndarray，尽量减小数据的拷贝，提高效率
+
+    :param dtype: 如果指明了数据类型，表示要做转换，则必然会进行拷贝
+
+    """
+    return x if (dtype is None and isinstance(x, np.ndarray)) else np.array(x, dtype=dtype)
+
+
 def get_ndim(coords):
     # 注意 np.array(coords[:1])，只需要取第一个元素就可以判断出ndim
     coords = coords if isinstance(coords, np.ndarray) else np.array(coords[:1])
@@ -46,9 +57,9 @@ def coords1d(coords, dtype=None):
     """
 
     if isinstance(coords, (list, tuple)):
-        return np.array(coords, dtype=dtype).reshape(-1).tolist()
+        return ensure_nparr(coords, dtype=dtype).reshape(-1).tolist()
     elif isinstance(coords, np.ndarray):
-        return np.array(coords, dtype=dtype).reshape(-1)
+        return ensure_nparr(coords, dtype=dtype).reshape(-1)
     else:
         raise TypeError(f'未知类型 {coords}')
 
@@ -75,9 +86,9 @@ def coords2d(coords, m=2, dtype=None):
     [[1, 2], [3, 4]]
     """
     if isinstance(coords, (list, tuple)):
-        return np.array(coords, dtype=dtype).reshape((-1, m)).tolist()
+        return ensure_nparr(coords, dtype=dtype).reshape((-1, m)).tolist()
     elif isinstance(coords, np.ndarray):
-        return np.array(coords, dtype=dtype).reshape((-1, m))
+        return ensure_nparr(coords, dtype=dtype).reshape((-1, m))
     else:
         raise TypeError(f'未知类型 {coords}')
 
@@ -115,7 +126,7 @@ def reset_arr_struct(src, target):
     """ 参考 target 的数据结构，重设src的结构
 
     目前支持的数据结构
-        PIL.Image.Image
+        PIL.Image.Image，涉及到图像格式转换的，为了与opencv兼容，一律以BGR为准，除了Image自身默认用RGB
         np.ndarray
         list
     对后两者，还会进一步判断维度信息 （目前维度信息还考虑比较简单，如果超过2维等场合，可能会有些未知、意外效果）
@@ -142,6 +153,8 @@ def reset_arr_struct(src, target):
     array([1, 2, 3, 4])
     >>> reset_arr_struct(np.array([[1, 2], [3, 4]]), [10, 20, 30, 40])
     [1, 2, 3, 4]
+    >>> reset_arr_struct(np.array([]), [10, 20, 30, 40])
+    []
 
     其他测试：
     # np矩阵转PIL图像
@@ -168,6 +181,7 @@ def reset_arr_struct(src, target):
 
         很多转换，底层都会变成一个np和np矩阵的对比问题
         """
+        a = ensure_nparr(a)
         if b is None: return a
         # b 只需要取出第1个维度转np.ndarray就行，只是作为一个维度参考，不需要全解析
         if not isinstance(b, np.ndarray): b = np.array(b[:1])
@@ -183,16 +197,18 @@ def reset_arr_struct(src, target):
     # 3 根据不同的目标数据类型，进行格式转换
     if type2 == np.ndarray:
         # 3.1 需要转成 np.ndarray
-        return np2np(np.array(src), target)
+        return np2np(src, target)
     elif type2 in (list, tuple):
         # 3.2 需要转成lis嵌套list
-        return np2np(np.array(src), target).tolist()
+        if type1 == PIL.Image.Image:
+            src = cv2.cvtColor(np.array(src), cv2.COLOR_RGB2BGR)
+        return np2np(src, target).tolist()
     elif isinstance(target, PIL.Image.Image):
         # 3.3 需要转成 Image 结构
         if type1 in (list, tuple):
             src = np.ndarray(src)
         if isinstance(src, np.ndarray):
-            src = PIL.Image.fromarray(src)
+            src = PIL.Image.fromarray(cv2.cvtColor(src, cv2.COLOR_BGR2RGB)) if src.size else None
         return src
     else:
         # TODO 可以增加Polygon的类型判断、转换；暂时还没有这需求，所以就没做
@@ -259,7 +275,7 @@ def warp_points(pts, warp_mat, reserve_struct=True):
     array([[ 2,  1],
            [22, 11]])
     """
-    pts1 = np.array(pts).reshape(-1, 2).T
+    pts1 = ensure_nparr(pts).reshape(-1, 2).T
     pts1 = np.concatenate([pts1, [[1] * pts1.shape[1]]], axis=0)
     pts2 = np.dot(warp_mat[:2], pts1)
     pts2 = pts2.T
@@ -296,8 +312,7 @@ def warp_image(img, warp_mat, dsize=None, *, view_rate=False, max_zoom=1, reserv
         img = reset_arr_struct(img, np.ndarray)
 
     # 1 得到3*3的变换矩阵
-    if not isinstance(warp_mat, np.ndarray):
-        warp_mat = np.array(warp_mat)
+    warp_mat = ensure_nparr(warp_mat)
     if warp_mat.shape[0] == 2:
         warp_mat = np.concatenate([warp_mat, [[0, 0, 1]]], axis=0)
 
@@ -312,14 +327,14 @@ def warp_image(img, warp_mat, dsize=None, *, view_rate=False, max_zoom=1, reserv
         # 2.2 变换后角点位置产生的外接矩形
         left, top, right, bottom = rect_bounds1d(warp_points(pts1, warp_mat))
         # 2.3 增加平移变换确保左上角在原点
-        warp_mat = np.dot(np.array([[1, 0, -left], [0, 1, -top], [0, 0, 1]]), warp_mat)
+        warp_mat = np.dot([[1, 0, -left], [0, 1, -top], [0, 0, 1]], warp_mat)
         # 2.4 控制面积变化率
         h2, w2 = (bottom - top, right - left)
         if max_zoom:
             rate = w2 * h2 / w / h  # 目标面积比原面积
             if rate > max_zoom:
                 r = 1 / sqrt(rate / max_zoom)
-                warp_mat = np.dot(np.array([[r, 0, 0], [0, r, 0], [0, 0, 1]]), warp_mat)
+                warp_mat = np.dot([[r, 0, 0], [0, r, 0], [0, 0, 1]], warp_mat)
                 h2, w2 = round(h2 * r), round(w2 * r)
         if not dsize:
             dsize = (w2, h2)
@@ -388,7 +403,7 @@ def warp_quad_pts(pts, method='average'):
     return reset_arr_struct(rect2polygon(0, 0, w, h), pts)
 
 
-def get_sub_image(src_image, pts, warp_quad=False):
+def get_sub_image(src_image, pts, warp_quad=False, reserve_struct=True):
     """ 从src_image取一个子图
 
     :param src_image: 原图
@@ -405,14 +420,17 @@ def get_sub_image(src_image, pts, warp_quad=False):
         文件、np.ndarray --> np.ndarray
         PIL.Image --> PIL.Image
     """
+    src_img = reset_arr_struct(src_image, np.ndarray)
     pts = coords2d(pts)
     if not warp_quad or len(pts) != 4:
         x1, y1, x2, y2 = rect_bounds1d(pts)
-        dst = src_image[y1:y2, x1:x2]
+        dst = src_img[y1:y2, x1:x2]  # 这里越界不会报错，只是越界的那个维度shape为0
     else:
         w, h = quad_warp_wh(pts, method=warp_quad)
         warp_mat = get_warp_mat(pts, rect2polygon(0, 0, w, h))
-        dst = warp_image(src_image, warp_mat, (w, h))
+        dst = warp_image(src_img, warp_mat, (w, h))
+    if reserve_struct:
+        dst = reset_arr_struct(dst, src_image)
     return dst
 
 

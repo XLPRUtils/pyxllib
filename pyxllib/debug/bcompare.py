@@ -51,7 +51,7 @@ def bcompare(oldfile, newfile=None, basefile=None, wait=True, named=True):
 
     :param oldfile:
     :param newfile:
-    :param basefile: 一般用于冲突合并是，oldfile、newfile共同依赖的旧版本
+    :param basefile: 一般用于冲突合并时，oldfile、newfile共同依赖的旧版本
     :param wait: 见viewfiles的kwargs参数解释
         一般调用bcompare的时候，默认值wait=True，python是打开一个子进程并等待bcompare软件关闭后，才继续执行后续代码。
         如果你的业务场景并不需要等待bcompare关闭后执行后续python代码，可以设为wait=False，不等待。
@@ -106,12 +106,10 @@ def bcompare(oldfile, newfile=None, basefile=None, wait=True, named=True):
 
 
 def refine_file(file, func, *args, file_mode=None, debug=False, **kwargs):
-    """ 对单个labelme的json文件就行优化的功能函数
+    """ 对单个文件就行优化的功能函数
 
     :param file_mode: 指定文件读取类型格式，例如'.json'是json文件，读取为字典
     :param debug: 如果设置 debug=True，则会打开BC比较差异，否则就是静默替换
-
-    TODO 这种refine_labelme的函数格式，可以写一个工厂函数来生成
     """
     p = Path(file)
     data = p.read(mode=file_mode)
