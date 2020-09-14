@@ -64,7 +64,8 @@ def magick(infile, *, outfile=None, if_exists='error', transparent=None, trim=Fa
     def func(infile, outfile):
         # 判断是否是支持的输入文件类型
         ext = os.path.splitext(infile)[1].lower()
-        if not Path(infile).is_file() or not ext in ('.png', '.eps', '.pdf', '.jpg', '.jpeg', '.wmf', '.emf'): return False
+        if not Path(infile).is_file() or not ext in ('.png', '.eps', '.pdf', '.jpg', '.jpeg', '.wmf', '.emf'):
+            return False
 
         # 2 生成需要执行的参数
         cmd = ['magick.exe']
@@ -72,18 +73,24 @@ def magick(infile, *, outfile=None, if_exists='error', transparent=None, trim=Fa
         if density: cmd.extend(['-density', str(density)])
         cmd.append(infile)
         if transparent:
-            if not isinstance(transparent, str): transparent_ = 'white'
-            else: transparent_ = transparent
+            if not isinstance(transparent, str):
+                transparent_ = 'white'
+            else:
+                transparent_ = transparent
             cmd.extend(['-transparent', transparent_])
         if trim: cmd.append('-trim')
         if other_args: cmd.extend(other_args)
         cmd.append(outfile)
 
         # 3 生成目标png图片
+        cmd = [x.replace('\\', '/') for x in cmd]
         print(' '.join(cmd))
         subprocess.run(cmd, stderr=subprocess.PIPE, shell=True)  # 看不懂magick出错写的是啥，关了
 
-    return Path(infile).process(outfile, func, if_exists, arg1=infile, arg2=outfile).fullpath
+    # 200914周一20:40，这有个相对路径的bug，修复了下，否则 test/a.png 会变成 test/test/a.png
+    outfile = Path(outfile)
+
+    return Path(infile).process(Path(outfile), func, if_exists, arg1=infile, arg2=outfile).fullpath
 
 
 def ensure_pngs(folder, *, if_exists='ignore',
@@ -198,9 +205,9 @@ def reduce_image_filesize(path, filesize):
         r = path.size / filesize
         if r <= 1: break
         # 假设图片面积和文件大小成正比，如果r=4，表示长宽要各减小至1/(r**0.5)才能到目标文件大小
-        rate = min(1 / (r**0.5), 0.95)  # 并且限制每轮至少要缩小至95%，避免可能会迭代太多轮
+        rate = min(1 / (r ** 0.5), 0.95)  # 并且限制每轮至少要缩小至95%，避免可能会迭代太多轮
         im = Image.open(f'{path}')
-        im.resize((int(im.size[0]*rate), int(im.size[1]*rate))).save(f'{path}')
+        im.resize((int(im.size[0] * rate), int(im.size[1] * rate))).save(f'{path}')
 
 
 def image_rgba2rgb(im):
