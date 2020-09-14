@@ -4,6 +4,11 @@
 # @Email  : 877362867@qq.com
 # @Data   : 2020/08/13 14:53
 
+
+"""
+以后这里cv功能多了，可以再拆子文件夹
+"""
+
 import copy
 
 import numpy as np
@@ -431,6 +436,66 @@ def get_sub_image(src_image, pts, warp_quad=False, reserve_struct=True):
         dst = warp_image(src_img, warp_mat, (w, h))
     if reserve_struct:
         dst = reset_arr_struct(dst, src_image)
+    return dst
+
+
+____opencv = """
+对opencv相关功能的一些优化、 封装
+"""
+
+
+def imread(path, flags=1):
+    """ opencv 源生的 imread不支持中文路径，所以要用PIL先读取，然后再转np.ndarray
+
+    :param flags:
+        0，转成 GRAY
+        1，转成 BGR
+    """
+    src = PIL.Image.open(str(path))
+    src = np.array(src)  # 如果原图是灰度图，获得的可能是单通道的结果
+    if flags == 0:
+        if src.ndim == 3:
+            src = cv2.cvtColor(src, cv2.COLOR_RGB2GRAY)
+    elif flags == 1:
+        if src.ndim == 3:
+            src = cv2.cvtColor(src, cv2.COLOR_RGB2BGR)
+        else:
+            src = cv2.cvtColor(src, cv2.COLOR_GRAY2BGR)
+    else:
+        raise ValueError(flags)
+    return src
+
+
+def imshow(mat, winname=None, flags=0):
+    """ 展示窗口
+    :param mat:
+    :param winname: 未输入时，则按test1、test2依次生成窗口
+    :param flags:
+        cv2.WINDOW_NORMAL，0，输入2等偶数值好像也等价于输入0
+        cv2.WINDOW_AUTOSIZE，1，输入3等奇数值好像等价于1
+        cv2.WINDOW_OPENGL，4096
+    :return:
+    """
+    if winname is None:
+        imshow.num = getattr(imshow, 'num', 0) + 1
+        winname = f'test{imshow.num}'
+    cv2.namedWindow(winname, flags)
+    cv2.imshow(winname, mat)
+
+
+def plot_lines(src, lines, color=None, thickness=1, line_type=cv2.LINE_AA, shift=None):
+    """ 在src图像上画系列线段
+    """
+    dst = np.array(src)  # 拷贝一张图来修改
+    if color is None:
+        if src.ndim == 3:
+            color = (0, 0, 255)  # TODO 可以根据背景色智能推导画线用的颜色，目前是固定红色
+        elif src.ndim == 2:
+            color = [255]  # 灰度图，默认先填白色
+    if not isinstance(lines, np.ndarray): lines = np.array(lines)
+    for line in lines.reshape(-1, 4):
+        x1, y1, x2, y2 = line
+        cv2.line(dst, (x1, y1), (x2, y2), color, thickness, line_type, shift)
     return dst
 
 
