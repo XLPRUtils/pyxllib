@@ -510,7 +510,7 @@ def plot_lines(src, lines, color=None, thickness=1, line_type=cv2.LINE_AA, shift
     return dst
 
 
-class Trackbars:
+class TrackbarTool:
     """ 滑动条控件组
     """
 
@@ -557,6 +557,46 @@ class Trackbars:
         :return: 当前取值
         """
         return cv2.getTrackbarPos(item, self.winname)
+
+
+def get_background_color(src_img, edge_size=5, binary_img=None):
+    """ 智能判断图片背景色
+
+    对全图二值化后，考虑最外一层宽度未edge_size的环中，0、1分布最多的作为背景色
+        然后取全部背景色的平均值返回
+
+    :param src_img: 支持黑白图、彩图
+    :param edge_size: 边缘宽度，宽度越高一般越准确，但也越耗性能
+    :param binary_img: 运算中需要用二值图，如果外部已经计算了，可以直接传入进来，避免重复运算
+    :return: color
+
+    TODO 可以写个获得前景色，道理类似，只是最后再图片中心去取平均值
+    """
+    from itertools import chain
+
+    # 1 获得二值图，区分前背景
+    if binary_img is None:
+        gray_img = cv2.cvtColor(src_img, cv2.COLOR_BGR2GRAY) if src_img.ndim == 3 else src_img
+        _, binary_img = cv2.threshold(gray_img, np.mean(gray_img), 255, cv2.THRESH_BINARY)
+
+    # 2 分别存储点集
+    n, m = src_img.shape[:2]
+    colors0, colors1 = [], []
+    for i in range(n):
+        if i < edge_size or i >= n - edge_size:
+            js = range(m)
+        else:
+            js = chain(range(edge_size), range(n - edge_size, n))
+        for j in js:
+            if binary_img[i, j]:
+                colors1.append(src_img[i, j])
+            else:
+                colors0.append(src_img[i, j])
+
+    # 3 计算平均像素
+    # 以数量多的作为背景像素
+    colors = colors0 if len(colors0) > len(colors1) else colors1
+    return np.mean(np.array(colors), axis=0, dtype='int').tolist()
 
 
 ____other = """
