@@ -486,17 +486,77 @@ def imshow(mat, winname=None, flags=0):
 def plot_lines(src, lines, color=None, thickness=1, line_type=cv2.LINE_AA, shift=None):
     """ 在src图像上画系列线段
     """
+    # 1 判断 lines 参数内容
+    if lines is None:
+        return src
+    if not isinstance(lines, np.ndarray):
+        lines = np.array(lines)
+    if not lines.any():
+        return src
+
+    # 2 预备
     dst = np.array(src)  # 拷贝一张图来修改
     if color is None:
         if src.ndim == 3:
             color = (0, 0, 255)  # TODO 可以根据背景色智能推导画线用的颜色，目前是固定红色
         elif src.ndim == 2:
             color = [255]  # 灰度图，默认先填白色
-    if not isinstance(lines, np.ndarray): lines = np.array(lines)
-    for line in lines.reshape(-1, 4):
-        x1, y1, x2, y2 = line
-        cv2.line(dst, (x1, y1), (x2, y2), color, thickness, line_type, shift)
+
+    # 3 画线
+    if lines.any():
+        for line in lines.reshape(-1, 4):
+            x1, y1, x2, y2 = line
+            cv2.line(dst, (x1, y1), (x2, y2), color, thickness, line_type, shift)
     return dst
+
+
+class Trackbars:
+    """ 滑动条控件组
+    """
+
+    def __init__(self, winname, img, flags=0):
+        if not isinstance(img, np.ndarray):
+            img = imread(str(img))
+        cv2.namedWindow(winname, flags)
+        cv2.imshow(winname, img)
+        self.winname = winname
+        self.img = img
+        self.trackbar_names = {}
+
+    def imshow(self, img=None):
+        """ 刷新显示的图片 """
+        if img is None:
+            img = self.img
+        cv2.imshow(self.winname, img)
+
+    def default_run(self, x):
+        """ 默认执行器，这个在类继承后，基本都是要自定义成自己的功能的
+
+        TODO 从1滑到20，会运行20次，可以研究一个机制，来只运行一次
+        """
+        kwargs = {}
+        for k in self.trackbar_names.keys():
+            kwargs[k] = self[k]
+        print(kwargs)
+
+    def create_trackbar(self, trackbar_name, count, value=0, on_change=None):
+        """ 创建一个滑动条
+        :param trackbar_name: 滑动条名称
+        :param count: 上限值
+        :param on_change: 回调函数
+        :param value: 初始值
+        :return:
+        """
+        if on_change is None:
+            on_change = self.default_run
+        cv2.createTrackbar(trackbar_name, self.winname, value, count, on_change)
+
+    def __getitem__(self, item):
+        """ 可以通过 Trackbars 来获取滑动条当前值
+        :param item: 滑动条名称
+        :return: 当前取值
+        """
+        return cv2.getTrackbarPos(item, self.winname)
 
 
 ____other = """
