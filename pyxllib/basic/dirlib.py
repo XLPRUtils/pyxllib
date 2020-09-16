@@ -147,6 +147,45 @@ class Dir(Path):
         """新建文件夹"""
         raise NotImplementedError
 
+    def check_repeat_filenames(self, part='name') -> dict:
+        """ 查看目前选中的文件中，不考虑所在目录的话，名称是否有重复的
+            这里的"文件名"，包含扩展名（TODO 或者可以设置参数，也能做无扩展名的判断。。。）
+
+        :param part: 默认是以name为准，即文件名，包含扩展名
+            也可以使用 stem，纯文件名
+            甚至 suffix，只考虑扩展名也行，只要是Path类的成员即可，但是应该没人会有这样的需求~
+
+        :return: 返回字典，k是名称（），值是这个k重复的文件清单
+        """
+        from collections import defaultdict
+
+        # 1 为了精准，需要将名称全部转为小写然后对比
+        #   但是可视化的时候，尽量遵循原来的大小写规范比较好，所以这里需要存储一个keys的映射
+        #   k是小写的文件名，v是文件中实际出现的某种文件名格式，最终使用的是v来作为返回值字典中的keys
+        keys = dict()
+
+        # 2 对文件分组
+        files = defaultdict(list)
+        for f in self.files:
+            raw_name = getattr(Path(self / f), part)
+            key_name = raw_name.lower()
+            if key_name not in keys:
+                keys[key_name] = raw_name
+            files[keys[key_name]].append(f)
+
+        # 3 留下有重复的数据
+        repeat_files = dict()
+        for k, v in files.items():
+            if len(v) > 1:
+                repeat_files[k] = v
+        return repeat_files
+
+    def check_stems(self):
+        """
+        :return:
+        """
+        pass
+
     def __repr__(self):
         return f'{self.root}: {self.files}'
 
@@ -154,7 +193,7 @@ class Dir(Path):
         """ 使用with模式可以进行工作目录切换
 
         注意！注意！注意！
-        切换工作目录和多线程混合使用会有意向不到的坑，要慎重！
+        切换工作目录和多线程混合使用会有意想不到的坑，要慎重！
         """
         self._origin_wkdir = os.getcwd()
         os.chdir(self.fullpath)
