@@ -138,7 +138,8 @@ def natural_sort_key(key):
 
 
 def natural_sort(ls, only_use_digits=False):
-    """自然排序
+    """ 自然排序
+
     :param only_use_digits: 正常会用数字作为分隔，切割每一部分进行比较
         如果只想比较数值部分，可以only_use_digits=True
     """
@@ -151,7 +152,8 @@ def natural_sort(ls, only_use_digits=False):
 
 
 def typename(c):
-    """简化输出的type类型
+    """ 简化输出的type类型
+
     >>> typename(123)
     'int'
     """

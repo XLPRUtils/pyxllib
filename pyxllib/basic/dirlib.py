@@ -57,11 +57,10 @@ class Dir(Path):
         """返回所有files的path对象"""
         return [self / f for f in self.files]
 
-    def select(self, patter, type_=None,
-               ignore_backup=False, ignore_special=False,
-               min_size=None, max_size=None,
-               min_ctime=None, max_ctime=None, min_mtime=None, max_mtime=None):
+    def select(self, patter, nsort=True, **kwargs):
         r""" 增加选中文件，从filesmatch衍生而来，参数含义见 filesfilter
+
+        :param nsort: 是否使用自然排序，关闭可以加速
 
         注意select和exclude的增减操作是不断叠加的，而不是每次重置！
         如果需要重置，应该重新定义一个Folder类
@@ -76,19 +75,20 @@ class Dir(Path):
 
         >> Dir(r'C:/pycode/code4101py').select('*.py', min_mtime=Datetime(2020, 3, 1))  # 修改时间在3月1日以上的
         """
-        files = filesmatch(patter, root=self.fullpath, type_=type_,
-                           ignore_backup=ignore_backup, ignore_special=ignore_special,
-                           min_size=min_size, max_size=max_size,
-                           min_ctime=min_ctime, max_ctime=max_ctime, min_mtime=min_mtime, max_mtime=max_mtime)
-        return Dir(self._path, files=natural_sort(self.files + files))
+        files = filesmatch(patter, root=self.fullpath, **kwargs)
+        files = self.files + files
+        if nsort: files = natural_sort(self.files + files)
+        return Dir(self._path, files=files)
 
-    def procfiles(self, func, ref_dir=None, pinterval=None):
+    def procfiles(self, func, start=None, end=None, ref_dir=None, pinterval=None):
         """ 对选中的文件迭代处理
 
         :param func: 对每个文件进行处理的自定义接口函数
             参数 p: 输入参数 Path 对象
             return: 可以没有返回值，当有返回值时，会作为信息，表示要输出查看
                 TODO 以后可以返回字典结构，用不同的key表示不同的功能，可以控制些高级功能
+        :param start: 只处理start编号以上的文件
+        :param end: 只处理end编号以下的文件
         :param ref_dir: 是否有个相对的目录，对比同子结构下的文件情况
             使用该参数时，func的接口会变成两个参数，会输入原p1、目标p2两个文件参数
         :param pinterval: print interval，是否输出处理进度，输入一个正整数值，则每个间隔的倍数，会显示处理进度
@@ -99,12 +99,26 @@ class Dir(Path):
         TODO 支持多线程？
         TODO 增设可以bfs还是dfs的功能？
         """
+        # 1 参数
         xllog = get_xllog()
         n_files = len(self.files)
         width = math.ceil(math.log10(n_files + 1))
         if ref_dir is not None: ref_dir = Dir(ref_dir)
         if pinterval: xllog.info(f"Dir('{self.fullpath}') 使用 {func} 处理 {n_files} 个文件(夹)")
-        for i, p in enumerate(self.filepaths):
+
+        # 2 处理区间
+        if start:
+            xllog.info(f"使用start参数，跳过编号{start}以下的文件")
+        else:
+            start = 0
+        if end:
+            # 这里空格是为了对齐，别删
+            xllog.info(f"使用 end 参数，  只处理{end}以内的文件")
+        else:
+            end = n_files
+
+        # 遍历
+        for i, p in enumerate(self.filepaths[start:end], start=start):
             if pinterval and (i or pinterval == 1) and i % pinterval == 0:
                 # 如果间隔是一个文件，则输出具体的每个文件路径
                 message = f' {self.files[i]}' if pinterval == 1 else ''
@@ -125,7 +139,7 @@ class Dir(Path):
         raise NotImplementedError
 
     def exclude(self):
-        """去掉部分选中文件
+        """ 去掉部分选中文件
         """
         raise NotImplementedError
 
@@ -186,9 +200,12 @@ def filesfilter(files, *, root=os.curdir, type_=None,
         'dir', 只匹配目录
     :param ignore_backup: 如果设为False，会过滤掉自定义的备份文件格式，不获取备份类文件
     :param ignore_special: 自动过滤掉 '.git'、'$RECYCLE.BIN' 目录下文件
-    :param min_size、max_size: 文件最小过滤，单位Byte
-    :param min_ctime、max_ctime: 创建时间的过滤，格式'2019-09-01'或'2019-09-01 00:00'
-    :param min_mtime、max_mtime: 修改时间的过滤
+    :param min_size: 文件大小过滤，单位Byte
+    :param max_size: ~
+    :param min_ctime: 创建时间的过滤，格式'2019-09-01'或'2019-09-01 00:00'
+    :param max_ctime: ~
+    :param min_mtime: 修改时间的过滤
+    :param max_mtime: ~
     :return:
     """
 
@@ -229,10 +246,7 @@ def filesfilter(files, *, root=os.curdir, type_=None,
     return list(filter(judge, files))
 
 
-def filesmatch(patter, *, root=os.curdir,
-               type_=None, ignore_backup=False, ignore_special=False,
-               min_size=None, max_size=None,
-               min_ctime=None, max_ctime=None, min_mtime=None, max_mtime=None) -> list:
+def filesmatch(patter, *, root=os.curdir, **kwargs) -> list:
     r"""
     :param patter:
         str，
@@ -241,7 +255,7 @@ def filesmatch(patter, *, root=os.curdir,
                 glob其实支持[0-9]这种用法，但是[、]在文件名中是合法的，
                     为了明确要使用glob模式，我这里改成<>模式
                 **/*，是不会匹配到根目录的
-        re.Patter，正则筛选规则（这种方法会比较慢，但是很灵活）
+        re.Patter，正则筛选规则（这种方法会比较慢，但是很灵活）  或者其他有match成员函数的类也可以
             会获得当前工作目录下的所有文件相对路径，组成list
             对list的所有元素使用re.match进行匹配
         list、tuple、set对象
@@ -288,7 +302,7 @@ def filesmatch(patter, *, root=os.curdir,
     root = os.path.abspath(root)
 
     # 0 规则匹配
-    patter = str(patter)
+    # patter = str(patter)  # 200916周三14:59，这样会处理不了正则，要关掉
     glob_chars_pos = strfind(patter, ('*', '?', '<', '>')) if isinstance(patter, str) else -1
 
     # 1 普通文本匹配  （没有通配符，单文件查找）
@@ -314,8 +328,8 @@ def filesmatch(patter, *, root=os.curdir,
 
         n = len(root) + 1
         res = [(x[n:] if x.startswith(root) else x) for x in files]
-    # 3 正则匹配
-    elif isinstance(patter, re.Pattern):
+    # 3 正则匹配 （只要有match成员函数就行，不一定非要正则对象）
+    elif hasattr(patter, 'match'):
         files = filesmatch('**/*', root=root)
         res = list(filter(lambda x: patter.match(x), files))
     # 4 list等迭代对象
@@ -326,10 +340,7 @@ def filesmatch(patter, *, root=os.curdir,
         raise TypeError
 
     # 2 filetype的筛选
-    res = filesfilter(res, root=root, type_=type_,
-                      ignore_backup=ignore_backup, ignore_special=ignore_special,
-                      min_size=min_size, max_size=max_size,
-                      min_ctime=min_ctime, max_ctime=max_ctime, min_mtime=min_mtime, max_mtime=max_mtime)
+    res = filesfilter(res, root=root, **kwargs)
 
     return [x.replace('\\', '/') for x in res]
 
