@@ -16,6 +16,7 @@ except ModuleNotFoundError:
 try:
     import lxml
 except ModuleNotFoundError:
+    # 好像很多人这个库都装不上，好奇怪~~在命令行装就可以
     subprocess.run(['pip3', 'install', 'lxml'])
     import lxml
 

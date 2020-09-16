@@ -453,6 +453,7 @@ def imread(path, flags=1):
     """
     src = PIL.Image.open(str(path))
     src = np.array(src)  # 如果原图是灰度图，获得的可能是单通道的结果
+
     if flags == 0:
         if src.ndim == 3:
             src = cv2.cvtColor(src, cv2.COLOR_RGB2GRAY)
@@ -586,7 +587,7 @@ def get_background_color(src_img, edge_size=5, binary_img=None):
         if i < edge_size or i >= n - edge_size:
             js = range(m)
         else:
-            js = chain(range(edge_size), range(n - edge_size, n))
+            js = chain(range(edge_size), range(m - edge_size, m))
         for j in js:
             if binary_img[i, j]:
                 colors1.append(src_img[i, j])
