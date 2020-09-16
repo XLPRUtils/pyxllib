@@ -444,12 +444,15 @@ ____opencv = """
 """
 
 
-def imread(path, flags=1):
+def imread_v1(path, flags=1):
     """ opencv 源生的 imread不支持中文路径，所以要用PIL先读取，然后再转np.ndarray
 
     :param flags:
         0，转成 GRAY
         1，转成 BGR
+
+    TODO 不知道新版的imread会不会出什么问题~~
+        所以这个版本的代码暂时先留着
     """
     src = PIL.Image.open(str(path))
     src = np.array(src)  # 如果原图是灰度图，获得的可能是单通道的结果
@@ -465,6 +468,11 @@ def imread(path, flags=1):
     else:
         raise ValueError(flags)
     return src
+
+
+def imread(path):
+    img = cv2.imdecode(np.fromfile(str(path), dtype=np.uint8), -1)
+    return img
 
 
 def imshow(mat, winname=None, flags=0):
