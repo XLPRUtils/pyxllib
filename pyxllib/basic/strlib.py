@@ -14,7 +14,7 @@ import pprint
 import re
 import sys
 
-from .dprint import dprint
+from pyxllib.basic.dprint import dprint
 
 
 def strfind(fullstr, objstr, *, start=None, times=0, overlap=False):
@@ -690,3 +690,42 @@ def digit2weektag(d):
         return '周' + '一二三四五六日'[d - 1]
     else:
         raise ValueError
+
+
+def fullwidth2halfwidth(ustring):
+    """ 把字符串全角转半角
+
+    python3环境下的全角与半角转换代码和测试_大数据挖掘SparkExpert的博客-CSDN博客:
+    https://blog.csdn.net/sparkexpert/article/details/82749207
+
+    >>> fullwidth2halfwidth("你好ｐｙｔｈｏｎａｂｄａｌｄｕｉｚｘｃｖｂｎｍ")
+    '你好pythonabdalduizxcvbnm'
+    """
+    ss = []
+    for s in ustring:
+        for uchar in s:
+            inside_code = ord(uchar)
+            if inside_code == 12288:  # 全角空格直接转换
+                inside_code = 32
+            elif 65281 <= inside_code <= 65374:  # 全角字符（除空格）根据关系转化
+                inside_code -= 65248
+            ss.append(chr(inside_code))
+    return ''.join(ss)
+
+
+def halfwidth2fullwidth(ustring):
+    """ 把字符串全角转半角
+
+    >>> halfwidth2fullwidth("你好ｐｙｔｈｏｎａｂｄａｌｄｕｉｚｘｃｖｂｎｍ")
+    '你好ｐｙｔｈｏｎａｂｄａｌｄｕｉｚｘｃｖｂｎｍ'
+    """
+    ss = []
+    for s in ustring:
+        for uchar in s:
+            inside_code = ord(uchar)
+            if inside_code == 32:  # 全角空格直接转换
+                inside_code = 12288
+            elif 33 <= inside_code <= 126:  # 全角字符（除空格）根据关系转化
+                inside_code += 65248
+            ss.append(chr(inside_code))
+    return ''.join(ss)

@@ -11,6 +11,7 @@ jsondata是轻量级的功能库
 """
 
 from pyxllib.cv import *
+from .jsondata import *
 
 
 class ToLabelmeJson:
