@@ -13,13 +13,13 @@ import time
 try:
     import pyautogui
 except ModuleNotFoundError:
-    subprocess.run(['pip3', 'install', 'pyautogui'])
+    subprocess.run(['pip', 'install', 'pyautogui'])
     import pyautogui
 
 try:
     import keyboard
 except ModuleNotFoundError:
-    subprocess.run(['pip3', 'install', 'keyboard'])
+    subprocess.run(['pip', 'install', 'keyboard'])
     import keyboard
 
 import pyscreeze

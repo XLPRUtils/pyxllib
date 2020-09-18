@@ -30,7 +30,7 @@ try:
     # MatchSimString计算编辑距离需要
     import Levenshtein
 except ModuleNotFoundError:
-    subprocess.run(['pip3', 'install', 'python-Levenshtein'])
+    subprocess.run(['pip', 'install', 'python-Levenshtein'])
     import Levenshtein
 
 # import textract     # ensure_content读取word文档需要
@@ -38,7 +38,7 @@ except ModuleNotFoundError:
 try:  # 拼写检查库，即词汇库
     from spellchecker import SpellChecker
 except ModuleNotFoundError:
-    subprocess.run(['pip3', 'install', 'pyspellchecker'])
+    subprocess.run(['pip', 'install', 'pyspellchecker'])
     from spellchecker import SpellChecker
 
 ____section_1_text = """

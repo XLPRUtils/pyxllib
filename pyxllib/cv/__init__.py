@@ -13,4 +13,4 @@ from .fitz_ import *
 # 非算法层面的一些简单的图像格式转换功能
 from .imlib import *
 # 几何运算功能，也有相关的透视变换等图像处理
-from .cv import *
+from pyxllib.cv.cv import *

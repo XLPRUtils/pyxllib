@@ -713,6 +713,27 @@ def fullwidth2halfwidth(ustring):
     return ''.join(ss)
 
 
+def fullwidth2halfwidth2(ustring):
+    """ 不处理标点符号的版本
+
+    >>> fullwidth2halfwidth2("你好ｐｙｔｈｏｎａｂｄａ，ｌｄｕｉｚｘｃｖｂｎｍ")
+    '你好pythonabda，lduizxcvbnm'
+    """
+    ss = []
+    for s in ustring:
+        for uchar in s:
+            if uchar in '：；！（），？＂．':
+                ss.append(uchar)
+            else:
+                inside_code = ord(uchar)
+                if inside_code == 12288:  # 全角空格直接转换
+                    inside_code = 32
+                elif 65281 <= inside_code <= 65374:  # 全角字符（除空格）根据关系转化
+                    inside_code -= 65248
+                ss.append(chr(inside_code))
+    return ''.join(ss)
+
+
 def halfwidth2fullwidth(ustring):
     """ 把字符串全角转半角
 

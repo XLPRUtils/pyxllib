@@ -10,6 +10,7 @@
 """
 
 import copy
+import re
 
 import numpy as np
 import cv2
@@ -18,113 +19,110 @@ from shapely.geometry import Polygon
 
 from pyxllib.debug import dprint
 
-____base = """
+____ensure_array_type = """
+数组方面的类型转换，相关类型有
 
+list (tuple)  1d, 2d
+np.ndarray    1d, 2d
+PIL.Image.Image
+Polygon
+
+这里封装的目的，是尽量减少不必要的数据重复拷贝，需要做些底层的特定判断优化
 """
 
 
-def ensure_nparr(x, dtype=None):
+def np_array(x, dtype=None, shape=None):
     """确保数据是np.ndarray结构，如果不是则做一个转换
 
     如果x已经是np.ndarray，尽量减小数据的拷贝，提高效率
 
-    :param dtype: 如果指明了数据类型，表示要做转换，则必然会进行拷贝
+    :param dtype: 还可以顺便指定数据类型，可以修改值的存储类型
 
+    TODO 增加一些字符串初始化方法，例如类似matlab这样的 [1 2 3 4]。虽然从性能角度不推荐，但是工程化应该提供尽可能完善全面的功能。
     """
-    return x if (dtype is None and isinstance(x, np.ndarray)) else np.array(x, dtype=dtype)
-
-
-def get_ndim(coords):
-    # 注意 np.array(coords[:1])，只需要取第一个元素就可以判断出ndim
-    coords = coords if isinstance(coords, np.ndarray) else np.array(coords[:1])
-    return coords.ndim
-
-
-def coords1d(coords, dtype=None):
-    """ 转成一维点数据
-
-    [(x1, y1), (x2, y2), ...] --> [x1, y1, x2, y2, ...]
-    会尽量遵循原始的array、list等结构返回
-
-    >>> coords1d([(1, 2), (3, 4)])
-    [1, 2, 3, 4]
-    >>> coords1d(np.array([[1, 2], [3, 4]]))
-    array([1, 2, 3, 4])
-    >>> coords1d([1, 2, 3, 4])
-    [1, 2, 3, 4]
-
-    >>> coords1d([[1.5, 2], [3.5, 4]])
-    [1.5, 2.0, 3.5, 4.0]
-    >>> coords1d([1, 2, [3, 4], [5, 6, 7]])  # 这种情况，[3,4]、[5,6,7]都是一个整体
-    [1, 2, [3, 4], [5, 6, 7]]
-    >>> coords1d([[[1, 2, 3], [4, 5, 6]], [[7, 8, 9], [10, 11, 12]]])
-    [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
-    """
-
-    if isinstance(coords, (list, tuple)):
-        return ensure_nparr(coords, dtype=dtype).reshape(-1).tolist()
-    elif isinstance(coords, np.ndarray):
-        return ensure_nparr(coords, dtype=dtype).reshape(-1)
+    if isinstance(x, np.ndarray):
+        if x.dtype == np.dtype(dtype):
+            y = x
+        else:
+            y = np.array(x, dtype=dtype)
+    elif isinstance(x, PIL.Image.Image):
+        # PIL RGB图像数据转 np的 BGR数据
+        y = cv2.cvtColor(np.array(x), cv2.COLOR_RGB2BGR)
+        if dtype: y = np.array(x, dtype=dtype)
+    elif isinstance(x, Polygon):
+        y = np.array(x.exterior.coords, dtype=dtype)
     else:
-        raise TypeError(f'未知类型 {coords}')
+        y = np.array(x, dtype=dtype)
+
+    if shape:
+        y = y.reshape(shape)
+
+    return y
 
 
-def coords2d(coords, m=2, dtype=None):
-    """ 一维的点数据转成二维点数据
-
-    :param m: 转成行列结构后，每列元素数，默认2个
-
-    [x1, y1, x2, y2, ...] --> [(x1, y1), (x2, y2), ...]
-    会尽量遵循原始的array、list等结构返回
-
-    >>> coords2d([1, 2, 3, 4])
-    [[1, 2], [3, 4]]
-    >>> coords2d(np.array([1, 2, 3, 4]))
-    array([[1, 2],
-           [3, 4]])
-    >>> coords2d([[1, 2], [3, 4]])
-    [[1, 2], [3, 4]]
-
-    >>> coords2d([1.5, 2, 3.5, 4])
-    [[1.5, 2.0], [3.5, 4.0]]
-    >>> coords2d([1.5, 2, 3.5, 4], dtype=int)  # 数据类型转换
-    [[1, 2], [3, 4]]
+def to_list(x, dtype=None, shape=None):
     """
-    if isinstance(coords, (list, tuple)):
-        return ensure_nparr(coords, dtype=dtype).reshape((-1, m)).tolist()
-    elif isinstance(coords, np.ndarray):
-        return ensure_nparr(coords, dtype=dtype).reshape((-1, m))
+    :param x:
+    :param shape: 输入格式如：-1, (-1, ), (-1, 2)
+    :return: list、tuple嵌套结构
+    """
+    if isinstance(x, (list, tuple)):
+        # 1 尽量不要用这两个参数，否则一定会使用到np矩阵作为中转
+        if dtype or shape:
+            y = np_array(x, dtype, shape)
+        else:
+            y = x
     else:
-        raise TypeError(f'未知类型 {coords}')
+        y = np_array(x, dtype, shape).tolist()
+    return y
 
 
-def rect_bounds1d(coords, dtype=int):
-    """ 多边形的最大外接矩形
-    :param coords: 任意多边形的一维值[x1, y1, x2, y2, ...]，或者二维结构[(x1, y1), (x2, y2), ...]
-    :param dtype: 默认存储的数值类型
-    :return: rect的两个点坐标，同时也是 [left, top, right, bottom]
-    """
-    pts = coords2d(coords)
-    if len(pts) > 2:
-        p = Polygon(pts).bounds
+def pil_image(x):
+    if isinstance(x, PIL.Image.Image):
+        y = x
     else:
-        pts = coords1d(pts)
-        p = [min(pts[::2]), min(pts[1::2]), max(pts[::2]), max(pts[1::2])]
-    return [dtype(v) for v in p]
+        y = np_array(x)
+        y = PIL.Image.fromarray(cv2.cvtColor(y, cv2.COLOR_BGR2RGB)) if y.size else None
+    return y
 
 
-def rect_bounds(coords, dtype=int):
-    """ 多边形的最大外接矩形
-    :param coords: 任意多边形的一维值[x1, y1, x2, y2, ...]，或者二维结构[(x1, y1), (x2, y2), ...]
-    :param dtype: 默认存储的数值类型
-    :return: rect的两个点坐标
+def shapely_polygon(x):
+    """ 转成shapely的Polygon对象
+
+    :param x: 支持多种格式，详见代码
+    :return: Polygon
+
+    >>> print(shapely_polygon([[0, 0], [10, 20]]))  # list
+    POLYGON ((0 0, 10 0, 10 20, 0 20, 0 0))
+    >>> print(shapely_polygon({'shape_type': 'polygon', 'points': [[0, 0], [10, 0], [10, 20], [0, 20]]}))  # labelme shape
+    POLYGON ((0 0, 10 0, 10 20, 0 20, 0 0))
+    >>> print(shapely_polygon('107,247,2358,209,2358,297,107,335'))  # 字符串格式
+    POLYGON ((107 247, 2358 209, 2358 297, 107 335, 107 247))
+    >>> print(shapely_polygon('107 247.5, 2358 209.2, 2358 297, 107.5 335'))  # 字符串格式
+    POLYGON ((107 247.5, 2358 209.2, 2358 297, 107.5 335, 107 247.5))
     """
-    x1, y1, x2, y2 = rect_bounds1d(coords, dtype=dtype)
-    return [[x1, y1], [x2, y2]]
+    from shapely.geometry import Polygon
 
-
-def rect2polygon(x1, y1, x2, y2):
-    return [[x1, y1], [x2, y1], [x2, y2], [x1, y2]]
+    if isinstance(x, Polygon):
+        return x
+    elif isinstance(x, dict) and 'points' in x:
+        if x['shape_type'] in ('rectangle', 'polygon'):
+            # 目前这种情况一般是输入了labelme的shape格式
+            return shapely_polygon(x['points'])
+        else:
+            raise ValueError('无法转成多边形的类型')
+    elif isinstance(x, str):
+        coords = re.findall(r'[\d\.]+', x)
+        return shapely_polygon(coords)
+    else:
+        x = np_array(x, shape=(-1, 2))
+        if x.shape[0] == 2:
+            x = rect2polygon(*x.reshape(-1).tolist())
+            x = np.array(x)
+        if x.shape[0] >= 3:
+            return Polygon(x)
+        else:
+            raise ValueError
 
 
 def reset_arr_struct(src, target):
@@ -173,7 +171,6 @@ def reset_arr_struct(src, target):
     print(type(dst))  # <class 'numpy.ndarray'>
     """
     # 1 判断输入数据原始的类型，和目标类型
-    type1 = type(src)
     if isinstance(target, type):
         type2 = target
         target = None
@@ -181,43 +178,126 @@ def reset_arr_struct(src, target):
         type2 = type(target)
 
     # 2 一些辅助功能
-    def np2np(a, b):
+    def to_np_array(a, b):
         """np.ndarray 维度细节信息的统一
 
         很多转换，底层都会变成一个np和np矩阵的对比问题
         """
-        a = ensure_nparr(a)
+        a = np_array(a)
         if b is None: return a
         # b 只需要取出第1个维度转np.ndarray就行，只是作为一个维度参考，不需要全解析
         if not isinstance(b, np.ndarray): b = np.array(b[:1])
-        if (a.ndim == b.ndim) or (b.ndim > 2):
-            return a
-        if b.ndim == 1:
-            return a.reshape(-1)
-        elif b.ndim == 2:
-            return a.reshape((-1, b.shape[1]))
-        else:
-            raise ValueError
+        return a.reshape([-1] + list(b.shape[1:]))
 
     # 3 根据不同的目标数据类型，进行格式转换
     if type2 == np.ndarray:
-        # 3.1 需要转成 np.ndarray
-        return np2np(src, target)
+        return to_np_array(src, target)
     elif type2 in (list, tuple):
-        # 3.2 需要转成lis嵌套list
-        if type1 == PIL.Image.Image:
-            src = cv2.cvtColor(np.array(src), cv2.COLOR_RGB2BGR)
-        return np2np(src, target).tolist()
-    elif isinstance(target, PIL.Image.Image):
-        # 3.3 需要转成 Image 结构
-        if type1 in (list, tuple):
-            src = np.ndarray(src)
-        if isinstance(src, np.ndarray):
-            src = PIL.Image.fromarray(cv2.cvtColor(src, cv2.COLOR_BGR2RGB)) if src.size else None
-        return src
+        return to_np_array(src, target).tolist()
+    elif type2 == PIL.Image.Image:
+        return pil_image(src)
+    elif type == Polygon:
+        return shapely_polygon(src)
     else:
-        # TODO 可以增加Polygon的类型判断、转换；暂时还没有这需求，所以就没做
         raise TypeError(f'未知类型 {type2}')
+
+
+____base = """
+
+"""
+
+
+def get_ndim(coords):
+    # 注意 np.array(coords[:1])，只需要取第一个元素就可以判断出ndim
+    coords = coords if isinstance(coords, np.ndarray) else np.array(coords[:1])
+    return coords.ndim
+
+
+def coords1d(coords, dtype=None):
+    """ 转成一维点数据
+
+    [(x1, y1), (x2, y2), ...] --> [x1, y1, x2, y2, ...]
+    会尽量遵循原始的array、list等结构返回
+
+    >>> coords1d([(1, 2), (3, 4)])
+    [1, 2, 3, 4]
+    >>> coords1d(np.array([[1, 2], [3, 4]]))
+    array([1, 2, 3, 4])
+    >>> coords1d([1, 2, 3, 4])
+    [1, 2, 3, 4]
+
+    >>> coords1d([[1.5, 2], [3.5, 4]])
+    [1.5, 2.0, 3.5, 4.0]
+    >>> coords1d([1, 2, [3, 4], [5, 6, 7]])  # 这种情况，[3,4]、[5,6,7]都是一个整体
+    [1, 2, [3, 4], [5, 6, 7]]
+    >>> coords1d([[[1, 2, 3], [4, 5, 6]], [[7, 8, 9], [10, 11, 12]]])
+    [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
+    """
+
+    if isinstance(coords, (list, tuple)):
+        return np_array(coords, dtype=dtype).reshape(-1).tolist()
+    elif isinstance(coords, np.ndarray):
+        return np_array(coords, dtype=dtype).reshape(-1)
+    else:
+        raise TypeError(f'未知类型 {coords}')
+
+
+def coords2d(coords, m=2, dtype=None):
+    """ 一维的点数据转成二维点数据
+
+    :param m: 转成行列结构后，每列元素数，默认2个
+
+    [x1, y1, x2, y2, ...] --> [(x1, y1), (x2, y2), ...]
+    会尽量遵循原始的array、list等结构返回
+
+    >>> coords2d([1, 2, 3, 4])
+    [[1, 2], [3, 4]]
+    >>> coords2d(np.array([1, 2, 3, 4]))
+    array([[1, 2],
+           [3, 4]])
+    >>> coords2d([[1, 2], [3, 4]])
+    [[1, 2], [3, 4]]
+
+    >>> coords2d([1.5, 2, 3.5, 4])
+    [[1.5, 2.0], [3.5, 4.0]]
+    >>> coords2d([1.5, 2, 3.5, 4], dtype=int)  # 数据类型转换
+    [[1, 2], [3, 4]]
+    """
+    if isinstance(coords, (list, tuple)):
+        return np_array(coords, dtype=dtype).reshape((-1, m)).tolist()
+    elif isinstance(coords, np.ndarray):
+        return np_array(coords, dtype=dtype).reshape((-1, m))
+    else:
+        raise TypeError(f'未知类型 {coords}')
+
+
+def rect_bounds1d(coords, dtype=int):
+    """ 多边形的最大外接矩形
+    :param coords: 任意多边形的一维值[x1, y1, x2, y2, ...]，或者二维结构[(x1, y1), (x2, y2), ...]
+    :param dtype: 默认存储的数值类型
+    :return: rect的两个点坐标，同时也是 [left, top, right, bottom]
+    """
+    pts = coords2d(coords)
+    if len(pts) > 2:
+        p = Polygon(pts).bounds
+    else:
+        pts = coords1d(pts)
+        p = [min(pts[::2]), min(pts[1::2]), max(pts[::2]), max(pts[1::2])]
+    return [dtype(v) for v in p]
+
+
+def rect_bounds(coords, dtype=int):
+    """ 多边形的最大外接矩形
+    :param coords: 任意多边形的一维值[x1, y1, x2, y2, ...]，或者二维结构[(x1, y1), (x2, y2), ...]
+    :param dtype: 默认存储的数值类型
+    :return: rect的两个点坐标
+    """
+    x1, y1, x2, y2 = rect_bounds1d(coords, dtype=dtype)
+    return [[x1, y1], [x2, y2]]
+
+
+def rect2polygon(x1, y1, x2, y2):
+    return [[x1, y1], [x2, y1], [x2, y2], [x1, y2]]
 
 
 ____warp_perspective = """
@@ -280,7 +360,7 @@ def warp_points(pts, warp_mat, reserve_struct=True):
     array([[ 2,  1],
            [22, 11]])
     """
-    pts1 = ensure_nparr(pts).reshape(-1, 2).T
+    pts1 = np_array(pts).reshape(-1, 2).T
     pts1 = np.concatenate([pts1, [[1] * pts1.shape[1]]], axis=0)
     pts2 = np.dot(warp_mat[:2], pts1)
     pts2 = pts2.T
@@ -317,7 +397,7 @@ def warp_image(img, warp_mat, dsize=None, *, view_rate=False, max_zoom=1, reserv
         img = reset_arr_struct(img, np.ndarray)
 
     # 1 得到3*3的变换矩阵
-    warp_mat = ensure_nparr(warp_mat)
+    warp_mat = np_array(warp_mat)
     if warp_mat.shape[0] == 2:
         warp_mat = np.concatenate([warp_mat, [[0, 0, 1]]], axis=0)
 
@@ -606,6 +686,29 @@ def get_background_color(src_img, edge_size=5, binary_img=None):
     # 以数量多的作为背景像素
     colors = colors0 if len(colors0) > len(colors1) else colors1
     return np.mean(np.array(colors), axis=0, dtype='int').tolist()
+
+
+____polygon = """
+"""
+
+
+def intersection_over_union(pts1, pts2):
+    """ 两个多边形的交并比 Intersection Over Union
+    :param pts1: 可以转成polygon的数据类型
+    :param pts2:可以转成polygon的数据类型
+    :return: 交并比
+
+    >>> intersection_over_union([[0, 0], [10, 10]], [[5, 5], [15, 15]])
+    0.14285714285714285
+    """
+    polygon1, polygon2 = shapely_polygon(pts1), shapely_polygon(pts2)
+    inter_area = polygon1.intersection(polygon2).area
+    union_area = polygon1.area + polygon2.area - inter_area
+    return inter_area / union_area
+
+
+def non_maximun_suppression():
+    raise NotImplementedError
 
 
 ____other = """

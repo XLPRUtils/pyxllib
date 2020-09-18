@@ -46,8 +46,8 @@ def intersection_split(a, b):
     return ls1, ls2, ls3, ls4
 
 
-def bcompare(oldfile, newfile=None, basefile=None, wait=True, named=True):
-    """调用Beyond Compare软件对比两段文本（请确保有把BC的bcompare.exe加入环境变量）
+def bcompare(oldfile, newfile=None, basefile=None, wait=True, sameoff=False):
+    """ 调用Beyond Compare软件对比两段文本（请确保有把BC的bcompare.exe加入环境变量）
 
     :param oldfile:
     :param newfile:
@@ -55,9 +55,9 @@ def bcompare(oldfile, newfile=None, basefile=None, wait=True, named=True):
     :param wait: 见viewfiles的kwargs参数解释
         一般调用bcompare的时候，默认值wait=True，python是打开一个子进程并等待bcompare软件关闭后，才继续执行后续代码。
         如果你的业务场景并不需要等待bcompare关闭后执行后续python代码，可以设为wait=False，不等待。
-    :param named:
-        True，如果没有文件名，使用输入的变量作为文件名
-        False，使用oldfile、newfile作为文件名
+    :param sameoff: 如果设为True，则会判断内容，两份内容如果相同则不打开bc
+        这个参数一定程度会影响性能，非必要的时候不要开。
+        或者在外部的时候，更清楚数据情况，可以在外部判断内容不重复再跑bcompare函数。
     :return: 程序返回被修改的oldfile内容
         注意如果没有修改，或者wait=False，会返回原始值
     这在进行调试、检测一些正则、文本处理算法是否正确时，特别方便有用
@@ -91,8 +91,9 @@ def bcompare(oldfile, newfile=None, basefile=None, wait=True, named=True):
 
     def func(file, d):
         if file is not None:
-            if Path(file).is_file():
-                ls.append(file)
+            p = Path(file)
+            if p.is_file():
+                ls.append(p.fullpath)
             else:
                 ls.append(Path(refinepath(names[d] + ext), root=Path.TEMP).write(file, if_exists='replace').fullpath)
 
@@ -101,7 +102,11 @@ def bcompare(oldfile, newfile=None, basefile=None, wait=True, named=True):
     func(basefile, 2)  # 注意这里不要写names[2]，因为names[2]不一定有存在
 
     # 4 调用程序（并计算外部操作时间）
-    viewfiles('BCompare.exe', *ls, wait=wait)
+    if sameoff:
+        if Path(ls[0]).read() != Path(ls[1]).read():
+            viewfiles('BCompare.exe', *ls, wait=wait)
+    else:
+        viewfiles('BCompare.exe', *ls, wait=wait)
     return Path(ls[0]).read()
 
 

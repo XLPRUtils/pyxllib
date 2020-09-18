@@ -14,7 +14,7 @@ from pyxllib.basic import Path
 try:
     import oss2
 except ModuleNotFoundError:
-    subprocess.run(['pip3', 'install', 'oss2'])
+    subprocess.run(['pip', 'install', 'oss2'])
     import oss2
 
 
