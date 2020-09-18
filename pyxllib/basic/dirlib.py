@@ -17,7 +17,8 @@ from requests.structures import CaseInsensitiveDict
 
 from .arrow_ import Datetime
 from .strlib import strfind, natural_sort
-from .pathlib_ import Path, get_xllog
+from .pathlib_ import Path
+from .log import get_xllog
 
 ____file = """
 路径、文件、目录相关操作功能
@@ -80,7 +81,7 @@ class Dir(Path):
         """
         files = filesmatch(patter, root=self.fullpath, **kwargs)
         files = self.files + files
-        if nsort: files = natural_sort(self.files + files)
+        if nsort: files = natural_sort(files)
         return Dir(self._path, files=files)
 
     def procfiles(self, func, start=None, end=None, ref_dir=None, pinterval=None):
@@ -137,18 +138,35 @@ class Dir(Path):
                 xllog.info(f'处理到该文件出现错误：{p}')
                 raise e
 
-    def select_invert(self):
-        """反选，在"全集"中，选中当前状态下没有被选中的那些文件"""
-        raise NotImplementedError
+    def select_invert(self, patter='**/*', nsort=True, **kwargs):
+        """ 反选，在"全集"中，选中当前状态下没有被选中的那些文件
 
-    def exclude(self):
-        """ 去掉部分选中文件
+        这里设置的选择模式，是指全集的选择范围
         """
-        raise NotImplementedError
+        files = Dir(self).select(patter, nsort, **kwargs).files
+        cur_files = set(self.files)
+        new_files = []
+        for f in files:
+            if f not in cur_files:
+                new_files.append(f)
+        return Dir(self._path, files=new_files)
 
-    def new_folder(self):
-        """新建文件夹"""
-        raise NotImplementedError
+    def exclude(self, patter, **kwargs):
+        """ 去掉部分选中文件
+
+        d1 = Dir('test').select('**/*.eps')
+        d2 = d1.exclude('subdir/*.eps')
+        d3 = d2.select_invert(type_='file')
+        print(d1.files)  # ['AA20pH-c1=1-1.eps', 'AA20pH-c1=1-2.eps', 'subdir/AA20pH-c1=1-2 - 副本.eps']
+        print(d2.files)  # ['AA20pH-c1=1-1.eps', 'AA20pH-c1=1-2.eps']
+        print(d3.files)  # ['subdir/AA20pH-c1=1-2 - 副本.eps']
+        """
+        files = set(filesmatch(patter, root=self.fullpath, **kwargs))
+        new_files = []
+        for f in self.files:
+            if f not in files:
+                new_files.append(f)
+        return Dir(self._path, files=new_files)
 
     def __repr__(self):
         return f'{self.root}: {self.files}'

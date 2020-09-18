@@ -43,15 +43,6 @@ def ________C_文本处理________():
     pass
 
 
-def print2string(*args, **kwargs):
-    """https://stackoverflow.com/questions/39823303/python3-print-to-string"""
-    output = io.StringIO()
-    print(*args, file=output, **kwargs)
-    contents = output.getvalue()
-    output.close()
-    return contents
-
-
 def read_from_ubuntu(url):
     """从paste.ubuntu.com获取数据"""
     if isinstance(url, int):  # 允许输入一个数字ID来获取网页内容
