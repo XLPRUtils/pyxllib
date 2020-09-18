@@ -17,9 +17,9 @@ basic中依赖的三方库有直接写到 requirements.txt 中
 """
 
 # 1 时间相关工具
-from .pytictoc import TicToc
+from .pytictoc import *
 from .timer import *
-from .arrow_ import Datetime
+from .arrow_ import *
 
 # 2 调试1
 from .dprint import *
@@ -31,7 +31,8 @@ from .strlib import *
 from .judge import *
 from .chardet_ import *
 from .qiniu_ import *
-from .pathlib_ import Path
+from .pathlib_ import *
+from .log import *
 from .dirlib import *
 
 
@@ -75,7 +76,8 @@ class RunOnlyOnce:
 
     文档：https://www.yuque.com/xlpr/pyxllib/RunOnlyOnce
 
-    使用好该装饰器，可以让很多动态规划dp问题、搜索问题变得异常简洁
+    使用好该装饰器，可能让一些动态规划dp、搜索问题变得更简洁，
+    以及一些配置文件操作，可以做到只读一遍
     """
 
     def __init__(self, func, distinct_args=True):

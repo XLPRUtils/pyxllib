@@ -750,3 +750,12 @@ def halfwidth2fullwidth(ustring):
                 inside_code += 65248
             ss.append(chr(inside_code))
     return ''.join(ss)
+
+
+def print2string(*args, **kwargs):
+    """https://stackoverflow.com/questions/39823303/python3-print-to-string"""
+    output = io.StringIO()
+    print(*args, file=output, **kwargs)
+    contents = output.getvalue()
+    output.close()
+    return contents
