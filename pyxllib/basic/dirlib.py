@@ -18,7 +18,7 @@ from requests.structures import CaseInsensitiveDict
 from .arrow_ import Datetime
 from .strlib import strfind, natural_sort
 from .pathlib_ import Path
-from .log import get_xllog
+from .log import *
 
 ____file = """
 路径、文件、目录相关操作功能
@@ -84,59 +84,41 @@ class Dir(Path):
         if nsort: files = natural_sort(files)
         return Dir(self._path, files=files)
 
-    def procfiles(self, func, start=None, end=None, ref_dir=None, pinterval=None):
+    def procfiles(self, func, start=None, end=None, ref_dir=None, pinterval=None, max_workers=1, interrupt=True):
         """ 对选中的文件迭代处理
 
         :param func: 对每个文件进行处理的自定义接口函数
             参数 p: 输入参数 Path 对象
             return: 可以没有返回值，当有返回值时，会作为信息，表示要输出查看
                 TODO 以后可以返回字典结构，用不同的key表示不同的功能，可以控制些高级功能
-        :param start: 只处理start编号以上的文件
-        :param end: 只处理end编号以下的文件
-        :param ref_dir: 是否有个相对的目录，对比同子结构下的文件情况
-            使用该参数时，func的接口会变成两个参数，会输入原p1、目标p2两个文件参数
-        :param pinterval: print interval，是否输出处理进度，输入一个正整数值，则每个间隔的倍数，会显示处理进度
-            当间隔为1时，会输出每个正在执行的具体文件名
-            TODO 增加了按照进度比例作为间距的参数，例如每1%显示一次
-        :return:
 
-        TODO 支持多线程？
         TODO 增设可以bfs还是dfs的功能？
+
+
+        将目录 test 的所有文件拷贝到 test2 目录 示例代码：
+
+        def func(p1, p2):
+            p1.copy(p2)
+
+        Dir('test').select('**/*', type_='file').procfiles(func, ref_dir='test2')
+
         """
-        # 1 参数
-        xllog = get_xllog()
-        n_files = len(self.files)
-        width = math.ceil(math.log10(n_files + 1))
-        if ref_dir is not None: ref_dir = Dir(ref_dir)
-        if pinterval: xllog.info(f"Dir('{self.fullpath}') 使用 {func} 处理 {n_files} 个文件(夹)")
+        if ref_dir:
+            ref_dir = Dir(ref_dir)
+            files1 = self.filepaths
+            files2 = [(ref_dir / self.files[i]) for i in range(len(self.files))]
 
-        # 2 处理区间
-        if start:
-            xllog.info(f"使用start参数，跳过编号{start}以下的文件")
-        else:
-            start = 0
-        if end:
-            # 这里空格是为了对齐，别删
-            xllog.info(f"使用 end 参数，  只处理{end}以内的文件")
-        else:
-            end = n_files
+            def wrap_func(data):
+                func(*data)
 
-        # 遍历
-        for i, p in enumerate(self.filepaths[start:end], start=start):
-            if pinterval and (i or pinterval == 1) and i % pinterval == 0:
-                # 如果间隔是一个文件，则输出具体的每个文件路径
-                message = f' {self.files[i]}' if pinterval == 1 else ''
-                xllog.info(f'{i:{width}d}/{n_files}={i / n_files:6.2%}{message}')
-            try:
-                if ref_dir:
-                    res = func(p, ref_dir / self.files[i])
-                else:
-                    res = func(p)
-                # if res is not None: print(res)
-            except Exception as e:
-                # 子函数里如果报错，不一定有记录文件路径信息，所以这里补充一下
-                xllog.info(f'处理到该文件出现错误：{p}')
-                raise e
+            data = zip(files1, files2)
+
+        else:
+            data = self.filepaths
+            wrap_func = func
+
+        Iterate(data).run(wrap_func, start=start, end=end, pinterval=pinterval,
+                          max_workers=max_workers, interrupt=interrupt)
 
     def select_invert(self, patter='**/*', nsort=True, **kwargs):
         """ 反选，在"全集"中，选中当前状态下没有被选中的那些文件

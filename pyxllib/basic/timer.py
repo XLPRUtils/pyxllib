@@ -60,28 +60,33 @@ def parse_perf(data):
         raise ValueError
 
 
-def performit(title, stmt="pass", setup="pass", repeat=1, number=1, globals=None, res_width=None):
+def performit(title, stmt="pass", setup="pass", repeat=1, number=1, globals=None, res_width=None, result=False):
     """ 在timeit.repeat的基础上，做了层封装，能更好的展示运行效果
     :param title: 测试标题、名称功能
     :param res_width: 运行结果内容展示的字符上限数
+    :param result: 是否获取运行结果，使用该参数会重复运行一次函数
     :return: 返回原函数单次执行结果
     """
     # 1 性能报告
     data = timeit.repeat(stmt=stmt, setup=setup,
                          repeat=repeat, number=number, globals=globals)
 
-    # 2 原函数运行结果
-    if callable(stmt):
-        res = stmt()
+    # 2 原函数运行结果（这里要先重载stdout）
+    if result:
+        if callable(stmt):
+            res = stmt()
+        else:
+            res = eval(stmt, globals)
+        res = ' 运行结果：' + shorten(str(res), res_width)
     else:
-        res = eval(stmt, globals)
+        res = ''
 
     if res_width is None:
         # 如果性能报告比较短，只有一次测试，那res_width默认长度可以高一点
         res_width = 50 if len(data) > 1 else 200
-    print(title, parse_perf(data), '运行结果：' + shorten(str(res), res_width))
+    print(title, parse_perf(data) + res)
 
-    return res
+    return data
 
 
 class Timer:
