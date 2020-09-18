@@ -6,7 +6,7 @@
 
 
 r"""
-除了使用pip3 install pyxllib，
+除了使用pip install pyxllib，
 还可以下载最新源代码，然后用该脚本将pyxllib配置到site-packages里，便于索引使用
 """
 

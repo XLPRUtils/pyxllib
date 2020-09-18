@@ -9,25 +9,25 @@ import subprocess
 try:
     import PIL
 except ModuleNotFoundError:
-    subprocess.run(['pip3', 'install', 'pillow'])
+    subprocess.run(['pip', 'install', 'pillow'])
     import PIL
 
 try:
     from get_image_size import get_image_size
 except ModuleNotFoundError:
-    subprocess.run(['pip3', 'install', 'opsdroid-get-image-size'])
+    subprocess.run(['pip', 'install', 'opsdroid-get-image-size'])
     from get_image_size import get_image_size
 
 try:
     import fitz
 except ModuleNotFoundError:
-    subprocess.run(['pip3', 'install', 'PyMuPdf'])
+    subprocess.run(['pip', 'install', 'PyMuPdf'])
     import fitz
 
 try:
     import cv2
 except ModuleNotFoundError:
-    subprocess.run(['pip3', 'install', 'opencv-python'])
+    subprocess.run(['pip', 'install', 'opencv-python'])
     import cv2
 
 try:

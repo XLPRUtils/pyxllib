@@ -14,7 +14,7 @@ import pandas as pd
 try:
     import aip
 except ModuleNotFoundError:
-    subprocess.run(['pip3', 'install', 'baidu-aip'])
+    subprocess.run(['pip', 'install', 'baidu-aip'])
     import aip
 
 from pyxllib.basic import Path
