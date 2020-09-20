@@ -6,8 +6,6 @@
 
 
 import filecmp
-import logging
-import math
 import os
 import re
 import shutil
@@ -15,10 +13,10 @@ import shutil
 # 大小写不敏感字典
 from requests.structures import CaseInsensitiveDict
 
-from .arrow_ import Datetime
-from .strlib import strfind, natural_sort
-from .pathlib_ import Path
-from .log import *
+from pyxllib.basic._1_strlib import strfind, natural_sort
+from pyxllib.basic._2_timelib import Datetime
+from pyxllib.basic._3_pathlib import Path
+from pyxllib.basic._4_loglib import Iterate
 
 ____file = """
 路径、文件、目录相关操作功能
