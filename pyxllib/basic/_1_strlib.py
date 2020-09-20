@@ -5,7 +5,10 @@
 # @Data   : 2020/06/01
 
 
-import collections
+"""
+TODO 这个文件结构还有点乱，需要梳理
+"""
+
 import copy
 import io
 import logging
@@ -13,8 +16,128 @@ import math
 import pprint
 import re
 import sys
+import textwrap
 
-from pyxllib.basic.dprint import dprint
+____str_funcs = """
+字符串类的一些辅助函数
+"""
+
+
+def shorten(s, width=200, placeholder='...'):
+    """
+    :param width: 这个长度是上限，即使用placeholder时的字符串总长度也在这个范围内
+
+    >>> shorten('aaa', 10)
+    'aaa'
+    >>> shorten('hell world! 0123456789 0123456789', 11)
+    'hell wor...'
+    >>> shorten("Hello  world!", width=12)
+    'Hello world!'
+    >>> shorten("Hello  world!", width=11)
+    'Hello wo...'
+    >>> shorten('0123456789 0123456789', 2, 'xyz')  # 自己写的shorten
+    'xy'
+
+    注意textwrap.shorten的缩略只针对空格隔开的单词有效，我这里的功能与其不太一样
+    >>> textwrap.shorten('0123456789 0123456789', 11)  # 全部字符都被折叠了
+    '[...]'
+    >>> shorten('0123456789 0123456789', 11)  # 自己写的shorten
+    '01234567...'
+    """
+    s = re.sub(r'\s+', ' ', str(s))
+    n, m = len(s), len(placeholder)
+    if n > width:
+        s = s[:max(width - m, 0)] + placeholder
+    return s[:width]  # 加了placeholder在特殊情况下也会超，再做个截断最保险
+
+    # return textwrap.shorten(str(s), width)
+
+
+def natural_sort_key(key):
+    def convert(text):
+        return int(text) if text.isdigit() else text.lower()
+
+    return [convert(c) for c in re.split('([0-9]+)', str(key))]
+
+
+def natural_sort(ls, only_use_digits=False):
+    """ 自然排序
+
+    :param only_use_digits: 正常会用数字作为分隔，切割每一部分进行比较
+        如果只想比较数值部分，可以only_use_digits=True
+
+    >>> natural_sort(['0.1.12', '0.0.10', '0.0.23'])
+    ['0.0.10', '0.0.23', '0.1.12']
+    """
+    if only_use_digits:
+        def func(key):
+            return [int(c) for c in re.split('([0-9]+)', str(key)) if c.isdigit()]
+    else:
+        func = natural_sort_key
+    return sorted(ls, key=func)
+
+
+def strwidth(s):
+    """ string width
+
+    中英字符串实际宽度
+    >>> strwidth('ab')
+    2
+    >>> strwidth('a⑪中⑩')
+    7
+
+    ⑩等字符的宽度还是跟字体有关的，不过在大部分地方好像都是域宽2，目前算法问题不大
+    """
+    try:
+        res = len(s.encode('gbk'))
+    except UnicodeEncodeError:
+        count = len(s)
+        for x in s:
+            if ord(x) > 127:
+                count += 1
+        res = count
+    return res
+
+
+def strwidth_proc(s, fmt='r', chinese_char_width=1.8):
+    """ 此函数可以用于每个汉字域宽是w=1.8等奇怪的情况
+
+    为了让字符串域宽为一个整数，需要补充中文空格，会对原始字符串进行修改。
+    故返回值有2个，第1个是修正后的字符串s，第2个是实际宽度w。
+
+    :param s: 一个字符串
+    :param fmt: 目标对齐格式
+    :param chinese_char_width: 每个汉字字符宽度
+    :return: (s, w)
+        s: 修正后的字符串值s
+        w: 修正后字符串的实际宽度
+
+    >>> strwidth_proc('哈哈a', chinese_char_width=1.8)
+    ('　　　哈哈a', 10)
+    """
+    # 1 计算一些参数值
+    s = str(s)  # 确保是字符串类型
+    l1 = len(s)
+    l2 = strwidth(s)
+    y = l2 - l1  # 中文字符数
+    x = l1 - y  # 英文字符数
+    ch = chr(12288)  # 中文空格
+    w = x + y * chinese_char_width  # 当前字符串宽度
+    # 2 计算需要补充t个中文空格
+    error = 0.05  # 允许误差范围
+    t = 0  # 需要补充中文字符数
+    while error < w % 1 < 1 - error:  # 小数部分超过误差
+        t += 1
+        w += chinese_char_width
+    # 3 补充中文字符
+    if t:
+        if fmt == 'r':
+            s = ch * t + s
+        elif fmt == 'l':
+            s = s + ch * t
+        else:
+            s = ch * (t - t // 2) + s + ch * (t // 2)
+    return s, int(w)
 
 
 def strfind(fullstr, objstr, *, start=None, times=0, overlap=False):
@@ -128,27 +251,6 @@ def strfind(fullstr, objstr, *, start=None, times=0, overlap=False):
                     return -1
 
     return p
-
-
-def natural_sort_key(key):
-    def convert(text):
-        return int(text) if text.isdigit() else text.lower()
-
-    return [convert(c) for c in re.split('([0-9]+)', str(key))]
-
-
-def natural_sort(ls, only_use_digits=False):
-    """ 自然排序
-
-    :param only_use_digits: 正常会用数字作为分隔，切割每一部分进行比较
-        如果只想比较数值部分，可以only_use_digits=True
-    """
-    if only_use_digits:
-        def func(key):
-            return [int(c) for c in re.split('([0-9]+)', str(key)) if c.isdigit()]
-    else:
-        func = natural_sort_key
-    return sorted(ls, key=func)
 
 
 def typename(c):
@@ -280,71 +382,9 @@ class Stdout:
             return self.strout.getvalue()
 
 
-def strwidth(s):
-    """string width
-    中英字符串实际宽度
-    >>> strwidth('ab')
-    2
-    >>> strwidth('a⑪中⑩')
-    7
-
-    ⑩等字符的宽度还是跟字体有关的，不过在大部分地方好像都是域宽2，目前算法问题不大
-    """
-    try:
-        res = len(s.encode('gbk'))
-    except UnicodeEncodeError:
-        count = len(s)
-        for x in s:
-            if ord(x) > 127:
-                count += 1
-        res = count
-    return res
-
-
-def strwidth_proc(s, fmt='r', chinese_char_width=1.8):
-    """ 此函数主要用于每个汉字域宽是w=1.8的情况
-
-    为了让字符串域宽为一个整数，需要补充中文空格，会对原始字符串进行修改。
-    故返回值有2个，第1个是修正后的字符串s，第2个是实际宽度w。
-
-    :param s: 一个字符串
-    :param fmt: 目标对齐格式
-    :param chinese_char_width: 每个汉字字符宽度
-    :return: (s, w)
-        s: 修正后的字符串值s
-        w: 修正后字符串的实际宽度
-
-    >>> strwidth_proc('哈哈a')
-    ('　　　哈哈a', 10)
-    """
-    # 1 计算一些参数值
-    s = str(s)  # 确保是字符串类型
-    l1 = len(s)
-    l2 = strwidth(s)
-    y = l2 - l1  # 中文字符数
-    x = l1 - y  # 英文字符数
-    # ch = chr(12288)  # 中文空格
-    ch = chr(12288)  # 中文空格
-    w = x + y * chinese_char_width  # 当前字符串宽度
-    # 2 计算需要补充t个中文空格
-    error = 0.05  # 允许误差范围
-    t = 0  # 需要补充中文字符数
-    while error < w % 1 < 1 - error:  # 小数部分超过误差
-        t += 1
-        w += chinese_char_width
-    # 3 补充中文字符
-    if t:
-        if fmt == 'r':
-            s = ch * t + s
-        elif fmt == 'l':
-            s = s + ch * t
-        else:
-            s = ch * (t - t // 2) + s + ch * (t // 2)
-    return s, int(w)
-
-
 def listalign(ls, fmt='r', *, width=None, fillchar=' ', prefix='', suffix='', chinese_char_width=2):
     """文档： https://blog.csdn.net/code4101/article/details/80985218（不过文档有些过时了）
+
     listalign列表对齐
     py3中str的len是计算字符数量，例如len('ab') --> 2， len('a中b') --> 3。
     但在对齐等操作中，是需要将每个汉字当成宽度2来处理，计算字符串实际宽度的。
@@ -381,8 +421,8 @@ def listalign(ls, fmt='r', *, width=None, fillchar=' ', prefix='', suffix='', ch
 
     # 2 算出需要域宽
     if chinese_char_width == 2:
-        strs = list(map(lambda x: str(x).replace('\n', r'\n'), ls))  # 存储转成字符串的元素
-        lens = list(map(strwidth, strs))  # 存储每个元素的实际域宽
+        strs = [str(x).replace('\n', r'\n') for x in ls]  # 存储转成字符串的元素
+        lens = [strwidth(x) for x in strs]  # 存储每个元素的实际域宽
     else:
         strs = []  # 存储转成字符串的元素
         lens = []  # 存储每个元素的实际域宽
@@ -527,7 +567,7 @@ def int2myalphaenum(n):
     if 0 <= n <= 52:
         return '_abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ'[n]
     else:
-        dprint(n)  # 不在处理范围内的数值
+        print('警告：不在处理范围内的数值', n)
         raise ValueError
 
 
@@ -567,7 +607,7 @@ def ensure_gbk(s):
     except UnicodeEncodeError:
         origin_s = s
         s = s.encode('gbk', errors='ignore').decode('gbk')
-        dprint(origin_s, s)  # 字符串存在无法转为gbk的字符
+        print('警告：字符串存在无法转为gbk的字符', origin_s, s)
     return s
 
 
@@ -692,6 +732,15 @@ def digit2weektag(d):
         raise ValueError
 
 
+def print2string(*args, **kwargs):
+    """https://stackoverflow.com/questions/39823303/python3-print-to-string"""
+    output = io.StringIO()
+    print(*args, file=output, **kwargs)
+    contents = output.getvalue()
+    output.close()
+    return contents
+
+
 def fullwidth2halfwidth(ustring):
     """ 把字符串全角转半角
 
@@ -752,10 +801,30 @@ def halfwidth2fullwidth(ustring):
     return ''.join(ss)
 
 
-def print2string(*args, **kwargs):
-    """https://stackoverflow.com/questions/39823303/python3-print-to-string"""
-    output = io.StringIO()
-    print(*args, file=output, **kwargs)
-    contents = output.getvalue()
-    output.close()
-    return contents
+def sort_by_given_list(a, b):
+    r"""本函数一般用在数据透视表中，分组中元素名为中文，没有按指定规律排序的情况
+    :param a: 需要排序的对象
+    :param b: 参照的排序数组
+    :return: 排序后的a
+
+    >>> sort_by_given_list(['初中', '小学', '高中'], ['少儿', '小学', '初中', '高中'])
+    ['小学', '初中', '高中']
+
+    # 不在枚举项目里的，会统一列在最后面
+    >>> sort_by_given_list(['初中', '小学', '高中', '幼儿'], ['少儿', '小学', '初中', '高中'])
+    ['小学', '初中', '高中', '幼儿']
+    """
+    # 1 从b数组构造一个d字典，d[k]=i，值为k的元素在第i位
+    d = dict()
+    for i, bb in enumerate(b): d[bb] = i
+    # 2 a数组分两部分，可以通过d排序的a1，和不能通过d排序的a2
+    a1, a2 = [], []
+    for aa in a:
+        if aa in d:
+            a1.append(aa)
+        else:
+            a2.append(aa)
+    # 3 用不同的规则排序a1、a2后合并
+    a1 = sorted(a1, key=lambda x: d[x])
+    a2 = sorted(a2)
+    return a1 + a2

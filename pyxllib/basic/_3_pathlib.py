@@ -5,6 +5,8 @@
 # @Data   : 2020/05/30 20:37
 
 
+from urllib.parse import urlparse
+import io
 import json
 import os
 import pathlib
@@ -14,8 +16,145 @@ import shutil
 import subprocess
 import tempfile
 
-from .arrow_ import Datetime
-from .chardet_ import get_encoding
+import chardet
+import qiniu
+import requests
+import yaml
+
+from pyxllib.basic._2_timelib import Datetime
+
+____judge = """
+"""
+
+
+def is_url(arg):
+    """输入是一个字符串，且值是一个合法的url"""
+    if not isinstance(arg, str): return False
+    try:
+        result = urlparse(arg)
+        return all([result.scheme, result.netloc])
+    except ValueError:
+        return False
+
+
+def is_file(arg, exists=True):
+    """相较于标准库的os.path.isfile，对各种其他错误类型也会判False
+
+    :param exists: arg不仅需要是一个合法的文件名，还要求其实际存在
+        设为False，则只判断文件名合法性，不要求其一定要存在
+    """
+    if not isinstance(arg, str): return False
+    if not exists:
+        raise NotImplementedError
+    return os.path.isfile(arg)
+
+
+____qiniu = """
+"""
+
+
+def get_etag(arg):
+    """七牛原有etag功能基础上做封装
+    :param arg: 支持bytes二进制、文件、url地址
+    """
+    if isinstance(arg, bytes):  # 二进制数据
+        return qiniu.utils.etag_stream(io.BytesIO(arg))
+    elif is_file(arg):  # 输入是一个文件
+        return qiniu.etag(arg)
+    elif is_url(arg):  # 输入是一个网页上的数据源
+        return get_etag(requests.get(arg).content)
+    elif isinstance(arg, str):  # 明文字符串转二进制
+        return get_etag(arg.encode('utf8'))
+    else:
+        raise TypeError('不识别的数据类型')
+
+
+def is_etag(s):
+    """字母、数字和-、_共64种字符构成的长度28的字符串"""
+    return re.match(r'[a-zA-Z0-9\-_]{28}$', s)
+
+
+def test_etag():
+    print(get_etag(r'\chematom{+8}{2}{8}{}'))
+    # Fjnu-ZXyDxrqLoZmNJ2Kj8FcZGR-
+
+    print(get_etag(__file__))
+    # 每次代码改了这段输出都是不一样的
+
+
+def test_etag2():
+    """ 字符串值和写到文件判断的etag，是一样的
+    """
+    s = 'code4101'
+    print(get_etag(s))
+    # FkAD2McB6ugxTiniE8ebhlNHdHh9
+
+    f = Path('1.tex', root=Path.TEMP).write(s, if_exists='replace').fullpath
+    print(get_etag(f))
+    # FkAD2McB6ugxTiniE8ebhlNHdHh9
+
+
+____chardet = """
+"""
+
+
+def get_encoding(bstr, maxn=1024):
+    """ 输入二进制字符串或文本文件，返回字符编码
+
+    https://www.yuque.com/xlpr/pyxllib/get_encoding
+
+    :param bstr: 二进制字符串、文本文件
+    :param maxn: 分析字节数上限，越小速度越快，但也会降低精准度
+    :return: utf8, utf-8-sig, gbk, utf16
+    """
+    # 1 读取编码
+    if isinstance(bstr, bytes):  # 如果输入是一个二进制字符串流则直接识别
+        encoding = chardet.detect(bstr[:maxn])['encoding']  # 截断一下，不然太长了，太影响速度
+    elif is_file(bstr):  # 如果是文件，则按二进制打开
+        # 如果输入是一个文件名则进行读取
+        if bstr.endswith('.pdf'):
+            print('二进制文件，不应该进行编码分析，暂且默认返回utf8', bstr)
+            return 'utf8'
+        with open(bstr, 'rb') as f:  # 以二进制读取文件，注意二进制没有\r\n的值
+            bstr = f.read()
+        encoding = chardet.detect(bstr[:maxn])['encoding']
+    else:  # 其他类型不支持
+        return 'utf8'
+    # 检测结果存储在encoding
+
+    # 2 智能适应优化，最终应该只能是gbk、utf8两种结果中的一种
+    if encoding in ('ascii', 'utf-8', 'ISO-8859-1'):
+        # 对ascii类编码，理解成是utf-8编码；ISO-8859-1跟ASCII差不多
+        encoding = 'utf8'
+    elif encoding in ('GBK', 'GB2312'):
+        encoding = 'gbk'
+    elif encoding == 'UTF-16':
+        encoding = 'utf16'
+    elif encoding == 'UTF-8-SIG':
+        # 保留原值的一些正常识别结果
+        encoding = 'utf-8-sig'
+    elif bstr.strip():  # 如果不在预期结果内，且bstr非空，则用常见的几种编码尝试
+        # dprint(encoding)
+        type_ = ('utf8', 'gbk', 'utf16')
+
+        def try_encoding(bstr, encoding):
+            try:
+                bstr.decode(encoding)
+                return encoding
+            except UnicodeDecodeError:
+                return False
+
+        for t in type_:
+            encoding = try_encoding(bstr, t)
+            if encoding: break
+    else:
+        encoding = 'utf8'
+
+    return encoding
+
+
+____path = """
+"""
 
 
 class Path:
@@ -577,13 +716,11 @@ class Path:
                 with open(name, 'rb') as f:
                     return pickle.load(f)
             elif mode == '.json':
-                import json
                 # 先读成字符串，再解析，会比rb鲁棒性更强，能自动过滤掉开头可能非正文特殊标记的字节
                 if not encoding: encoding = self.encoding
                 with open(name, 'r', encoding=encoding) as f:
                     return json.loads(f.read())
             elif mode == '.yaml':
-                import yaml
                 with open(name, 'r', encoding=encoding) as f:
                     return yaml.safe_load(f.read())
             elif mode in ('.jpg', '.jpeg', '.png', '.bmp'):
@@ -626,7 +763,6 @@ class Path:
                 with open(name, 'w', encoding=encoding) as f:
                     json.dump(ob, f, ensure_ascii=False, indent=2)
             elif mode == '.yaml':
-                import yaml
                 with open(name, 'w', encoding=encoding) as f:
                     yaml.dump(ob, f)
             elif isinstance(ob, bytes):
@@ -642,7 +778,6 @@ class Path:
         # 2 推导出目标文件的完整名，并判断是否存在，进行不同处理
         self.process(self, data2file, if_exists, arg1=ob, arg2=self)
         if etag:
-            from .qiniu_ import get_etag
             return self.rename(get_etag(self.fullpath) + self.suffix, if_exists='ignore')
         else:
             return self
