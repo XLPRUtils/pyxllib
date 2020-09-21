@@ -17,11 +17,11 @@ ____main = """
 这里会加载好主要功能，但并不会加载所有功能
 """
 
-from .installer import *
-from .typelib import *
-from .chrome import *
-from .showdir import *
-from .bcompare import *
+from ._0_installer import *
+from ._1_typelib import *
+from ._2_chrome import *
+from ._3_showdir import *
+from ._4_bcompare import *
 
 ____other = """
 """

@@ -6,7 +6,6 @@
 
 
 from collections import defaultdict, Counter
-import textwrap
 
 import pandas as pd
 
@@ -115,7 +114,7 @@ def prettifystr(s):
     title = ''
     if isinstance(s, str):
         pass
-    elif isinstance(s, collections.Counter):  # Counter要按照出现频率显示
+    elif isinstance(s, Counter):  # Counter要按照出现频率显示
         li = s.most_common()
         title = f'collections.Counter长度：{len(s)}\n'
         # 不使用复杂的pd库，先简单用pprint即可

@@ -13,12 +13,15 @@ import pandas as pd
 from bs4 import BeautifulSoup
 
 from pyxllib.basic import *
-from .typelib import dataframe_str
-from .chrome import getasizeof
+from pyxllib.debug._1_typelib import dataframe_str
+from pyxllib.debug._2_chrome import getasizeof
 
 
 def getmembers(object, predicate=None):
-    """自己重写改动的 inspect.getmembers"""
+    """自己重写改动的 inspect.getmembers
+
+    TODO 这个实现好复杂，对于成员，直接用dir不就好了？
+    """
     from inspect import isclass, getmro
     import types
 
