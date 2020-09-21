@@ -67,12 +67,12 @@ class Dir(Path):
         注意select和exclude的增减操作是不断叠加的，而不是每次重置！
         如果需要重置，应该重新定义一个Folder类
 
-        >>> Dir('C:/pycode/code4101py').select('*.pyw').select('ckz.py')
+        >> Dir('C:/pycode/code4101py').select('*.pyw').select('ckz.py')
         C:/pycode/code4101py: ['ol批量修改文本.pyw', 'ckz.py']
-        >>> Dir('C:/pycode/code4101py').select('**/*.pyw').select('ckz.py')
+        >> Dir('C:/pycode/code4101py').select('**/*.pyw').select('ckz.py')
         C:/pycode/code4101py: ['ol批量修改文本.pyw', 'chenkz/批量修改文本.pyw', 'winr/bc.pyw', 'winr/reg/FileBackup.pyw', 'ckz.py']
 
-        >>> Dir('C:/pycode/code4101py').select('*.py', min_size=200*1024)  # 200kb以上的文件
+        >> Dir('C:/pycode/code4101py').select('*.py', min_size=200*1024)  # 200kb以上的文件
         C:/pycode/code4101py: ['liangyb.py']
 
         >> Dir(r'C:/pycode/code4101py').select('*.py', min_mtime=Datetime(2020, 3, 1))  # 修改时间在3月1日以上的
@@ -266,38 +266,38 @@ def filesmatch(patter, *, root=os.curdir, **kwargs) -> list:
 
     TODO patter大小写问题？会导致匹配缺失的bug吗？
 
-    >>> os.chdir('F:/work/filesmatch')  # 工作目录
+    >> os.chdir('F:/work/filesmatch')  # 工作目录
 
     1、普通匹配
-    >>> filesmatch('a')  # 匹配当前目录下的文件a，或者目录a
+    >> filesmatch('a')  # 匹配当前目录下的文件a，或者目录a
     ['a']
-    >>> filesmatch('b/a/')
+    >> filesmatch('b/a/')
     ['b\\a']
-    >>> filesmatch('b/..\\a/')
+    >> filesmatch('b/..\\a/')
     ['a']
-    >>> filesmatch('c')  # 不存在c则返回 []
+    >> filesmatch('c')  # 不存在c则返回 []
     []
 
     2、通配符模式
-    >>> filesmatch('work/*.png')  # 支持通配符
+    >> filesmatch('work/*.png')  # 支持通配符
     []
-    >>> filesmatch('*.png')  # 支持通配符
+    >> filesmatch('*.png')  # 支持通配符
     ['1.png', '1[.png', 'logo.png']
-    >>> filesmatch('**/*.png')  # 包含所有子目录下的png图片
+    >> filesmatch('**/*.png')  # 包含所有子目录下的png图片
     ['1.png', '1[.png', 'logo.png', 'a\\2.png']
-    >>> filesmatch('?.png')
+    >> filesmatch('?.png')
     ['1.png']
-    >>> filesmatch('[0-9]/<0-9>.txt')  # 用<0-9>表示[0-9]模式
+    >> filesmatch('[0-9]/<0-9>.txt')  # 用<0-9>表示[0-9]模式
     ['[0-9]\\3.txt']
 
     3、正则模式
-    >>> filesmatch(re.compile(r'\d\[\.png$'))
+    >> filesmatch(re.compile(r'\d\[\.png$'))
     ['1[.png']
 
     4、其他高级用法
-    >>> filesmatch('**/*', type_='dir', max_size=0)  # 筛选空目录
+    >> filesmatch('**/*', type_='dir', max_size=0)  # 筛选空目录
     ['b', '[0-9]']
-    >>> filesmatch('**/*', type_='file', max_size=0)  # 筛选空文件
+    >> filesmatch('**/*', type_='file', max_size=0)  # 筛选空文件
     ['b/a', '[0-9]/3.txt']
     """
     root = os.path.abspath(root)

@@ -191,8 +191,8 @@ class Path:
         >> Path()  # 不输入参数的时候，默认为当前工作目录
         Path('D:/pycode/code4101py')
 
-        >>> Path('a.txt', root=Path.TEMP)
-        Path('F:/work/CreatorTemp/a.txt')
+        >> Path('a.txt', root=Path.TEMP)
+        Path('D:/Temp/a.txt')
         >>> Path('F:/work/CreatorTemp')
         Path('F:/work/CreatorTemp')
 
@@ -535,11 +535,11 @@ class Path:
         >>> f.abs_dstpath('chen.py')
         'C:\\Windows\\System32\\chen.py'
         >>> f.abs_dstpath('E:/')  # 原始文件必须存在，否则因为无法判断实际类型，目标路径可能会错
-        'E:/cmd.exe'
+        'E:\\cmd.exe'
         >>> f.abs_dstpath('D:/aabbccdd.txt')
-        'D:/aabbccdd.txt'
+        'D:\\aabbccdd.txt'
         >>> f.abs_dstpath('D:/aabbccdd.txt/')  # 并不存在aabbccdd.txt这样的对象，但末尾有个/表明这是个目录
-        'D:/aabbccdd.txt/cmd.exe'
+        'D:\\aabbccdd.txt\\cmd.exe'
         """
         if not root: root = self.dirname
         dst = Path(dst, suffix, root)

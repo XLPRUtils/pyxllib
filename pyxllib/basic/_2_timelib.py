@@ -219,6 +219,9 @@ def perftest(title, stmt="pass", repeat=1, number=1, globals=None, res_width=Non
 
 
 class PerfTest:
+    """ 这里模仿了unittest的机制
+    """
+
     def __init__(self, number=1, repeat=1, globals=None):
         self.number = number
         self.repeat = repeat

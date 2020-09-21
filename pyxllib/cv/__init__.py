@@ -5,7 +5,7 @@
 # @Data   : 2020/08/14 22:59
 
 # 确保安装了前置包
-import pyxllib.debug.installer
+import pyxllib.debug._0_installer
 # image部分需要依赖的第三方库
 from .installer import *
 # pdf相关解析功能

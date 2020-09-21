@@ -254,6 +254,11 @@ class Iterate:
     """ 迭代器类，用来封装一些特定模式的for循环操作
 
     TODO 双循环，需要内部两两对比的迭代功能
+
+    200920周日18:20，最初设计的时候，是提供run_pair、run_pair2的功能的
+        不过后来想想，这个其实就是排列组合，在itertools里有combinations, permutations可以代替
+        甚至有放回的组合也有combinations_with_replacement，我实在是不需要再这里写这些冗余的功能
+        所以就移除了
     """
 
     def __init__(self, items):
@@ -314,8 +319,8 @@ class Iterate:
         :param start: 跳过<start的数据，只处理>=start编号以上
         :param end: 只处理 < end 的数据
         :param pinterval: 每隔多少条目输出进度日志，默认不输出进度日志（但是错误日志依然会输出）
-            TODO 支持按百分比进度显示？  例如每20%，pinterval='20%'
-            TODO 支持按指定时间间隔显示？ 例如每15秒，pinterval='15s'
+            支持按百分比进度显示，例如每20%，pinterval='20%'，不过一些底层实现机制原因，会有些许误差
+            TODO 支持按指定时间间隔显示？ 例如每15秒，pinterval='15s' 感觉这种功能太花哨了，没必要搞
         :param max_workers: 默认线程数，默认1，即串行
         :type max_workers: int, None
         :param interrupt: 出现错误时是否中断，默认True会终止程序，否则只会输出错误日志
@@ -344,71 +349,6 @@ class Iterate:
             self._step4_iter(i, pinterval, executor)
             executor.submit(wrap_func, func, i)
             if interrupt and error: break
-        self._step5_finish(pinterval, interrupt and error, executor)
-
-    def run_pair(self, func, start=0, end=None, pinterval=None, max_workers=1, interrupt=True):
-        """ 对items两两运算
-            func(x, y) 等同于 func(y, x)，不重复运算
-
-        :param start: 这里的start、end特指第一层迭代器i的取值范围
-
-        TODO starti, endi, startj, endj，i和j支持单独设置遍历区间？
-        """
-        # 1 统一的参数处理部分
-        pinterval = self._format_pinterval(pinterval)
-        self._step1_check_number(pinterval, func)
-        start, end = self._step2_check_range(start, end)
-        error = False
-        executor = self._step3_executor(pinterval, max_workers)
-
-        # 2 封装的子处理部分
-        def wrap_func(func, i, j):
-            nonlocal error
-            item1, item2 = self.items[i], self.items[j]
-            try:
-                func(item1, item2)
-            except Exception as e:
-                error = True
-                self.xllog.error(f'💔idxs=({i},{j})运行出错：{item1},{item2}\n{format_exception(e)}')
-
-        # 3 执行迭代
-        for i in range(start, end):
-            self._step4_iter(i, pinterval, executor)
-            for j in range(i + 1, self.n_items):
-                executor.submit(wrap_func, func, i, j)
-                if interrupt and error: break
-        self._step5_finish(pinterval, interrupt and error, executor)
-
-    def run_pair2(self, func, start=0, end=None, pinterval=None, max_workers=1, interrupt=True):
-        """ 对items两两运算
-            func(x, y) 不同于 func(y, x)，需要全量运算
-
-        :param start: 这里的start、end特指第一层迭代器i的取值范围
-        """
-        # 1 统一的参数处理部分
-        pinterval = self._format_pinterval(pinterval)
-        self._step1_check_number(pinterval, func)
-        start, end = self._step2_check_range(start, end)
-        error = False
-        executor = self._step3_executor(pinterval, max_workers)
-
-        # 2 封装的子处理部分
-        def wrap_func(func, i, j):
-            nonlocal error
-            item1, item2 = self.items[i], self.items[j]
-            try:
-                func(item1, item2)
-            except Exception as e:
-                error = True
-                self.xllog.error(f'💔idxs=({i},{j})运行出错：{item1},{item2}\n{format_exception(e)}')
-
-        # 3 执行迭代
-        for i in range(start, end):
-            self._step4_iter(i, pinterval, executor)
-            for j in range(self.n_items):
-                if j == i: continue
-                executor.submit(wrap_func, func, i, j)
-                if interrupt and error: break
         self._step5_finish(pinterval, interrupt and error, executor)
 
 
