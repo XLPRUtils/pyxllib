@@ -118,7 +118,7 @@ def shapely_polygon(x):
     else:
         x = np_array(x, shape=(-1, 2))
         if x.shape[0] == 2:
-            x = rect2polygon(*x.reshape(-1).tolist())
+            x = rect2polygon(x)
             x = np.array(x)
         if x.shape[0] >= 3:
             return Polygon(x)
@@ -126,38 +126,28 @@ def shapely_polygon(x):
             raise ValueError
 
 
-def reset_arr_struct(src, target):
+def ensure_array_type(src_data, target_type):
     """ 参考 target 的数据结构，重设src的结构
 
     目前支持的数据结构
         PIL.Image.Image，涉及到图像格式转换的，为了与opencv兼容，一律以BGR为准，除了Image自身默认用RGB
         np.ndarray
         list
-    对后两者，还会进一步判断维度信息 （目前维度信息还考虑比较简单，如果超过2维等场合，可能会有些未知、意外效果）
-        1d，例如[x1 ,y1, x2, y2]
-        2d，例如[[x1, y1], [x2, y2]]
+        shapely polygon
 
-    本库默认策略，图片是存np.ndarray，点集是存成np.ndarray 2d结构：[[x1, y1], [x2, y2]]
-    如果希望一些函数接口功能，能输入什么类型，就返回原来什么类型，就需要这个函数来实现格式判断、转换
-
-    本函数实现上，还是为了效率考虑，分支比较多，能不进行中间类型转换的，尽量去避免了，所以代码比较冗长
-    否则直接用np结构中转，实现代码还是比较简洁的
-
-    :param src: 原数据
-    :param target: 正常是指定一个type类型，
-        但是也可以输入一个【实例对象】作为参考，可以分析到更多细节信息
+    :param src_data: 原数据
+    :param target_type: 正常是指定一个type类型
     :return: 重置结构后的src数据
 
-    >>> reset_arr_struct([1, 2, 3, 4], [[1, 1], [2, 2]])
-    [[1, 2], [3, 4]]
-    >>> reset_arr_struct([1, 2, 3, 4], np.array([[1, 1], [2, 2]]))
-    array([[1, 2],
-           [3, 4]])
-    >>> reset_arr_struct([1, 2, 3, 4], np.ndarray)
-    array([1, 2, 3, 4])
-    >>> reset_arr_struct(np.array([[1, 2], [3, 4]]), [10, 20, 30, 40])
+    >>> ensure_array_type([1, 2, 3, 4], type([[1, 1], [2, 2]]))
     [1, 2, 3, 4]
-    >>> reset_arr_struct(np.array([]), [10, 20, 30, 40])
+    >>> ensure_array_type([1, 2, 3, 4], type(np.array([[1, 1], [2, 2]])))
+    array([1, 2, 3, 4])
+    >>> ensure_array_type([1, 2, 3, 4], np.ndarray)
+    array([1, 2, 3, 4])
+    >>> ensure_array_type(np.array([[1, 2], [3, 4]]), type([10, 20, 30, 40]))
+    [[1, 2], [3, 4]]
+    >>> ensure_array_type(np.array([]), type([10, 20, 30, 40]))
     []
 
     其他测试：
@@ -171,36 +161,17 @@ def reset_arr_struct(src, target):
     dst = reset_arr_struct(img, np.ndarray)
     print(type(dst))  # <class 'numpy.ndarray'>
     """
-    # 1 判断输入数据原始的类型，和目标类型
-    if isinstance(target, type):
-        type2 = target
-        target = None
+    # 根据不同的目标数据类型，进行格式转换
+    if target_type == np.ndarray:
+        return np_array(src_data)
+    elif target_type in (list, tuple):
+        return np_array(src_data).tolist()
+    elif target_type == PIL.Image.Image:
+        return pil_image(src_data)
+    elif target_type == Polygon:
+        return shapely_polygon(src_data)
     else:
-        type2 = type(target)
-
-    # 2 一些辅助功能
-    def to_np_array(a, b):
-        """np.ndarray 维度细节信息的统一
-
-        很多转换，底层都会变成一个np和np矩阵的对比问题
-        """
-        a = np_array(a)
-        if b is None: return a
-        # b 只需要取出第1个维度转np.ndarray就行，只是作为一个维度参考，不需要全解析
-        if not isinstance(b, np.ndarray): b = np.array(b[:1])
-        return a.reshape([-1] + list(b.shape[1:]))
-
-    # 3 根据不同的目标数据类型，进行格式转换
-    if type2 == np.ndarray:
-        return to_np_array(src, target)
-    elif type2 in (list, tuple):
-        return to_np_array(src, target).tolist()
-    elif type2 == PIL.Image.Image:
-        return pil_image(src)
-    elif type == Polygon:
-        return shapely_polygon(src)
-    else:
-        raise TypeError(f'未知类型 {type2}')
+        raise TypeError(f'未知目标类型 {target_type}')
 
 
 ____base = """
@@ -297,30 +268,23 @@ def rect_bounds(coords, dtype=int):
     return [[x1, y1], [x2, y2]]
 
 
-def rect2polygon(x1, y1, x2, y2):
-    return [[x1, y1], [x2, y1], [x2, y2], [x1, y2]]
-
-
-def rectangle_pts2polygon_pts(src_pts):
+def rect2polygon(src):
     """ 矩形转成四边形结构来表达存储
 
-    >>> rectangle_pts2polygon_pts([[0, 0], [10, 20]])
-    [[0, 0], [10, 0], [10, 20], [0, 20]]
-    >>> rectangle_pts2polygon_pts([[0, 0], [10, 10], [0, 10]])
-    [[0, 0], [10, 10], [0, 10]]
-    >>> rectangle_pts2polygon_pts([0, 0, 10, 20])
-    [0, 0, 10, 0, 10, 20, 0, 20]
-    >>> rectangle_pts2polygon_pts(np.array([0, 0, 10, 20]))
-    array([ 0,  0, 10,  0, 10, 20,  0, 20])
+    >>> rect2polygon([[0, 0], [10, 20]])
+    array([[ 0,  0],
+           [10,  0],
+           [10, 20],
+           [ 0, 20]])
+    >>> rect2polygon(np.array([0, 0, 10, 20]))
+    array([[ 0,  0],
+           [10,  0],
+           [10, 20],
+           [ 0, 20]])
     """
-    pts1 = np_array(src_pts).reshape([-1, 2])
-    if pts1.shape[0] != 2:
-        # 只有两个点的情况才把矩形转四边形，其他都返回原始结果
-        return src_pts
-    else:
-        x1, y1, x2, y2 = pts1.reshape(-1)
-        pts2 = rect2polygon(x1, y1, x2, y2)
-        return reset_arr_struct(pts2, src_pts)
+    x1, y1, x2, y2 = np_array(src).reshape(-1)
+    dst = np.array([[x1, y1], [x2, y1], [x2, y2], [x1, y2]])
+    return dst
 
 
 ____warp_perspective = """
@@ -370,15 +334,22 @@ def warp_points(pts, warp_mat, reserve_struct=True):
 
     >>> warp_mat = [[0, 1, 0], [1, 0, 0], [0, 0, 1]]  # 对换x、y
     >>> warp_points([[1, 2], [11, 22]], warp_mat)  # 处理两个点
-    [[2, 1], [22, 11]]
+    array([[ 2,  1],
+           [22, 11]])
     >>> warp_points([[1, 2], [11, 22]], [[0, 1, 0], [1, 0, 0]])  # 输入2*3的变换矩阵也可以
-    [[2, 1], [22, 11]]
+    array([[ 2,  1],
+           [22, 11]])
     >>> warp_points([1, 2, 11, 22], warp_mat)  # 也可以用一维的结构来输入点集
-    [2, 1, 22, 11]
+    array([[ 2,  1],
+           [22, 11]])
     >>> warp_points([1, 2, 11, 22, 111, 222], warp_mat)  # 点的数量任意，返回的结构同输入的结构形式
-    [2, 1, 22, 11, 222, 111]
+    array([[  2,   1],
+           [ 22,  11],
+           [222, 111]])
     >>> warp_points(np.array([1, 2, 11, 22, 111, 222]), warp_mat)  # 也可以用np.ndarray等结构
-    array([  2,   1,  22,  11, 222, 111])
+    array([[  2,   1],
+           [ 22,  11],
+           [222, 111]])
     >>> warp_points([1, 2, 11, 22], warp_mat, reserve_struct=False)  # 也可以用一维的结构来输入点集
     array([[ 2,  1],
            [22, 11]])
@@ -387,8 +358,6 @@ def warp_points(pts, warp_mat, reserve_struct=True):
     pts1 = np.concatenate([pts1, [[1] * pts1.shape[1]]], axis=0)
     pts2 = np.dot(warp_mat[:2], pts1)
     pts2 = pts2.T
-    if reserve_struct:
-        pts2 = reset_arr_struct(pts2, pts)
     return pts2
 
 
@@ -417,7 +386,7 @@ def warp_image(img, warp_mat, dsize=None, *, view_rate=False, max_zoom=1, reserv
     # 0 参数整理
     img0 = img
     if not isinstance(img, np.ndarray):
-        img = reset_arr_struct(img, np.ndarray)
+        img = np_array(img)
 
     # 1 得到3*3的变换矩阵
     warp_mat = np_array(warp_mat)
@@ -453,9 +422,6 @@ def warp_image(img, warp_mat, dsize=None, *, view_rate=False, max_zoom=1, reserv
     dst = cv2.warpPerspective(img, warp_mat, dsize)
 
     # 4 返回值
-    if reserve_struct:
-        dst = reset_arr_struct(dst, img0)
-
     return dst
 
 
@@ -503,15 +469,16 @@ def warp_quad_pts(pts, method='average'):
     :return: 规则矩形的四个点坐标
 
     >>> warp_quad_pts([[89, 424], [931, 424], [399, 290], [621, 290]])
-    [[0, 0], [532, 0], [532, 549], [0, 549]]
-    >>> warp_quad_pts([89, 424, 931, 424, 399, 290, 621, 290])
-    [0, 0, 532, 0, 532, 549, 0, 549]
+    array([[  0,   0],
+           [532,   0],
+           [532, 549],
+           [  0, 549]])
     """
     w, h = quad_warp_wh(pts, method)
-    return reset_arr_struct(rect2polygon(0, 0, w, h), pts)
+    return rect2polygon([0, 0, w, h])
 
 
-def get_sub_image(src_image, pts, warp_quad=False, reserve_struct=True):
+def get_sub_image(src_image, pts, warp_quad=False):
     """ 从src_image取一个子图
 
     :param src_image: 原图
@@ -528,17 +495,15 @@ def get_sub_image(src_image, pts, warp_quad=False, reserve_struct=True):
         文件、np.ndarray --> np.ndarray
         PIL.Image --> PIL.Image
     """
-    src_img = reset_arr_struct(src_image, np.ndarray)
+    src_img = ensure_array_type(src_image, np.ndarray)
     pts = coords2d(pts)
     if not warp_quad or len(pts) != 4:
         x1, y1, x2, y2 = rect_bounds1d(pts)
         dst = src_img[y1:y2, x1:x2]  # 这里越界不会报错，只是越界的那个维度shape为0
     else:
         w, h = quad_warp_wh(pts, method=warp_quad)
-        warp_mat = get_warp_mat(pts, rect2polygon(0, 0, w, h))
+        warp_mat = get_warp_mat(pts, rect2polygon([0, 0, w, h]))
         dst = warp_image(src_img, warp_mat, (w, h))
-    if reserve_struct:
-        dst = reset_arr_struct(dst, src_image)
     return dst
 
 
