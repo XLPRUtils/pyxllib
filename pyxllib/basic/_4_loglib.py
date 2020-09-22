@@ -306,11 +306,9 @@ class Iterate:
         # 队列中没有新任务时，才放入新任务，这样能确保pinterval的输出能反应实时情况，而不是一下全部进入队列，把for循环跑完了
         while executor._work_queue.qsize(): pass
 
-    def _step5_finish(self, pinterval, interrupt, executor):
-        executor.shutdown()
+    def _step5_finish(self, pinterval, interrupt):
         if not interrupt and pinterval:
-            self.xllog.info(f'{self.n_items:{self.format_width}d}/{self.n_items}='
-                            f'{self.n_items / self.n_items:6.2%} 完成迭代')
+            self.xllog.info(f'{self.n_items / self.n_items:6.2%} 完成迭代')
             sys.stderr.flush()
 
     def run(self, func, start=0, end=None, pinterval=None, max_workers=1, interrupt=True):
@@ -349,7 +347,8 @@ class Iterate:
             self._step4_iter(i, pinterval, executor)
             executor.submit(wrap_func, func, i)
             if interrupt and error: break
-        self._step5_finish(pinterval, interrupt and error, executor)
+        executor.shutdown()  # 必须等executor结束，error才是准确的
+        self._step5_finish(pinterval, interrupt and error)
 
 
 class RunOnlyOnce:
