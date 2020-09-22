@@ -17,7 +17,8 @@ import cv2
 import PIL.Image
 from shapely.geometry import Polygon
 
-from pyxllib.debug import dprint
+from pyxllib.basic import Path
+from pyxllib.debug import dprint, showdir
 
 ____ensure_array_type = """
 数组方面的类型转换，相关类型有
@@ -300,6 +301,28 @@ def rect2polygon(x1, y1, x2, y2):
     return [[x1, y1], [x2, y1], [x2, y2], [x1, y2]]
 
 
+def rectangle_pts2polygon_pts(src_pts):
+    """ 矩形转成四边形结构来表达存储
+
+    >>> rectangle_pts2polygon_pts([[0, 0], [10, 20]])
+    [[0, 0], [10, 0], [10, 20], [0, 20]]
+    >>> rectangle_pts2polygon_pts([[0, 0], [10, 10], [0, 10]])
+    [[0, 0], [10, 10], [0, 10]]
+    >>> rectangle_pts2polygon_pts([0, 0, 10, 20])
+    [0, 0, 10, 0, 10, 20, 0, 20]
+    >>> rectangle_pts2polygon_pts(np.array([0, 0, 10, 20]))
+    array([ 0,  0, 10,  0, 10, 20,  0, 20])
+    """
+    pts1 = np_array(src_pts).reshape([-1, 2])
+    if pts1.shape[0] != 2:
+        # 只有两个点的情况才把矩形转四边形，其他都返回原始结果
+        return src_pts
+    else:
+        x1, y1, x2, y2 = pts1.reshape(-1)
+        pts2 = rect2polygon(x1, y1, x2, y2)
+        return reset_arr_struct(pts2, src_pts)
+
+
 ____warp_perspective = """
 仿射、透视变换相关功能
 
@@ -550,13 +573,28 @@ def imread_v1(path, flags=1):
     return src
 
 
-def imread(path):
-    img = cv2.imdecode(np.fromfile(str(path), dtype=np.uint8), -1)
-    return img
+def imread(path, flags=1):
+    """ https://www.yuque.com/xlpr/pyxllib/imread
+
+    cv2.imread的flags默认参数相当于是1
+
+    """
+    return cv2.imdecode(np.fromfile(str(path), dtype=np.uint8), flags)
+
+
+def imwrite(path, img, if_exists='replace'):
+    """
+    TODO 200922周二16:21，如何更好与Path融合？能直接Path('a.jpg').write(img)？
+    """
+    if not isinstance(path, Path):
+        path = Path(path)
+    data = cv2.imencode(ext=path.suffix, img=img)[1]
+    return path.write(data.tobytes(), if_exists=if_exists)
 
 
 def imshow(mat, winname=None, flags=0):
     """ 展示窗口
+
     :param mat:
     :param winname: 未输入时，则按test1、test2依次生成窗口
     :param flags:
@@ -700,6 +738,10 @@ def intersection_over_union(pts1, pts2):
 
     >>> intersection_over_union([[0, 0], [10, 10]], [[5, 5], [15, 15]])
     0.14285714285714285
+
+    TODO 其实，如果有大量的双循环两两对比，每次判断shapely类型是比较浪费性能的
+        此时可以考虑直接在业务层用三行代码计算，不必调用该函数
+        同时，我也要注意一些密集型的底层计算函数，应该尽量避免这种工程性类型判断的泛用操作，会影响性能
     """
     polygon1, polygon2 = shapely_polygon(pts1), shapely_polygon(pts2)
     inter_area = polygon1.intersection(polygon2).area
