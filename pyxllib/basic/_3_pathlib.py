@@ -305,7 +305,7 @@ class Path:
         return 'Path' + self._path.__repr__()[11:]
 
     def __str__(self):
-        return str(self._path) + ('/' if self.assume_dir else '')
+        return str(self._path).replace('\\', '/') + ('/' if self.assume_dir else '')
 
     def __eq__(self, other):
         if not isinstance(other, Path):
@@ -372,9 +372,9 @@ class Path:
     def dirname(self) -> str:
         r"""
         >>> Path('D:/pycode/code4101py').dirname
-        'D:\\pycode'
+        'D:/pycode'
         >>> Path(r'D:\toweb\a').dirname
-        'D:\\toweb'
+        'D:/toweb'
         """
         return str(self.parent)
 
@@ -556,6 +556,21 @@ class Path:
             # 否则dst是文件，或者不存在的路径，均视为文件类型处理
 
         return dst.fullpath
+
+    def relative_path(self, ref_dir) -> str:
+        r""" 当前路径，相对于ref_dir的路径位置
+
+        >>> Path('C:/a/b/c.txt').relative_path('C:/a/')
+        'b/c.txt'
+        >>> Path('C:/a/b\\c.txt').relative_path('C:\\a/')
+        'b/c.txt'
+        """
+        if not isinstance(ref_dir, Path):
+            ref_dir = Path(ref_dir)
+        s1, s2 = str(self), str(ref_dir)
+        if s1.startswith(s2):
+            s1 = s1[len(s2):]
+        return s1
 
     def process(self, dst, func, if_exists='error', arg1=None, arg2=None):
         r""" copy或move的本质底层实现
