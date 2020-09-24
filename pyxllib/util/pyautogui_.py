@@ -57,8 +57,9 @@ class AutoGui:
         # 如果使用了cv2，是不能直接处理含中文的路径的；有的话，就要先拷贝到一个英文路径来处理
         # 出现这种情况，均速会由0.168秒变慢18%到0.198秒。
         if self.use_opencv and re.search(r'[\u4e00-\u9fa5，。；？（）【】、①-⑨]', file_path):
+            # TODO 除了拷贝图片的方法，应该有其他更好的策略
             p1 = Path(file_path)
-            p2 = Path(get_etag(file_path), Path(file_path).suffix, root=Path.TEMP)
+            p2 = Path(get_etag(file_path), p1.suffix, root=Path.TEMP)
             p1.copy(p2, if_exists='ignore')  # 使用etag去重，出现相同etag则不用拷贝了
             file_path = p2.fullpath
             # print(file_path)
