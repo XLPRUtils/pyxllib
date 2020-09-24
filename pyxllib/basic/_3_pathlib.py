@@ -428,7 +428,7 @@ class Path:
         return self._path.suffix if self._path else ''
 
     def with_suffix(self, suffix):
-        r""" with_suffix和suffix.setter区别是，前者是生成一个新指向的类，后者是重命名
+        r""" 指向同目录下后缀为suffix的文件
 
         >>> Path('a.txt').with_suffix('.py').fullpath.split('\\')[-1]  # 强制替换
         'a.py'

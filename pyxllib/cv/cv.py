@@ -287,6 +287,33 @@ def rect2polygon(src):
     return dst
 
 
+def resort_quad_points(src_pts):
+    """ 重置四边形点集顺序，确保以左上角为起点，顺时针罗列点集
+
+    算法：先确保pt1、pt2在上面，然后再确保pt1在pt2左边
+
+    >>> pts = [[100, 50], [200, 0], [100, 0], [0, 50]]
+    >>> resort_quad_points(pts)
+    [[100, 0], [200, 0], [100, 50], [0, 50]]
+    >>> pts  # 原来的点不会被修改
+    [[100, 50], [200, 0], [100, 0], [0, 50]]
+    """
+    # numpy的交换会有问题！必须要转为list结构
+    src_type = type(src_pts)
+    pts = to_list(src_pts)
+    if src_type == list:
+        # list的时候比较特别，不能拷贝操作
+        pts = copy.copy(pts)
+    if pts[0][1] > pts[2][1]:
+        pts[0], pts[2] = pts[2], pts[0]
+    if pts[1][1] > pts[3][1]:
+        pts[1], pts[3] = pts[3], pts[1]
+    if pts[0][0] > pts[1][0]:
+        pts[0], pts[1] = pts[1], pts[0]
+        pts[2], pts[3] = pts[3], pts[2]
+    return ensure_array_type(pts, src_type)
+
+
 ____warp_perspective = """
 仿射、透视变换相关功能
 
@@ -431,6 +458,7 @@ ____get_sub_image = """
 
 def quad_warp_wh(pts, method='average'):
     """ 四边形转为矩形的宽、高
+
     :param pts: 四个点坐标
         TODO 暂时认为pts是按点集顺时针顺序输入的
         TODO 暂时认为pts[0]就是第一个坐标点
