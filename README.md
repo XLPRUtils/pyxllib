@@ -11,7 +11,7 @@ pip install pyxllib
 
 # 2 document
 
-使用文档: https://www.yuque.com/xlpr/pyxllib，
+使用文档: https://www.yuque.com/xlpr/pyxllib ，
 正在努力完善中，欢迎更多小伙伴一起助力
 
 # 鸣谢

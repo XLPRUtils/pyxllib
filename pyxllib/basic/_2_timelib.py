@@ -208,10 +208,10 @@ def perftest(title, stmt="pass", repeat=1, number=1, globals=None, res_width=Non
     if res_width is None:
         # 如果性能报告比较短，只有一次测试，那res_width默认长度可以高一点
         res_width = 50 if len(data) > 1 else 200
-    if res:
-        res = '运行结果：' + shorten(str(res), res_width)
-    elif res is None:
+    if res is None:
         res = ''
+    else:
+        res = '运行结果：' + shorten(str(res), res_width)
     if print_:
         print(title, parse_perf(data), res)
 
