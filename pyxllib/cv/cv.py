@@ -302,7 +302,7 @@ def resort_quad_points(src_pts):
     src_type = type(src_pts)
     pts = to_list(src_pts)
     if src_type == list:
-        # list的时候比较特别，不能拷贝操作
+        # list的时候比较特别，要拷贝、不能引用数据
         pts = copy.copy(pts)
     if pts[0][1] > pts[2][1]:
         pts[0], pts[2] = pts[2], pts[0]
