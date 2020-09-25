@@ -46,7 +46,7 @@ def intersection_split(a, b):
     return ls1, ls2, ls3, ls4
 
 
-def bcompare(oldfile, newfile=None, basefile=None, wait=True, sameoff=False):
+def bcompare(oldfile, newfile=None, basefile=None, wait=True, sameoff=False, oldfilename=None, newfilename=None):
     """ 调用Beyond Compare软件对比两段文本（请确保有把BC的bcompare.exe加入环境变量）
 
     :param oldfile:
@@ -58,6 +58,8 @@ def bcompare(oldfile, newfile=None, basefile=None, wait=True, sameoff=False):
     :param sameoff: 如果设为True，则会判断内容，两份内容如果相同则不打开bc
         这个参数一定程度会影响性能，非必要的时候不要开。
         或者在外部的时候，更清楚数据情况，可以在外部判断内容不重复再跑bcompare函数。
+    :param oldfilename: 强制指定旧的文件名，如果oldfile已经是一个文件路径，则不生效
+    :param newfilename: 强制指定新的文件名，如果newfile已经是一个文件路径，则不生效
     :return: 程序返回被修改的oldfile内容
         注意如果没有修改，或者wait=False，会返回原始值
     这在进行调试、检测一些正则、文本处理算法是否正确时，特别方便有用
@@ -95,7 +97,13 @@ def bcompare(oldfile, newfile=None, basefile=None, wait=True, sameoff=False):
             if p.is_file():
                 ls.append(p.fullpath)
             else:
-                ls.append(Path(refinepath(names[d] + ext), root=Path.TEMP).write(file, if_exists='replace').fullpath)
+                if d == 0 and oldfilename:
+                    name = oldfilename
+                elif d == 1 and newfilename:
+                    name = newfilename
+                else:
+                    name = refinepath(names[d] + ext)
+                ls.append(Path(name, root=Path.TEMP).write(file, if_exists='replace').fullpath)
 
     func(oldfile, 0)
     func(newfile, 1)
