@@ -18,6 +18,8 @@ import re
 import sys
 import textwrap
 
+from disjoint_set import DisjointSet
+
 ____str_funcs = """
 字符串类的一些辅助函数
 """
@@ -828,3 +830,42 @@ def sort_by_given_list(a, b):
     a1 = sorted(a1, key=lambda x: d[x])
     a2 = sorted(a2)
     return a1 + a2
+
+
+____disjoint_set = """
+并查集相关功能
+"""
+
+
+def disjoint_set(items, join_checker):
+    """ 按照一定的相连规则分组
+
+    :param items: 项目清单
+    :param join_checker: 检查任意两个对象是否相连，进行分组
+    :return:
+
+    算法：因为会转成下标，按照下标进行分组合并，所以支持items里有重复值，或者unhashable对象
+
+    >>> disjoint_set([-1, -2, 2, 0, 0, 1], lambda x, y: x*y>0)
+    [[-1, -2], [2, 1], [0], [0]]
+    """
+    from itertools import combinations
+
+    # 1 添加元素
+    ds = DisjointSet()
+    items = tuple(items)
+    n = len(items)
+    for i in range(n):
+        ds.find(i)
+
+    # 2 连接、分组
+    for i, j in combinations(range(n), 2):
+        if join_checker(items[i], items[j]):
+            ds.union(i, j)
+
+    # 3 返回分组信息
+    res = []
+    for group in ds.itersets():
+        group_elements = [items[g] for g in group]
+        res.append(group_elements)
+    return res

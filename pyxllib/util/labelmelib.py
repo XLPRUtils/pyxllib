@@ -51,8 +51,9 @@ class ToLabelmeJson:
             self.img = None
         self.data = None  # 存储json的字典数据
 
-    def get_data(self, infile, *args):
+    def get_data(self, infile):
         """ 格式转换接口函数，继承的类需要自己实现这个方法
+
         :param infile: 待解析的标注数据
         """
         # s = Path(infile).read()
