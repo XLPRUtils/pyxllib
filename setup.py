@@ -15,7 +15,7 @@
 from setuptools import setup, find_packages
 import io
 
-VERSION = '0.0.32'
+VERSION = '0.0.33'
 
 with io.open("README.md", encoding='utf-8') as f:
     long_description = f.read()

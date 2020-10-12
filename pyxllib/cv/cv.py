@@ -603,31 +603,75 @@ def imshow(mat, winname=None, flags=0):
     cv2.imshow(winname, mat)
 
 
-def plot_lines(src, lines, color=None, thickness=1, line_type=cv2.LINE_AA, shift=None):
-    """ 在src图像上画系列线段
-    """
-    # 1 判断 lines 参数内容
-    if lines is None:
-        return src
-    if not isinstance(lines, np.ndarray):
-        lines = np.array(lines)
-    if not lines.any():
-        return src
+class CvPlot:
+    @classmethod
+    def get_plot_color(cls, src):
+        """ 获得比较适合的作画颜色
 
-    # 2 预备
-    dst = np.array(src)  # 拷贝一张图来修改
-    if color is None:
+        TODO 可以根据背景色智能推导画线用的颜色，目前是固定红色
+        """
         if src.ndim == 3:
-            color = (0, 0, 255)  # TODO 可以根据背景色智能推导画线用的颜色，目前是固定红色
+            return 0, 0, 255
         elif src.ndim == 2:
-            color = [255]  # 灰度图，默认先填白色
+            return 255  # 灰度图，默认先填白色
 
-    # 3 画线
-    if lines.any():
-        for line in lines.reshape(-1, 4):
-            x1, y1, x2, y2 = line
-            cv2.line(dst, (x1, y1), (x2, y2), color, thickness, line_type, shift)
-    return dst
+    @classmethod
+    def get_plot_args(cls, src, color=None):
+        # 1 作图颜色
+        if not color:
+            color = cls.get_plot_color(src)
+
+        # 2 画布
+        if len(color) >= 3 and src.ndim < 2:
+            dst = cv2.cvtColor(src, cv2.COLOR_GRAY2BGR)
+        else:
+            dst = np.array(src)
+
+        return dst, color
+
+    @classmethod
+    def lines(cls, src, lines, color=None, thickness=1, line_type=cv2.LINE_AA, shift=None):
+        """ 在src图像上画系列线段
+        """
+        # 1 判断 lines 参数内容
+        lines = np_array(lines).reshape(-1, 4)
+        if not lines.size:
+            return src
+
+        # 2 参数
+        dst, color = cls.get_plot_args(src, color)
+
+        # 3 画线
+        if lines.any():
+            for line in lines:
+                x1, y1, x2, y2 = line
+                cv2.line(dst, (x1, y1), (x2, y2), color, thickness, line_type, shift)
+        return dst
+
+    @classmethod
+    def circles(cls, src, circles, color=None, thickness=1, center=False):
+        """ 在图片上画圆形
+
+        :param src: 要作画的图
+        :param circles: 要画的圆形参数 (x, y, 半径 r)
+        :param color: 画笔颜色
+        :param center: 是否画出圆心
+        """
+        # 1 圆 参数
+        circles = np_array(circles, dtype=int).reshape(-1, 3)
+        if not circles.size:
+            return src
+
+        # 2 参数
+        dst, color = cls.get_plot_args(src, color)
+
+        # 3 作画
+        for x in circles:
+            cv2.circle(dst, (x[0], x[1]), x[2], color, thickness)
+            if center:
+                cv2.circle(dst, (x[0], x[1]), 2, color, thickness)
+
+        return dst
 
 
 class TrackbarTool:
@@ -661,6 +705,7 @@ class TrackbarTool:
 
     def create_trackbar(self, trackbar_name, count, value=0, on_change=None):
         """ 创建一个滑动条
+
         :param trackbar_name: 滑动条名称
         :param count: 上限值
         :param on_change: 回调函数
@@ -673,6 +718,7 @@ class TrackbarTool:
 
     def __getitem__(self, item):
         """ 可以通过 Trackbars 来获取滑动条当前值
+
         :param item: 滑动条名称
         :return: 当前取值
         """
