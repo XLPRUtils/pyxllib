@@ -314,6 +314,10 @@ def resort_quad_points(src_pts):
     return ensure_array_type(pts, src_type)
 
 
+def xywh2ltrb(p):
+    return [p[0], p[1], p[0] + p[2], p[1] + p[3]]
+
+
 ____warp_perspective = """
 仿射、透视变换相关功能
 
