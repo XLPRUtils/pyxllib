@@ -47,11 +47,11 @@ class TrainingModelBase:
 class TrainingClassifyModel(TrainingModelBase):
     """ 对pytorch（分类）模型的训练、测试等操作的进一步封装 """
 
-    def __init__(self, model, data_dir=None, batch_size=None,
+    def __init__(self, model, *, data_dir=None, batch_size=None,
                  optimizer=None, loss_func=None):
 
         super().__init__()
-        self.log.info(f'initialize. use device={self.device}.')
+        self.log.info(f'initialize. use_device={self.device}.')
 
         self.data_dir = data_dir if data_dir else 'D:/data'
         self.batch_size = batch_size if batch_size else 500
@@ -75,7 +75,6 @@ class TrainingClassifyModel(TrainingModelBase):
 
     def training_one_epoch(self):
         # 1 检查模式
-        tt = TicToc()
         if not self.model.training:
             self.model.train(True)
 
@@ -86,6 +85,8 @@ class TrainingClassifyModel(TrainingModelBase):
             x, label = x.to(self.device), label.to(self.device)
 
             logits = self.model(x)
+            if isinstance(logits, tuple):
+                logits = logits[0]  # 如果返回是多个值，一般是RNN等层有其他信息，先只取第一个参数值就行了
             loss = self.loss_func(logits, label)
             loss_values.append(loss)
 
@@ -94,8 +95,7 @@ class TrainingClassifyModel(TrainingModelBase):
             self.optimizer.step()
 
         # 3 训练阶段只看loss，不看实际预测准确度，默认每个epoch都会输出
-        elapsed_time = tt.tocvalue()
-        return elapsed_time, loss_values
+        return loss_values
 
     def test_accuracy(self, data, prefix=''):
         """ 测试验证集等数据上的精度 """
@@ -110,17 +110,19 @@ class TrainingClassifyModel(TrainingModelBase):
             # 2.1 有时候在训练阶段的batch_size太小，导致预测阶段速度太慢，所以把batch_size改一下
             sample_size = self.sample_size(data)
             # 用1G内存作为参考，每次能加载的样本数量上限；上限控制在2000条以内
-            batch_size = min(math.floor(1024 ** 3 / sample_size), 2000)
+            batch_size = min(math.floor(1024 ** 3 / sample_size), max(self.batch_size, 2000))
 
             # 2.2 预测结果，计算正确率
             loss, correct, number = [], 0, len(data.dataset)
             for x, label in torch.utils.data.DataLoader(data.dataset, batch_size=batch_size):
                 x, label = x.to(self.device), label.to(self.device)
                 logits = self.model(x)
+                if isinstance(logits, tuple):
+                    logits = logits[0]
                 loss.append(self.loss_func(logits, label))
                 correct += logits.argmax(dim=1).eq(label).sum().item()  # 预测正确的数量
             elapsed_time, mean_loss = tt.tocvalue(), np.mean(loss, dtype=float)
-            info = f'{prefix} accuracy={correct}/{number} ({correct / number:.0%})\t' \
+            info = f'{prefix} accuracy={correct}/{number} ({correct / number:.2%})\t' \
                    f'mean_loss={mean_loss:.3f}\telapsed_time={elapsed_time:.0f}s\tbatch_size={batch_size}'
             self.log.info(info)
 
@@ -134,11 +136,14 @@ class TrainingClassifyModel(TrainingModelBase):
         :param save_interval: 每隔几个epoch保存一次模型（未实装）
         :return:
         """
+        tt = TicToc()
+        epoch_time = f'elapsed_time' if log_interval == 1 else f'{log_interval}*epoch_time'
         for epoch in range(1, epochs + 1):
-            elapsed_time, loss_values = self.training_one_epoch()
+            loss_values = self.training_one_epoch()
             if log_interval and epoch % log_interval == 0:
                 msg = self.loss_values_stat(loss_values)
-                self.log.info(f'training_epoch={epoch}, elapsed_time={elapsed_time:.0f}s\t{msg}')
+                elapsed_time = tt.tocvalue(restart=True)
+                self.log.info(f'epoch={epoch}, {epoch_time}={elapsed_time:.0f}s\t{msg}')
             if test_interval and epoch % test_interval == 0:
                 self.test_accuracy(self.train_data, 'train_data')
                 self.test_accuracy(self.test_data, ' test_data')
