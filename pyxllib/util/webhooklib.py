@@ -78,8 +78,10 @@ class DingtalkRobot:
 
     def push_markdown(self, text='', title=''):
         msgtype = 'link'
-        t = {"text": text, "title": title}
-        data = {"msgtype": msgtype, msgtype: t}
+        d = {}
+        if text: d['text'] = text
+        if title: d['title'] = title
+        data = {"msgtype": msgtype, msgtype: d}
         self.push_data(data)
 
     def push_actioncard(self, text='', title='', siggle_url='', siggle_title='', btn_orientation='0'):
