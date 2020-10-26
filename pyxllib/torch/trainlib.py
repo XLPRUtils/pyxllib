@@ -15,6 +15,7 @@ from pyxllib.debug import *
 
 import torch
 from torch import nn, optim
+import torch.utils.data
 
 
 class TrainingModelBase:
@@ -53,23 +54,24 @@ class TrainingClassifyModel(TrainingModelBase):
         super().__init__()
         self.log.info(f'initialize. use_device={self.device}.')
 
+        self.model = model.to(self.device)
+        self.optimizer = optimizer if optimizer else optim.Adam(model.parameters(), lr=0.01)
+        self.loss_func = loss_func if loss_func else nn.CrossEntropyLoss().to(self.device)
+        self.log.info('model parameters size: ' + str(sum(map(lambda p: p.numel(), self.model.parameters()))))
+
         self.data_dir = data_dir if data_dir else 'D:/data'
         self.batch_size = batch_size if batch_size else 500
         self.train_data = self.get_train_data()
-        self.test_data = self.get_test_data()
-        self.train_data_number, self.test_data_number = len(self.train_data.dataset), len(self.test_data.dataset)
+        self.val_data = self.get_val_data()
+        self.train_data_number, self.test_data_number = len(self.train_data.dataset), len(self.val_data.dataset)
         self.log.info(f'get data, train_data_number={self.train_data_number}(batch={len(self.train_data)}), '
-                      f'test_data_number={self.test_data_number}(batch={len(self.test_data)}), batch_size={self.batch_size}')
-
-        self.model = model.to(self.device)
-        self.optimizer = optimizer if optimizer else optim.SGD(model.parameters(), lr=0.01)
-        self.loss_func = loss_func if loss_func else nn.CrossEntropyLoss().to(self.device)
+                      f'test_data_number={self.test_data_number}(batch={len(self.val_data)}), batch_size={self.batch_size}')
 
     def get_train_data(self):
         """ 子类必须实现的接口函数 """
         raise NotImplementedError
 
-    def get_test_data(self):
+    def get_val_data(self):
         """ 子类必须实现的接口函数 """
         raise NotImplementedError
 
@@ -97,7 +99,7 @@ class TrainingClassifyModel(TrainingModelBase):
         # 3 训练阶段只看loss，不看实际预测准确度，默认每个epoch都会输出
         return loss_values
 
-    def test_accuracy(self, data, prefix=''):
+    def calculate_accuracy(self, data, prefix=''):
         """ 测试验证集等数据上的精度 """
         # 1 eval模式
         if self.model.training:
@@ -145,5 +147,5 @@ class TrainingClassifyModel(TrainingModelBase):
                 elapsed_time = tt.tocvalue(restart=True)
                 self.log.info(f'epoch={epoch}, {epoch_time}={elapsed_time:.0f}s\t{msg}')
             if test_interval and epoch % test_interval == 0:
-                self.test_accuracy(self.train_data, 'train_data')
-                self.test_accuracy(self.test_data, ' test_data')
+                self.calculate_accuracy(self.train_data, 'train_data')
+                self.calculate_accuracy(self.val_data, ' val_data')
