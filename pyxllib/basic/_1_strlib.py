@@ -15,10 +15,13 @@ import logging
 import math
 import pprint
 import re
+import socket
 import sys
 import textwrap
 
 from disjoint_set import DisjointSet
+
+HOSTNAME = socket.getfqdn()
 
 ____str_funcs = """
 字符串类的一些辅助函数
@@ -869,3 +872,7 @@ def disjoint_set(items, join_checker):
         group_elements = [items[g] for g in group]
         res.append(group_elements)
     return res
+
+
+____other = """
+"""

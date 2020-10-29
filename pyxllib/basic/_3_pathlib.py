@@ -37,6 +37,15 @@ def is_url(arg):
         return False
 
 
+def is_url_connect(url, timeout=5):
+    try:
+        _ = requests.head(url, timeout=timeout)
+        return True
+    except requests.ConnectionError:
+        pass
+    return False
+
+
 def is_file(arg, exists=True):
     """相较于标准库的os.path.isfile，对各种其他错误类型也会判False
 
