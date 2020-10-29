@@ -17,11 +17,77 @@ import torch
 from torch import nn, optim
 import torch.utils.data
 
+# 可视化工具
+try:
+    import visdom
+except ModuleNotFoundError:
+    subprocess.run(['pip', 'install', 'visdom'])
+    import visdom
+
+
+class Visdom(visdom.Visdom, metaclass=SingletonForEveryInitArgs):
+    """
+
+    visdom文档： https://www.yuque.com/code4101/pytorch/visdom
+    """
+
+    def __init__(
+            self,
+            server='http://localhost',
+            endpoint='events',
+            port=8097,
+            base_url='/',
+            ipv6=True,
+            http_proxy_host=None,
+            http_proxy_port=None,
+            env='main',
+            send=True,
+            raise_exceptions=None,
+            use_incoming_socket=True,
+            log_to_filename=None):
+        self.is_connection = is_url_connect(f'{server}:{port}')
+
+        if self.is_connection:
+            super().__init__(server, endpoint, port, base_url, ipv6,
+                             http_proxy_host, http_proxy_port, env, send,
+                             raise_exceptions, use_incoming_socket, log_to_filename)
+        else:
+            get_xllog().info('未开启visdom可视化服务')
+
+        self.line_windows = set()
+
+    def __bool__(self):
+        return self.is_connection
+
+    def one_batch_images(self, imgs, targets, title='one_batch_image', *, nrow=8, padding=2):
+        self.images(imgs, nrow=nrow, padding=padding,
+                    win=title, opts={'title': title, 'caption': str(targets)})
+
+    def loss_line(self, loss_values, epoch, title='loss', *, update=None):
+        """ 损失函数曲线
+
+        横坐标是epoch
+        """
+        # 1 记录窗口是否为本次执行程序时第一次初始化
+        if update is None:
+            if title in self.line_windows:
+                update = 'append'
+            else:
+                update = None
+        self.line_windows.add(title)
+
+        # 2 画线
+        xs = np.linspace(epoch - 1, epoch, num=len(loss_values) + 1)
+        self.line(loss_values, xs[1:], win=title, opts={'title': title, 'xlabel': 'epoch'},
+                  update=update)
+
 
 class TrainingModelBase:
-    def __init__(self):
+    def __init__(self, *, save_dir=None):
         self.log = get_xllog()
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        self.save_dir = save_dir if save_dir else os.path.abspath('.')  # 没有指定数据路径则以当前工作目录为准
+        self.model = None
 
     @classmethod
     def loss_values_stat(cls, loss_vales):
@@ -44,28 +110,21 @@ class TrainingModelBase:
         x, label = data.dataset[0]  # 取第0个样本作为参考
         return getasizeof(x.numpy()) + getasizeof(label)
 
+    def save_model_state(self, file):
+        """ 保存模型参数值
+        一般存储model.state_dict，而不是直接存储model，确保灵活性
 
-class TrainingClassifyModel(TrainingModelBase):
-    """ 对pytorch（分类）模型的训练、测试等操作的进一步封装 """
+        # TODO 和path结合，增加if_exists参数
+        """
+        p = Path(file, root=self.save_dir)
+        p.ensure_dir(pathtype='file')
+        torch.save(self.model.state_dict(), str(p))
 
-    def __init__(self, model, *, data_dir=None, batch_size=None,
-                 optimizer=None, loss_func=None):
-
-        super().__init__()
-        self.log.info(f'initialize. use_device={self.device}.')
-
-        self.model = model.to(self.device)
-        self.optimizer = optimizer if optimizer else optim.Adam(model.parameters(), lr=0.01)
-        self.loss_func = loss_func if loss_func else nn.CrossEntropyLoss().to(self.device)
-        self.log.info('model parameters size: ' + str(sum(map(lambda p: p.numel(), self.model.parameters()))))
-
-        self.data_dir = data_dir if data_dir else 'D:/data'
-        self.batch_size = batch_size if batch_size else 500
-        self.train_data = self.get_train_data()
-        self.val_data = self.get_val_data()
-        self.train_data_number, self.test_data_number = len(self.train_data.dataset), len(self.val_data.dataset)
-        self.log.info(f'get data, train_data_number={self.train_data_number}(batch={len(self.train_data)}), '
-                      f'test_data_number={self.test_data_number}(batch={len(self.val_data)}), batch_size={self.batch_size}')
+    def load_model_state(self, file):
+        """ 读取模型参数值 """
+        p = Path(file, root=self.save_dir)
+        p.ensure_dir(pathtype='file')
+        self.model.load_state_dict(torch.load(str(p)))
 
     def get_train_data(self):
         """ 子类必须实现的接口函数 """
@@ -74,6 +133,49 @@ class TrainingClassifyModel(TrainingModelBase):
     def get_val_data(self):
         """ 子类必须实现的接口函数 """
         raise NotImplementedError
+
+
+class TrainingClassifyModel(TrainingModelBase):
+    """ 对pytorch（分类）模型的训练、测试等操作的进一步封装
+
+    # TODO log变成可选项，可以关掉
+    """
+
+    def __init__(self, model, *, data_dir=None, save_dir=None,
+                 batch_size=None, optimizer=None, loss_func=None):
+
+        super().__init__(save_dir=save_dir)
+        self.log.info(f'initialize. use_device={self.device}.')
+
+        self.model = model.to(self.device)
+        self.optimizer = optimizer if optimizer else optim.Adam(model.parameters(), lr=0.01)
+        self.loss_func = loss_func if loss_func else nn.CrossEntropyLoss().to(self.device)
+        self.log.info('model parameters size: ' + str(sum(map(lambda p: p.numel(), self.model.parameters()))))
+
+        self.data_dir = data_dir if data_dir else os.path.abspath('.')  # 没有指定数据路径则以当前工作目录为准
+        self.log.info(f'data_dir={self.data_dir}, save_dir={self.save_dir}')
+
+        self.batch_size = batch_size if batch_size else 500
+        self.train_data = self.get_train_data()
+        self.val_data = self.get_val_data()
+        self.train_data_number, self.test_data_number = len(self.train_data.dataset), len(self.val_data.dataset)
+        self.log.info(f'get data, train_data_number={self.train_data_number}(batch={len(self.train_data)}), '
+                      f'test_data_number={self.test_data_number}(batch={len(self.val_data)}), batch_size={self.batch_size}')
+
+    def viz_data(self):
+        """ 用visdom显示样本数据
+
+        TODO 增加一些自定义格式参数
+        TODO 不能使用\n、\r\n、<br/>实现文本换行，有时间可以研究下，结合nrow、图片宽度，自动推算，怎么美化展示效果
+        """
+        viz = Visdom()
+        if not viz: return
+
+        x, label = next(iter(self.train_data))
+        viz.one_batch_images(x, label, 'train data')
+
+        x, label = next(iter(self.val_data))
+        viz.one_batch_images(x, label, 'val data')
 
     def training_one_epoch(self):
         # 1 检查模式
@@ -90,7 +192,7 @@ class TrainingClassifyModel(TrainingModelBase):
             if isinstance(logits, tuple):
                 logits = logits[0]  # 如果返回是多个值，一般是RNN等层有其他信息，先只取第一个参数值就行了
             loss = self.loss_func(logits, label)
-            loss_values.append(loss)
+            loss_values.append(float(loss))
 
             self.optimizer.zero_grad()
             loss.backward()
@@ -128,24 +230,39 @@ class TrainingClassifyModel(TrainingModelBase):
                    f'mean_loss={mean_loss:.3f}\telapsed_time={elapsed_time:.0f}s\tbatch_size={batch_size}'
             self.log.info(info)
 
-    def training(self, epochs=20,
-                 log_interval=1, test_interval=5,
-                 save_interval=None):
+    def training(self, epochs=20, start_epoch=0,
+                 log_interval=1,
+                 test_interval=0, save_interval=0):
         """ 主要训练接口
+
         :param epochs: 训练代数，输出时从1开始编号
+        :param start_epoch: 直接从现有的第几个epoch的模型读取参数
+            使用该参数，需要在self.save_dir有对应名称的model文件
         :param log_interval: 每隔几个epoch输出当前epoch的训练情况，损失值
         :param test_interval: 每隔几个epoch进行一次正确率测试（训练阶段只能看到每轮epoch中多个batch的平均损失）
-        :param save_interval: 每隔几个epoch保存一次模型（未实装）
+        :param save_interval: 每隔几个epoch保存一次模型
         :return:
         """
+        # 1 参数
+        tag = self.model.__class__.__name__
+        epoch_time_tag = f'elapsed_time' if log_interval == 1 else f'{log_interval}*epoch_time'
+        viz = Visdom()
+
+        # 2 加载之前的模型继续训练
+        if start_epoch:
+            self.load_model_state(f'{tag} epoch={start_epoch}.pth')
+
+        # 3 训练
         tt = TicToc()
-        epoch_time = f'elapsed_time' if log_interval == 1 else f'{log_interval}*epoch_time'
-        for epoch in range(1, epochs + 1):
+        for epoch in range(start_epoch + 1, epochs + 1):
             loss_values = self.training_one_epoch()
+            if viz: viz.loss_line(loss_values, epoch, 'train_loss')
             if log_interval and epoch % log_interval == 0:
                 msg = self.loss_values_stat(loss_values)
                 elapsed_time = tt.tocvalue(restart=True)
-                self.log.info(f'epoch={epoch}, {epoch_time}={elapsed_time:.0f}s\t{msg}')
+                self.log.info(f'epoch={epoch}, {epoch_time_tag}={elapsed_time:.0f}s\t{msg}')
             if test_interval and epoch % test_interval == 0:
                 self.calculate_accuracy(self.train_data, 'train_data')
-                self.calculate_accuracy(self.val_data, ' val_data')
+                self.calculate_accuracy(self.val_data, '  val_data')
+            if save_interval and epoch % save_interval == 0:
+                self.save_model_state(f'{tag} epoch={epoch}.pth')

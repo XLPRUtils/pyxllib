@@ -13,3 +13,8 @@
 
 from pyxllib.torch.modellib import *
 from pyxllib.torch.trainlib import *
+
+# 把pytorch等常用的导入写了
+import PIL
+import torch.utils.data
+from torchvision.datasets import VisionDataset
