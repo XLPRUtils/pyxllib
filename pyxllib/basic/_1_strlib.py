@@ -876,3 +876,14 @@ def disjoint_set(items, join_checker):
 
 ____other = """
 """
+
+
+def mybool(v):
+    """ 有些类型不能直接判断真假，例如具有多值的np.array，df等
+
+    这些有歧义的情况，在我的mybool里暂时都判断为True，如果有需要，需要精细化判断，可以扩展自己的npbool、dfbool
+    """
+    try:
+        return bool(v)
+    except ValueError:
+        return True

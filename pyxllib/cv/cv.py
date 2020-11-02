@@ -523,6 +523,7 @@ def get_sub_image(src_image, pts, warp_quad=False):
     :param warp_quad: 变形的四边形
         默认是截图pts的外接四边形区域，使用该参数
             且当pts为四个点时，是否强行扭转为矩形
+        一般写 'average'，也可以写'max'、'min'，详见 quad_warp_wh()
     :return: 子图
         文件、np.ndarray --> np.ndarray
         PIL.Image --> PIL.Image
