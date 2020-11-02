@@ -10,12 +10,16 @@
 常见的训练操作的代码封装
 
 """
+from abc import ABC
 
 from pyxllib.debug import *
 
 import torch
 from torch import nn, optim
 import torch.utils.data
+
+import torchvision
+from torchvision import transforms
 
 # 可视化工具
 try:
@@ -52,9 +56,9 @@ class Visdom(visdom.Visdom, metaclass=SingletonForEveryInitArgs):
                              http_proxy_host, http_proxy_port, env, send,
                              raise_exceptions, use_incoming_socket, log_to_filename)
         else:
-            get_xllog().info('未开启visdom可视化服务')
+            get_xllog().info('visdom server not support')
 
-        self.line_windows = set()
+        self.plot_windows = set()
 
     def __bool__(self):
         return self.is_connection
@@ -63,30 +67,56 @@ class Visdom(visdom.Visdom, metaclass=SingletonForEveryInitArgs):
         self.images(imgs, nrow=nrow, padding=padding,
                     win=title, opts={'title': title, 'caption': str(targets)})
 
-    def loss_line(self, loss_values, epoch, title='loss', *, update=None):
+    def _check_plot_win(self, win, update=None):
+        # 记录窗口是否为本次执行程序时第一次初始化，并且据此推导update是首次None，还是复用append
+        if update is None:
+            if win in self.plot_windows:
+                update = 'append'
+            else:
+                update = None
+        self.plot_windows.add(win)
+        return update
+
+    def _refine_opts(self, opts=None, *, title=None, legend=None, **kwargs):
+        if opts is None:
+            opts = {}
+        if title and 'title' not in opts: opts['title'] = title
+        if legend and 'legend' not in opts: opts['legend'] = legend
+        for k, v in kwargs.items():
+            if k not in opts:
+                opts[k] = v
+        return opts
+
+    def loss_line(self, loss_values, epoch, win='loss', *, title=None, update=None):
         """ 损失函数曲线
 
         横坐标是epoch
         """
         # 1 记录窗口是否为本次执行程序时第一次初始化
-        if update is None:
-            if title in self.line_windows:
-                update = 'append'
-            else:
-                update = None
-        self.line_windows.add(title)
+        if title is None: title = win
+        update = self._check_plot_win(win, update)
 
         # 2 画线
         xs = np.linspace(epoch - 1, epoch, num=len(loss_values) + 1)
-        self.line(loss_values, xs[1:], win=title, opts={'title': title, 'xlabel': 'epoch'},
+        self.line(loss_values, xs[1:], win=win, opts={'title': title, 'xlabel': 'epoch'},
                   update=update)
 
+    def plot_line(self, y, x, win, *, opts=None,
+                  title=None, legend=None, update=None):
+        # 1 记录窗口是否为本次执行程序时第一次初始化
+        if title is None: title = win
+        update = self._check_plot_win(win, update)
 
-class TrainingModelBase:
+        # 2 画线
+        self.line(y, x, win=win, update=update,
+                  opts=self._refine_opts(opts, title=title, legend=legend, xlabel='epoch'))
+
+
+class TrainerBase:
     def __init__(self, *, save_dir=None):
         self.log = get_xllog()
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-        self.save_dir = save_dir if save_dir else os.path.abspath('.')  # 没有指定数据路径则以当前工作目录为准
+        self.save_dir = Path(save_dir) if save_dir else Path()  # 没有指定数据路径则以当前工作目录为准
         self.model = None
 
     @classmethod
@@ -98,7 +128,7 @@ class TrainingModelBase:
         if not loss_vales:
             raise ValueError
 
-        data = np.array(loss_vales, float)
+        data = np.array(loss_vales, dtype=float)
         n, sum_ = len(data), data.sum()
         mean, std = data.mean(), data.std()
         msg = f'total_loss={sum_:.3f}, mean±std={mean:.3f}±{std:.3f}({max(data):.3f}->{min(data):.3f})'
@@ -135,7 +165,7 @@ class TrainingModelBase:
         raise NotImplementedError
 
 
-class TrainingClassifyModel(TrainingModelBase):
+class ClassificationTrainer(TrainerBase, ABC):
     """ 对pytorch（分类）模型的训练、测试等操作的进一步封装
 
     # TODO log变成可选项，可以关掉
@@ -152,7 +182,7 @@ class TrainingClassifyModel(TrainingModelBase):
         self.loss_func = loss_func if loss_func else nn.CrossEntropyLoss().to(self.device)
         self.log.info('model parameters size: ' + str(sum(map(lambda p: p.numel(), self.model.parameters()))))
 
-        self.data_dir = data_dir if data_dir else os.path.abspath('.')  # 没有指定数据路径则以当前工作目录为准
+        self.data_dir = Path(data_dir) if data_dir else Path()  # 没有指定数据路径则以当前工作目录为准
         self.log.info(f'data_dir={self.data_dir}, save_dir={self.save_dir}')
 
         self.batch_size = batch_size if batch_size else 500
@@ -211,14 +241,9 @@ class TrainingClassifyModel(TrainingModelBase):
         with torch.no_grad():
             tt = TicToc()
 
-            # 2.1 有时候在训练阶段的batch_size太小，导致预测阶段速度太慢，所以把batch_size改一下
-            sample_size = self.sample_size(data)
-            # 用1G内存作为参考，每次能加载的样本数量上限；上限控制在2000条以内
-            batch_size = min(math.floor(1024 ** 3 / sample_size), max(self.batch_size, 2000))
-
-            # 2.2 预测结果，计算正确率
+            # 预测结果，计算正确率
             loss, correct, number = [], 0, len(data.dataset)
-            for x, label in torch.utils.data.DataLoader(data.dataset, batch_size=batch_size):
+            for x, label in data:
                 x, label = x.to(self.device), label.to(self.device)
                 logits = self.model(x)
                 if isinstance(logits, tuple):
@@ -226,11 +251,13 @@ class TrainingClassifyModel(TrainingModelBase):
                 loss.append(self.loss_func(logits, label))
                 correct += logits.argmax(dim=1).eq(label).sum().item()  # 预测正确的数量
             elapsed_time, mean_loss = tt.tocvalue(), np.mean(loss, dtype=float)
-            info = f'{prefix} accuracy={correct}/{number} ({correct / number:.2%})\t' \
-                   f'mean_loss={mean_loss:.3f}\telapsed_time={elapsed_time:.0f}s\tbatch_size={batch_size}'
+            accuracy = correct / number
+            info = f'{prefix} accuracy={correct}/{number} ({accuracy:.2%})\t' \
+                   f'mean_loss={mean_loss:.3f}\telapsed_time={elapsed_time:.0f}s'
             self.log.info(info)
+            return accuracy
 
-    def training(self, epochs=20, start_epoch=0,
+    def training(self, epochs=20, *, start_epoch=0,
                  log_interval=1,
                  test_interval=0, save_interval=0):
         """ 主要训练接口
@@ -247,6 +274,7 @@ class TrainingClassifyModel(TrainingModelBase):
         tag = self.model.__class__.__name__
         epoch_time_tag = f'elapsed_time' if log_interval == 1 else f'{log_interval}*epoch_time'
         viz = Visdom()
+        if test_interval == 0 and save_interval: test_interval = save_interval
 
         # 2 加载之前的模型继续训练
         if start_epoch:
@@ -262,7 +290,8 @@ class TrainingClassifyModel(TrainingModelBase):
                 elapsed_time = tt.tocvalue(restart=True)
                 self.log.info(f'epoch={epoch}, {epoch_time_tag}={elapsed_time:.0f}s\t{msg}')
             if test_interval and epoch % test_interval == 0:
-                self.calculate_accuracy(self.train_data, 'train_data')
-                self.calculate_accuracy(self.val_data, '  val_data')
+                accuracy1 = self.calculate_accuracy(self.train_data, 'train_data')
+                accuracy2 = self.calculate_accuracy(self.val_data, '  val_data')
+                if viz: viz.plot_line([[accuracy1, accuracy2]], [epoch], 'accuracy', legend=['train', 'val'])
             if save_interval and epoch % save_interval == 0:
                 self.save_model_state(f'{tag} epoch={epoch}.pth')
