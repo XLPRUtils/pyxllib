@@ -10,12 +10,6 @@
 这里要强调，推荐os.walk功能
 """
 
-import shutil
-import datetime
-import tempfile
-import requests
-
-from pyxllib.debug import *
 from pyxllib.util.xmllib import *
 import pyxllib.util.zipfile as zipfile  # 重写了标准库的zipfile文件，cp437改为gbk，解决zip中文乱码问题
 
@@ -109,9 +103,9 @@ def checkpathfile(name):
     r"""判断环境变量path下是否有name这个文件，有则返回绝对路径，无则返回None
     常用的有：BCompare.exe、Chrome.exe、mogrify.exe、xelatex.exe
 
-    >>> checkpathfile('xelatex.exe')
+    >> checkpathfile('xelatex.exe')
     'C:\\CTEX\\MiKTeX\\miktex\\bin\\xelatex.exe'
-    >>> checkpathfile('abcd.exe')
+    >> checkpathfile('abcd.exe')
     """
     for path in os.getenv('path').split(';'):
         fn = os.path.join(path, name)
@@ -612,3 +606,7 @@ def download_file(url, fn=None, *, encoding=None, if_exists=None, ext=None, temp
     fn = Path(fn, ext, root).write(requests.get(url).content,
                                    encoding=encoding, if_exists=if_exists, etag=(not fn))
     return fn.fullpath
+
+
+____other = """
+"""

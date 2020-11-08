@@ -482,6 +482,8 @@ def quad_warp_wh(pts, method='average'):
         lens[i] = hypot(pt1[0] - pt2[0], pt1[1] - pt2[1])
 
     # 2 目标宽、高
+    if method is True:
+        method = 'average'
     if method == 'average':
         w, h = (lens[0] + lens[2]) / 2, (lens[1] + lens[3]) / 2
     elif method == 'max':
@@ -515,7 +517,7 @@ def get_sub_image(src_image, pts, warp_quad=False):
 
     :param src_image: 原图
         可以是图片路径、np.ndarray、PIL.Image对象
-        TODO 目前先只支持np.ndarray格式
+        TODO 目前只支持np.ndarray、pil图片输入，返回统一是np.ndarray
     :param pts: 子图位置信息
         只有两个点，认为是矩形的两个对角点
         只有四个点，认为是任意四边形
