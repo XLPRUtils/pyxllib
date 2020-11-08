@@ -21,6 +21,7 @@ import qiniu
 import requests
 import yaml
 
+from pyxllib.basic._1_strlib import struct_unpack
 from pyxllib.basic._2_timelib import Datetime
 
 ____judge = """
@@ -151,7 +152,7 @@ def get_encoding(bstr, maxn=1024):
                 bstr.decode(encoding)
                 return encoding
             except UnicodeDecodeError:
-                return False
+                return None
 
         for t in type_:
             encoding = try_encoding(bstr, t)
@@ -246,9 +247,9 @@ class Path:
         >> Path.abspath('F:/work', '.txt')  # F:/work是个实际存在的目录
         'F:/work\\tmpahqm6nod.txt'
 
-        >>> Path.abspath('F:/work/a.txt', 'py')  # 参考后缀不修改
+        >> Path.abspath('F:/work/a.txt', 'py')  # 参考后缀不修改
         'F:/work/a.txt'
-        >>> Path.abspath('F:/work/a.txt', '.py')  # 强制后缀会修改
+        >> Path.abspath('F:/work/a.txt', '.py')  # 强制后缀会修改
         'F:/work/a.py'
 
         >> Path.abspath(suffix='.tex', root=Path.TEMP)
@@ -262,9 +263,9 @@ class Path:
         >> Path.abspath('work/a.txt/', '.py', Path.TEMP)  # 在临时文件夹下的work/a.txt目录新建一个随机名称的py文件
         'F:\\work\\CreatorTemp\\work/a.txt/tmp2jn5cqkc.py'
 
-        >>> Path.abspath('C:/a.txt/')  # 会保留最后的斜杠特殊标记
+        >> Path.abspath('C:/a.txt/')  # 会保留最后的斜杠特殊标记
         'C:/a.txt/'
-        >>> Path.abspath('C:/a.txt\\')  # 会保留最后的斜杠特殊标记
+        >> Path.abspath('C:/a.txt\\')  # 会保留最后的斜杠特殊标记
         'C:/a.txt\\'
         """
         # 1 判断参考目录
@@ -726,6 +727,7 @@ class Path:
         :param encoding: 文件编码
             默认None，则在需要使用encoding参数的场合，会使用self.encoding自动判断编码
         :param mode: 读取模式（例如 '.json'），默认从扩展名识别，也可以强制指定
+            'b': 特殊标记，表示按二进制读取文件内容
         :return:
         """
         if self.is_file():  # 如果存在这样的文件，那就读取文件内容
@@ -747,13 +749,17 @@ class Path:
             elif mode == '.yaml':
                 with open(name, 'r', encoding=encoding) as f:
                     return yaml.safe_load(f.read())
-            elif mode in ('.jpg', '.jpeg', '.png', '.bmp'):
+            elif mode in ('.jpg', '.jpeg', '.png', '.bmp', 'b'):
+                # 二进制读取
                 with open(name, 'rb') as fp:
                     return fp.read()
             else:
                 with open(name, 'rb') as f:
                     bstr = f.read()
-                if not encoding: encoding = self.encoding
+                if not encoding:
+                    encoding = self.encoding
+                    if not encoding:
+                        raise ValueError(f'{self} 自动识别编码失败，请手动指定文件编码')
                 s = bstr.decode(encoding=encoding, errors='ignore')
                 if '\r' in s: s = s.replace('\r\n', '\n')  # 如果用\r\n作为换行符会有一些意外不好处理
                 return s
@@ -790,9 +796,6 @@ class Path:
                 with open(name, 'w', encoding=encoding) as f:
                     yaml.dump(ob, f)
             elif isinstance(ob, bytes):
-                # print(name)  #  TODO 本少发现个bug：导出平台讲义到本地(r'https://tr.histudy.com/#/dtextbook/202005159c00ce57bdd342c3a879ebb1a2e5ed21', path=r'R:/平台挑题', download_pictures=True)
-                # 老师们从其它网站上抄来的题 可能是 \href{/tr/item/202006038365bfee56b244b2bfbd02e2b25b1500/image_41825807541591152423871.png}{\includegraphics{菁优网：http://www.jyeoo.com}}
-                # 而在这里  name = "菁优网：http://www.jyeoo.com" 含有 "/" 不能作为文件名，这应该是平台的锅
                 with open(name, 'wb') as f:
                     f.write(ob)
             else:  # 其他类型认为是文本类型
@@ -858,6 +861,36 @@ def demo_path_rename():
     # Path('F:/work/CreatorTemp/temp/figs/b')
 
     # TODO 把目录下的1 2 3 4 5重命名为5 4 3 2 1时要怎么搞？
+
+
+class XlBytesIO(io.BytesIO):
+    """ 自定义的字节流类，封装了struct_unpack操作
+
+    https://www.yuque.com/xlpr/pyxllib/xlbytesio
+
+    """
+
+    def __init__(self, init_bytes):
+        if isinstance(init_bytes, (Path, str)):
+            # with open的作用：可以用.read循序读入，而不是我的Path.read一口气读入。
+            #   这在只需要进行局部数据分析，f本身又非常大的时候很有用。
+            #   但是我这里操作不太方便等原因，还是先全部读入BytesIO流了
+            init_bytes = Path(init_bytes).read(mode='b')
+        super().__init__(init_bytes)
+
+    def unpack(self, fmt):
+        return struct_unpack(self, fmt)
+
+    def readtext(self, char_num, encoding='gbk', errors='ignore', code_length=2):
+        """ 读取二进制流，将其解析未文本内容
+
+        :param char_num: 字符数
+        :param encoding: 所用编码，一般是gbk，因为如果是utf8是字符是变长的，不好操作
+        :param errors: decode出现错误时的处理方式
+        :param code_length: 每个字符占的长度
+        :return: 文本内容
+        """
+        return self.read(code_length * char_num).decode(encoding, errors)
 
 
 if __name__ == '__main__':

@@ -220,14 +220,11 @@ def perftest(title, stmt="pass", repeat=1, number=1, globals=None, res_width=Non
 
 class PerfTest:
     """ 这里模仿了unittest的机制
+
+    v0.0.38 重要改动，将number等参数移到perf操作，而不是类初始化中操作，继承使用上会更简单
     """
 
-    def __init__(self, number=1, repeat=1, globals=None):
-        self.number = number
-        self.repeat = repeat
-        self.globals = globals
-
-    def perf(self):
+    def perf(self, number=1, repeat=1, globals=None):
         # 1 找到所有perf_为前缀，且callable的函数方法
         funcnames = []
         for k in dir(self):
@@ -240,7 +237,7 @@ class PerfTest:
         funcnames2 = listalign([fn[5:] for fn in funcnames], 'r')
         for i, funcname in enumerate(funcnames):
             perftest(funcnames2[i], getattr(self, funcname),
-                     number=self.number, repeat=self.repeat, globals=self.globals)
+                     number=number, repeat=repeat, globals=globals)
 
 
 ____arrow = """

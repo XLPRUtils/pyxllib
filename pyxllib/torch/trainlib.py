@@ -153,8 +153,7 @@ class TrainerBase:
     def load_model_state(self, file):
         """ 读取模型参数值 """
         p = Path(file, root=self.save_dir)
-        p.ensure_dir(pathtype='file')
-        self.model.load_state_dict(torch.load(str(p)))
+        self.model.load_state_dict(torch.load(str(p), map_location=self.device))
 
     def get_train_data(self):
         """ 子类必须实现的接口函数 """
