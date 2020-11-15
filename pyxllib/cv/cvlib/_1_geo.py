@@ -2,31 +2,27 @@
 # -*- coding: utf-8 -*-
 # @Author : 陈坤泽
 # @Email  : 877362867@qq.com
-# @Data   : 2020/08/13 14:53
+# @Data   : 2020/11/15 10:16
 
-
-"""
-以后这里cv功能多了，可以再拆子文件夹
-"""
+"""几何、数学运算"""
 
 import copy
 import re
 
 import numpy as np
-import cv2
-import PIL.Image
 from shapely.geometry import Polygon
 
-from pyxllib.basic import Path, is_file
-from pyxllib.debug import dprint, showdir
 from pyxllib.util.mathlib import Intervals
 
-____ensure_array_type = """
+# 特地放一个反例在这里，注意这是几何库，不要在这个库导入图像处理
+# import cv2
+# import PIL.Image
+
+____ensure_type = """
 数组方面的类型转换，相关类型有
 
 list (tuple)  1d, 2d
 np.ndarray    1d, 2d
-PIL.Image.Image
 Polygon
 
 这里封装的目的，是尽量减少不必要的数据重复拷贝，需要做些底层的特定判断优化
@@ -47,10 +43,6 @@ def np_array(x, dtype=None, shape=None):
             y = x
         else:
             y = np.array(x, dtype=dtype)
-    elif isinstance(x, PIL.Image.Image):
-        # PIL RGB图像数据转 np的 BGR数据
-        y = cv2.cvtColor(np.array(x), cv2.COLOR_RGB2BGR)
-        if dtype: y = np.array(x, dtype=dtype)
     elif isinstance(x, Polygon):
         y = np.array(x.exterior.coords, dtype=dtype)
     else:
@@ -79,13 +71,23 @@ def to_list(x, dtype=None, shape=None):
     return y
 
 
-def pil_image(x):
-    if isinstance(x, PIL.Image.Image):
-        y = x
-    else:
-        y = np_array(x)
-        y = PIL.Image.fromarray(cv2.cvtColor(y, cv2.COLOR_BGR2RGB)) if y.size else None
-    return y
+def rect2polygon(src):
+    """ 矩形转成四边形结构来表达存储
+
+    >>> rect2polygon([[0, 0], [10, 20]])
+    array([[ 0,  0],
+           [10,  0],
+           [10, 20],
+           [ 0, 20]])
+    >>> rect2polygon(np.array([0, 0, 10, 20]))
+    array([[ 0,  0],
+           [10,  0],
+           [10, 20],
+           [ 0, 20]])
+    """
+    x1, y1, x2, y2 = np_array(src).reshape(-1)
+    dst = np.array([[x1, y1], [x2, y1], [x2, y2], [x1, y2]])
+    return dst
 
 
 def shapely_polygon(x):
@@ -131,7 +133,6 @@ def ensure_array_type(src_data, target_type):
     """ 参考 target 的数据结构，重设src的结构
 
     目前支持的数据结构
-        PIL.Image.Image，涉及到图像格式转换的，为了与opencv兼容，一律以BGR为准，除了Image自身默认用RGB
         np.ndarray
         list
         shapely polygon
@@ -150,25 +151,12 @@ def ensure_array_type(src_data, target_type):
     [[1, 2], [3, 4]]
     >>> ensure_array_type(np.array([]), type([10, 20, 30, 40]))
     []
-
-    其他测试：
-    # np矩阵转PIL图像
-    img = cv2.imread(r'textline.jpg')
-    dst = reset_arr_struct(img, PIL.Image.Image)
-    print(type(dst))  # <class 'PIL.Image.Image'>
-
-    # PIL图像转np矩阵
-    img = Image.open('textline.jpg')
-    dst = reset_arr_struct(img, np.ndarray)
-    print(type(dst))  # <class 'numpy.ndarray'>
     """
     # 根据不同的目标数据类型，进行格式转换
     if target_type == np.ndarray:
         return np_array(src_data)
     elif target_type in (list, tuple):
         return np_array(src_data).tolist()
-    elif target_type == PIL.Image.Image:
-        return pil_image(src_data)
     elif target_type == Polygon:
         return shapely_polygon(src_data)
     else:
@@ -269,25 +257,6 @@ def rect_bounds(coords, dtype=int):
     return [[x1, y1], [x2, y2]]
 
 
-def rect2polygon(src):
-    """ 矩形转成四边形结构来表达存储
-
-    >>> rect2polygon([[0, 0], [10, 20]])
-    array([[ 0,  0],
-           [10,  0],
-           [10, 20],
-           [ 0, 20]])
-    >>> rect2polygon(np.array([0, 0, 10, 20]))
-    array([[ 0,  0],
-           [10,  0],
-           [10, 20],
-           [ 0, 20]])
-    """
-    x1, y1, x2, y2 = np_array(src).reshape(-1)
-    dst = np.array([[x1, y1], [x2, y1], [x2, y2], [x1, y2]])
-    return dst
-
-
 def resort_quad_points(src_pts):
     """ 重置四边形点集顺序，确保以左上角为起点，顺时针罗列点集
 
@@ -326,32 +295,7 @@ https://www.yuque.com/xlpr/pyxllib/warpperspective
 """
 
 
-def get_warp_mat(src, dst):
-    """
-    :param src: 原点集，支持多种格式输入
-    :param dst: 变换后的点集
-    :return: np.ndarray，3*3的变换矩阵
-    """
-
-    def cvt_data(pts):
-        # opencv的透视变换，输入的点集有类型限制，必须使用float32
-        return np.array(pts, dtype='float32').reshape((-1, 2))
-
-    src, dst = cvt_data(src), cvt_data(dst)
-    n = src.shape[0]
-    if n == 3:
-        # 只有3个点，则使用仿射变换
-        warp_mat = cv2.getAffineTransform(src, dst)
-        warp_mat = np.concatenate([warp_mat, [[0, 0, 1]]], axis=0)
-    elif n == 4:
-        # 有4个点，则使用透视变换
-        warp_mat = cv2.getPerspectiveTransform(src, dst)
-    else:
-        raise ValueError('点集数量过多')
-    return warp_mat
-
-
-def warp_points(pts, warp_mat, reserve_struct=True):
+def warp_points(pts, warp_mat, reserve_struct=False):
     """ 透视等点集坐标转换
 
     :param pts: 支持list、tuple、np.ndarray等结构，支持1d、2d的维度
@@ -360,7 +304,7 @@ def warp_points(pts, warp_mat, reserve_struct=True):
         例如 [x1, y1, x2, y2, x3, y3] --> [[x1, x2, x3], [y1, y2, y3], [1, 1, 1]]
     :param warp_mat: 变换矩阵，一般是个3*3的矩阵，但是只输入2*3的矩阵也行，因为第3行并用不到（点集只要取前两个维度X'Y'的结果值）
         TODO 不过这里我有个点也没想明白，如果不用第3行，本质上不是又变回仿射变换了，如何达到透视变换效果？第三维的深度信息能完全舍弃？
-    :param reserve_struct: 是否保留原来pts的结构返回，默认True
+    :param reserve_struct: TODO 是否保留原来pts的结构返回，默认True
         关掉该功能可以提高性能，此时返回结果统一为 n*2 的np矩阵
     :return: 会遵循原始的 pts 数据类型、维度结构返回
 
@@ -385,80 +329,17 @@ def warp_points(pts, warp_mat, reserve_struct=True):
     >>> warp_points([1, 2, 11, 22], warp_mat, reserve_struct=False)  # 也可以用一维的结构来输入点集
     array([[ 2,  1],
            [22, 11]])
+
+    # >>> warp_points([1, 2, 11, 22], warp_mat, reserve_struct=True)  # 也可以用一维的结构来输入点集
+    # [2, 1, 22, 11]
     """
     pts1 = np_array(pts).reshape(-1, 2).T
     pts1 = np.concatenate([pts1, [[1] * pts1.shape[1]]], axis=0)
     pts2 = np.dot(warp_mat[:2], pts1)
     pts2 = pts2.T
+    if reserve_struct:
+        raise NotImplementedError
     return pts2
-
-
-def warp_image(img, warp_mat, dsize=None, *, view_rate=False, max_zoom=1, reserve_struct=True):
-    """ 对图像进行透视变换
-
-    :param img: np.ndarray的图像数据
-        TODO 支持PIL.Image格式？
-    :param warp_mat: 变换矩阵
-    :param dsize: 目标图片尺寸
-        没有任何输入时，同原图
-        如果有指定，则会决定最终的图片大小
-        如果使用了view_rate、max_zoom，会改变变换矩阵所展示的内容
-    :param view_rate: 视野比例，默认不开启，当输入非0正数时，几个数值功能效果如下
-        1，关注原图四个角点位置在变换后的位置，确保新的4个点依然在目标图中
-            为了达到该效果，会增加【平移】变换，以及自动控制dsize
-        2，将原图依中心面积放到至2倍，记录新的4个角点变换后的位置，确保变换后的4个点依然在目标图中
-        0.5，同理，只是只关注原图局部的一半位置
-    :param max_zoom: 默认1倍，当设置时（只在开启view_rate时有用），会增加【缩小】变换，限制view_rate扩展的上限
-    :param reserve_struct: 是否保留原来img的数据类型返回，默认True
-        关掉该功能可以提高性能，此时返回结果统一为 np 矩阵
-    :return: 见 reserve_struct
-    """
-    from math import sqrt
-
-    # 0 参数整理
-    img0 = img
-    if not isinstance(img, np.ndarray):
-        img = np_array(img)
-
-    # 1 得到3*3的变换矩阵
-    warp_mat = np_array(warp_mat)
-    if warp_mat.shape[0] == 2:
-        warp_mat = np.concatenate([warp_mat, [[0, 0, 1]]], axis=0)
-
-    # 2 view_rate，视野比例改变导致的变换矩阵规则变化
-    if view_rate:
-        # 2.1 视野变化后的四个角点
-        h, w = img.shape[:2]
-        y, x = h / 2, w / 2  # 图片中心点坐标
-        h1, w1 = view_rate * h / 2, view_rate * w / 2
-        l, t, r, b = [-w1 + x, -h1 + y, w1 + x, h1 + y]
-        pts1 = np.array([[l, t], [r, t], [r, b], [l, b]])
-        # 2.2 变换后角点位置产生的外接矩形
-        left, top, right, bottom = rect_bounds1d(warp_points(pts1, warp_mat))
-        # 2.3 增加平移变换确保左上角在原点
-        warp_mat = np.dot([[1, 0, -left], [0, 1, -top], [0, 0, 1]], warp_mat)
-        # 2.4 控制面积变化率
-        h2, w2 = (bottom - top, right - left)
-        if max_zoom:
-            rate = w2 * h2 / w / h  # 目标面积比原面积
-            if rate > max_zoom:
-                r = 1 / sqrt(rate / max_zoom)
-                warp_mat = np.dot([[r, 0, 0], [0, r, 0], [0, 0, 1]], warp_mat)
-                h2, w2 = round(h2 * r), round(w2 * r)
-        if not dsize:
-            dsize = (w2, h2)
-
-    # 3 标准操作，不做额外处理，按照原图默认的图片尺寸展示
-    if dsize is None:
-        dsize = (img.shape[1], img.shape[0])
-    dst = cv2.warpPerspective(img, warp_mat, dsize)
-
-    # 4 返回值
-    return dst
-
-
-____get_sub_image = """
-"""
 
 
 def quad_warp_wh(pts, method='average'):
@@ -513,266 +394,6 @@ def warp_quad_pts(pts, method='average'):
     return rect2polygon([0, 0, w, h])
 
 
-def get_sub_image(src_image, pts, warp_quad=False):
-    """ 从src_image取一个子图
-
-    :param src_image: 原图
-        可以是图片路径、np.ndarray、PIL.Image对象
-        TODO 目前只支持np.ndarray、pil图片输入，返回统一是np.ndarray
-    :param pts: 子图位置信息
-        只有两个点，认为是矩形的两个对角点
-        只有四个点，认为是任意四边形
-        同理，其他点数量，默认为
-    :param warp_quad: 变形的四边形
-        默认是截图pts的外接四边形区域，使用该参数
-            且当pts为四个点时，是否强行扭转为矩形
-        一般写 'average'，也可以写'max'、'min'，详见 quad_warp_wh()
-    :return: 子图
-        文件、np.ndarray --> np.ndarray
-        PIL.Image --> PIL.Image
-    """
-    src_img = ensure_array_type(src_image, np.ndarray)
-    pts = coords2d(pts)
-    if not warp_quad or len(pts) != 4:
-        x1, y1, x2, y2 = rect_bounds1d(pts)
-        dst = src_img[y1:y2, x1:x2]  # 这里越界不会报错，只是越界的那个维度shape为0
-    else:
-        w, h = quad_warp_wh(pts, method=warp_quad)
-        warp_mat = get_warp_mat(pts, rect2polygon([0, 0, w, h]))
-        dst = warp_image(src_img, warp_mat, (w, h))
-    return dst
-
-
-____opencv = """
-对opencv相关功能的一些优化、 封装
-"""
-
-
-def imread_v1(path, flags=1):
-    """ opencv 源生的 imread不支持中文路径，所以要用PIL先读取，然后再转np.ndarray
-
-    :param flags:
-        0，转成 GRAY
-        1，转成 BGR
-
-    TODO 不知道新版的imread会不会出什么问题~~
-        所以这个版本的代码暂时先留着
-    """
-    src = PIL.Image.open(str(path))
-    src = np.array(src)  # 如果原图是灰度图，获得的可能是单通道的结果
-
-    if flags == 0:
-        if src.ndim == 3:
-            src = cv2.cvtColor(src, cv2.COLOR_RGB2GRAY)
-    elif flags == 1:
-        if src.ndim == 3:
-            src = cv2.cvtColor(src, cv2.COLOR_RGB2BGR)
-        else:
-            src = cv2.cvtColor(src, cv2.COLOR_GRAY2BGR)
-    else:
-        raise ValueError(flags)
-    return src
-
-
-def imread(path, flags=1):
-    """ https://www.yuque.com/xlpr/pyxllib/imread
-
-    cv2.imread的flags默认参数相当于是1
-
-    """
-    return cv2.imdecode(np.fromfile(str(path), dtype=np.uint8), flags)
-
-
-def imwrite(path, img, if_exists='replace'):
-    """
-    TODO 200922周二16:21，如何更好与Path融合？能直接Path('a.jpg').write(img)？
-    """
-    if not isinstance(path, Path):
-        path = Path(path)
-    data = cv2.imencode(ext=path.suffix, img=img)[1]
-    return path.write(data.tobytes(), if_exists=if_exists)
-
-
-def imshow(mat, winname=None, flags=0):
-    """ 展示窗口
-
-    :param mat:
-    :param winname: 未输入时，则按test1、test2依次生成窗口
-    :param flags:
-        cv2.WINDOW_NORMAL，0，输入2等偶数值好像也等价于输入0
-        cv2.WINDOW_AUTOSIZE，1，输入3等奇数值好像等价于1
-        cv2.WINDOW_OPENGL，4096
-    :return:
-    """
-    if winname is None:
-        imshow.num = getattr(imshow, 'num', 0) + 1
-        winname = f'test{imshow.num}'
-    cv2.namedWindow(winname, flags)
-    cv2.imshow(winname, mat)
-
-
-class CvPlot:
-    @classmethod
-    def get_plot_color(cls, src):
-        """ 获得比较适合的作画颜色
-
-        TODO 可以根据背景色智能推导画线用的颜色，目前是固定红色
-        """
-        if src.ndim == 3:
-            return 0, 0, 255
-        elif src.ndim == 2:
-            return 255  # 灰度图，默认先填白色
-
-    @classmethod
-    def get_plot_args(cls, src, color=None):
-        # 1 作图颜色
-        if not color:
-            color = cls.get_plot_color(src)
-
-        # 2 画布
-        if len(color) >= 3 and src.ndim <= 2:
-            dst = cv2.cvtColor(src, cv2.COLOR_GRAY2BGR)
-        else:
-            dst = np.array(src)
-
-        return dst, color
-
-    @classmethod
-    def lines(cls, src, lines, color=None, thickness=1, line_type=cv2.LINE_AA, shift=None):
-        """ 在src图像上画系列线段
-        """
-        # 1 判断 lines 参数内容
-        lines = np_array(lines).reshape(-1, 4)
-        if not lines.size:
-            return src
-
-        # 2 参数
-        dst, color = cls.get_plot_args(src, color)
-
-        # 3 画线
-        if lines.any():
-            for line in lines:
-                x1, y1, x2, y2 = line
-                cv2.line(dst, (x1, y1), (x2, y2), color, thickness, line_type)
-        return dst
-
-    @classmethod
-    def circles(cls, src, circles, color=None, thickness=1, center=False):
-        """ 在图片上画圆形
-
-        :param src: 要作画的图
-        :param circles: 要画的圆形参数 (x, y, 半径 r)
-        :param color: 画笔颜色
-        :param center: 是否画出圆心
-        """
-        # 1 圆 参数
-        circles = np_array(circles, dtype=int).reshape(-1, 3)
-        if not circles.size:
-            return src
-
-        # 2 参数
-        dst, color = cls.get_plot_args(src, color)
-
-        # 3 作画
-        for x in circles:
-            cv2.circle(dst, (x[0], x[1]), x[2], color, thickness)
-            if center:
-                cv2.circle(dst, (x[0], x[1]), 2, color, thickness)
-
-        return dst
-
-
-class TrackbarTool:
-    """ 滑动条控件组
-    """
-
-    def __init__(self, winname, img, flags=0):
-        if not isinstance(img, np.ndarray):
-            img = imread(str(img))
-        cv2.namedWindow(winname, flags)
-        cv2.imshow(winname, img)
-        self.winname = winname
-        self.img = img
-        self.trackbar_names = {}
-
-    def imshow(self, img=None):
-        """ 刷新显示的图片 """
-        if img is None:
-            img = self.img
-        cv2.imshow(self.winname, img)
-
-    def default_run(self, x):
-        """ 默认执行器，这个在类继承后，基本都是要自定义成自己的功能的
-
-        TODO 从1滑到20，会运行20次，可以研究一个机制，来只运行一次
-        """
-        kwargs = {}
-        for k in self.trackbar_names.keys():
-            kwargs[k] = self[k]
-        print(kwargs)
-
-    def create_trackbar(self, trackbar_name, count, value=0, on_change=None):
-        """ 创建一个滑动条
-
-        :param trackbar_name: 滑动条名称
-        :param count: 上限值
-        :param on_change: 回调函数
-        :param value: 初始值
-        :return:
-        """
-        if on_change is None:
-            on_change = self.default_run
-        cv2.createTrackbar(trackbar_name, self.winname, value, count, on_change)
-
-    def __getitem__(self, item):
-        """ 可以通过 Trackbars 来获取滑动条当前值
-
-        :param item: 滑动条名称
-        :return: 当前取值
-        """
-        return cv2.getTrackbarPos(item, self.winname)
-
-
-def get_background_color(src_img, edge_size=5, binary_img=None):
-    """ 智能判断图片背景色
-
-    对全图二值化后，考虑最外一层宽度未edge_size的环中，0、1分布最多的作为背景色
-        然后取全部背景色的平均值返回
-
-    :param src_img: 支持黑白图、彩图
-    :param edge_size: 边缘宽度，宽度越高一般越准确，但也越耗性能
-    :param binary_img: 运算中需要用二值图，如果外部已经计算了，可以直接传入进来，避免重复运算
-    :return: color
-
-    TODO 可以写个获得前景色，道理类似，只是最后再图片中心去取平均值
-    """
-    from itertools import chain
-
-    # 1 获得二值图，区分前背景
-    if binary_img is None:
-        gray_img = cv2.cvtColor(src_img, cv2.COLOR_BGR2GRAY) if src_img.ndim == 3 else src_img
-        _, binary_img = cv2.threshold(gray_img, np.mean(gray_img), 255, cv2.THRESH_BINARY)
-
-    # 2 分别存储点集
-    n, m = src_img.shape[:2]
-    colors0, colors1 = [], []
-    for i in range(n):
-        if i < edge_size or i >= n - edge_size:
-            js = range(m)
-        else:
-            js = chain(range(edge_size), range(m - edge_size, m))
-        for j in js:
-            if binary_img[i, j]:
-                colors1.append(src_img[i, j])
-            else:
-                colors0.append(src_img[i, j])
-
-    # 3 计算平均像素
-    # 以数量多的作为背景像素
-    colors = colors0 if len(colors0) > len(colors1) else colors1
-    return np.mean(np.array(colors), axis=0, dtype='int').tolist()
-
-
 ____polygon = """
 """
 
@@ -806,6 +427,7 @@ ____other = """
 
 def divide_quadrangle(coords, r1=0.5, r2=None):
     """ 切分一个四边形为两个四边形
+
     :param coords: 1*8的坐标，或者4*2的坐标
     :param r1: 第一个切分比例，0.5相当于中点（即第一个四边形右边位置）
     :param r2: 第二个切分比例，即第二个四边形左边位置
