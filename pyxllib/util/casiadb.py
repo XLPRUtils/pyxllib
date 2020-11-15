@@ -22,6 +22,10 @@ def read_from_dgrl(dgrl):
     参考代码：https://blog.csdn.net/DaGongJiGuoMaLu09/article/details/107050519
         有做了大量简化、工程封装
 
+    TODO 可以考虑做一个返回类似labelme格式的接口，会更通用
+        因为有时候会需要取整张原图
+        而且如果有整个原图，那么每个文本行用shape形状标记即可，不需要取出子图
+
     :param dgrl: dgrl 格式的文件，或者对应的二进制数据流
     :return: [(img0, label0), (img1, label1), ...]
     """

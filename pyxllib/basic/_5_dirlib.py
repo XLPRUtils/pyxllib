@@ -149,7 +149,7 @@ class Dir(Path):
         return Dir(self._path, files=new_files)
 
     def __repr__(self):
-        return f'{self.root}: {self.files}'
+        return f'{self._path}: {self.files}'
 
     def __enter__(self):
         """ 使用with模式可以进行工作目录切换
@@ -317,8 +317,8 @@ def filesmatch(patter, *, root=os.curdir, **kwargs) -> list:
             res = []
     # 2 glob通配符匹配
     elif isinstance(patter, str) and glob_chars_pos != -1:
-        patter = patter.replace('/', '\\')
-        t = patter[:glob_chars_pos].rfind('\\')
+        patter = patter.replace('\\', '/')
+        t = patter[:glob_chars_pos].rfind('/')
         # 计算出这批文件实际所在的目录dirname
         if t == -1:  # 模式里没有套子文件夹
             dirname, basename = root, patter
