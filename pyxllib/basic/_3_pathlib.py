@@ -455,6 +455,9 @@ class Path:
             return Path(self.stem, '', self.dirname)
         return self
 
+    def joinpath(self, *args):
+        return Path(self._path.joinpath(*args))
+
     @property
     def backup_time(self):
         r""" 返回文件的备份时间戳，如果并不是备份文件，则返回空字符串
@@ -764,7 +767,7 @@ class Path:
                 if '\r' in s: s = s.replace('\r\n', '\n')  # 如果用\r\n作为换行符会有一些意外不好处理
                 return s
         else:  # 非文件对象
-            raise FileNotFoundError('文件不存在，无法读取。')
+            raise FileNotFoundError(f'{self} 文件不存在，无法读取。')
 
     def write(self, ob, *, encoding='utf8', if_exists='error', etag=False, mode=None):
         """ 保存为文件

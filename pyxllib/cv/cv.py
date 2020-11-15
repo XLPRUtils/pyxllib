@@ -17,8 +17,9 @@ import cv2
 import PIL.Image
 from shapely.geometry import Polygon
 
-from pyxllib.basic import Path
+from pyxllib.basic import Path, is_file
 from pyxllib.debug import dprint, showdir
+from pyxllib.util.mathlib import Intervals
 
 ____ensure_array_type = """
 数组方面的类型转换，相关类型有
@@ -629,7 +630,7 @@ class CvPlot:
             color = cls.get_plot_color(src)
 
         # 2 画布
-        if len(color) >= 3 and src.ndim < 2:
+        if len(color) >= 3 and src.ndim <= 2:
             dst = cv2.cvtColor(src, cv2.COLOR_GRAY2BGR)
         else:
             dst = np.array(src)
@@ -652,7 +653,7 @@ class CvPlot:
         if lines.any():
             for line in lines:
                 x1, y1, x2, y2 = line
-                cv2.line(dst, (x1, y1), (x2, y2), color, thickness, line_type, shift)
+                cv2.line(dst, (x1, y1), (x2, y2), color, thickness, line_type)
         return dst
 
     @classmethod
@@ -834,3 +835,63 @@ def divide_quadrangle(coords, r1=0.5, r2=None):
     pt5, pt6 = segment_point(pt1, pt2, r1), segment_point(pt4, pt3, r1)
     pt7, pt8 = segment_point(pt1, pt2, r2), segment_point(pt4, pt3, r2)
     return [pt1, pt5, pt6, pt4], [pt7, pt2, pt3, pt8]
+
+
+def split_vector_interval(vec, maxsplit=None, minwidth=3):
+    """
+    :param vec: 一个一维向量，需要对这个向量进行切割
+        需要前置工作先处理好数值
+            使得背景在非正数，背景概率越大，负值绝对值越大
+            前景在正值，前景概率越大，数值越大
+        要得到能量最大（数值最大、前景内容）的几个区域
+        但是因为有噪声的原因，该算法要有一定的扛干扰能力
+    :param maxsplit: 最大切分数量，即最多得到几个子区间
+        没设置的时候，会对所有满足条件的情况进行切割
+    :param minwidth: 每个切分位置最小具有的宽度
+    :return: [(l, r), (l, r), ...]  每一段文本的左右区间
+    """
+    # 1 裁剪左边、右边
+    left, right = 0, len(vec)
+    while vec[left] <= 0 and left < right:
+        left += 1
+    while vec[right - 1] <= 0 and right > left:
+        right -= 1
+    vec = vec[left:right]
+    width = len(vec)
+    if width == 0:
+        return []  # 没有内容，返回空list
+
+    # 2 找切分位置
+    #   统计每一段连续的背景长度，并且对其数值求和，作为这段是背景的置信度
+    bg_probs, bg_start, cnt = [], 0, 0
+
+    def update_fg():
+        """ 遇到前景内容，或者循环结束，更新一下 """
+        nonlocal cnt
+        if cnt >= minwidth:
+            itv, prob = [bg_start, bg_start + cnt], vec[bg_start:bg_start + cnt].sum()
+            bg_probs.append([itv, prob])
+        cnt = 0
+
+    for i in range(width):
+        if vec[i] <= 0:
+            if not cnt:
+                bg_start = i
+            cnt += 1
+        else:
+            update_fg()
+    else:
+        update_fg()
+
+    # 3 取置信度最大的几个分割点
+    if maxsplit:
+        bg_probs = sorted(bg_probs, key=lambda x: x[1])[:(maxsplit - 1)]
+    bg_probs = sorted(bg_probs, key=lambda x: x[0])  # 从左到右排序
+
+    # 4 返回文本区间（反向计算）
+    res = []
+    intervals = Intervals([itv for itv, prob in bg_probs]).invert(width) + left
+    # print(intervals)
+    for interval in intervals:
+        res.append([interval.start(), interval.end()])
+    return res

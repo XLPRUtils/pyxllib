@@ -15,8 +15,6 @@
 文档： https://histudy.yuque.com/docs/share/365f3a75-28d0-4595-bc80-5e9d6ab36f71#
 """
 
-import math
-
 from pyxllib.debug import *
 
 
@@ -49,7 +47,8 @@ class Interval:
         self.update()
 
     def update(self):
-        """将空区间统一标记为None
+        """ 将空区间统一标记为None
+
         >>> Interval(5, 5).regs  # 返回 None
         >>> Interval(6, 5).regs
         """
@@ -79,8 +78,8 @@ class Interval:
             return False
 
     def __repr__(self):
-        """
-        所有区间都是左闭右开！ 第一组(x~y)是主区间，后面跟的是子区间
+        """ 所有区间都是左闭右开！ 第一组(x~y)是主区间，后面跟的是子区间
+
         >>> Interval()  # 空区间
         []
         >>> Interval(6, 5)  # 空区间

@@ -112,10 +112,14 @@ class Visdom(visdom.Visdom, metaclass=SingletonForEveryInitArgs):
                   opts=self._refine_opts(opts, title=title, legend=legend, xlabel='epoch'))
 
 
+def get_device():
+    return torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
+
 class TrainerBase:
     def __init__(self, *, save_dir=None):
         self.log = get_xllog()
-        self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        self.device = get_device()
         self.save_dir = Path(save_dir) if save_dir else Path()  # 没有指定数据路径则以当前工作目录为准
         self.model = None
 
