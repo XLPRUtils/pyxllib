@@ -212,7 +212,7 @@ def pdf2imagebase(pdffile, target=None, scale=None, ext='.png'):
         else:
             target = Path(pdffile).dirname + '/'
 
-    newfile = Path(pdffile).abs_dstpath(target)
+    newfile = Path(pdffile).abs_dstpath(target).fullpath
     if newfile.endswith('.pdf'): newfile = os.path.splitext(newfile)[0] + ext
     Path(newfile).ensure_dir()
 
@@ -277,7 +277,7 @@ def pdf2svg(pdffile, target=None, scale=None, trim=False):
     """
     if trim:  # 先对pdf文件进行裁剪再转换
         pdf = Path(pdffile)
-        newfile = pdf.abs_dstpath('origin.pdf')
+        newfile = pdf.abs_dstpath('origin.pdf').fullpath
         pdf.copy(newfile)
         # subprocess.run(['pdf-crop-margins.exe', '-p', '0', newfile, '-o', pdffile], stderr=subprocess.PIPE) # 本少： 会裁过头！
         # 本少： 对于上下边处的 [] 分数等，会裁过头，先按百分比 -p 0 不留边，再按绝对点数收缩/扩张 -a -1  负数为扩张，单位为bp

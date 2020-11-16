@@ -192,6 +192,8 @@ class Path:
         r""" 初始化参数含义详见 abspath 函数解释
 
         TODO 这个初始化也有点过于灵活了，需要降低灵活性，增加使用清晰度
+            或者看下性能速度，可以考虑加速
+            特别是用Path作为参数拷贝的情况，应该可以加速减少分析、拷贝
 
         >>> Path('D:/pycode/code4101py')
         Path('D:/pycode/code4101py')
@@ -318,6 +320,9 @@ class Path:
         return str(self._path).replace('\\', '/') + ('/' if self.assume_dir else '')
 
     def __eq__(self, other):
+        """ pathlib.Path内置了windows和linux的区别
+            在windows是不区分大小写的，在linux则区分大小写
+        """
         if not isinstance(other, Path):
             raise TypeError
         return self._path == other._path
@@ -541,18 +546,18 @@ class Path:
 
     # 四、文件操作功能
 
-    def abs_dstpath(self, dst=None, suffix=None, root=None) -> str:
+    def abs_dstpath(self, dst=None, suffix=None, root=None):
         r""" 参照当前Path的父目录，来确定dst的具体路径
 
         >>> f = Path('C:/Windows/System32/cmd.exe')
         >>> f.abs_dstpath('chen.py')
-        'C:\\Windows\\System32\\chen.py'
+        Path('C:/Windows/System32/chen.py')
         >>> f.abs_dstpath('E:/')  # 原始文件必须存在，否则因为无法判断实际类型，目标路径可能会错
-        'E:\\cmd.exe'
+        Path('E:/cmd.exe')
         >>> f.abs_dstpath('D:/aabbccdd.txt')
-        'D:\\aabbccdd.txt'
+        Path('D:/aabbccdd.txt')
         >>> f.abs_dstpath('D:/aabbccdd.txt/')  # 并不存在aabbccdd.txt这样的对象，但末尾有个/表明这是个目录
-        'D:\\aabbccdd.txt\\cmd.exe'
+        Path('D:/aabbccdd.txt/cmd.exe')
         """
         if not root: root = self.dirname
         dst = Path(dst, suffix, root)
@@ -568,7 +573,7 @@ class Path:
                 dst = dst / self.name
             # 否则dst是文件，或者不存在的路径，均视为文件类型处理
 
-        return dst.fullpath
+        return dst
 
     def relative_path(self, ref_dir) -> str:
         r""" 当前路径，相对于ref_dir的路径位置
@@ -585,50 +590,59 @@ class Path:
             s1 = s1[len(s2):]
         return s1
 
-    def process(self, dst, func, if_exists='error', arg1=None, arg2=None):
+    def preprocess(self, if_exists='error', exclude=None):
+        """ 这个功能要结合参数一起理解，不是简单的理解成“预处理”
+        这个实际上是在做copy等操作前，如果目标文件已存在，需要预先删除等的预处理
+        并返回判断，是否需要执行下一步操作
+
+        有时候情况比较复杂，process无法满足需求时，可以用preprocess这个底层函数协助
+
+        :param if_exists:
+            'error': （默认）如果要替换的目标文件已经存在，则报错
+            'replace': 替换 （提前把已存在的目标文件删除）
+            'ignore': 忽略、不处理  （不用执行后续的功能）
+            'backup': 备份后写入  （对原文件先做一个备份）
+        :param exclude: 排除掉不分析的目录，用于有些重命名等自身可能操作自身的情况
+            如果self是exclude这个路径，默认直接need_run=True
+        """
+        # 1 如果src和dst是同一个文件，因为重命名等特殊功能，可以直接执行，不用管提前存在目标文件的问题
+        if exclude and self == Path(exclude):
+            return True
+
+        # 2
+        need_run = True
+        if self.exists():
+            if if_exists == 'error':
+                raise FileExistsError(f'目标文件已存在： {self}')
+            elif if_exists == 'replace':  # None的话相当于replace，但是不会事先delete，可能会报错
+                self.delete()
+            elif if_exists == 'ignore':
+                need_run = False
+            elif if_exists == 'backup':
+                self.backup(if_exists='backup')
+                self.delete()
+        return need_run
+
+    def process(self, dst, func, if_exists='error'):
         r""" copy或move的本质底层实现
 
         文件复制等操作中src、dst不同组合下的效果：https://www.yuque.com/xlpr/pyxllib/mgwe19
 
         :param dst: 目标路径对象，注意如果使用相对路径，是相对于self的路径！
-        :param if_exists:
-            'error': （默认）如果要替换的目标文件已经存在，则报错
-            'replace': 替换
-            'ignore': 忽略、不处理
-            'backup': 备份后写入
         :param func: 传入arg1和arg2参数，可以自定义
             默认分别是self和dst的fullpath
         :return : 返回dst
         """
-        # 1 分类处理，确定实际dst位置
-        dst = Path(self.abs_dstpath(dst))
+        # 1 判断目标是有已存在，进行不同的指定规则处理
+        dst = self.abs_dstpath(dst)
+        need_run = dst.preprocess(if_exists, self)
 
-        # 2 判断目标是有已存在，进行不同的指定规则处理
-        need_run = True
-        if dst.exists():
-            if dst == self and arg1 is None and arg2 is None:
-                # 同一个文件，估计只是修改大小写名称，或者就是要原地操作
-                # 不做任何特殊处理，准备直接跑函数
-                # 200601周一19:23：要补arg1、arg2的判断，不然Path.write会出错
-                pass
-            elif if_exists == 'error':
-                raise FileExistsError(f'目标文件已存在： {self} — {func.__name__} —> {dst}')
-            elif if_exists == 'replace':  # None的话相当于replace，但是不会事先delete，可能会报错
-                dst.delete()
-            elif if_exists == 'ignore':
-                need_run = False
-            elif if_exists == 'backup':
-                dst.backup(if_exists='backup')
-                dst.delete()
-
-        # 3 执行特定功能
+        # 2 执行特定功能
         if need_run:
             # 此时dst已是具体路径，哪怕是"目录"也可以按照"文件"对象理解，避免目录会重复生成，多层嵌套
             #   本来是 a --> C:/target/a ，避免 C:/target/a/a 的bug
             dst.ensure_dir('file')
-            if arg1 is None: arg1 = self.fullpath
-            if arg2 is None: arg2 = dst.fullpath
-            func(arg1, arg2)
+            func(self.fullpath, dst.fullpath)
         return dst
 
     def ensure_dir(self, pathtype=None):
@@ -781,12 +795,10 @@ class Path:
         :return: 返回写入的文件名，这个主要是在写临时文件时有用
         """
 
-        # 1 核心写入功能
-        def data2file(ob, path):
-            """将ob写入文件path，如果path已存在，也会被直接覆盖"""
-            nonlocal mode
-            path.ensure_dir(pathtype='file')
-            name, suffix = path.fullpath, path.suffix
+        # 1 核心功能：将ob写入文件path
+        if self.preprocess(if_exists):
+            self.ensure_dir(pathtype='file')
+            name, suffix = self.fullpath, self.suffix
             if not mode: mode = suffix
             mode = mode.lower()
             if mode == '.pkl':
@@ -805,8 +817,7 @@ class Path:
                 with open(name, 'w', errors='ignore', encoding=encoding) as f:
                     f.write(str(ob))
 
-        # 2 推导出目标文件的完整名，并判断是否存在，进行不同处理
-        self.process(self, data2file, if_exists, arg1=ob, arg2=self)
+        # 2 如果使用了etag命名机制
         if etag:
             return self.rename(get_etag(self.fullpath) + self.suffix, if_exists='ignore')
         else:

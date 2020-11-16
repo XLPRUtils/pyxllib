@@ -59,15 +59,18 @@ def magick(infile, *, outfile=None, if_exists='error', transparent=None, trim=Fa
         返回生成的文件名（outfile）
     """
     # 1 条件判断，有些情况下不用处理
-    if not outfile: outfile = infile
+    if not outfile:
+        outfile = infile
 
-    def func(infile, outfile):
-        # 判断是否是支持的输入文件类型
+    # 2
+    # 200914周一20:40，这有个相对路径的bug，修复了下，否则 test/a.png 会变成 test/test/a.png
+    if Path(outfile).preprocess(if_exists, exclude=Path(infile)):
+        # 2.1 判断是否是支持的输入文件类型
         ext = os.path.splitext(infile)[1].lower()
         if not Path(infile).is_file() or not ext in ('.png', '.eps', '.pdf', '.jpg', '.jpeg', '.wmf', '.emf'):
             return False
 
-        # 2 生成需要执行的参数
+        # 2.2 生成需要执行的参数
         cmd = ['magick.exe']
         # 透明、裁剪、density都是可以重复操作的
         if density: cmd.extend(['-density', str(density)])
@@ -82,15 +85,12 @@ def magick(infile, *, outfile=None, if_exists='error', transparent=None, trim=Fa
         if other_args: cmd.extend(other_args)
         cmd.append(outfile)
 
-        # 3 生成目标png图片
+        # 2.3 生成目标png图片
         cmd = [x.replace('\\', '/') for x in cmd]
         print(' '.join(cmd))
         subprocess.run(cmd, stderr=subprocess.PIPE, shell=True)  # 看不懂magick出错写的是啥，关了
 
-    # 200914周一20:40，这有个相对路径的bug，修复了下，否则 test/a.png 会变成 test/test/a.png
-    outfile = Path(outfile)
-
-    return Path(infile).process(Path(outfile), func, if_exists, arg1=infile, arg2=outfile).fullpath
+    return outfile
 
 
 def ensure_pngs(folder, *, if_exists='ignore',

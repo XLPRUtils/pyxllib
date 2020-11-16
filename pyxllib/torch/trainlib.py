@@ -116,12 +116,29 @@ def get_device():
     return torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 
+class TinyDataset(torch.utils.data.Dataset):
+    def __init__(self, labelfile, label_transform):
+        """ 超轻量级的Dataset类，一般由外部ProjectData类指定每行label的转换规则 """
+        self.labels = labelfile.read().splitlines()
+        self.label_transform = label_transform
+
+    def __len__(self):
+        return len(self.labels)
+
+    def __getitem__(self, idx):
+        return self.label_transform(self.labels[idx])
+
+
 class TrainerBase:
-    def __init__(self, *, save_dir=None):
+    def __init__(self, model, datasets, *,
+                 save_dir=None,
+                 batch_size=None,
+                 optimizer=None, loss_func=None):
         self.log = get_xllog()
         self.device = get_device()
         self.save_dir = Path(save_dir) if save_dir else Path()  # 没有指定数据路径则以当前工作目录为准
-        self.model = None
+        self.model = model
+        self.datasets = datasets
 
     @classmethod
     def loss_values_stat(cls, loss_vales):
@@ -160,15 +177,19 @@ class TrainerBase:
         self.model.load_state_dict(torch.load(str(p), map_location=self.device))
 
     def get_train_data(self):
-        """ 子类必须实现的接口函数 """
-        raise NotImplementedError
+        train_loader = torch.utils.data.DataLoader(
+            ImageDirectionDataset(self.data_dir, mode='train'),
+            batch_size=self.batch_size, shuffle=True, num_workers=8)
+        return train_loader
 
     def get_val_data(self):
-        """ 子类必须实现的接口函数 """
-        raise NotImplementedError
+        val_loader = torch.utils.data.DataLoader(
+            self.datasets(self.data_dir, mode='val'),
+            batch_size=self.batch_size, shuffle=True, num_workers=8)
+        return val_loader
 
 
-class ClassificationTrainer(TrainerBase, ABC):
+class ClassificationTrainer(TrainerBase):
     """ 对pytorch（分类）模型的训练、测试等操作的进一步封装
 
     # TODO log变成可选项，可以关掉
@@ -298,3 +319,26 @@ class ClassificationTrainer(TrainerBase, ABC):
                 if viz: viz.plot_line([[accuracy1, accuracy2]], [epoch], 'accuracy', legend=['train', 'val'])
             if save_interval and epoch % save_interval == 0:
                 self.save_model_state(f'{tag} epoch={epoch}.pth')
+
+
+def get_classification_func(model, state_file, func):
+    """ 工厂函数，生成一个分类器函数
+
+    用这个函数做过渡的一个重要目的，也是避免重复加载模型
+
+    :param model: 模型结构
+    :param state_file: 存储参数的文件
+    :param func: 模型结果的处理器，默认
+    :return: 返回的函数结构见下述cls_func
+    """
+    model.load_state_dict(torch.load(str(state_file), map_location=get_device()))
+
+    def cls_func(x):
+        """
+        :param x: 输入可以是路径、np.ndarray、PIL图片等，都为转为batch结构的tensor
+        :return: 输入如果只有一张图片，则返回一个结果
+            否则会存在list，返回一个batch的多个结果
+        """
+        pass
+
+    return cls_func

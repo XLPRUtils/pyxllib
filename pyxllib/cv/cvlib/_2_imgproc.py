@@ -159,7 +159,7 @@ class ImgProcesser(ABC):
         """ 确保图片目前是flags指示的通道情况 """
         raise NotImplementedError
 
-    def write(self, path, if_exists='replace'):
+    def write(self, path, if_exists='replace', **kwargs):
         raise NotImplementedError
 
     @property
@@ -205,7 +205,7 @@ class CvImg(ImgProcesser):
     def read(cls, file, flags=1, **kwargs):
         if is_numpy_image(file):
             img = file
-        elif is_file(file):
+        elif Path(file).is_file():
             # https://www.yuque.com/xlpr/pyxllib/imread
             img = cv2.imdecode(np.fromfile(str(file), dtype=np.uint8), flags)
         elif is_pil_image(file):
@@ -237,7 +237,7 @@ class CvImg(ImgProcesser):
                 img = cv2.cvtColor(img, cv2.COLOR_BGRA2BGR)
         return CvImg(img)
 
-    def write(self, path, if_exists='replace'):
+    def write(self, path, if_exists='replace', **kwargs):
         img = self.img
         if not isinstance(path, Path):
             path = Path(path)
@@ -297,7 +297,7 @@ class PilImg(ImgProcesser):
             img = file
         elif is_numpy_image(file):
             img = cls.np2pil(file)
-        elif is_file(file):
+        elif Path(file).is_file():
             img = Image.open(file, **kwargs)
         else:
             raise TypeError(f'类型错误：{type(file)}')
@@ -377,6 +377,12 @@ class PilImg(ImgProcesser):
         elif flags == 1 and n_c != 3:
             img = img.convert('RGB')
         return PilImg(img)
+
+    def write(self, path, if_exists='replace', **kwargs):
+        p = Path(path)
+        if p.preprocess(if_exists):
+            p.ensure_dir('file')
+            self.img.save(str(p), **kwargs)
 
     def resize(self, size, interpolation=Image.BILINEAR, **kwargs):
         """
