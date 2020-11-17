@@ -11,7 +11,7 @@ https://www.yuque.com/xlpr/pyxllib/setup.py
 from setuptools import setup, find_packages
 import io
 
-VERSION = '0.0.41'
+VERSION = '0.0.42'
 
 with io.open("README.md", encoding='utf-8') as f:
     long_description = f.read()

@@ -14,8 +14,7 @@ from shapely.geometry import Polygon
 
 from pyxllib.util.mathlib import Intervals
 
-# 特地放一个反例在这里，注意这是几何库，不要在这个库导入图像处理
-# import cv2
+import cv2
 # import PIL.Image
 
 ____ensure_type = """
@@ -340,6 +339,31 @@ def warp_points(pts, warp_mat, reserve_struct=False):
     if reserve_struct:
         raise NotImplementedError
     return pts2
+
+
+def get_warp_mat(src, dst):
+    """ 从前后点集计算仿射变换矩阵
+    :param src: 原点集，支持多种格式输入
+    :param dst: 变换后的点集
+    :return: np.ndarray，3*3的变换矩阵
+    """
+
+    def cvt_data(pts):
+        # opencv的透视变换，输入的点集有类型限制，必须使用float32
+        return np.array(pts, dtype='float32').reshape((-1, 2))
+
+    src, dst = cvt_data(src), cvt_data(dst)
+    n = src.shape[0]
+    if n == 3:
+        # 只有3个点，则使用仿射变换
+        warp_mat = cv2.getAffineTransform(src, dst)
+        warp_mat = np.concatenate([warp_mat, [[0, 0, 1]]], axis=0)
+    elif n == 4:
+        # 有4个点，则使用透视变换
+        warp_mat = cv2.getPerspectiveTransform(src, dst)
+    else:
+        raise ValueError('点集数量过多')
+    return warp_mat
 
 
 def quad_warp_wh(pts, method='average'):
