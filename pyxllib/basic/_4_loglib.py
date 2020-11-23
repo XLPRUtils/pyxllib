@@ -6,10 +6,16 @@
 
 import concurrent.futures
 import inspect
-import os
-import traceback
+import logging
 import math
+import os
+import queue
 import sys
+import traceback
+
+# https://pypi.org/project/verboselogs/
+# import verboselogs
+# verboselogs.install()
 
 from pyxllib.basic._1_strlib import shorten
 from pyxllib.basic._3_pathlib import Path
@@ -215,7 +221,7 @@ def get_xllog():
 
     TODO 类似企业微信机器人的机制怎么设？或者如何配置出问题发邮件？
     """
-    import logging
+    import logging, coloredlogs
 
     if 'pyxllib.xllog' in logging.root.manager.loggerDict:
         # 1 判断xllog是否已存在，直接返回
@@ -234,11 +240,12 @@ def get_xllog():
         # 3 否则生成一个非常简易版的xllog
         # TODO 不同级别能设不同的格式（颜色）？
         xllog = logging.getLogger('pyxllib.xllog')
-        xllog.setLevel(logging.DEBUG)
-        ch = logging.StreamHandler()
-        ch.setLevel(logging.DEBUG)
-        ch.setFormatter(logging.Formatter('%(asctime)s %(message)s', datefmt='%H:%M:%S'))
-        xllog.addHandler(ch)
+        # xllog.setLevel(logging.DEBUG)
+        # ch = logging.StreamHandler()
+        # ch.setLevel(logging.DEBUG)
+        # ch.setFormatter(logging.Formatter('%(asctime)s %(message)s'))
+        # xllog.addHandler(ch)
+        coloredlogs.install(level='DEBUG', logger=xllog, fmt='%(asctime)s %(message)s')
     return logging.getLogger('pyxllib.xllog')
 
 
@@ -248,6 +255,27 @@ def format_exception(e):
 
 ____iterate = """
 """
+
+
+class EmptyPoolExecutor:
+    """伪造一个类似concurrent.futures.ThreadPoolExecutor、ProcessPoolExecutor的接口类
+        用来检查多线程、多进程中的错误
+
+    即并行中不会直接报出每个线程的错误，只能串行执行才好检查
+        但是两种版本代码来回修改很麻烦，故设计此类，只需把
+            concurrent.futures.ThreadPoolExecutor 暂时改为 EmptyPoolExecutor 进行调试即可
+    """
+
+    def __init__(self, *args, **kwargs):
+        """参数并不需要实际处理，并没有真正并行，而是串行执行"""
+        self._work_queue = queue.Queue()
+
+    def submit(self, func, *args, **kwargs):
+        """执行函数"""
+        func(*args, **kwargs)
+
+    def shutdown(self):
+        print('并行执行结束')
 
 
 class Iterate:
@@ -293,18 +321,22 @@ class Iterate:
         return start, end
 
     def _step3_executor(self, pinterval, max_workers):
-        executor = concurrent.futures.ThreadPoolExecutor(max_workers)
-        if executor._max_workers != 1:
+        if max_workers == 1:
+            # workers=1，实际上并不用多线程，用一个假的多线程类代替，能大大提速
+            executor = EmptyPoolExecutor()
+            # executor = concurrent.futures.ThreadPoolExecutor(max_workers)
+        else:
+            executor = concurrent.futures.ThreadPoolExecutor(max_workers)
             if pinterval:
                 self.xllog.info(f'多线程执行，当前迭代所用线程数：{executor._max_workers}')
         return executor
 
     def _step4_iter(self, i, pinterval, executor):
+        # 队列中没有新任务时，才放入新任务，这样能确保pinterval的输出能反应实时情况，而不是一下全部进入队列，把for循环跑完了
+        while executor._work_queue.qsize(): pass
         if pinterval and (i or pinterval == 1) and i % pinterval == 0:
             message = f' {self.items[i]}' if pinterval == 1 else ''
             self.xllog.info(f'{i:{self.format_width}d}/{self.n_items}={i / self.n_items:6.2%}{message}')
-        # 队列中没有新任务时，才放入新任务，这样能确保pinterval的输出能反应实时情况，而不是一下全部进入队列，把for循环跑完了
-        while executor._work_queue.qsize(): pass
 
     def _step5_finish(self, pinterval, interrupt):
         if not interrupt and pinterval:
