@@ -599,8 +599,8 @@ class Path:
 
         :param if_exists:
             'error': （默认）如果要替换的目标文件已经存在，则报错
-            'replace': 替换 （提前把已存在的目标文件删除）
-            'ignore': 忽略、不处理  （不用执行后续的功能）
+            'overwrite', 'replace': 替换 （提前把已存在的目标文件删除）
+            'skip', 'ignore': 忽略、不处理  （不用执行后续的功能）
             'backup': 备份后写入  （对原文件先做一个备份）
         :param exclude: 排除掉不分析的目录，用于有些重命名等自身可能操作自身的情况
             如果self是exclude这个路径，默认直接need_run=True
@@ -614,9 +614,9 @@ class Path:
         if self.exists():
             if if_exists == 'error':
                 raise FileExistsError(f'目标文件已存在： {self}')
-            elif if_exists == 'replace':  # None的话相当于replace，但是不会事先delete，可能会报错
+            elif if_exists in ('replace', 'overwrite'):  # None的话相当于replace，但是不会事先delete，可能会报错
                 self.delete()
-            elif if_exists == 'ignore':
+            elif if_exists in ('ignore', 'skip'):
                 need_run = False
             elif if_exists == 'backup':
                 self.backup(if_exists='backup')
@@ -634,16 +634,21 @@ class Path:
         :return : 返回dst
         """
         # 1 判断目标是有已存在，进行不同的指定规则处理
-        dst = self.abs_dstpath(dst)
-        need_run = dst.preprocess(if_exists, self)
+        dst0 = self.abs_dstpath(dst)
 
         # 2 执行特定功能
-        if need_run:
+        if dst0.preprocess(if_exists, self):
             # 此时dst已是具体路径，哪怕是"目录"也可以按照"文件"对象理解，避免目录会重复生成，多层嵌套
             #   本来是 a --> C:/target/a ，避免 C:/target/a/a 的bug
-            dst.ensure_dir('file')
-            func(self.fullpath, dst.fullpath)
-        return dst
+            dst0.ensure_dir('file')
+
+            if dst0 == self:  # 重命名自身的操作比较特别，需要打补丁
+                func(self.fullpath, os.path.join(dst0.dirname, pathlib.Path(str(dst)).name))
+                dst0 = self.abs_dstpath(dst)
+            else:
+                func(self.fullpath, dst0)
+
+        return dst0
 
     def ensure_dir(self, pathtype=None):
         r""" 确保path中指定的dir都存在
