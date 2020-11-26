@@ -55,9 +55,12 @@ class PilImg(CvImg):
     """
     prcs = PilPrcs
 
+    # 一些比较特别的接口微调下即可
     def random_direction(self):
-        _t = type(self)
-        return _t(self.prcs.random_direction(self.img))
+        """ 这个功能可以考虑关掉，否则PilImg返回是普通img也有点奇怪~~ """
+        # _t = type(self)
+        img, label = self.prcs.random_direction(self.img)
+        return img, label
 
 
 ____alias = """

@@ -221,7 +221,7 @@ class Path:
         try:
             self._path = pathlib.Path(self.abspath(path, suffix, root)).resolve()
             # 有些问题上一步不一定测的出来，要再补一个测试
-            self._path.is_file()
+            # self._path.is_file()
         except (ValueError, TypeError, OSError):
             # ValueError：文件名过长，代表输入很可能是一段文本，根本不是路径
             # TypeError：不是str等正常的参数
@@ -314,10 +314,13 @@ class Path:
         return self._path and self._path.exists()
 
     def __repr__(self):
-        return 'Path' + self._path.__repr__()[11:]
+        return self._path.__repr__()
 
     def __str__(self):
         return str(self._path).replace('\\', '/') + ('/' if self.assume_dir else '')
+
+    def to_str(self):
+        return self.__str__()
 
     def __eq__(self, other):
         """ pathlib.Path内置了windows和linux的区别
@@ -585,10 +588,10 @@ class Path:
         """
         if not isinstance(ref_dir, Path):
             ref_dir = Path(ref_dir)
-        s1, s2 = str(self), str(ref_dir)
-        if s1.startswith(s2):
-            s1 = s1[len(s2):]
-        return s1
+        # s1, s2 = str(self), str(ref_dir)
+        # if s1.startswith(s2):
+        #     s1 = s1[len(s2):]
+        return os.path.relpath(str(self), str(ref_dir))
 
     def preprocess(self, if_exists='error', exclude=None):
         """ 这个功能要结合参数一起理解，不是简单的理解成“预处理”
