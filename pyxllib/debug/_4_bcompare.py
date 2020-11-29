@@ -5,7 +5,7 @@
 # @Data   : 2020/06/01 18:13
 
 
-from pyxllib.basic import func_input_message, dprint, natural_sort_key, Path, refinepath
+from pyxllib.basic import func_input_message, dprint, natural_sort_key, File, refinepath
 from pyxllib.debug._1_typelib import prettifystr
 from pyxllib.debug._2_chrome import viewfiles
 
@@ -76,12 +76,12 @@ def bcompare(oldfile, newfile=None, basefile=None, wait=True, sameoff=False, old
         newfile = f'【共有部分】，{t[2]}\n\n【独有部分】，{t[3]}'
 
     # 2 获取文件扩展名ext
-    if Path(oldfile).is_file():
-        ext = Path(oldfile).suffix
-    elif Path(newfile).is_file():
-        ext = Path(newfile).suffix
-    elif Path(basefile).is_file():
-        ext = Path(basefile).suffix
+    if File(oldfile).is_file():
+        ext = File(oldfile).suffix
+    elif File(newfile).is_file():
+        ext = File(newfile).suffix
+    elif File(basefile).is_file():
+        ext = File(basefile).suffix
     else:
         ext = '.txt'  # 默认为txt文件
 
@@ -93,7 +93,7 @@ def bcompare(oldfile, newfile=None, basefile=None, wait=True, sameoff=False, old
 
     def func(file, d):
         if file is not None:
-            p = Path(file)
+            p = File(file)
             if p.is_file():
                 ls.append(p.fullpath)
             else:
@@ -103,7 +103,7 @@ def bcompare(oldfile, newfile=None, basefile=None, wait=True, sameoff=False, old
                     name = newfilename
                 else:
                     name = refinepath(names[d] + ext)
-                ls.append(Path(name, root=Path.TEMP).write(file, if_exists='replace').fullpath)
+                ls.append(File(name, root=File.TEMP).write(file, if_exists='replace').fullpath)
 
     func(oldfile, 0)
     func(newfile, 1)
@@ -111,11 +111,11 @@ def bcompare(oldfile, newfile=None, basefile=None, wait=True, sameoff=False, old
 
     # 4 调用程序（并计算外部操作时间）
     if sameoff:
-        if Path(ls[0]).read() != Path(ls[1]).read():
+        if File(ls[0]).read() != File(ls[1]).read():
             viewfiles('BCompare.exe', *ls, wait=wait)
     else:
         viewfiles('BCompare.exe', *ls, wait=wait)
-    return Path(ls[0]).read()
+    return File(ls[0]).read()
 
 
 def refine_file(file, func, *args, file_mode=None, debug=False, **kwargs):
@@ -124,7 +124,7 @@ def refine_file(file, func, *args, file_mode=None, debug=False, **kwargs):
     :param file_mode: 指定文件读取类型格式，例如'.json'是json文件，读取为字典
     :param debug: 如果设置 debug=True，则会打开BC比较差异，否则就是静默替换
     """
-    p = Path(file)
+    p = File(file)
     data = p.read(mode=file_mode)
     origin_content = str(data)
     new_data = func(data, *args, **kwargs)
@@ -132,7 +132,7 @@ def refine_file(file, func, *args, file_mode=None, debug=False, **kwargs):
     isdiff = origin_content != str(new_data)
     if isdiff:
         if debug:
-            temp_file = Path('refine_file', p.suffix, root=Path.TEMP).write(new_data, if_exists='replace').fullpath
+            temp_file = File('refine_file', p.suffix, root=File.TEMP).write(new_data, if_exists='replace').fullpath
             bcompare(file, temp_file)  # 使用beyond compare软件打开对比查看
         else:
             p.write(new_data, mode=file_mode, if_exists='replace')  # 直接原地替换

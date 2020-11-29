@@ -4,7 +4,7 @@
 # @Email  : 877362867@qq.com
 # @Data   : 2020/11/15 10:09
 
-from pyxllib.basic import Path
+from pyxllib.basic import File
 from pyxllib.cv.cvlib._1_geo import *
 
 import cv2
@@ -223,7 +223,7 @@ class CvPrcs:
         """
         if is_numpy_image(file):
             img = file
-        elif Path(file).is_file():
+        elif File(file).is_file():
             # https://www.yuque.com/xlpr/pyxllib/imread
             img = cv2.imdecode(np.fromfile(str(file), dtype=np.uint8), flags)
         elif is_pil_image(file):
@@ -250,8 +250,8 @@ class CvPrcs:
 
     @classmethod
     def write(cls, img, path, if_exists='replace', **kwargs):
-        if not isinstance(path, Path):
-            path = Path(path)
+        if not isinstance(path, File):
+            path = File(path)
         data = cv2.imencode(ext=path.suffix, img=img)[1]
         return path.write(data.tobytes(), if_exists=if_exists)
 

@@ -18,7 +18,7 @@ import traceback
 # verboselogs.install()
 
 from pyxllib.basic._1_strlib import shorten
-from pyxllib.basic._3_pathlib import Path
+from pyxllib.basic._3_filelib import File
 
 XLLOG_CONF_FILE = 'xllog.yaml'
 
@@ -229,7 +229,7 @@ def get_xllog():
     elif os.path.isfile(XLLOG_CONF_FILE):
         # 2 若不存在，尝试在默认位置是否有自定义配置文件，读取配置文件来创建
         import logging.config
-        data = Path(XLLOG_CONF_FILE).read()
+        data = File(XLLOG_CONF_FILE).read()
         if isinstance(data, dict):
             # 推荐使用yaml的字典结构，格式更简洁清晰
             logging.config.dictConfig(data)

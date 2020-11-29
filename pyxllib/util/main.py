@@ -96,7 +96,7 @@ class CWord:
             file = arg1
             self.app.Documents.Open(file)  # 打开文件
             # self.__dict__ = app.Documents(Path(file).name).__dict__
-            self.__dict__['doc'] = self.app.Documents(Path(file).name)  # 存储到doc成员变量
+            self.__dict__['doc'] = self.app.Documents(File(file).name)  # 存储到doc成员变量
         else:  # 如果输入参数不合法，新建一个空word
             self.app.Documents.Add()
             self.__dict__['doc'] = self.app.ActiveDocument
@@ -158,7 +158,7 @@ class CExcel:
             file = arg1
             self.app.Workbooks.Open(file)  # 打开文件
             # self.__dict__ = app.Documents(Path(file).name).__dict__
-            self.__dict__['wb'] = self.app.Workbooks(Path(file).name)  # 存储到doc成员变量
+            self.__dict__['wb'] = self.app.Workbooks(File(file).name)  # 存储到doc成员变量
         else:  # 如果输入参数不合法，新建一个空word
             # self.app.Workbooks.Add()
             # self.__dict__['wb'] = self.app.ActiveWorkbook
@@ -338,8 +338,8 @@ def SetWkDir(wkDir=None, key=None):
 
 def SmartCopyFiles(files, inFolder, outFolder):
     """将files里的文件移到folder目录里，如果folder里已经存在对应文件则自动进行备份"""
-    inFd = Path(inFolder)
-    outFd = Path(outFolder)
+    inFd = File(inFolder)
+    outFd = File(outFolder)
 
     for file in files:
         inFile = inFd / file
@@ -350,9 +350,9 @@ def SmartCopyFiles(files, inFolder, outFolder):
             if filecmp.cmp(inFile, outFile):
                 continue  # 如果两个文件是相同的，不用操作，可以直接处理下一个
             else:
-                Path(outFile).backup()  # 如果不相同，则对outFile进行备份
+                File(outFile).backup()  # 如果不相同，则对outFile进行备份
         shutil.copy2(inFile, outFile)
-        Path(outFile).backup()  # 对拷贝过来的文件也提前做好备份
+        File(outFile).backup()  # 对拷贝过来的文件也提前做好备份
 
 
 def MyMove(folder1, folder2):
@@ -363,7 +363,7 @@ def MyMove(folder1, folder2):
 def 多规则字符串筛选(列表, glob筛选=None, *, 正则筛选=None, 指定名筛选=None, 去除备份文件=False):
     """该函数主要供文件处理使用，其它字符串算法慎用"""
     if glob筛选:
-        列表 = list(filter(lambda x: Path(x).match(glob筛选), 列表))
+        列表 = list(filter(lambda x: File(x).match(glob筛选), 列表))
 
     # 只挑选出满足正则条件的文件名（目录名）
     if 正则筛选:
@@ -373,7 +373,7 @@ def 多规则字符串筛选(列表, glob筛选=None, *, 正则筛选=None, 指�
         列表 = list(filter(lambda x: x in 指定名筛选, 列表))
 
     if 去除备份文件:
-        列表 = list(filter(lambda x: not Path(x).backup_time, 列表))
+        列表 = list(filter(lambda x: not File(x).backup_time, 列表))
 
     return 列表
 
@@ -443,7 +443,7 @@ class CBaseFolder(object):
         if not 目标目录:  # 如果没有设置目标目录，则以该类所在目录为准
             目标目录 = self.name
         for fn in files:
-            f = Path(os.path.join(self.name, fn))
+            f = File(os.path.join(self.name, fn))
             目标名称 = re.sub(origin, target, fn, flags=re.IGNORECASE)
             f.rename(os.path.join(目标目录, 目标名称))
 
@@ -462,7 +462,7 @@ class CBaseFolder(object):
                 continue
 
     def 大小(self):
-        return Path(self.name).size
+        return File(self.name).size
 
     def 删除(self):
         shutil.rmtree(self.name, ignore_errors=True)
@@ -486,7 +486,7 @@ def 文件搜索匹配(源目录, 自定义正则规则, *, 目标类型=('文�
     正则规则 = 自定义正则规则转为标准正则表达式(自定义正则规则)
     所有目录 = tuple(os.walk(源目录))
     for 当前目录名, 包含目录, 包含文件 in 所有目录:
-        parts = Path(当前目录名).parts
+        parts = File(当前目录名).parts
         if '.git' in parts or '$RECYCLE.BIN' in parts:  # 去掉'.git'这个备份目录，'$RECYCLE.BIN'这个不知啥鬼目录
             continue
         相对目录 = 当前目录名[源目录前缀长度 + 1:]
@@ -523,7 +523,7 @@ def 文件重命名(源目录, 自定义正则规则, 新正则名称, *, 目标
         ls.append([f, f2])
         if not 调试:
             targetName = os.path.join(目标目录, f2)
-            f3 = Path(targetName)
+            f3 = File(targetName)
             if f3.is_file():
                 print('文件已存在：', f3.name)
                 if 覆盖操作:
@@ -565,7 +565,7 @@ def 目录下查找文本(目录, 文件名筛选, 目标文本, *, 模式='表�
     行文本模式：显示所有匹配的行文本
     """
     ls = 文件搜索匹配(目录, 文件名筛选, 目标类型=('文件',))
-    ls = list(filter(lambda x: Path(x).backup_time == '', ls))  # 去除备份文件
+    ls = list(filter(lambda x: File(x).backup_time == '', ls))  # 去除备份文件
     ls = natural_sort(ls)
     if 模式 == '表格':
         table = list()
@@ -598,8 +598,8 @@ def 目录下统计单词出现频数(目录, 文件名筛选, 目标文本=r'(\
     """默认会找所有单词，以及tex命令"""
     ls = 文件搜索匹配(目录, 文件名筛选, 目标类型=('文件',))
     s = list()
-    for fileName in [f for f in ls if not Path(f).backup_time]:  # 去除备份文件
-        c = Path(pathjoin(目录, fileName)).read()
+    for fileName in [f for f in ls if not File(f).backup_time]:  # 去除备份文件
+        c = File(pathjoin(目录, fileName)).read()
         s.append(c)
     s = '\n'.join(s)
 
@@ -616,9 +616,9 @@ def 目录下统计单词出现频数(目录, 文件名筛选, 目标文本=r'(\
 def GetFullPathClass(s):
     """如果输入的是相对路径，会解析为绝对路径"""
     # p = Path(s).resolve() # 奕本的电脑这句话运行不了
-    p = Path(s)
+    p = File(s)
     if not s.startswith('\\') and not p.drive:
-        p = Path.cwd() / p
+        p = File.cwd() / p
     return p
 
 
@@ -714,7 +714,7 @@ def 查看目录下png图片信息(folder):
     fd = CBaseFolder(folder)
     ls = list()
     for imgFile in fd.Files('*.png'):
-        file = Path(pathjoin(fd.name, imgFile))
+        file = File(pathjoin(fd.name, imgFile))
         im = Image.open(file.name)
         d0, d1 = im.info['dpi'] if 'dpi' in im.info else ('', '')
         # 处理eps格式
@@ -725,7 +725,7 @@ def 查看目录下png图片信息(folder):
         else:
             epsSize, boundingBox = '', ''
         # 处理pdf格式
-        pdfFile = Path(file.name[:-4] + '-eps-converted-to.pdf')
+        pdfFile = File(file.name[:-4] + '-eps-converted-to.pdf')
         pdfSize = pdfFile.size if pdfFile else ''
         # 存储到列表
         ls.append((imgFile, im.size[0], im.size[1], d0, d1,

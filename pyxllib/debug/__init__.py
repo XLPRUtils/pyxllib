@@ -40,7 +40,7 @@ def render_echart(ob, name, show=False):
     # 如果没有设置页面标题，则默认采用文件名作为标题
     if not ob.page_title or ob.page_title == 'Awesome-pyecharts':
         ob.page_title = name
-    f = ob.render(Path(f'{name}.html', root=Path.TEMP).fullpath)
+    f = ob.render(File(f'{name}.html', root=File.TEMP).fullpath)
     if show: chrome(f)
     return f
 

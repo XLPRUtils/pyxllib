@@ -930,7 +930,7 @@ def ensure_content(ob=None, encoding=None):
     # TODO: 增加鲁棒性判断，如果输入的不是字符串类型也要有出错判断
     if ob is None:
         return sys.stdin.read()  # 注意输入是按 Ctrl + D 结束
-    elif Path(ob).is_file():  # 如果存在这样的文件，那就读取文件内容（bug点：如果输入是目录名会PermissionError）
+    elif File(ob).is_file():  # 如果存在这样的文件，那就读取文件内容（bug点：如果输入是目录名会PermissionError）
         if ob.endswith('.docx'):  # 这里还要再扩展pdf、doc文件的读取
             try:
                 import textract

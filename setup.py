@@ -11,8 +11,6 @@ https://www.yuque.com/xlpr/pyxllib/setup.py
 from setuptools import setup, find_packages
 import io
 
-VERSION = '0.0.43'
-
 with io.open("README.md", encoding='utf-8') as f:
     long_description = f.read()
 
@@ -20,7 +18,7 @@ install_requires = open("requirements.txt").readlines()
 
 setup(
     name="pyxllib",  # pip 安装时用的名字
-    version=VERSION,  # 当前版本，每次更新上传到pypi都需要修改
+    version='0.0.45',  # 当前版本，每次更新上传到pypi都需要修改
     author="code4101",
     author_email="877362867@qq.com",
     url="https://github.com/XLPRUtils/pyxllib",
@@ -32,6 +30,8 @@ setup(
     include_package_data=True,
     license='Apache License 2.0',
     classifiers=[
+        'Development Status :: 3 - Alpha',
+        'Intended Audience :: Developers',  # 开发的目标用户
         "Programming Language :: Python :: 3",
         "Operating System :: OS Independent",  # 大部分功能都是跨平台的
     ],

@@ -23,10 +23,10 @@ except ModuleNotFoundError:
     subprocess.run(['pip', 'install', 'mysqlclient'])
     import sqlalchemy
 
-from pyxllib.basic import TicToc, dformat, dprint, Path
+from pyxllib.basic import TicToc, dformat, dprint, File
 
 
-SQL_LIB_ACCOUNT_FILE = Path(__file__).parent / 'sqllibaccount.pkl'
+SQL_LIB_ACCOUNT_FILE = File(__file__).parent / 'sqllibaccount.pkl'
 
 
 def create_account_df(file='sqllibaccount.pkl'):
@@ -39,7 +39,7 @@ def create_account_df(file='sqllibaccount.pkl'):
     df['user'] = df['user'].replace('', 'root')  # 没写用户名的默认值
     df['passwd'] = df['passwd'].replace('', '123456')  # 没写密码的默认值
     df.set_index('index_name', inplace=True)
-    Path(file).write(df)
+    File(file).write(df)
 
 
 class SqlEngine:
@@ -75,9 +75,9 @@ class SqlEngine:
         # 1 读取地址、账号信息
         if alias:
             if account_file_path is None:
-                account_file_path = Path(SQL_LIB_ACCOUNT_FILE)
+                account_file_path = File(SQL_LIB_ACCOUNT_FILE)
             # dprint(alias,account_file_path)
-            record = Path(account_file_path).read().loc[alias]  # 从文件读取账号信息
+            record = File(account_file_path).read().loc[alias]  # 从文件读取账号信息
             user, passwd, host, port = record.user, record.passwd, record.host, record.port
 
         # 2 '数据库类型+数据库驱动名称://用户名:口令@机器地址:端口号/数据库名'

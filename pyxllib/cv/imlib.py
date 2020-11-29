@@ -64,10 +64,10 @@ def magick(infile, *, outfile=None, if_exists='error', transparent=None, trim=Fa
 
     # 2
     # 200914周一20:40，这有个相对路径的bug，修复了下，否则 test/a.png 会变成 test/test/a.png
-    if Path(outfile).preprocess(if_exists, exclude=Path(infile)):
+    if File(outfile).preprocess(if_exists, exclude=File(infile)):
         # 2.1 判断是否是支持的输入文件类型
         ext = os.path.splitext(infile)[1].lower()
-        if not Path(infile).is_file() or not ext in ('.png', '.eps', '.pdf', '.jpg', '.jpeg', '.wmf', '.emf'):
+        if not File(infile).is_file() or not ext in ('.png', '.eps', '.pdf', '.jpg', '.jpeg', '.wmf', '.emf'):
             return False
 
         # 2.2 生成需要执行的参数
@@ -129,7 +129,7 @@ def ensure_pngs(folder, *, if_exists='ignore',
             if if_exists == 'ignore':
                 continue
             elif if_exists == 'backup':
-                Path(name, '.png', folder).backup(move=True)
+                File(name, '.png', folder).backup(move=True)
             elif if_exists == 'replace':
                 pass
             else:
@@ -172,14 +172,14 @@ def zoomsvg(file, scale=1):
         return re.sub(r'((?:height|width)=")(\d+(?:\.\d+)?)', g, m.group())
 
     if os.path.isfile(file):
-        s = re.sub(r'<svg .+?>', func, Path(file).read(), flags=re.DOTALL)
-        Path(file).write(s, if_exists='replace')
+        s = re.sub(r'<svg .+?>', func, File(file).read(), flags=re.DOTALL)
+        File(file).write(s, if_exists='replace')
     elif os.path.isdir(file):
         for f in os.listdir(file):
             if not f.endswith('.svg'): continue
             f = os.path.join(file, f)
-            s = re.sub(r'<svg\s+.+?>', func, Path(f).read(), flags=re.DOTALL)
-            Path(file).write(s, if_exists='replace')
+            s = re.sub(r'<svg\s+.+?>', func, File(f).read(), flags=re.DOTALL)
+            File(file).write(s, if_exists='replace')
     elif isinstance(file, str) and '<svg ' in file:  # 输入svg的代码文本
         return re.sub(r'<svg .+?>', func, file, flags=re.DOTALL)
 
@@ -195,7 +195,7 @@ def reduce_image_filesize(path, filesize):
     """
     from PIL import Image
 
-    path = Path(path)
+    path = File(path)
     # 1 无论什么情况，都先做个100%的resize处理，很可能会去掉一些没用的冗余信息
     im = Image.open(f'{path}')
     im.resize(im.size).save(f'{path}')

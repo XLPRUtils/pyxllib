@@ -9,7 +9,7 @@ oss2 · PyPI: https://pypi.org/project/oss2/
 """
 
 import subprocess
-from pyxllib.basic import Path
+from pyxllib.basic import File
 
 try:
     import oss2
@@ -57,7 +57,7 @@ class OssBucket:
             return False
 
     def download(self, key, localfile):
-        Path(localfile).ensure_dir()
+        File(localfile).ensure_dir()
         if self.check_exists(key):
             return self.bucket.get_object_to_file(key, localfile)
         else:
