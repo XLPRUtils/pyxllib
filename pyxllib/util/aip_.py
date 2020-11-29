@@ -17,11 +17,11 @@ except ModuleNotFoundError:
     subprocess.run(['pip', 'install', 'baidu-aip'])
     import aip
 
-from pyxllib.basic import Path
+from pyxllib.basic import File
 from pyxllib.image import get_img_content
 
 
-AIP_OCR_ACCOUNT_FILE = Path(__file__).parent / 'aipocraccount.pkl'
+AIP_OCR_ACCOUNT_FILE = File(__file__).parent / 'aipocraccount.pkl'
 
 
 def create_account_df(file='aipocraccount.pkl'):
@@ -32,7 +32,7 @@ def create_account_df(file='aipocraccount.pkl'):
         ['欧龙', '16933485', 'cccccc', '123456'],
         ['韩锦锦', '16933339', 'dddddd', '123456'],
     ], columns=['user', 'APP_ID', 'API_KEY', 'SECRET_KEY'])
-    Path(file).write(df)
+    File(file).write(df)
 
 
 class AipOcr:
@@ -50,7 +50,7 @@ class AipOcr:
         # 1 账号信息
         if cls.account_df is None:
             if not account_file_path:
-                cls.account_df = Path(AIP_OCR_ACCOUNT_FILE).read()
+                cls.account_df = File(AIP_OCR_ACCOUNT_FILE).read()
 
         # 2 初始化client
         if cls.client is None or next_client:

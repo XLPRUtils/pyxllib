@@ -73,8 +73,8 @@ class UsedRecords:
 
     def save(self):
         """保存记录文件"""
-        Path(self.dirname + '/').ensure_dir()
-        Path(self.fullname).write('\n'.join(self.ls), if_exists='replace')
+        File(self.dirname + '/').ensure_dir()
+        File(self.fullname).write('\n'.join(self.ls), if_exists='replace')
 
     def add(self, s):
         """新增一个使用方法
@@ -187,8 +187,8 @@ def myoswalk(root, filter_rule=None, recur=True):
             except ValueError:
                 pass
         # 去掉备份文件
-        dirnames = list(filter(lambda x: not Path(x).backup_time and '-冲突-' not in x, dirnames))
-        filenames = list(filter(lambda x: not Path(x).backup_time and '-冲突-' not in x, filenames))
+        dirnames = list(filter(lambda x: not File(x).backup_time and '-冲突-' not in x, dirnames))
+        filenames = list(filter(lambda x: not File(x).backup_time and '-冲突-' not in x, filenames))
 
         # 调用特殊过滤规则
         if filter_rule:
@@ -563,7 +563,7 @@ def filetext_replace(files, func, *,
         total += 1
         if total < start:
             continue
-        s0 = Path(f).read()
+        s0 = File(f).read()
         s1 = func(s0)
         if s0 != s1:
             match = len(ls) + 1
@@ -571,7 +571,7 @@ def filetext_replace(files, func, *,
             if bc:
                 bcompare(f, s1)
             elif write:  # 如果开了bc，程序是绝对不会自动写入的
-                Path(f).write(s1, if_exists=if_exists)
+                File(f).write(s1, if_exists=if_exists)
             ls.append(f)
             if len(ls) == count:
                 break
@@ -602,8 +602,8 @@ def download_file(url, fn=None, *, encoding=None, if_exists=None, ext=None, temp
     :return:
     """
     if not fn: fn = url.split('/')[-1]
-    root = Path.TEMP if temp else None
-    fn = Path(fn, ext, root).write(requests.get(url).content,
+    root = File.TEMP if temp else None
+    fn = File(fn, ext, root).write(requests.get(url).content,
                                    encoding=encoding, if_exists=if_exists, etag=(not fn))
     return fn.fullpath
 

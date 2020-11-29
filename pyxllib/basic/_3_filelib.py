@@ -99,7 +99,7 @@ def test_etag2():
     print(get_etag(s))
     # FkAD2McB6ugxTiniE8ebhlNHdHh9
 
-    f = Path('1.tex', root=Path.TEMP).write(s, if_exists='replace').fullpath
+    f = File('1.tex', root=File.TEMP).write(s, if_exists='replace').fullpath
     print(get_etag(f))
     # FkAD2McB6ugxTiniE8ebhlNHdHh9
 
@@ -163,12 +163,14 @@ def get_encoding(bstr, maxn=1024):
     return encoding
 
 
-____path = """
+____file = """
 """
 
 
-class Path:
+class File:
     r""" 通用文件、路径处理类，也可以处理目录，可以把目录对象理解为特殊类型的文件
+        其实叫File比较好，因为主要就是针对文件处理，而不是路径解析
+        如果是纯粹的路径解析，推荐pathlib.Path处理
 
     document: https://www.yuque.com/xlpr/python/pyxllib.debug.path
 
@@ -195,22 +197,22 @@ class Path:
             或者看下性能速度，可以考虑加速
             特别是用Path作为参数拷贝的情况，应该可以加速减少分析、拷贝
 
-        >>> Path('D:/pycode/code4101py')
-        Path('D:/pycode/code4101py')
-        >>> Path(Path('D:/pycode/code4101py'))
-        Path('D:/pycode/code4101py')
+        >>> File('D:/pycode/code4101py')
+        File('D:/pycode/code4101py')
+        >>> File(File('D:/pycode/code4101py'))
+        File('D:/pycode/code4101py')
 
-        >> Path()  # 不输入参数的时候，默认为当前工作目录
-        Path('D:/pycode/code4101py')
+        >> File()  # 不输入参数的时候，默认为当前工作目录
+        File('D:/pycode/code4101py')
 
-        >> Path('a.txt', root=Path.TEMP)
-        Path('D:/Temp/a.txt')
-        >>> Path('F:/work/CreatorTemp')
-        Path('F:/work/CreatorTemp')
+        >> File('a.txt', root=Path.TEMP)
+        File('D:/Temp/a.txt')
+        >>> File('F:/work/CreatorTemp')
+        File('F:/work/CreatorTemp')
 
         注意！如果使用了符号链接（软链接），则路径是会解析转向实际位置的！例如
-        >> Path('D:/pycode/code4101py')
-        Path('D:/slns/pycode/code4101py')
+        >> File('D:/pycode/code4101py')
+        File('D:/slns/pycode/code4101py')
         """
         strpath = str(path)
         self._path = None
@@ -306,37 +308,43 @@ class Path:
 
         重置WindowsPath的bool逻辑，返回值变成存在True，不存在为False
 
-        >>> Path('D:/slns').exists()
+        >>> File('D:/slns').exists()
         True
-        >>> Path('D:/pycode/code4101').exists()
+        >>> File('D:/pycode/code4101').exists()
         False
         """
         return self._path and self._path.exists()
 
     def __repr__(self):
-        return self._path.__repr__()
+        s = self._path.__repr__()
+        if s.startswith('WindowsPath'):
+            s = 'File' + s[11:]
+        elif s.startswith('PosixPath'):
+            s = 'File' + s[9:]
+        return s
 
     def __str__(self):
         return str(self._path).replace('\\', '/') + ('/' if self.assume_dir else '')
 
     def to_str(self):
+        """ 不推荐使用，建议直接用str """
         return self.__str__()
 
     def __eq__(self, other):
         """ pathlib.Path内置了windows和linux的区别
             在windows是不区分大小写的，在linux则区分大小写
         """
-        if not isinstance(other, Path):
+        if not isinstance(other, File):
             raise TypeError
         return self._path == other._path
 
     def __truediv__(self, key):
         r""" 路径拼接功能
 
-        >>> Path('C:/a') / 'b.txt'
-        Path('C:/a/b.txt')
+        >>> File('C:/a') / 'b.txt'
+        File('C:/a/b.txt')
         """
-        return Path(self._path / str(key))
+        return File(self._path / str(key))
 
     def resolve(self):
         return self._path.resolve()
@@ -365,11 +373,11 @@ class Path:
     @property
     def name(self) -> str:
         r"""
-        >>> Path('D:/pycode/a.txt').name
+        >>> File('D:/pycode/a.txt').name
         'a.txt'
-        >>> Path('D:/pycode/code4101py').name
+        >>> File('D:/pycode/code4101py').name
         'code4101py'
-        >>> Path('D:/pycode/.gitignore').name
+        >>> File('D:/pycode/.gitignore').name
         '.gitignore'
         """
         return self._path.name
@@ -381,32 +389,32 @@ class Path:
     @property
     def parent(self):
         r"""
-        >>> Path('D:/pycode/code4101py').parent
-        Path('D:/pycode')
+        >>> File('D:/pycode/code4101py').parent
+        File('D:/pycode')
         """
-        return Path(self._path.parent) if self._path else None
+        return File(self._path.parent) if self._path else None
 
     @property
     def dirname(self) -> str:
         r"""
-        >>> Path('D:/pycode/code4101py').dirname
+        >>> File('D:/pycode/code4101py').dirname
         'D:/pycode'
-        >>> Path(r'D:\toweb\a').dirname
+        >>> File(r'D:\toweb\a').dirname
         'D:/toweb'
         """
         return str(self.parent)
 
     def with_dirname(self, value):
-        return Path(self.name, root=value)
+        return File(self.name, root=value)
 
     @property
     def stem(self) -> str:
         r"""
-        >>> Path('D:/pycode/code4101py/ckz.py').stem
+        >>> File('D:/pycode/code4101py/ckz.py').stem
         'ckz'
-        >>> Path('D:/pycode/.gitignore').stem  # os.path.splitext也是这种算法
+        >>> File('D:/pycode/.gitignore').stem  # os.path.splitext也是这种算法
         '.gitignore'
-        >>> Path('D:/pycode/.123.45.6').stem
+        >>> File('D:/pycode/.123.45.6').stem
         '.123.45'
         """
         return self._path.stem
@@ -417,12 +425,12 @@ class Path:
             如果setter要rename，那if_exists参数怎么控制？
             如果setter不要rename，那和用with_stem实现有什么区别？
         """
-        return Path(stem, self.suffix, self.dirname)
+        return File(stem, self.suffix, self.dirname)
 
     @property
     def parts(self) -> tuple:
         r"""
-        >>> Path('D:/pycode/code4101py').parts
+        >>> File('D:/pycode/code4101py').parts
         ('D:\\', 'pycode', 'code4101py')
         """
         return self._path.parts
@@ -430,17 +438,17 @@ class Path:
     @property
     def suffix(self) -> str:
         r"""
-        >>> Path('D:/pycode/code4101py/ckz.py').suffix
+        >>> File('D:/pycode/code4101py/ckz.py').suffix
         '.py'
-        >>> Path('D:/pycode/code4101py').suffix
+        >>> File('D:/pycode/code4101py').suffix
         ''
-        >>> Path('D:/pycode/code4101py/ckz.').suffix
+        >>> File('D:/pycode/code4101py/ckz.').suffix
         ''
-        >>> Path('D:/pycode/code4101py/ckz.123.456').suffix
+        >>> File('D:/pycode/code4101py/ckz.123.456').suffix
         '.456'
-        >>> Path('D:/pycode/code4101py/ckz.123..456').suffix
+        >>> File('D:/pycode/code4101py/ckz.123..456').suffix
         '.456'
-        >>> Path('D:/pycode/.gitignore').suffix
+        >>> File('D:/pycode/.gitignore').suffix
         ''
         """
         return self._path.suffix if self._path else ''
@@ -448,23 +456,23 @@ class Path:
     def with_suffix(self, suffix):
         r""" 指向同目录下后缀为suffix的文件
 
-        >>> Path('a.txt').with_suffix('.py').fullpath.split('\\')[-1]  # 强制替换
+        >>> File('a.txt').with_suffix('.py').fullpath.split('\\')[-1]  # 强制替换
         'a.py'
-        >>> Path('a.txt').with_suffix('py').fullpath.split('\\')[-1]  # 参考替换
+        >>> File('a.txt').with_suffix('py').fullpath.split('\\')[-1]  # 参考替换
         'a.txt'
-        >>> Path('a.txt').with_suffix('').fullpath.split('\\')[-1]  # 删除
+        >>> File('a.txt').with_suffix('').fullpath.split('\\')[-1]  # 删除
         'a'
         """
         if suffix and (suffix[0] == '.' or not self.suffix):
             if suffix[0] != '.': suffix = '.' + suffix
-            return Path(self._path.with_suffix(suffix))
+            return File(self._path.with_suffix(suffix))
         elif not suffix:
             # suffix 为假值则删除扩展名
-            return Path(self.stem, '', self.dirname)
+            return File(self.stem, '', self.dirname)
         return self
 
     def joinpath(self, *args):
-        return Path(self._path.joinpath(*args))
+        return File(self._path.joinpath(*args))
 
     @property
     def backup_time(self):
@@ -475,11 +483,11 @@ class Path:
         如果是目录，是：'figs 171020-153959'
         通过后缀分析，可以判断这是不是一个备份文件
 
-        >>> Path('chePre 171020-153959.tex').backup_time
+        >>> File('chePre 171020-153959.tex').backup_time
         '171020-153959'
-        >>> Path('figs 171020-153959').backup_time
+        >>> File('figs 171020-153959').backup_time
         '171020-153959'
-        >>> Path('figs 171020').backup_time
+        >>> File('figs 171020').backup_time
         ''
         """
         name = self.stem
@@ -552,18 +560,18 @@ class Path:
     def abs_dstpath(self, dst=None, suffix=None, root=None):
         r""" 参照当前Path的父目录，来确定dst的具体路径
 
-        >>> f = Path('C:/Windows/System32/cmd.exe')
+        >>> f = File('C:/Windows/System32/cmd.exe')
         >>> f.abs_dstpath('chen.py')
-        Path('C:/Windows/System32/chen.py')
+        File('C:/Windows/System32/chen.py')
         >>> f.abs_dstpath('E:/')  # 原始文件必须存在，否则因为无法判断实际类型，目标路径可能会错
-        Path('E:/cmd.exe')
+        File('E:/cmd.exe')
         >>> f.abs_dstpath('D:/aabbccdd.txt')
-        Path('D:/aabbccdd.txt')
+        File('D:/aabbccdd.txt')
         >>> f.abs_dstpath('D:/aabbccdd.txt/')  # 并不存在aabbccdd.txt这样的对象，但末尾有个/表明这是个目录
-        Path('D:/aabbccdd.txt/cmd.exe')
+        File('D:/aabbccdd.txt/cmd.exe')
         """
         if not root: root = self.dirname
-        dst = Path(dst, suffix, root)
+        dst = File(dst, suffix, root)
         # print(dst, dst.assume_dir)
 
         if self.is_dir() or (self.assume_dir and not self.is_file()):
@@ -581,13 +589,13 @@ class Path:
     def relative_path(self, ref_dir) -> str:
         r""" 当前路径，相对于ref_dir的路径位置
 
-        >>> Path('C:/a/b/c.txt').relative_path('C:/a/')
-        'b/c.txt'
-        >>> Path('C:/a/b\\c.txt').relative_path('C:\\a/')
-        'b/c.txt'
+        >>> File('C:/a/b/c.txt').relative_path('C:/a/')
+        'b\\c.txt'
+        >>> File('C:/a/b\\c.txt').relative_path('C:\\a/')
+        'b\\c.txt'
         """
-        if not isinstance(ref_dir, Path):
-            ref_dir = Path(ref_dir)
+        if not isinstance(ref_dir, File):
+            ref_dir = File(ref_dir)
         # s1, s2 = str(self), str(ref_dir)
         # if s1.startswith(s2):
         #     s1 = s1[len(s2):]
@@ -609,7 +617,7 @@ class Path:
             如果self是exclude这个路径，默认直接need_run=True
         """
         # 1 如果src和dst是同一个文件，因为重命名等特殊功能，可以直接执行，不用管提前存在目标文件的问题
-        if exclude and self == Path(exclude):
+        if exclude and self == File(exclude):
             return True
 
         # 2
@@ -649,7 +657,7 @@ class Path:
                 func(self.fullpath, os.path.join(dst0.dirname, pathlib.Path(str(dst)).name))
                 dst0 = self.abs_dstpath(dst)
             else:
-                func(self.fullpath, dst0)
+                func(self.fullpath, dst0.fullpath)
 
         return dst0
 
@@ -841,33 +849,33 @@ class Path:
         subprocess.run([proc, self.fullpath])
 
 
-def demo_path():
-    """Path类的综合测试"""
+def demo_file():
+    """ File类的综合测试"""
     # 切换工作目录到临时文件夹
-    os.chdir(Path.TEMP)
+    os.chdir(File.TEMP)
 
-    p = Path('demo_path', root=Path.TEMP)
+    p = File('demo_path', root=File.TEMP)
     p.delete()  # 如果存在先删除
     p.ensure_dir()  # 然后再创建一个空目录
 
-    print(Path('demo_path', '.py'))
+    print(File('demo_path', '.py'))
     # F:\work\CreatorTemp\demo_path.py
 
-    print(Path('demo_path/', '.py'))
+    print(File('demo_path/', '.py'))
     # F:\work\CreatorTemp\demo_path\tmp65m8mc0b.py
 
     # 空字符串区别于None，会随机生成一个文件名
-    print(Path('', root=Path.TEMP))
+    print(File('', root=File.TEMP))
     # F:\work\CreatorTemp\tmpwp4g1692
 
     # 可以在随机名称基础上，再指定文件扩展名
-    print(Path('', '.txt', root=Path.TEMP))
+    print(File('', '.txt', root=File.TEMP))
     # F:\work\CreatorTemp\tmpimusjtu1.txt
 
 
-def demo_path_rename():
+def demo_file_rename():
     # 初始化一个空的测试目录
-    f = Path('temp/', root=Path.TEMP)
+    f = File('temp/', root=File.TEMP)
     f.delete()
     f.ensure_dir()
 
@@ -893,11 +901,11 @@ class XlBytesIO(io.BytesIO):
     """
 
     def __init__(self, init_bytes):
-        if isinstance(init_bytes, (Path, str)):
+        if isinstance(init_bytes, (File, str)):
             # with open的作用：可以用.read循序读入，而不是我的Path.read一口气读入。
             #   这在只需要进行局部数据分析，f本身又非常大的时候很有用。
             #   但是我这里操作不太方便等原因，还是先全部读入BytesIO流了
-            init_bytes = Path(init_bytes).read(mode='b')
+            init_bytes = File(init_bytes).read(mode='b')
         super().__init__(init_bytes)
 
     def unpack(self, fmt):

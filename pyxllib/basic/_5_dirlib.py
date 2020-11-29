@@ -15,7 +15,7 @@ from requests.structures import CaseInsensitiveDict
 
 from pyxllib.basic._1_strlib import strfind, natural_sort
 from pyxllib.basic._2_timelib import Datetime
-from pyxllib.basic._3_pathlib import Path
+from pyxllib.basic._3_filelib import File
 from pyxllib.basic._4_loglib import Iterate
 
 ____file = """
@@ -33,7 +33,7 @@ ____file = """
 """
 
 
-class Dir(Path):
+class Dir(File):
     r"""类似NestEnv思想的文件夹处理类
 
     这里的测试可以全程自己造一个
@@ -219,7 +219,7 @@ def filesfilter(files, *, root=os.curdir, type_=None,
 
         msg = os.stat(f)
         if min_size is not None or max_size is not None:
-            size = Path(f).size
+            size = File(f).size
             if min_size is not None and size < min_size: return False
             if max_size is not None and size > max_size: return False
 
@@ -234,11 +234,11 @@ def filesfilter(files, *, root=os.curdir, type_=None,
             if max_mtime and Datetime(file_mtime) > max_mtime: return False
 
         if ignore_special:
-            parts = Path(f).parts
+            parts = File(f).parts
             if '.git' in parts or '$RECYCLE.BIN' in parts:
                 return False
 
-        if ignore_backup and Path(f).backup_time:
+        if ignore_backup and File(f).backup_time:
             return False
 
         return True
@@ -308,9 +308,9 @@ def filesmatch(patter, *, root=os.curdir, **kwargs) -> list:
 
     # 1 普通文本匹配  （没有通配符，单文件查找）
     if isinstance(patter, str) and glob_chars_pos == -1:
-        path = Path(patter, root=root)
+        path = File(patter, root=root)
         if path.exists():  # 文件存在
-            p = str(Path(patter, root=root).resolve())
+            p = str(File(patter, root=root).resolve())
             if p.startswith(root): p = p[len(root) + 1:]
             res = [p]
         else:  # 文件不存在
@@ -325,7 +325,7 @@ def filesmatch(patter, *, root=os.curdir, **kwargs) -> list:
         else:  # 模式里有套子文件夹
             dirname, basename = os.path.abspath(os.path.join(root, patter[:t])), patter[t + 1:]
         basename = basename.replace('<', '[').replace('>', ']')
-        files = map(str, Path(dirname).glob(basename))
+        files = map(str, File(dirname).glob(basename))
 
         n = len(root) + 1
         res = [(x[n:] if x.startswith(root) else x) for x in files]
@@ -376,19 +376,19 @@ def _files_copy_move_base(src, dst, filefunc, dirfunc,
             func = dirfunc
 
         # 2 根据目标是否已存在和if_exists分类处理
-        Path(dst).ensure_dir(pathtype='file')
+        File(dst).ensure_dir(pathtype='file')
         # 目前存在，且不是把文件移向文件夹的操作
         if os.path.exists(dst):
             # 根据if_exists参数情况分类处理
             if if_exists is None:  # 智能判断
                 if not filescmp(f, dst):  # 如果内容不同则backup
-                    Path(dst).backup(move=True)
+                    File(dst).backup(move=True)
                     func(f, dst)
                 elif os.path.abspath(f).lower() == os.path.abspath(dst).lower():
                     # 如果内容相同，再判断其是否实际是一个文件，则调用重命名功能
                     os.rename(f, dst)
             elif if_exists == 'backup':
-                Path(dst).backup(move=True)
+                File(dst).backup(move=True)
                 func(f, dst)
             elif if_exists == 'replace':
                 filesdel(dst)
@@ -502,7 +502,7 @@ def writefile(ob, path='', *, encoding='utf8', if_exists='backup', suffix=None, 
     :return: 返回写入的文件名，这个主要是在写临时文件时有用
     """
     if etag is None: etag = (not path)
-    return Path(path, suffix, root).write(ob,
+    return File(path, suffix, root).write(ob,
                                           encoding=encoding, if_exists=if_exists,
                                           etag=etag).fullpath
 
@@ -524,5 +524,5 @@ def extract_files(src, dst, pattern, if_exists='replace'):
     d1, d2 = Dir(src), Dir(dst)
     files = d1.select(pattern).files
     for f in files:
-        p1, p2 = Path(d1 / f), Path(d2 / f)
+        p1, p2 = File(d1 / f), File(d2 / f)
         p1.copy(p2, if_exists=if_exists)

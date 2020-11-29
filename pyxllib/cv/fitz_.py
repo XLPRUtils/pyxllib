@@ -47,7 +47,7 @@ class DemoFitz:
         toc = self.doc.getToC()
         toc[1][1] = '改标题名称'
         self.doc.setToC(toc)
-        file = Path('a.pdf', root=Path.TEMP).fullpath
+        file = File('a.pdf', root=File.TEMP).fullpath
         self.doc.save(file, garbage=4)
         chrome(file)
 
@@ -74,7 +74,7 @@ class DemoFitz:
     def rearrange_pages(self):
         """重新布局页面"""
         self.doc.select([0, 0, 1])  # 第1页展示两次后，再跟第2页
-        file = writefile(b'', 'a.pdf', root=Path.TEMP, if_exists='replace')
+        file = writefile(b'', 'a.pdf', root=File.TEMP, if_exists='replace')
         self.doc.save(file, garbage=4)  # 注意要设置garbage，否则文档并没有实际删除内容压缩文件大小
         chrome(file)
 
@@ -122,7 +122,7 @@ class DemoFitz:
         self.doc.select([0])
         page = self.doc.loadPage(0)
         # page.insertText(fitz.Point(100, 200), 'test\ntest')
-        file = Path('a.pdf', root=Path.TEMP).fullpath
+        file = File('a.pdf', root=File.TEMP).fullpath
         dprint(file)
         self.doc.save(file, garbage=4)
         chrome(file)
@@ -166,7 +166,7 @@ def pdf2svg_oldversion(pdffile, target=None, *, trim=False):
     else:
         if target is None: target = pdffile[:-4] + '_svg\\'
         executor = concurrent.futures.ThreadPoolExecutor()
-        Path(basename + '/').ensure_dir()
+        File(basename + '/').ensure_dir()
 
         def func(f1, f2, i):
             subprocess.run(['pdf2svg.exe', f1, f2, str(i)])
@@ -208,13 +208,13 @@ def pdf2imagebase(pdffile, target=None, scale=None, ext='.png'):
     # 大于1页的时候，默认新建一个文件夹来存储图片
     if target is None:
         if num_pages > 1:
-            target = Path(pdffile).stem + '/'
+            target = File(pdffile).stem + '/'
         else:
-            target = Path(pdffile).dirname + '/'
+            target = File(pdffile).dirname + '/'
 
-    newfile = Path(pdffile).abs_dstpath(target).fullpath
+    newfile = File(pdffile).abs_dstpath(target).fullpath
     if newfile.endswith('.pdf'): newfile = os.path.splitext(newfile)[0] + ext
-    Path(newfile).ensure_dir()
+    File(newfile).ensure_dir()
 
     # 2 图像数据的获取
     def get_svg_image(n):
@@ -237,7 +237,7 @@ def pdf2imagebase(pdffile, target=None, scale=None, ext='.png'):
     if num_pages == 1:
         image = get_svg_image(0) if ext == '.svg' else get_png_image(0)
         files.append(newfile)
-        Path(newfile).write(image, if_exists='replace')
+        File(newfile).write(image, if_exists='replace')
     else:  # 有多页
         number_width = math.ceil(math.log10(num_pages + 1))  # 根据总页数计算需要的对齐域宽
         stem, ext = os.path.splitext(newfile)
@@ -245,7 +245,7 @@ def pdf2imagebase(pdffile, target=None, scale=None, ext='.png'):
             image = get_svg_image(i) if ext == '.svg' else get_png_image(i)
             name = ('-{:0' + str(number_width) + 'd}').format(i + 1)  # 前面的括号不要删，这样才是完整的一个字符串来使用format
             files.append(stem + name + ext)
-            Path(stem + name + ext).write(image, if_exists='replace')
+            File(stem + name + ext).write(image, if_exists='replace')
     return files
 
 
@@ -276,7 +276,7 @@ def pdf2svg(pdffile, target=None, scale=None, trim=False):
     :return:
     """
     if trim:  # 先对pdf文件进行裁剪再转换
-        pdf = Path(pdffile)
+        pdf = File(pdffile)
         newfile = pdf.abs_dstpath('origin.pdf').fullpath
         pdf.copy(newfile)
         # subprocess.run(['pdf-crop-margins.exe', '-p', '0', newfile, '-o', pdffile], stderr=subprocess.PIPE) # 本少： 会裁过头！

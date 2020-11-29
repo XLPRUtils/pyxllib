@@ -148,7 +148,7 @@ def showdir(c, *, to_html=None, printf=True):
     # 4 使用chrome.exe浏览或输出到控制台
     #   这里底层可以封装一个chrome函数来调用，但是这个chrome需要依赖太多功能，故这里暂时手动简单调用
     if to_html:
-        filename = Path(object_name, suffix='.html', root=Path.TEMP). \
+        filename = File(object_name, suffix='.html', root=File.TEMP). \
             write(ensure_gbk(res), if_exists='replace').fullpath
         try:
             subprocess.run(['chrome.exe', filename])

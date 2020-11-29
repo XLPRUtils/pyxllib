@@ -60,6 +60,13 @@ def shorten(s, width=200, placeholder='...'):
 
 
 def natural_sort_key(key):
+    """
+    >>> natural_sort_key('0.0.43') < natural_sort_key('0.0.43.1')
+    True
+
+    >>> natural_sort_key('0.0.2') < natural_sort_key('0.0.12')
+    True
+    """
     def convert(text):
         return int(text) if text.isdigit() else text.lower()
 
@@ -908,17 +915,17 @@ def struct_unpack(f, fmt):
     >>> b
     b'\x7f'
     >>> struct_unpack(b, 'c')
-    (b'\x7f',)
+    b'\x7f'
     >>> struct_unpack(b, 'B')
-    (127,)
+    127
 
     >>> b = struct.pack('I', 258)
     >>> b
     b'\x02\x01\x00\x00'
     >>> struct_unpack(b, 'I')  # 默认都是按小端打包、解析
-    (258,)
+    258
     >>> struct_unpack(b, '>I') # 错误示范，按大端解析的值
-    (33619968,)
+    33619968
     >>> struct_unpack(b, 'H'*2)  # 解析两个值，fmt*2即可
     (258, 0)
 
@@ -926,7 +933,7 @@ def struct_unpack(f, fmt):
     >>> struct_unpack(f, 'B'*3)  # 取前3个值，等价于np.fromfile(f, dtype='uint8', count=3)
     (2, 1, 3)
     >>> struct_unpack(f, 'B')  # 取出第4个值
-    (4,)
+    4
     """
     # 1 取数据
     size_ = struct.calcsize(fmt)

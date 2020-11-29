@@ -21,7 +21,7 @@ def is_labelme_json_data(data):
 
 def reduce_labelme_jsonfile(jsonpath):
     """ 删除imageData """
-    p = Path(jsonpath)
+    p = File(jsonpath)
     data = p.read(mode='.json')
     if is_labelme_json_data(data) and data['imageData']:
         data['imageData'] = None
@@ -43,7 +43,7 @@ class ToLabelmeJson:
         """
         :param imgpath: 可选参数图片路径，强烈建议要输入，否则建立的label json会少掉图片宽高信息
         """
-        self.imgpath = Path(imgpath)
+        self.imgpath = File(imgpath)
         # 读取图片数据，在一些转换规则比较复杂，有可能要用到原图数据
         if self.imgpath.is_file():
             self.img = imread(str(self.imgpath))
@@ -112,7 +112,7 @@ class ToLabelmeJson:
         """
         if dst is None and self.imgpath.is_file():
             dst = self.imgpath.with_suffix('.json')
-        return Path(dst).write(self.data, if_exists=if_exists)
+        return File(dst).write(self.data, if_exists=if_exists)
 
 
 def get_labelme_shapes_df(dir, pattern='**/*.json', max_workers=None, pinterval=None, **kwargs):

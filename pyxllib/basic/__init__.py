@@ -21,7 +21,7 @@ from pyxllib.basic._1_strlib import *
 # 2 时间相关工具
 from pyxllib.basic._2_timelib import *
 # 3 文件、路径工具
-from pyxllib.basic._3_pathlib import *
+from pyxllib.basic._3_filelib import *
 # 4 调试工具，Iterate等一些高级通用功能
 from pyxllib.basic._4_loglib import *
 # 5 目录工具

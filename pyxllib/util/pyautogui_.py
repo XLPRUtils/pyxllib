@@ -24,7 +24,7 @@ except ModuleNotFoundError:
 
 import pyscreeze
 
-from pyxllib.basic import get_etag, Path, dprint
+from pyxllib.basic import get_etag, File, dprint
 
 
 class AutoGui:
@@ -58,8 +58,8 @@ class AutoGui:
         # 出现这种情况，均速会由0.168秒变慢18%到0.198秒。
         if self.use_opencv and re.search(r'[\u4e00-\u9fa5，。；？（）【】、①-⑨]', file_path):
             # TODO 除了拷贝图片的方法，应该有其他更好的策略
-            p1 = Path(file_path)
-            p2 = Path(get_etag(file_path), p1.suffix, root=Path.TEMP)
+            p1 = File(file_path)
+            p2 = File(get_etag(file_path), p1.suffix, root=File.TEMP)
             p1.copy(p2, if_exists='ignore')  # 使用etag去重，出现相同etag则不用拷贝了
             file_path = p2.fullpath
             # print(file_path)
