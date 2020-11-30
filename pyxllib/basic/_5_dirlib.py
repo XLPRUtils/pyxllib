@@ -38,26 +38,26 @@ class Dir(File):
 
     这里的测试可以全程自己造一个
     """
-    __slots__ = ('files', '_origin_wkdir')
+    __slots__ = ('filepaths', '_origin_wkdir')
 
-    def __init__(self, path=None, *, root=None, files=None):
+    def __init__(self, path=None, *, root=None, filepaths=None):
         """根目录、工作目录
 
         >> Dir()  # 以当前文件夹作为root
         >> Dir(r'C:/pycode/code4101py')  # 指定目录
         """
         super().__init__(path, root=root)
-        self.files = files or []  # 初始默认没有选中任何文件（文件夹）
+        self.filepaths = filepaths or []  # 初始默认没有选中任何文件（文件夹）
 
     @property
-    def absfiles(self):
+    def absfilepaths(self):
         """返回所有files的绝对路径"""
-        return [self.fullpath + '/' + f for f in self.files]
+        return [self.fullpath + '/' + f for f in self.filepaths]
 
     @property
-    def filepaths(self):
-        """返回所有files的path对象"""
-        return [self / f for f in self.files]
+    def files(self):
+        """返回所有files的File对象"""
+        return [self / f for f in self.filepaths]
 
     def select(self, patter, nsort=True, **kwargs):
         r""" 增加选中文件，从filesmatch衍生而来，参数含义见 filesfilter
@@ -78,9 +78,9 @@ class Dir(File):
         >> Dir(r'C:/pycode/code4101py').select('*.py', min_mtime=Datetime(2020, 3, 1))  # 修改时间在3月1日以上的
         """
         files = filesmatch(patter, root=self.fullpath, **kwargs)
-        files = self.files + files
+        files = self.filepaths + files
         if nsort: files = natural_sort(files)
-        return Dir(self._path, files=files)
+        return Dir(self._path, filepaths=files)
 
     def procfiles(self, func, start=None, end=None, ref_dir=None, pinterval=None, max_workers=1, interrupt=True):
         """ 对选中的文件迭代处理
@@ -103,8 +103,8 @@ class Dir(File):
         """
         if ref_dir:
             ref_dir = Dir(ref_dir)
-            files1 = self.filepaths
-            files2 = [(ref_dir / self.files[i]) for i in range(len(self.files))]
+            files1 = self.files
+            files2 = [(ref_dir / self.filepaths[i]) for i in range(len(self.filepaths))]
 
             def wrap_func(data):
                 func(*data)
@@ -112,7 +112,7 @@ class Dir(File):
             data = zip(files1, files2)
 
         else:
-            data = self.filepaths
+            data = self.files
             wrap_func = func
 
         Iterate(data).run(wrap_func, start=start, end=end, pinterval=pinterval,
@@ -123,13 +123,13 @@ class Dir(File):
 
         这里设置的选择模式，是指全集的选择范围
         """
-        files = Dir(self).select(patter, nsort, **kwargs).files
-        cur_files = set(self.files)
+        files = Dir(self).select(patter, nsort, **kwargs).filepaths
+        cur_files = set(self.filepaths)
         new_files = []
         for f in files:
             if f not in cur_files:
                 new_files.append(f)
-        return Dir(self._path, files=new_files)
+        return Dir(self._path, filepaths=new_files)
 
     def exclude(self, patter, **kwargs):
         """ 去掉部分选中文件
@@ -143,13 +143,13 @@ class Dir(File):
         """
         files = set(filesmatch(patter, root=self.fullpath, **kwargs))
         new_files = []
-        for f in self.files:
+        for f in self.filepaths:
             if f not in files:
                 new_files.append(f)
-        return Dir(self._path, files=new_files)
+        return Dir(self._path, filepaths=new_files)
 
     def __repr__(self):
-        return f'{self._path}: {self.files}'
+        return f'{self._path}: {self.filepaths}'
 
     def __enter__(self):
         """ 使用with模式可以进行工作目录切换
@@ -522,7 +522,7 @@ def extract_files(src, dst, pattern, if_exists='replace'):
     """ 提取满足pattern模式的文件
     """
     d1, d2 = Dir(src), Dir(dst)
-    files = d1.select(pattern).files
+    files = d1.select(pattern).filepaths
     for f in files:
         p1, p2 = File(d1 / f), File(d2 / f)
         p1.copy(p2, if_exists=if_exists)

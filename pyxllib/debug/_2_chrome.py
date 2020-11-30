@@ -130,7 +130,7 @@ def view_jsons_kv(fd, files='**/*.json', encoding=None, max_items=10, max_value_
     """
     kvc = KeyValuesCounter()
     d = Dir(fd)
-    for p in d.select(files).filepaths:
+    for p in d.select(files).files:
         # print(p)
         data = p.read(encoding=encoding, mode='.json')
         kvc.add(data, max_value_length=max_value_length)
@@ -154,7 +154,7 @@ def check_repeat_filenames(dir, key='stem', link=True):
     # 1 智能解析dir参数
     if not isinstance(dir, Dir):
         dir = Dir(dir)
-    if not dir.files:
+    if not dir.filepaths:
         dir = dir.select('**/*', type_='file')
 
     # 2 辅助函数，智能解析key参数
@@ -169,7 +169,7 @@ def check_repeat_filenames(dir, key='stem', link=True):
     # 3 制作df表格数据
     columns = ['key', 'suffix', 'filename']
     li = []
-    for f in dir.files:
+    for f in dir.filepaths:
         p = File(f)
         li.append([extract_key(p), p.suffix.lower(), f])
     df = pd.DataFrame.from_records(li, columns=columns)
