@@ -108,18 +108,30 @@ ____chardet = """
 """
 
 
-def get_encoding(bstr, maxn=1024):
+def get_encoding(bstr):
     """ 输入二进制字符串或文本文件，返回字符编码
 
     https://www.yuque.com/xlpr/pyxllib/get_encoding
 
     :param bstr: 二进制字符串、文本文件
-    :param maxn: 分析字节数上限，越小速度越快，但也会降低精准度
     :return: utf8, utf-8-sig, gbk, utf16
     """
+    # 0 检查工具
+    def inner_detect(bdata):
+        """ https://mp.weixin.qq.com/s/gSXNf3K_JWydhej8KpyhMg """
+        from chardet.universaldetector import UniversalDetector
+        detector = UniversalDetector()
+        for line in bdata.splitlines():
+            detector.feed(line)
+            if detector.done:
+                break
+        detector.close()
+        return detector.result['encoding']
+
     # 1 读取编码
     if isinstance(bstr, bytes):  # 如果输入是一个二进制字符串流则直接识别
-        encoding = chardet.detect(bstr[:maxn])['encoding']  # 截断一下，不然太长了，太影响速度
+        # encoding = chardet.detect(bstr[:maxn])['encoding']  # 截断一下，不然太长了，太影响速度
+        encoding = inner_detect(bstr)  # 截断一下，不然太长了，太影响速度
     elif is_file(bstr):  # 如果是文件，则按二进制打开
         # 如果输入是一个文件名则进行读取
         if bstr.endswith('.pdf'):
@@ -127,7 +139,8 @@ def get_encoding(bstr, maxn=1024):
             return 'utf8'
         with open(bstr, 'rb') as f:  # 以二进制读取文件，注意二进制没有\r\n的值
             bstr = f.read()
-        encoding = chardet.detect(bstr[:maxn])['encoding']
+        # encoding = chardet.detect(bstr[:maxn])['encoding']
+        encoding = inner_detect(bstr)
     else:  # 其他类型不支持
         return 'utf8'
     # 检测结果存储在encoding
@@ -144,7 +157,7 @@ def get_encoding(bstr, maxn=1024):
         # 保留原值的一些正常识别结果
         encoding = 'utf-8-sig'
     elif bstr.strip():  # 如果不在预期结果内，且bstr非空，则用常见的几种编码尝试
-        # dprint(encoding)
+        # print('encoding=', encoding)
         type_ = ('utf8', 'gbk', 'utf16')
 
         def try_encoding(bstr, encoding):
@@ -799,19 +812,28 @@ class File:
         else:  # 非文件对象
             raise FileNotFoundError(f'{self} 文件不存在，无法读取。')
 
-    def write(self, ob, *, encoding='utf8', if_exists='error', etag=False, mode=None):
+    def write(self, ob, *, encoding=None, if_exists='error', etag=False, mode=None):
         """ 保存为文件
 
         :param ob: 写入的内容
             如果要写txt文本文件且ob不是文本对象，只会进行简单的字符串化
         :param encoding: 强制写入的编码
+            如果原文件存在且有编码，则使用原文件的编码
+            如果没有，则默认使用utf8
+            当然，其实有些格式是用不到编码信息的~~例如pkl文件
         :param if_exists: 如果文件已存在，要进行的操作
         :param etag: 创建的文件，是否需要再进一步重命名为etag名称
         :param mode: 写入模式（例如 '.json'），默认从扩展名识别，也可以强制指定
         :return: 返回写入的文件名，这个主要是在写临时文件时有用
         """
-
         # 1 核心功能：将ob写入文件path
+        def get_enc():
+            # 编码在需要的时候才获取分析，减少不必要的运算开销
+            # 所以封装一个函数接口，需要的时候再计算
+            if encoding is None:
+                return self.encoding or 'utf8'
+            return encoding
+
         if self.preprocess(if_exists):
             self.ensure_dir(pathtype='file')
             name, suffix = self.fullpath, self.suffix
@@ -821,16 +843,16 @@ class File:
                 with open(name, 'wb') as f:
                     pickle.dump(ob, f)
             elif mode == '.json':
-                with open(name, 'w', encoding=encoding) as f:
+                with open(name, 'w', encoding=get_enc()) as f:
                     json.dump(ob, f, ensure_ascii=False, indent=2)
             elif mode == '.yaml':
-                with open(name, 'w', encoding=encoding) as f:
+                with open(name, 'w', encoding=get_enc()) as f:
                     yaml.dump(ob, f)
             elif isinstance(ob, bytes):
                 with open(name, 'wb') as f:
                     f.write(ob)
             else:  # 其他类型认为是文本类型
-                with open(name, 'w', errors='ignore', encoding=encoding) as f:
+                with open(name, 'w', errors='ignore', encoding=get_enc()) as f:
                     f.write(str(ob))
 
         # 2 如果使用了etag命名机制
