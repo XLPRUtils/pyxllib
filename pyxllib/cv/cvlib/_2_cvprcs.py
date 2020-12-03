@@ -249,11 +249,11 @@ class CvPrcs:
         return img
 
     @classmethod
-    def write(cls, img, path, if_exists='replace', **kwargs):
-        if not isinstance(path, File):
-            path = File(path)
-        data = cv2.imencode(ext=path.suffix, img=img)[1]
-        return path.write(data.tobytes(), if_exists=if_exists)
+    def write(cls, img, file, if_exists='replace', **kwargs):
+        if not isinstance(file, File):
+            file = File(file)
+        data = cv2.imencode(ext=file.suffix, img=img)[1]
+        return file.write(data.tobytes(), if_exists=if_exists)
 
     @classmethod
     def size(cls, img):

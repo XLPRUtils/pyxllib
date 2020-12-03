@@ -212,3 +212,33 @@ def get_background_color(src_img, edge_size=5, binary_img=None):
     # 以数量多的作为背景像素
     colors = colors0 if len(colors0) > len(colors1) else colors1
     return np.mean(np.array(colors), axis=0, dtype='int').tolist()
+
+
+def debug_images(dir_, func, *, save=None, show=False):
+    """
+    :param dir_: 选中的文件清单
+    :param func: 对每张图片执行的功能，函数应该只有一个图片路径参数  new_img = func(img)
+        当韩式有个参数时，可以用lambda函数技巧： lambda im: func(im, arg1=..., arg2=...)
+    :param save: 如果输入一个目录，会将debug结果图存储到对应的目录里
+    :param show: 如果该参数为True，则每处理一张会imshow显示处理效果
+        此时弹出的窗口里，每按任意键则显示下一张，按ESC退出
+    :return:
+
+    TODO 显示原图、处理后图的对比效果
+    TODO 支持同时显示多张图处理效果
+    """
+    if save:
+        save = File(save)
+
+    for f in dir_.files:
+        im1 = imread(f)
+        im2 = func(im1)
+
+        if save:
+            imwrite(im2, File(save / f.name, root=dir_))
+
+        if show:
+            imshow(im2)
+            key = cv2.waitKey()
+            if key == '0x1B':  # ESC 键
+                break

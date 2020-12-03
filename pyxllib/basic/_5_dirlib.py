@@ -7,6 +7,7 @@
 
 import filecmp
 import os
+import random
 import re
 import shutil
 
@@ -49,6 +50,16 @@ class Dir(File):
         super().__init__(path, root=root)
         self.filepaths = filepaths or []  # 初始默认没有选中任何文件（文件夹）
 
+    def sample(self, n=None, frac=None):
+        """
+        :param n: 在filepaths中抽取n个文件
+        :param frac: 按比例抽取文件
+        :return: 新的Dir文件选取状态
+        """
+        n = n or int(frac * len(self.filepaths))
+        files = random.sample(self.filepaths, n)
+        return Dir(self._path, filepaths=files)
+
     @property
     def absfilepaths(self):
         """返回所有files的绝对路径"""
@@ -89,6 +100,8 @@ class Dir(File):
             参数 p: 输入参数 Path 对象
             return: 可以没有返回值，当有返回值时，会作为信息，表示要输出查看
                 TODO 以后可以返回字典结构，用不同的key表示不同的功能，可以控制些高级功能
+        :param ref_dir: 使用该参数时，则每次会给func传递两个路径参数
+            第一个是原始的file，第二个是ref_dir目录下对应路径的file
 
         TODO 增设可以bfs还是dfs的功能？
 
