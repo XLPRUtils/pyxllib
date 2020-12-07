@@ -275,7 +275,8 @@ class EmptyPoolExecutor:
         func(*args, **kwargs)
 
     def shutdown(self):
-        print('并行执行结束')
+        # print('并行执行结束')
+        pass
 
 
 class Iterate:

@@ -15,6 +15,7 @@ from shapely.geometry import Polygon
 from pyxllib.util.mathlib import Intervals
 
 import cv2
+
 # import PIL.Image
 
 ____ensure_type = """
@@ -498,9 +499,9 @@ def split_vector_interval(vec, maxsplit=None, minwidth=3):
     """
     # 1 裁剪左边、右边
     left, right = 0, len(vec)
-    while vec[left] <= 0 and left < right:
+    while left < right and vec[left] <= 0:
         left += 1
-    while vec[right - 1] <= 0 and right > left:
+    while right > left and vec[right - 1] <= 0:
         right -= 1
     vec = vec[left:right]
     width = len(vec)
