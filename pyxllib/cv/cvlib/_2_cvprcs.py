@@ -229,7 +229,7 @@ class CvPrcs:
         elif is_pil_image(file):
             img = pil2cv(file)
         else:
-            raise TypeError(f'类型错误：{type(file)}')
+            raise TypeError(f'类型错误：{type(file)} {file}')
         return cls.cvt_channel(img, flags)
 
     @classmethod
