@@ -5,7 +5,7 @@
 # @Data   : 2020/11/15 10:09
 
 from pyxllib.basic import File
-from pyxllib.cv.cvlib._1_geo import *
+from pyxllib.cv._1_geo import *
 
 import cv2
 import PIL.Image

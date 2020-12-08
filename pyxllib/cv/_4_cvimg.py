@@ -4,7 +4,7 @@
 # @Email  : 877362867@qq.com
 # @Data   : 2020/11/17 15:21
 
-from pyxllib.cv.cvlib._3_pilprcs import *
+from pyxllib.cv._3_pilprcs import *
 
 ____XxImg = """
 对CvPrcs、PilPrcs的类层级接口封装

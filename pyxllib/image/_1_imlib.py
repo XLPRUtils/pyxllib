@@ -7,16 +7,15 @@
 
 from collections import defaultdict
 import concurrent.futures
-import subprocess
 
-import requests
 from PIL import Image
 
 from pyxllib.basic import *
 
 
 def get_img_content(in_):
-    """获取in_代表的图片的二进制数据
+    """ 获取in_代表的图片的二进制数据
+
     :param in_: 可以是本地文件，也可以是图片url地址，也可以是Image对象
     """
     from pyxllib.basic import is_url, is_file
@@ -43,7 +42,8 @@ def get_img_content(in_):
 
 
 def magick(infile, *, outfile=None, if_exists='error', transparent=None, trim=False, density=None, other_args=None):
-    """调用iamge magick的magick.exe工具
+    """ 调用iamge magick的magick.exe工具
+
     :param infile: 处理对象文件
     :param outfile: 输出文件，可以不写，默认原地操作（只设置透明度、裁剪时可能会原地操作）
     :param if_exists: 如果目标文件已存在要怎么处理
@@ -97,7 +97,8 @@ def ensure_pngs(folder, *, if_exists='ignore',
                 transparent=None, trim=False,
                 density=None, epsdensity=None,
                 max_workers=None):
-    """确保一个目录下的所有图片都有一个png版本格式的文件
+    """ 确保一个目录下的所有图片都有一个png版本格式的文件
+
     :param folder: 目录名，会遍历直接目录下所有没png的stem名称生成png
     :param if_exists: 如果文件已存在，要进行的操作
         'replace'，直接替换

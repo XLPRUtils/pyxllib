@@ -19,12 +19,6 @@ except ModuleNotFoundError:
     from get_image_size import get_image_size
 
 try:
-    import fitz
-except ModuleNotFoundError:
-    subprocess.run(['pip', 'install', 'PyMuPdf'])
-    import fitz
-
-try:
     import cv2
 except ModuleNotFoundError:
     subprocess.run(['pip', 'install', 'opencv-python'])

@@ -15,6 +15,9 @@
 文档： https://histudy.yuque.com/docs/share/365f3a75-28d0-4595-bc80-5e9d6ab36f71#
 """
 
+import collections
+import itertools
+
 from pyxllib.debug import *
 
 
@@ -826,3 +829,107 @@ MathJax.Hub.Config(MATHJAX_KLXX_CONFIG);
     res.append(tail)
 
     return ''.join(res)
+
+
+class StrIdxBack:
+    r"""字符串删除部分干扰字符后，对新字符串匹配并回溯找原字符串的下标
+
+    >>> ob = StrIdxBack('bxx  ax xbxax')
+    >>> ob.delchars(r'[ x]+')
+    >>> ob  # 删除空格、删除字符x
+    baba
+    >>> print(ob.idx)  # keystr中与原字符串对应位置：(0, 5, 9, 11)
+    (0, 5, 9, 11)
+    >>> m = re.match(r'b(ab)', ob.keystr)
+    >>> m = ob.matchback(m)
+    >>> m.group(1)
+    'ax xb'
+    >>> ob.search('ab')  # 找出原字符串中内容：'ax xb'
+    'ax xb'
+    """
+
+    def __init__(self, s):
+        self.oristr = s
+        self.idx = tuple(range(len(s)))  # 存储还保留着内容的下标
+        self.keystr = s
+
+    def delchars(self, pattern, flags=0):
+        """模仿正则的替换语法
+        但是不用输入替换目标s，以及目标格式，因为都是删除操作
+
+        利用正则可以知道被删除的是哪个区间范围
+        >>> ob = StrIdxBack('abc123df4a'); ob.delchars(r'\d+'); str(ob)
+        'abcdfa'
+        >>> ob.idx
+        (0, 1, 2, 6, 7, 9)
+        """
+        k = 0
+        idxs = []
+
+        def repl(m):
+            nonlocal k, idxs
+            idxs.append(self.idx[k:m.start(0)])
+            k = m.end(0)
+            return ''
+
+        self.keystr = re.sub(pattern, repl, self.keystr, flags=flags)
+        idxs.append(self.idx[k:])
+        self.idx = tuple(itertools.chain(*idxs))
+
+    def compare_newstr(self, limit=300):
+        r"""比较直观的比较字符串前后变化
+
+        newstr相对于oldnew作展开，比较直观的显示字符串前后变化差异
+        >>> ob = StrIdxBack('abab'); ob.delchars('b'); ob.compare_newstr()
+        'a a '
+        """
+        s1 = self.oristr
+        dd = set(self.idx)
+
+        s2 = []
+        k = 0
+        for i in range(min(len(s1), limit)):
+            if i in dd:
+                s2.append(s1[i])
+                k += 1
+            else:
+                if ord(s1[i]) < 128:
+                    if s1[i] == ' ':  # 原来是空格的，删除后要用_表示
+                        s2.append('_')
+                    else:  # 原始不是空格的，可以用空格表示已被删除
+                        s2.append(' ')
+                else:  # 中文字符要用两个空格表示才能对齐
+                    s2.append('  ')
+        s2 = ''.join(s2)
+        s2 = s2.replace('\n', r'\n')
+
+        return s2
+
+    def compare(self, limit=300):
+        """比较直观的比较字符串前后变化"""
+        s1 = self.oristr
+
+        s1 = s1.replace('\n', r'\n')[:limit]
+        s2 = self.compare_newstr(limit)
+
+        return s1 + '\n' + s2 + '\n'
+
+    def matchback(self, m):
+        """输入一个keystr匹配的match对象，将其映射回oristr的match对象"""
+        regs = []
+        for rs in getattr(m, 'regs'):
+            regs.append((self.idx[rs[0]], self.idx[rs[1] - 1] + 1))  # 注意右边界的处理有细节
+        return ReMatch(regs, self.oristr, m.pos, len(self.oristr), m.lastindex, m.lastgroup, m.re)
+
+    def search(self, pattern):
+        """在新字符串上查找模式，但是返回的是原字符串的相关下标数据"""
+        m = re.search(pattern, self.keystr)
+        if m:
+            m = self.matchback(m)  # pycharm这里会提示m没有regs的成员变量，其实是正常的，没问题
+            return m.group()
+        else:
+            return ''
+
+    def __repr__(self):
+        """返回处理后当前的新字符串"""
+        return self.keystr
