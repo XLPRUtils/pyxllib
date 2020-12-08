@@ -9,16 +9,7 @@
 xml等网页结构方面的处理
 """
 
-
-from collections import defaultdict, Counter
-
-
-import bs4
-from bs4 import BeautifulSoup
-
-
-from pyxllib.util.textlib import *
-
+from pyxllib.text._1_base import *
 
 ____section_1_dfs_base = """
 一个通用的递归功能
@@ -55,6 +46,7 @@ def dfs_base(node, *,
         textwrap：用到shorten
         align.listalign：生成列编号时对齐
     """
+
     # 1 子节点生成器，与配置
     def bs4_child_generator(node):
         try:
@@ -75,6 +67,7 @@ def dfs_base(node, *,
         for t in child_generator(node):
             ls += inner(t, depth + 1)
         return ls
+
     ls = inner(node)
     total_node = len(ls)
     total_depth = max(map(lambda x: x[1], ls))
@@ -121,7 +114,7 @@ def dfs_base(node, *,
     # 5 格式处理
     def default_mystr(node, depth):
         s1 = prefix * depth
-        s2 = typename(node)+'，' if show_node_type else ''
+        s2 = typename(node) + '，' if show_node_type else ''
         s3 = textwrap.shorten(str(node), 200)
         return s1 + s2 + s3
 
@@ -138,6 +131,7 @@ def dfs_base(node, *,
 
                 def str_plus(node, depth):  # 注意这里函数名要换一个新的func
                     return prefix * depth + func(node)
+
                 mystr = str_plus
 
         line_num = listalign(range(1, total_node + 1))
@@ -224,7 +218,7 @@ def treetable(childreds, parents, arg3=None, nodename_colname=None):
             ps.append(root)
 
     n = len(cs)
-    depth, tree_order, len_childs = [-1]*n, [-1]*n, [0]*n
+    depth, tree_order, len_childs = [-1] * n, [-1] * n, [0] * n
 
     # 2 构造父结点-孩子结点的字典dd
     dd = defaultdict(list)
@@ -232,13 +226,15 @@ def treetable(childreds, parents, arg3=None, nodename_colname=None):
 
     # 3 dfs
     cnt = 1
+
     def dfs(node, d):
         """找node的所有子结点"""
         nonlocal cnt
         for i in dd.get(node, []):
             tree_order[i], depth[i], len_childs[i] = cnt, d, len(dd[cs[i]])
             cnt += 1
-            dfs(cs[i], d+1)
+            dfs(cs[i], d + 1)
+
     dfs(root, 1)
 
     # 4 输出格式
@@ -277,7 +273,7 @@ def treetable_flatten(df, *, reverse=False, childid_colname='id', parentid_colna
     # 1 构造辅助数组
     if format_colname is None: format_colname = parentid_colname
     parentid = dict()  # parentid[k] = v， 存储结点k对应的父结点v
-    nodeval = dict()   # nodeval[k] = v，  存储结点k需要显示的数值情况
+    nodeval = dict()  # nodeval[k] = v，  存储结点k需要显示的数值情况
     if len(df[df.index.duplicated()]):
         dprint(len(set(df.index)), len(df.index))  # 有重复index
         raise ValueError
@@ -302,13 +298,13 @@ def treetable_flatten(df, *, reverse=False, childid_colname='id', parentid_colna
     if reverse:
         for j in range(num_depth, 0, -1): df[f'depth-{j}'] = ''
         for idx, row in df.iterrows():
-            for j in range(1, len(row.parents)+1):
-                df.loc[idx, f'depth-{j}'] = row.parents[j-1]
+            for j in range(1, len(row.parents) + 1):
+                df.loc[idx, f'depth-{j}'] = row.parents[j - 1]
     else:
         for j in range(num_depth): df[f'depth{j}'] = ''
         for idx, row in df.iterrows():
             for j in range(len(row.parents)):
-                df.loc[idx, f'depth{j}'] = row.parents[-j-1]
+                df.loc[idx, f'depth{j}'] = row.parents[-j - 1]
     df.drop('parents', axis=1, inplace=True)
     return df
 
@@ -347,11 +343,12 @@ def subtag_names(t):
     """列出结点t的所有直接子结点（花括号后面跟的数字是连续出现次数）
     例如body的： p{137}，tbl，p{94}，tbl，p{1640}，sectPr
     """
+
     def counter(m):
         s1 = m.group(1)
         n = (m.end(0) - m.start(0)) // len(s1)
         s = s1[:-1] + '{' + str(n) + '}'
-        if m.string[m.end(0)-1] == '，':
+        if m.string[m.end(0) - 1] == '，':
             s += '，'
         return s
 
@@ -389,6 +386,7 @@ class XmlParser:
     def treestruct_brief(self, linenum=True, prefix='- ', **kwargs):
         """查看树形结构的简洁版
         """
+
         def mystr(node):
             # if isinstance(node, (bs4.ProcessingInstruction, code4101py.stdlib.bs4.ProcessingInstruction)):
             if isinstance(node, bs4.ProcessingInstruction):
@@ -416,6 +414,7 @@ class XmlParser:
                 ls2： 属性规律表
         count_tagname、check_tag的功能基本都可以被这个函数代替
         """
+
         def text(t):
             """ 考虑到结果一般都是存储到excel，所以会把无法存成gbk的字符串删掉
             另外控制了每个元素的长度上限
@@ -437,7 +436,7 @@ class XmlParser:
         while t:
             # 1 结点规律表
             d = depth(t)
-            line = [i, d, '_'*d+str(d), tag_name(t.parent), tag_name(t),
+            line = [i, d, '_' * d + str(d), tag_name(t.parent), tag_name(t),
                     text(mydictstr(t.attrs) if t.name else t),  # 结点存属性，字符串存值
                     subtag_names(t)]
             ls1.append(line)
@@ -500,7 +499,7 @@ class XmlParser:
                     dprint(node, depth)  # tagname里有同名子标签
                 add(node.name, depth)
                 for t in node.children:
-                    inner(t, depth+1)
+                    inner(t, depth + 1)
             elif isinstance(node, bs4.NavigableString):
                 add('NavigableString', depth)
             else:
@@ -555,6 +554,7 @@ class MyBs4(BeautifulSoup, XmlParser):
     show_brief：显示xml结构
     count_tagname： 统计各个结点名称出现次数
     """
+
     def __init__(self, markup="", features='lxml', *args, **kwargs):
         # markup = Path(markup).read()
         # TODO: **kwargs我不知道怎么传进来啊，不过感觉也不删大雅没什么鸟用吧~~

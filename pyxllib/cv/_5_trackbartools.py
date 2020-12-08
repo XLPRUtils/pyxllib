@@ -10,10 +10,8 @@
 from pyxlib.cv.debugtools import *
 """
 
-import math
-
-from pyxllib.basic import TicToc
-from pyxllib.cv.cvlib import *
+from pyxllib.basic import *
+from pyxllib.cv._4_cvimg import *
 
 
 class TrackbarTool:
@@ -21,7 +19,7 @@ class TrackbarTool:
     """
 
     def __init__(self, winname, img, flags=0):
-        img = xlcv.read(img)
+        img = imread(img)
         cv2.namedWindow(winname, flags)
         cv2.imshow(winname, img)
         self.winname = winname

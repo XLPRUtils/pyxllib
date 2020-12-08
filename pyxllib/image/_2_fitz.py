@@ -6,15 +6,12 @@
 
 
 import concurrent.futures
-import math
-import subprocess
-import tempfile
 
 import fitz
 
 from pyxllib.basic import *
-from pyxllib.debug import chrome, showdir
-from .imlib import zoomsvg
+from pyxllib.debug import chrome
+from pyxllib.image._1_imlib import zoomsvg
 
 
 class DemoFitz:

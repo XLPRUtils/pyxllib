@@ -6,8 +6,6 @@
 
 
 import html
-import subprocess
-import pandas as pd
 
 from pyxllib.debug._1_typelib import *
 
