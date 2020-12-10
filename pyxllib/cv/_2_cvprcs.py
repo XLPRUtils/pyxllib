@@ -5,6 +5,7 @@
 # @Data   : 2020/11/15 10:09
 
 from pyxllib.basic import File
+from pyxllib.debug import dprint
 from pyxllib.cv._1_geo import *
 
 import cv2
@@ -229,12 +230,13 @@ class CvPrcs:
         elif is_pil_image(file):
             img = pil2cv(file)
         else:
-            raise TypeError(f'类型错误：{type(file)} {file}')
+            raise TypeError(f'类型错误或文件不存在：{type(file)} {file}')
         return cls.cvt_channel(img, flags)
 
     @classmethod
-    def cvt_channel(cls, img, flags):
+    def cvt_channel(cls, img, flags=None):
         """ 确保图片目前是flags指示的通道情况 """
+        if flags is None: return img
         n_c = cls.n_channels(img)
         if flags == 0 and n_c > 1:
             if n_c == 3:
@@ -269,11 +271,15 @@ class CvPrcs:
             return 1
 
     @classmethod
-    def resize(cls, img, size, interpolation=cv2.INTER_CUBIC, **kwargs):
+    def resize(cls, img, size, **kwargs):
         """
         :param size: (h, w)
+        :param kwargs:
+            interpolation=cv2.INTER_CUBIC
         """
-        return cv2.resize(img, size[::-1], interpolation, **kwargs)
+        # if 'interpolation' not in kwargs:
+        #     kwargs['interpolation'] = cv2.INTER_CUBIC
+        return cv2.resize(img, size[::-1], **kwargs)
 
     @classmethod
     def show(cls, img, winname=None, flags=0):

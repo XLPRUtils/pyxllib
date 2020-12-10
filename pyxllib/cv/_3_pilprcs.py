@@ -17,11 +17,12 @@ class PilPrcs(CvPrcs):
         elif File(file).is_file():
             img = Image.open(file, **kwargs)
         else:
-            raise TypeError(f'类型错误：{type(file)}')
+            raise TypeError(f'类型错误或文件不存在：{type(file)} {file}')
         return cls.cvt_channel(img, flags)
 
     @classmethod
-    def cvt_channel(cls, img, flags):
+    def cvt_channel(cls, img, flags=None):
+        if flags is None: return img
         n_c = cls.n_channels(img)
         if flags == 0 and n_c > 1:
             img = img.convert('L')
@@ -37,17 +38,22 @@ class PilPrcs(CvPrcs):
             img.save(str(p), **kwargs)
 
     @classmethod
-    def resize(cls, img, size, interpolation=Image.BILINEAR, **kwargs):
+    def resize(cls, img, size, **kwargs):
         """
-        >>> im = PilImg.read(np.zeros([100, 200], dtype='uint8'), 0)
+
+        :param kwargs:
+            resample=3，插值算法；有PIL.Image.NEAREST, ~BOX, ~BILINEAR, ~HAMMING, ~BICUBIC, ~LANCZOS等
+                默认是 PIL.Image.BICUBIC；如果mode是"1"或"P"模式，则总是 PIL.Image.NEAREST
+
+        >>> im = PilPrcs.read(np.zeros([100, 200], dtype='uint8'), 0)
         >>> im.size
         (100, 200)
-        >>> im2 = im.reduce_by_area(50*50)
+        >>> im2 = im.reduce_by_area(50*50, **kwargs)
         >>> im2.size
         (35, 70)
         """
         # 注意pil图像尺寸接口都是[w,h]，跟标准的[h,w]相反
-        return cls.resize(img, size[::-1], interpolation)
+        return img.resize(size[::-1])
 
     @classmethod
     def size(cls, img):

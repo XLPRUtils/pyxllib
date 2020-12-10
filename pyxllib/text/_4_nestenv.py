@@ -31,6 +31,7 @@ def pqmove(s, p, q):
 
 def substr_intervals(s, head, tail=None, invert=False, inner=False):
     """ 旧模块，不推荐使用，建议使用新版的NestEnv接口直接处理
+
     :param s: 内容
     :param head: 头
         TODO 含正则和不含正则的，可以分子函数来实现，不要都写在这个函数
@@ -45,6 +46,7 @@ def substr_intervals(s, head, tail=None, invert=False, inner=False):
     TODO 考虑tabular嵌套tabular这种的正常定位？
     TODO 支持同时定位topic和sub_topic？
     """
+    from pyxllib.text import NestEnv, LatexNestEnv
 
     def infer_headtail(head, tail=None):
         """输入简化的head、tail命令，返回智能推导出的完整的head、tail值"""
@@ -77,29 +79,29 @@ def substr_intervals(s, head, tail=None, invert=False, inner=False):
         parts = NestEnv(s).bracket2(head, tail, inner).intervals
     # 3 公式匹配
     elif head == tail == '$':
-        parts = NestEnv(s).formula(inner).intervals
+        parts = LatexNestEnv(s).formula(inner).intervals
     # 4 百分注结构 %<xxx a='yy'> ... %</xxx> 的格式匹配
     elif re.match(r'%<[a-zA-Z\-_]+', head) and tail == '%/':
-        parts = NestEnv(s).pxmltag(head[2:], 'inner').intervals
+        parts = LatexNestEnv(s).pxmltag(head[2:], 'inner').intervals
     # 5 latex的 章、节、子节 匹配
     elif re.match(r'\\(chapter|section|subsection)', head) and not tail:  # TODO 支持inner功能
-        parts = NestEnv(s).latexpart(head[1:], inner=inner)
+        parts = LatexNestEnv(s).latexpart(head[1:], inner=inner)
     elif head == r'\item':
-        parts = NestEnv(s).item().intervals
+        parts = LatexNestEnv(s).item().intervals
     # 7 latex类的环境匹配
     elif re.match(r'\\begin{([a-zA-Z]+)}', head):
         m1 = re.match(r'\\begin{([a-zA-Z]+)}', head)
         m2 = re.match(r'\\end{([a-zA-Z]+)}', tail)
         if m2 and m1.group(1) == m2.group(1):
-            parts = NestEnv(s).latexenv(head, tail, inner).intervals
+            parts = LatexNestEnv(s).latexenv(head, tail, inner).intervals
         else:
-            parts = NestEnv(s).find2(head, tail, inner).intervals
+            parts = LatexNestEnv(s).find2(head, tail, inner).intervals
     # 8 抓取latex中所有插图命令
     elif head == r'\includegraphics' and tail is None:
-        parts = NestEnv(s).includegraphics('inner').intervals
+        parts = LatexNestEnv(s).includegraphics('inner').intervals
     # 9 lewis电子式匹配
     elif head == r'\lewis' and tail is None:
-        parts = NestEnv(s).lewis(inner=inner).intervals
+        parts = LatexNestEnv(s).lewis(inner=inner).intervals
     # 10 xml标签结点匹配
     elif head[0] == '<' and tail == 'xmltag':
         parts = NestEnv(s).xmltag(head[1:], inner).intervals
@@ -149,9 +151,9 @@ class __NestEnvBase:
         self.intervals = Intervals(intervals)
 
     def inner(self, head, tail=None):
-        r"""0、匹配标记里，不含head、tail标记
+        r""" 0、匹配标记里，不含head、tail标记
 
-        >>> NestEnv(r'01\ce{H2O\ce{2}}01\ce{1\ce{3}5}').inner(r'\ce{').inner(r'\ce{').replace(lambda s: 'x')
+        >>> NestEnv(r'01\ce{H2O\ce{2}}01\ce{1\ce{3}5}').inner(r'\ce{').inner(r'\ce{').replace('x')
         '01\\ce{H2O\\ce{x}}01\\ce{1\\ce{x}5}'
         >>> NestEnv(r'01\ce{H2O\ce{2}}01\ce{1\ce{3}5}').inner(r'\cc{').string()
         >>> NestEnv(r'01\ce{H2O\ce{2}}01\ce{1\ce{3}5}').outside(r'\cc{').string()
@@ -167,9 +169,9 @@ class __NestEnvBase:
         return NestEnv(self.s, Intervals(li))
 
     def inside(self, head, tail=None):
-        r"""1、匹配标记里
+        r""" 1、匹配标记里
 
-        >>> NestEnv(r'01\ce{H2O\ce{2}}01\ce{1\ce{3}5}').inside(r'\ce{').replace(lambda s: 'x')
+        >>> NestEnv(r'01\ce{H2O\ce{2}}01\ce{1\ce{3}5}').inside(r'\ce{').replace('x')
         '01x01x'
         """
         li = []
@@ -179,7 +181,7 @@ class __NestEnvBase:
         return NestEnv(self.s, Intervals(li))
 
     def outside(self, head, tail=None):
-        r"""2、匹配标记外
+        r""" 2、匹配标记外
 
         >>> NestEnv(r'01\ce{H2O\ce{2}}01\ce{1\ce{3}5}').outside(r'\ce{').replace(lambda s: 'x')
         'x\\ce{H2O\\ce{2}}x\\ce{1\\ce{3}5}'
@@ -191,7 +193,7 @@ class __NestEnvBase:
         return NestEnv(self.s, Intervals(li))
 
     def expand(self, ne):
-        r"""在现有区间上，判断是否有被其他区间包含，有则进行延展
+        r""" 在现有区间上，判断是否有被其他区间包含，有则进行延展
         可以输入head、tail配对规则，也可以输入现成的区间
 
         >>> ne = NestEnv(r'aa$cc\ce{a}dd$bb\ce{d}h$h$')
@@ -210,7 +212,7 @@ class __NestEnvBase:
         return NestEnv(self.s, c)
 
     def filter(self, func):
-        r"""传入一个自定义函数func，会将每个区间的s传入，只保留func(s)为True的区间
+        r""" 传入一个自定义函数func，会将每个区间的s传入，只保留func(s)为True的区间
 
         >>> NestEnv('aa$bbb$ccc$d$eee$fff$g').formula().filter(lambda s: len(s) > 4).strings()
         ['$bbb$', '$fff$']
@@ -227,7 +229,8 @@ class __NestEnvBase:
         return tags
 
     def any(self, tags):
-        r"""区间集求并
+        r""" 区间集求并
+
         :param tags: 同nestenv的tags参数规则
 
         >>> NestEnv(r'12$34$56\ce{78}90').any(['$', '$', 1, r'\ce{', '}', 1]).replace(lambda s: 'x')
@@ -242,7 +245,8 @@ class __NestEnvBase:
         return NestEnv(self.s, Intervals(li))
 
     def all(self, tags):
-        r"""区间集求交
+        r""" 区间集求交
+
         :param tags: 同nestenv的tags参数规则
 
         # 删除即在公式里，也在ce里的内容
@@ -274,7 +278,7 @@ class __NestEnvBase:
     def string(self, idx=0):
         """第一个区间匹配的值
 
-        >>> NestEnv('11a22b33').inside('a', 'b').string()
+        >>> NestEnv('11a22b33a44bcc').find2('a', 'b').string()
         'a22b'
         """
         if self.intervals and idx < len(self.intervals):
@@ -291,7 +295,7 @@ class __NestEnvBase:
             return []
 
     def startlines(self, unique=False):
-        r"""每个匹配到的区间处于原内容s的第几行
+        r""" 每个匹配到的区间处于原内容s的第几行
 
         >>> NestEnv('{}\naa\n{}\n{}{}a\nb').inside('{', '}').startlines()
         [1, 3, 4, 4]
@@ -329,31 +333,33 @@ class __NestEnvBase:
         return self.intervals.sub(self.s, infunc, out_repl=outfunc, adjacent=adjacent)
 
     def replace(self, arg1, arg2=None, *, outfunc=lambda s: s, adjacent=False) -> str:
-        """类似字符串replace模式的替换
+        """ 类似字符串replace模式的替换
+
         arg1可以输入自定义替换函数，也可以像str.replace(arg1, arg2)这样传入参数
         """
         return self.intervals.replace(self.s, arg1, arg2, out_repl=outfunc, adjacent=adjacent)
 
     def __invert__(self):
         r"""
-        >>> (~NestEnv('aa$b$cc').inside('$')).strings()
+        >>> (~NestEnv('aa$b$cc').find2('$', '$')).strings()
         ['aa', 'cc']
         """
         return NestEnv(self.s, self.intervals.invert(len(self.s)))
 
     def invert(self):
         r"""
-        >>> NestEnv('aa$b$cc').inside('$').invert().strings()
+        >>> NestEnv('aa$b$cc').find2('$', '$').invert().strings()
         ['aa', 'cc']
         """
         return ~self
 
     def __and__(self, other):
-        r"""区间集求并运算
+        r""" 区间集求并运算
+
         >>> s = 'aa$b$ccc$dd$eee'
-        >>> (NestEnv(s).inside('$') & NestEnv(s).inside('a', 'd')).strings()
+        >>> (NestEnv(s).find2('$', '$') & NestEnv(s).inside('a', 'd')).strings()
         ['$b$', '$d']
-        >>> (NestEnv(s).inside('$') & re.finditer(r'a.*?d', s)).strings()
+        >>> (NestEnv(s).find2('$', '$') & re.finditer(r'a.*?d', s)).strings()
         ['$b$', '$d']
         """
         if isinstance(other, Intervals):
@@ -367,11 +373,12 @@ class __NestEnvBase:
             return NestEnv(self.s, self.intervals & Intervals(other))
 
     def __or__(self, other):
-        """区间集相加运算
+        """ 区间集相加运算
+
         >>> s = 'aa$b$ccc$dd$eee'
-        >>> (NestEnv(s).inside('$') | NestEnv(s).inside('a', 'd')).strings()
+        >>> (NestEnv(s).find2('$', '$') | NestEnv(s).inside('a', 'd')).strings()
         ['aa$b$ccc$dd$']
-        >>> (NestEnv(s).inside('$') | re.finditer(r'a.*?d', s)).strings()
+        >>> (NestEnv(s).find2('$', '$') | re.finditer(r'a.*?d', s)).strings()
         ['aa$b$ccc$dd$']
         """
         if isinstance(other, Intervals):
@@ -387,11 +394,12 @@ class __NestEnvBase:
         return self | other
 
     def __sub__(self, other):
-        """区间集减法运算
+        """ 区间集减法运算
+
         >>> s = 'aa$b$ccc$dd$eee'
-        >>> (NestEnv(s).inside('$') - NestEnv(s).inside('a', 'd')).strings()
+        >>> (NestEnv(s).find2('$', '$') - NestEnv(s).inside('a', 'd')).strings()
         ['d$']
-        >>> (NestEnv(s).inside('$') - re.finditer(r'a.*?d', s)).strings()
+        >>> (NestEnv(s).find2('$', '$') - re.finditer(r'a.*?d', s)).strings()
         ['d$']
         """
         if isinstance(other, Intervals):
@@ -405,6 +413,7 @@ class __NestEnvBase:
 
     def nest(self, func, invert=False):
         """ 对每个子区间进行一层嵌套定位
+
         :param func: 输入一个函数，模式为 func(s)
             支持输入一个字符串，返回一个类区间集
         :param invert: 是否对最终的结果再做一次取反
@@ -512,6 +521,12 @@ class NestEnv(__NestEnvBase):
 
         :param latexenv: latex环境下的括号匹配，需要忽略注释，以及\{等转义的影响
             目前并未细致优化该功能，只是暂时考虑了\{的影响
+
+        >>> NestEnv('__{_}_[_]_{[_]+[_]}__').bracket('{', '}').bracket('[', ']', inner=True).replace('1')
+        '__{_}_[_]_{[1]+[1]}__'
+
+        >>> NestEnv('__{_}_[_]_{[_]+[_]}__').bracket('{', '}', inner=True).bracket('[', ']', invert=True).replace('1')
+        '__{1}_[_]_{[_]1[_]}__'
 
         >>> NestEnv(r'xx\ce{b{c}d}b').bracket(r'\ce{').strings()
         ['\\ce{b{c}d}']

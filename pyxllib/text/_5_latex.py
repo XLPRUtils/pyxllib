@@ -7,7 +7,7 @@
 from pyxllib.text._4_nestenv import *
 
 
-def LatexNestEnv(NestEnv):
+class LatexNestEnv(NestEnv):
     def includegraphics(self, part=0, invert=False):
         r"""能抓取各种插图命令，使用inner可以只获得图片文件名
 
@@ -19,9 +19,9 @@ def LatexNestEnv(NestEnv):
             stem        inner里不含路径、扩展名的纯文件名
 
         >>> s = r'阳离子：\underline{\includegraphics{18pH-g1=8-8.eps}\qquad \figt[9pt]{18pH-g1=8-9.eps}}'
-        >>> NestEnv(s).includegraphics().strings()
+        >>> LatexNestEnv(s).includegraphics().strings()
         ['\\includegraphics{18pH-g1=8-8.eps}', '\\figt[9pt]{18pH-g1=8-9.eps}']
-        >>> NestEnv(s).includegraphics('inner').strings()
+        >>> LatexNestEnv(s).includegraphics('inner').strings()
         ['18pH-g1=8-8.eps', '18pH-g1=8-9.eps']
         """
 
@@ -37,9 +37,9 @@ def LatexNestEnv(NestEnv):
         r"""电子式的匹配
         这个本身是有个命令的并不难，难的是实际情况中，往往两边会有拓展
 
-        >>> NestEnv(r'aa H\Lewis{0:2:4:6:,N}H bb').inside(r'\lewis').strings()
+        >>> LatexNestEnv(r'aa H\Lewis{0:2:4:6:,N}H bb').inside(r'\lewis').strings()
         ['H\\Lewis{0:2:4:6:,N}H']
-        >>> NestEnv(r'aa H\Lewis{0:2:4:6:,N}H bb').lewis().strings()
+        >>> LatexNestEnv(r'aa H\Lewis{0:2:4:6:,N}H bb').lewis().strings()
         ['H\\Lewis{0:2:4:6:,N}H']
         """
 
@@ -115,7 +115,7 @@ def LatexNestEnv(NestEnv):
         算法：由于情况的复杂性，基本思路是只能一步一步往前search
         注意：这里暂不支持multirow那种可以在第2个参数写*的情形，那种情况可以另外再开发multirow匹配函数
 
-        >>> NestEnv('\n\\ssb{有关概念及其相互关系}\n\n{\\includegraphics{19pS-g4=5-1.png}}').latexcmd().replace('')
+        >>> LatexNestEnv('\n\\ssb{有关概念及其相互关系}\n\n{\\includegraphics{19pS-g4=5-1.png}}').latexcmd().replace('')
         '\n\n\n{}'
         """
 
@@ -181,7 +181,7 @@ def LatexNestEnv(NestEnv):
         r"""latex的\begin、\end环境匹配，支持嵌套定位
 
         >>> s = r"\begin{center}\begin{tabular}\begin{tabular}\end{tabular}\end{tabular}\end{center}"
-        >>> NestEnv(s).latexenv('tabular').replace('x')
+        >>> LatexNestEnv(s).latexenv('tabular').replace('x')
         '\\begin{center}x\\end{center}'
 
         TODO 因为存在自嵌套情况，暂时还不好对head扩展支持正则匹配模式
@@ -230,7 +230,7 @@ def LatexNestEnv(NestEnv):
 
     def formula(self, inner=False, invert=False):
         r"""公式匹配
-        >>> NestEnv(r'aa$bb$cc').formula().strings()
+        >>> LatexNestEnv(r'aa$bb$cc').formula().strings()
         ['$bb$']
 
         TODO 遇到 "$$ x xx $xx$"，前面的$$是中间漏了内容的，应该要有异常处理机制，至少报个错误位置吧
@@ -269,7 +269,7 @@ def LatexNestEnv(NestEnv):
             inner_tail      关标签后的内容，不含边界
 
         >>> s = 'a\n%<topic>\nbb\n%</topic>c'
-        >>> NestEnv(s).pxmltag('topic').replace('x')
+        >>> LatexNestEnv(s).pxmltag('topic').replace('x')
         'a\nxc'
 
         head支持正则模式，例如：stem|answer
