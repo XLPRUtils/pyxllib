@@ -12,7 +12,7 @@ import re
 import numpy as np
 from shapely.geometry import Polygon
 
-from pyxllib.util.mathlib import Intervals
+from pyxllib.text import Intervals
 
 import cv2
 
