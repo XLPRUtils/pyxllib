@@ -37,9 +37,9 @@ class CvImg:
     def n_channels(self):
         return self.prcs.n_channels(self.img)
 
-    def resize(self, size, interpolation=cv2.INTER_CUBIC, **kwargs):
+    def resize(self, size, **kwargs):
         _t = type(self)
-        return _t(self.prcs.resize(self.img, size, interpolation, **kwargs))
+        return _t(self.prcs.resize(self.img, size, **kwargs))
 
     def show(self, winname=None, flags=0):
         return self.prcs.show(self.img, winname, flags)
