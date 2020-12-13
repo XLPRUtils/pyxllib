@@ -118,23 +118,23 @@ def bcompare(oldfile, newfile=None, basefile=None, wait=True, sameoff=False, old
     return File(ls[0]).read()
 
 
-def refine_file(file, func, *args, file_mode=None, debug=False, **kwargs):
+def refine_file(file, func, file_mode=None, debug=False):
     """ 对单个文件就行优化的功能函数
 
     :param file_mode: 指定文件读取类型格式，例如'.json'是json文件，读取为字典
     :param debug: 如果设置 debug=True，则会打开BC比较差异，否则就是静默替换
     """
-    p = File(file)
-    data = p.read(mode=file_mode)
+    f = File(file)
+    data = f.read(mode=file_mode)
     origin_content = str(data)
-    new_data = func(data, *args, **kwargs)
+    new_data = func(data)
 
     isdiff = origin_content != str(new_data)
     if isdiff:
         if debug:
-            temp_file = File('refine_file', p.suffix, root=File.TEMP).write(new_data, if_exists='replace').fullpath
+            temp_file = File('refine_file', f.suffix, root=File.TEMP).write(new_data, if_exists='replace').fullpath
             bcompare(file, temp_file)  # 使用beyond compare软件打开对比查看
         else:
-            p.write(new_data, mode=file_mode, if_exists='replace')  # 直接原地替换
+            f.write(new_data, mode=file_mode, if_exists='replace')  # 直接原地替换
 
     return isdiff

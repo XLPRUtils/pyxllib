@@ -7,16 +7,18 @@
 
 import filecmp
 import os
+import pathlib
 import random
 import re
 import shutil
+import tempfile
 
 # 大小写不敏感字典
 from requests.structures import CaseInsensitiveDict
 
 from pyxllib.basic._1_strlib import strfind, natural_sort
 from pyxllib.basic._2_timelib import Datetime
-from pyxllib.basic._3_filelib import File
+from pyxllib.basic._3_filelib import PathBase, File
 from pyxllib.basic._4_loglib import Iterate
 
 ____file = """
@@ -34,12 +36,19 @@ ____file = """
 """
 
 
-class Dir(File):
+class Dir(PathBase):
     r"""类似NestEnv思想的文件夹处理类
 
     这里的测试可以全程自己造一个
     """
-    __slots__ = ('filepaths', '_origin_wkdir')
+    __slots__ = ('_path', 'filepaths', '_origin_wkdir')
+
+    # 零、常用的目录类
+    TEMP = tempfile.gettempdir()
+    if os.environ.get('Desktop', None):  # 如果修改了win10默认的桌面路径，需要在环境变量添加一个正确的Desktop路径值
+        DESKTOP = os.environ['Desktop']
+    else:
+        DESKTOP = os.path.join(str(pathlib.Path.home()), 'Desktop')  # 这个不一定准，桌面是有可能被移到D盘等的
 
     def __init__(self, path=None, *, root=None, filepaths=None):
         """根目录、工作目录
@@ -49,6 +58,25 @@ class Dir(File):
         """
         super().__init__(path, root=root)
         self.filepaths = filepaths or []  # 初始默认没有选中任何文件（文件夹）
+
+    @property
+    def size(self) -> int:
+        """ 计算目录的大小，会递归目录计算总大小
+
+        https://stackoverflow.com/questions/1392413/calculating-a-directory-size-using-python
+
+        >> Path('D:/slns/pyxllib').size  # 这个算的就是真实大小，不是占用空间
+        2939384
+        """
+        if self:
+            total_size = 0
+            for dirpath, dirnames, Pathnames in os.walk(str(self)):
+                for f in Pathnames:
+                    fp = os.path.join(dirpath, f)
+                    total_size += os.path.getsize(fp)
+        else:  # 不存在的对象
+            total_size = 0
+        return total_size
 
     def sample(self, n=None, frac=None):
         """
@@ -160,9 +188,6 @@ class Dir(File):
             if f not in files:
                 new_files.append(f)
         return Dir(self._path, filepaths=new_files)
-
-    def __repr__(self):
-        return f'{self._path}: {self.filepaths}'
 
     def __enter__(self):
         """ 使用with模式可以进行工作目录切换

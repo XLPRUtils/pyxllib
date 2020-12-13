@@ -125,7 +125,7 @@ def get_labelme_shapes_df(dir, pattern='**/*.json', max_workers=None, pinterval=
         data = p.read()
         if not data['shapes']: return
         df = pd.DataFrame.from_records(data['shapes'])
-        df['filename'] = p.relative_path(dir)
+        df['filename'] = p.relpath(dir)
         # 坐标转成整数，看起来比较精简点
         df['points'] = [np.array(v, dtype=int).tolist() for v in df['points']]
         li.append(df)
