@@ -24,7 +24,7 @@ except ModuleNotFoundError:
 
 import pyscreeze
 
-from pyxllib.basic import get_etag, File, dprint
+from pyxllib.basic import get_etag, File, Dir, dprint
 
 
 class AutoGui:
@@ -59,9 +59,9 @@ class AutoGui:
         if self.use_opencv and re.search(r'[\u4e00-\u9fa5，。；？（）【】、①-⑨]', file_path):
             # TODO 除了拷贝图片的方法，应该有其他更好的策略
             p1 = File(file_path)
-            p2 = File(get_etag(file_path), p1.suffix, root=File.TEMP)
-            p1.copy(p2, if_exists='ignore')  # 使用etag去重，出现相同etag则不用拷贝了
-            file_path = p2.fullpath
+            p2 = File(get_etag(file_path), p1.suffix, root=Dir.TEMP)
+            p1.copy(p2, if_exists='skip')  # 使用etag去重，出现相同etag则不用拷贝了
+            file_path = p2.to_str()
             # print(file_path)
         pos = pyautogui.locateCenterOnScreen(file_path, grayscale=grayscale, confidence=confidence)
         # pyautogui.screenshot().save('debug.jpg')

@@ -224,7 +224,7 @@ class CvPrcs:
         """
         if is_numpy_image(file):
             img = file
-        elif File(file).is_file():
+        elif File(file):
             # https://www.yuque.com/xlpr/pyxllib/imread
             img = cv2.imdecode(np.fromfile(str(file), dtype=np.uint8), flags)
         elif is_pil_image(file):
@@ -251,7 +251,7 @@ class CvPrcs:
         return img
 
     @classmethod
-    def write(cls, img, file, if_exists='replace', **kwargs):
+    def write(cls, img, file, if_exists='delete', **kwargs):
         if not isinstance(file, File):
             file = File(file)
         data = cv2.imencode(ext=file.suffix, img=img)[1]

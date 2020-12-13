@@ -26,7 +26,7 @@ class CvImg:
         _t = type(self)
         return _t(self.prcs.cvt_channel(self.img, flags))
 
-    def write(self, path, if_exists='replace', **kwargs):
+    def write(self, path, if_exists='delete', **kwargs):
         return self.prcs.write(self.img, path, if_exists, **kwargs)
 
     @property
@@ -230,12 +230,12 @@ def debug_images(dir_, func, *, save=None, show=False):
     if save:
         save = File(save)
 
-    for f in dir_.subfiles:
+    for f in dir_.subfiles():
         im1 = imread(f)
         im2 = func(im1)
 
         if save:
-            imwrite(im2, File(save / f.name, root=dir_))
+            imwrite(im2, File(save / f.name, dir_))
 
         if show:
             imshow(im2)

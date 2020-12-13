@@ -74,7 +74,7 @@ class UsedRecords:
     def save(self):
         """保存记录文件"""
         File(self.dirname + '/').ensure_dir()
-        File(self.fullname).write('\n'.join(self.ls), if_exists='replace')
+        File(self.fullname).write('\n'.join(self.ls), if_exists='delete')
 
     def add(self, s):
         """新增一个使用方法
@@ -602,10 +602,10 @@ def download_file(url, fn=None, *, encoding=None, if_exists=None, ext=None, temp
     :return:
     """
     if not fn: fn = url.split('/')[-1]
-    root = File.TEMP if temp else None
-    fn = File(fn, ext, root).write(requests.get(url).content,
+    root = Dir.TEMP if temp else None
+    fn = File(fn, root, suffix=ext).write(requests.get(url).content,
                                    encoding=encoding, if_exists=if_exists, etag=(not fn))
-    return fn.fullpath
+    return fn.to_str()
 
 
 ____other = """

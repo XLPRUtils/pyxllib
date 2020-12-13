@@ -55,7 +55,7 @@ def viewfiles(procname, *files, **kwargs):
             ls.append(str(t))
         else:
             bn = basename or ''
-            ls.append(File(bn, Dir.TEMP, suffix=ext).write(t, if_exists=kwargs.get('if_exists', 'error')).fullpath)
+            ls.append(File(bn, Dir.TEMP, suffix=ext).write(t, if_exists=kwargs.get('if_exists', 'error')).to_str())
 
     # 2 调用程序（并计算外部操作时间）
     tictoc = TicToc()
@@ -100,19 +100,20 @@ def chrome(arg_, **kwargs):
             + f'内存消耗：{sys.getsizeof(arg_)}（递归子类总大小：{getasizeof(arg_)}）Byte ===='
         t = '<p>' + html.escape(t) + '</p>'
         content = arg.to_html(**kwargs)
-        filename = File('', '.html', File.TEMP).write(t + content, etag=True, if_exists='ignore')
+        filename = File(..., Dir.TEMP, suffix='.html').write(t + content, if_exists='skip')
+        filename.rename(get_etag(filename))
         viewfiles('chrome.exe', str(filename))
     elif getattr(arg, 'render', None):  # pyecharts 等表格对象，可以用render生成html表格显示
         try:
             name = arg.options['title'][0]['text']
         except (LookupError, TypeError):
             name = Datetime().strftime('%H%M%S_%f')
-        filename = File(name, '.html', File.TEMP).fullpath
+        filename = File(name, Dir.TEMP, suffix='.html').to_str()
         arg.render(path=filename)
         viewfiles('chrome.exe', filename)
     else:
         name = Datetime().strftime('%H%M%S_%f')
-        filename = File(name, '.txt', File.TEMP).write(arg).fullpath
+        filename = File(name, Dir.TEMP, suffix='.txt').write(arg).to_str()
         viewfiles('chrome.exe', filename)
 
 
@@ -128,13 +129,13 @@ def view_jsons_kv(fd, files='**/*.json', encoding=None, max_items=10, max_value_
     """
     kvc = KeyValuesCounter()
     d = Dir(fd)
-    for p in d.select(files).subfiles:
+    for p in d.select(files).subfiles():
         # print(p)
         data = p.read(encoding=encoding, mode='.json')
         kvc.add(data, max_value_length=max_value_length)
-    p = File(r'demo_keyvaluescounter.html', root=File.TEMP)
-    p.write(kvc.to_html_table(max_items=max_items), if_exists='replace')
-    chrome(p.fullpath)
+    p = File(r'demo_keyvaluescounter.html', Dir.TEMP)
+    p.write(kvc.to_html_table(max_items=max_items), if_exists='delete')
+    chrome(p.to_str())
 
 
 def check_repeat_filenames(dir, key='stem', link=True):

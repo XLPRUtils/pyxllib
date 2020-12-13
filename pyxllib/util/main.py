@@ -524,7 +524,7 @@ def 文件重命名(源目录, 自定义正则规则, 新正则名称, *, 目标
         if not 调试:
             targetName = os.path.join(目标目录, f2)
             f3 = File(targetName)
-            if f3.is_file():
+            if f3:
                 print('文件已存在：', f3.name)
                 if 覆盖操作:
                     f3.delete()

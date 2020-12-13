@@ -610,7 +610,7 @@ def 自动制作网页标题的导航栏(html_content, title='temphtml'):
             '<link rel=Stylesheet type="text/css" media=all href="https://code4101.github.io/css/navigation0.css">',
             '</head><body>']
 
-    f2 = File(title + '_内容', '.html', File.TEMP)
+    f2 = File(title + '_内容', Dir.TEMP, suffix='.html')
 
     def func(m):
         nonlocal cnt
@@ -625,8 +625,8 @@ def 自动制作网页标题的导航栏(html_content, title='temphtml'):
 
     refs.append('</body>\n</html>')
 
-    f1 = File(title + '_导航', '.html', File.TEMP).write('\n'.join(refs), if_exists='replace')
-    f2 = f2.write(html_content, if_exists='replace')
+    f1 = File(title + '_导航', Dir.TEMP, suffix='.html').write('\n'.join(refs), if_exists='delete')
+    f2 = f2.write(html_content, if_exists='delete')
 
     # 2 生成首页 f0
     main_content = f"""<html>
@@ -635,5 +635,5 @@ def 自动制作网页标题的导航栏(html_content, title='temphtml'):
 	<frame src="{f2}" name="showframe">
 </frameset></html>"""
 
-    f0 = File(title, '.html', File.TEMP).write(main_content, if_exists='replace')
+    f0 = File(title, Dir.TEMP, suffix='.html').write(main_content, if_exists='delete')
     return f0

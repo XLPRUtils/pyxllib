@@ -44,7 +44,7 @@ class DemoFitz:
         toc = self.doc.getToC()
         toc[1][1] = '改标题名称'
         self.doc.setToC(toc)
-        file = File('a.pdf', root=File.TEMP).fullpath
+        file = File('a.pdf', Dir.TEMP).to_str()
         self.doc.save(file, garbage=4)
         chrome(file)
 
@@ -65,13 +65,13 @@ class DemoFitz:
             toc[i][1] = m.group(1) + m.group(2) + '，' + str(pages)
             newtoc.append(toc[i])
         self.doc.setToC(newtoc)
-        file = writefile(b'', 'a.pdf', if_exists='replace')
+        file = writefile(b'', 'a.pdf', if_exists='delete')
         self.doc.save(file, garbage=4)
 
     def rearrange_pages(self):
         """重新布局页面"""
         self.doc.select([0, 0, 1])  # 第1页展示两次后，再跟第2页
-        file = writefile(b'', 'a.pdf', root=File.TEMP, if_exists='replace')
+        file = writefile(b'', 'a.pdf', root=Dir.TEMP, if_exists='delete')
         self.doc.save(file, garbage=4)  # 注意要设置garbage，否则文档并没有实际删除内容压缩文件大小
         chrome(file)
 
@@ -119,7 +119,7 @@ class DemoFitz:
         self.doc.select([0])
         page = self.doc.loadPage(0)
         # page.insertText(fitz.Point(100, 200), 'test\ntest')
-        file = File('a.pdf', root=File.TEMP).fullpath
+        file = File('a.pdf', Dir.TEMP).to_str()
         dprint(file)
         self.doc.save(file, garbage=4)
         chrome(file)
@@ -209,7 +209,7 @@ def pdf2imagebase(pdffile, target=None, scale=None, ext='.png'):
         else:
             target = File(pdffile).dirname + '/'
 
-    newfile = File(pdffile).abs_dstpath(target).fullpath
+    newfile = File(pdffile).abs_dstpath(target).to_str()
     if newfile.endswith('.pdf'): newfile = os.path.splitext(newfile)[0] + ext
     File(newfile).ensure_dir()
 
@@ -234,7 +234,7 @@ def pdf2imagebase(pdffile, target=None, scale=None, ext='.png'):
     if num_pages == 1:
         image = get_svg_image(0) if ext == '.svg' else get_png_image(0)
         files.append(newfile)
-        File(newfile).write(image, if_exists='replace')
+        File(newfile).write(image, if_exists='delete')
     else:  # 有多页
         number_width = math.ceil(math.log10(num_pages + 1))  # 根据总页数计算需要的对齐域宽
         stem, ext = os.path.splitext(newfile)
@@ -242,7 +242,7 @@ def pdf2imagebase(pdffile, target=None, scale=None, ext='.png'):
             image = get_svg_image(i) if ext == '.svg' else get_png_image(i)
             name = ('-{:0' + str(number_width) + 'd}').format(i + 1)  # 前面的括号不要删，这样才是完整的一个字符串来使用format
             files.append(stem + name + ext)
-            File(stem + name + ext).write(image, if_exists='replace')
+            File(stem + name + ext).write(image, if_exists='delete')
     return files
 
 
@@ -274,7 +274,7 @@ def pdf2svg(pdffile, target=None, scale=None, trim=False):
     """
     if trim:  # 先对pdf文件进行裁剪再转换
         pdf = File(pdffile)
-        newfile = pdf.abs_dstpath('origin.pdf').fullpath
+        newfile = pdf.abs_dstpath('origin.pdf').to_str()
         pdf.copy(newfile)
         # subprocess.run(['pdf-crop-margins.exe', '-p', '0', newfile, '-o', pdffile], stderr=subprocess.PIPE) # 本少： 会裁过头！
         # 本少： 对于上下边处的 [] 分数等，会裁过头，先按百分比 -p 0 不留边，再按绝对点数收缩/扩张 -a -1  负数为扩张，单位为bp

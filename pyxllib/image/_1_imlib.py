@@ -67,7 +67,7 @@ def magick(infile, *, outfile=None, if_exists='error', transparent=None, trim=Fa
     if File(outfile).exist_preprcs(if_exists, exclude=File(infile)):
         # 2.1 判断是否是支持的输入文件类型
         ext = os.path.splitext(infile)[1].lower()
-        if not File(infile).is_file() or not ext in ('.png', '.eps', '.pdf', '.jpg', '.jpeg', '.wmf', '.emf'):
+        if not File(infile) or not ext in ('.png', '.eps', '.pdf', '.jpg', '.jpeg', '.wmf', '.emf'):
             return False
 
         # 2.2 生成需要执行的参数
@@ -93,7 +93,7 @@ def magick(infile, *, outfile=None, if_exists='error', transparent=None, trim=Fa
     return outfile
 
 
-def ensure_pngs(folder, *, if_exists='ignore',
+def ensure_pngs(folder, *, if_exists='skip',
                 transparent=None, trim=False,
                 density=None, epsdensity=None,
                 max_workers=None):
@@ -130,7 +130,7 @@ def ensure_pngs(folder, *, if_exists='ignore',
             if if_exists == 'ignore':
                 continue
             elif if_exists == 'backup':
-                File(name, '.png', folder).backup(move=True)
+                File(name, folder, suffix='.png').backup(move=True)
             elif if_exists == 'replace':
                 pass
             else:
@@ -174,13 +174,13 @@ def zoomsvg(file, scale=1):
 
     if os.path.isfile(file):
         s = re.sub(r'<svg .+?>', func, File(file).read(), flags=re.DOTALL)
-        File(file).write(s, if_exists='replace')
+        File(file).write(s, if_exists='delete')
     elif os.path.isdir(file):
         for f in os.listdir(file):
             if not f.endswith('.svg'): continue
             f = os.path.join(file, f)
             s = re.sub(r'<svg\s+.+?>', func, File(f).read(), flags=re.DOTALL)
-            File(file).write(s, if_exists='replace')
+            File(file).write(s, if_exists='delete')
     elif isinstance(file, str) and '<svg ' in file:  # 输入svg的代码文本
         return re.sub(r'<svg .+?>', func, file, flags=re.DOTALL)
 

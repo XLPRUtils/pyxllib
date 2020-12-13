@@ -25,7 +25,7 @@ def reduce_labelme_jsonfile(jsonpath):
     data = p.read(mode='.json')
     if is_labelme_json_data(data) and data['imageData']:
         data['imageData'] = None
-        p.write(data, encoding=p.encoding, if_exists='replace')
+        p.write(data, encoding=p.encoding, if_exists='delete')
 
 
 class ToLabelmeJson:
@@ -45,7 +45,7 @@ class ToLabelmeJson:
         """
         self.imgpath = File(imgpath)
         # 读取图片数据，在一些转换规则比较复杂，有可能要用到原图数据
-        if self.imgpath.is_file():
+        if self.imgpath:
             self.img = imread(str(self.imgpath))
         else:
             self.img = None
@@ -66,7 +66,7 @@ class ToLabelmeJson:
         如果初始化时没有输入图片，也可以这里传入name等的值
         """
         # 1 默认属性，和图片名、尺寸
-        if self.imgpath.is_file():
+        if self.imgpath:
             name = self.imgpath.name
             height, width = self.img.shape[:2]
         # 2 构建结构框架
@@ -105,12 +105,12 @@ class ToLabelmeJson:
                  'shape_type': shape_type}
         return shape
 
-    def write(self, dst=None, if_exists='replace'):
+    def write(self, dst=None, if_exists='delete'):
         """
         :param dst: 往dst目标路径存入json文件，默认名称在self.imgpath同目录的同名json文件
         :return: 写入后的文件路径
         """
-        if dst is None and self.imgpath.is_file():
+        if dst is None and self.imgpath:
             dst = self.imgpath.with_suffix('.json')
         return File(dst).write(self.data, if_exists=if_exists)
 
