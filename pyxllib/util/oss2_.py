@@ -22,7 +22,7 @@ class OssBucket:
     def __init__(self, bucket_name, endpoint, access_key_id, access_key_secret):
         self.bucket = oss2.Bucket(oss2.Auth(access_key_id, access_key_secret), endpoint, bucket_name)
 
-    def upload(self, key, localfile, if_exists='replace', force=False):
+    def upload(self, key, localfile, if_exists='delete', force=False):
         """ 如果云端已存在，默认会进行覆盖
         :param key: 上传后存储的文件名
         :param localfile: 本地文件

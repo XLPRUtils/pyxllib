@@ -103,7 +103,7 @@ def bcompare(oldfile, newfile=None, basefile=None, wait=True, sameoff=False, old
                     name = newfilename
                 else:
                     name = refinepath(names[d] + ext)
-                ls.append(File(name, root=Dir.TEMP).write(file, if_exists='replace').fullpath)
+                ls.append(File(name, Dir.TEMP).write(file, if_exists='delete').to_str())
 
     func(oldfile, 0)
     func(newfile, 1)
@@ -118,11 +118,14 @@ def bcompare(oldfile, newfile=None, basefile=None, wait=True, sameoff=False, old
     return File(ls[0]).read()
 
 
-def refine_file(file, func, file_mode=None, debug=False):
+def refine_file(file, func, file_mode=None, debug=0):
     """ 对单个文件就行优化的功能函数
 
     :param file_mode: 指定文件读取类型格式，例如'.json'是json文件，读取为字典
-    :param debug: 如果设置 debug=True，则会打开BC比较差异，否则就是静默替换
+    :param debug: 这个功能可以对照refine分级轮理解
+        0，关闭调试，直接运行
+        1，打开BC比较差异，左边原始内容，右边参考内容
+        -1，介于完全不调试和全部人工检查之间，特殊的差异比较。左边放原始文件修改后的结果，右边对照原内容。
     """
     f = File(file)
     data = f.read(mode=file_mode)
@@ -131,10 +134,17 @@ def refine_file(file, func, file_mode=None, debug=False):
 
     isdiff = origin_content != str(new_data)
     if isdiff:
-        if debug:
-            temp_file = File('refine_file', Dir.TEMP, suffix=f.suffix).write(new_data)
-            bcompare(file, str(temp_file))  # 使用beyond compare软件打开对比查看
-        else:
+        if debug == 0:
             f.write(new_data, mode=file_mode)  # 直接原地替换
+        elif debug == 1:
+            temp_file = File('refine_file', Dir.TEMP, suffix=f.suffix).write(new_data)
+            bcompare(f, temp_file)  # 使用beyond compare软件打开对比查看
+        elif debug == -1:
+            temp_file = File('old_content', Dir.TEMP, suffix=f.suffix)
+            f.copy(temp_file)
+            f.write(new_data, mode=file_mode)  # 把原文件内容替换了
+            bcompare(f, temp_file)  # 然后显示与旧内容进行对比
+        else:
+            raise ValueError(f'{debug}')
 
     return isdiff

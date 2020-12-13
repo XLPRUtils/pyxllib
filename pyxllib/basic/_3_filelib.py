@@ -99,7 +99,7 @@ def test_etag2():
     print(get_etag(s))
     # FkAD2McB6ugxTiniE8ebhlNHdHh9
 
-    f = File('1.tex', root=Dir.TEMP).write(s, if_exists='replace').fullpath
+    f = File('1.tex', tempfile.gettempdir()).write(s, if_exists='delete').to_str()
     print(get_etag(f))
     # FkAD2McB6ugxTiniE8ebhlNHdHh9
 
@@ -284,6 +284,9 @@ class PathBase:
 
     def __str__(self):
         return str(self._path).replace('\\', '/')
+
+    def to_str(self):
+        return self.__str__()
 
     def resolve(self):
         return self._path.resolve()
@@ -630,7 +633,7 @@ class File(PathBase):
         """ 在copy、move等中，给了个"模糊"的目标位置dst，智能推导出实际file、dir绝对路径
         """
         dst_ = self.abspath(dst)
-        if dst[-1] in ('\\', '/') or dst_.is_dir():
+        if (isinstance(dst, str) and dst[-1] in ('\\', '/')) or dst_.is_dir():
             dst_ = File(self.name, dst_)
         else:
             dst_ = File(dst_)
@@ -764,14 +767,14 @@ def demo_file():
     p.delete()  # 如果存在先删除
     p.ensure_dir()  # 然后再创建一个空目录
 
-    print(File('demo_path', '.py'))
+    print(File('demo_path', suffix='.py'))
     # F:\work\CreatorTemp\demo_path.py
 
-    print(File('demo_path/', '.py'))
+    print(File('demo_path/', suffix='.py'))
     # F:\work\CreatorTemp\demo_path\tmp65m8mc0b.py
 
-    # 空字符串区别于None，会随机生成一个文件名
-    print(File('', temp))
+    # ...区别于None，会随机生成一个文件名
+    print(File(..., temp))
     # F:\work\CreatorTemp\tmpwp4g1692
 
     # 可以在随机名称基础上，再指定文件扩展名
@@ -780,15 +783,8 @@ def demo_file():
 
 
 def demo_file_rename():
-    temp = tempfile.gettempdir()
-
-    # 初始化一个空的测试目录
-    f = File('temp/', temp)
-    f.delete()
-    f.ensure_dir()
-
     # 建一个空文件
-    f1 = f / 'a.txt'
+    f1 = File('temp/a.txt', tempfile.gettempdir())
     # Path('F:/work/CreatorTemp/temp/a.txt')
     with open(str(f1), 'wb') as p: pass  # 写一个空文件
 

@@ -14,7 +14,7 @@ class PilPrcs(CvPrcs):
             img = file
         elif is_numpy_image(file):
             img = cv2pil(file)
-        elif File(file).is_file():
+        elif File(file):
             img = Image.open(file, **kwargs)
         else:
             raise TypeError(f'类型错误或文件不存在：{type(file)} {file}')
@@ -31,10 +31,10 @@ class PilPrcs(CvPrcs):
         return img
 
     @classmethod
-    def write(cls, img, path, if_exists='replace', **kwargs):
+    def write(cls, img, path, if_exists='delete', **kwargs):
         p = File(path)
         if p.exist_preprcs(if_exists):
-            p.ensure_dir('file')
+            p.ensure_dir()
             img.save(str(p), **kwargs)
 
     @classmethod
