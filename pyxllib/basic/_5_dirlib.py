@@ -128,7 +128,8 @@ class Dir(PathBase):
     def delete(self):
         r""" 删除自身文件
         """
-        os.remove(str(self))
+        if self:
+            shutil.rmtree(str(self))
 
     # 二、目录类专有功能
 
