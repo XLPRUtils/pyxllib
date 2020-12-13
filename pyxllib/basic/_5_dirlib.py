@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 # @Author : 陈坤泽
 # @Email  : 877362867@qq.com
-# @Data   : 2020/05/30
+# @Date   : 2020/05/30
 
 
 import filecmp
@@ -18,21 +18,11 @@ from requests.structures import CaseInsensitiveDict
 
 from pyxllib.basic._1_strlib import strfind, natural_sort
 from pyxllib.basic._2_timelib import Datetime
-from pyxllib.basic._3_filelib import PathBase, File
+from pyxllib.basic._3_filelib import get_etag, PathBase, File
 from pyxllib.basic._4_loglib import Iterate
 
-____file = """
-路径、文件、目录相关操作功能
-
-主要是为了提供readfile、wrritefile函数
-与普通的读写文件相比，有以下优点：
-1、智能识别pkl等特殊格式文件的处理
-2、智能处理编码
-3、目录不存在自动创建
-4、自动备份旧文件，而不是强制覆盖写入
-
-其他相关文件处理组件：isfile、get_encoding、ensure_folders
-以及同时支持文件或文件夹的对比复制删除等操作的函数：filescmp、filesdel、filescopy
+____dir = """
+支持文件或文件夹的对比复制删除等操作的函数：filescmp、filesdel、filescopy
 """
 
 
@@ -41,7 +31,7 @@ class Dir(PathBase):
 
     这里的测试可以全程自己造一个
     """
-    __slots__ = ('_path', 'filepaths', '_origin_wkdir')
+    __slots__ = ('_path', 'subs', '_origin_wkdir')
 
     # 零、常用的目录类
     TEMP = tempfile.gettempdir()
@@ -50,14 +40,36 @@ class Dir(PathBase):
     else:
         DESKTOP = os.path.join(str(pathlib.Path.home()), 'Desktop')  # 这个不一定准，桌面是有可能被移到D盘等的
 
-    def __init__(self, path=None, *, root=None, filepaths=None):
+    # 添加 HOME 目录？ 方便linux操作？
+
+    # 一、基本目录类功能
+
+    def __init__(self, path=None, root=None, *, subs=None):
         """根目录、工作目录
 
         >> Dir()  # 以当前文件夹作为root
         >> Dir(r'C:/pycode/code4101py')  # 指定目录
+
+        :param path: 注意哪怕path传入的是Dir，也只会设置目录，不会取其paths成员值
+        :param subs: 该目录下，选中的子文件（夹）
         """
-        super().__init__(path, root=root)
-        self.filepaths = filepaths or []  # 初始默认没有选中任何文件（文件夹）
+
+        self._path = None
+        # 1 快速初始化
+        if root is None:
+            if isinstance(path, Dir):
+                self._path = path._path
+            elif isinstance(path, pathlib.Path):
+                self._path = path
+        # 2 普通初始化
+        if self._path is None:
+            self._path = self.abspath(path, root)
+        if not self._path:
+            raise ValueError(f'无效路径 {self._path}')
+        elif self._path.is_file():
+            raise ValueError(f'不能用文件初始化一个Dir对象 {self._path}')
+
+        self.subs = subs or []  # 初始默认没有选中任何文件（夹）
 
     @property
     def size(self) -> int:
@@ -78,25 +90,59 @@ class Dir(PathBase):
             total_size = 0
         return total_size
 
+    def __truediv__(self, key) -> pathlib.Path:
+        r""" 路径拼接功能
+
+        >>> Dir('C:/a') / 'b.txt'
+        WindowsPath('C:/a/b.txt')
+        """
+        return self._path / str(key)
+
+    def with_dirname(self, value):
+        return Dir(self.name, value)
+
+    def ensure_dir(self):
+        r""" 确保目录存在
+        """
+        if not self:
+            os.makedirs(str(self))
+
+    def copy(self, dst, if_exists=None):
+        return self.process(dst, shutil.copytree, if_exists)
+
+    def rename(self, dst, if_exists=None):
+        r""" 重命名
+        """
+        return self.move(Dir(dst, self), if_exists)
+
+    def delete(self):
+        r""" 删除自身文件
+        """
+        os.remove(str(self))
+
+    # 二、目录类专有功能
+
     def sample(self, n=None, frac=None):
         """
-        :param n: 在filepaths中抽取n个文件
+        :param n: 在 paths 中抽取n个文件
         :param frac: 按比例抽取文件
         :return: 新的Dir文件选取状态
         """
-        n = n or int(frac * len(self.filepaths))
-        files = random.sample(self.filepaths, n)
-        return Dir(self._path, filepaths=files)
+        n = n or int(frac * len(self.subs))
+        paths = random.sample(self.subs, n)
+        return Dir(self._path, subs=paths)
 
-    @property
-    def absfilepaths(self):
-        """返回所有files的绝对路径"""
-        return [self.fullpath + '/' + f for f in self.filepaths]
+    def subpaths(self):
+        """ 返回所有subs的绝对路径 """
+        return [self._path / p for p in self.subs]
 
-    @property
-    def files(self):
-        """返回所有files的File对象"""
-        return [self / f for f in self.filepaths]
+    def subfiles(self):
+        """ 返回所有subs的File对象 （过滤掉文件夹对象） """
+        return list(filter(lambda p: not p.is_dir(), self.subpaths()))
+
+    def subdirs(self):
+        """ 返回所有subs的File对象 （过滤掉文件对象） """
+        return list(filter(lambda p: not p.is_file(), self.subpaths()))
 
     def select(self, patter, nsort=True, **kwargs):
         r""" 增加选中文件，从filesmatch衍生而来，参数含义见 filesfilter
@@ -116,17 +162,17 @@ class Dir(PathBase):
 
         >> Dir(r'C:/pycode/code4101py').select('*.py', min_mtime=Datetime(2020, 3, 1))  # 修改时间在3月1日以上的
         """
-        files = filesmatch(patter, root=self.fullpath, **kwargs)
-        files = self.filepaths + files
-        if nsort: files = natural_sort(files)
-        return Dir(self._path, filepaths=files)
+        subs = filesmatch(patter, root=str(self), **kwargs)
+        subs = self.subs + subs
+        if nsort: subs = natural_sort(subs)
+        return Dir(self._path, subs=subs)
 
-    def procfiles(self, func, start=None, end=None, ref_dir=None, pinterval=None, max_workers=1, interrupt=True):
+    def procpaths(self, func, start=None, end=None, ref_dir=None, pinterval=None, max_workers=1, interrupt=True):
         """ 对选中的文件迭代处理
 
         :param func: 对每个文件进行处理的自定义接口函数
             参数 p: 输入参数 Path 对象
-            return: 可以没有返回值，当有返回值时，会作为信息，表示要输出查看
+            return: 可以没有返回值
                 TODO 以后可以返回字典结构，用不同的key表示不同的功能，可以控制些高级功能
         :param ref_dir: 使用该参数时，则每次会给func传递两个路径参数
             第一个是原始的file，第二个是ref_dir目录下对应路径的file
@@ -137,23 +183,23 @@ class Dir(PathBase):
         将目录 test 的所有文件拷贝到 test2 目录 示例代码：
 
         def func(p1, p2):
-            p1.copy(p2)
+            File(p1).copy(p2)
 
         Dir('test').select('**/*', type_='file').procfiles(func, ref_dir='test2')
 
         """
         if ref_dir:
             ref_dir = Dir(ref_dir)
-            files1 = self.files
-            files2 = [(ref_dir / self.filepaths[i]) for i in range(len(self.filepaths))]
+            paths1 = self.subpaths()
+            paths2 = [(ref_dir / self.subs[i]) for i in range(len(self.subs))]
 
             def wrap_func(data):
                 func(*data)
 
-            data = zip(files1, files2)
+            data = zip(paths1, paths2)
 
         else:
-            data = self.files
+            data = self.subpaths()
             wrap_func = func
 
         Iterate(data).run(wrap_func, start=start, end=end, pinterval=pinterval,
@@ -164,13 +210,13 @@ class Dir(PathBase):
 
         这里设置的选择模式，是指全集的选择范围
         """
-        files = Dir(self).select(patter, nsort, **kwargs).filepaths
-        cur_files = set(self.filepaths)
-        new_files = []
-        for f in files:
-            if f not in cur_files:
-                new_files.append(f)
-        return Dir(self._path, filepaths=new_files)
+        subs = Dir(self).select(patter, nsort, **kwargs).subs
+        cur_subs = set(self.subs)
+        new_subs = []
+        for s in subs:
+            if s not in cur_subs:
+                new_subs.append(s)
+        return Dir(self._path, subs=new_subs)
 
     def exclude(self, patter, **kwargs):
         """ 去掉部分选中文件
@@ -182,12 +228,12 @@ class Dir(PathBase):
         print(d2.files)  # ['AA20pH-c1=1-1.eps', 'AA20pH-c1=1-2.eps']
         print(d3.files)  # ['subdir/AA20pH-c1=1-2 - 副本.eps']
         """
-        files = set(filesmatch(patter, root=self.fullpath, **kwargs))
-        new_files = []
-        for f in self.filepaths:
-            if f not in files:
-                new_files.append(f)
-        return Dir(self._path, filepaths=new_files)
+        subs = set(filesmatch(patter, root=str(self), **kwargs))
+        new_subs = []
+        for s in self.subs:
+            if s not in subs:
+                new_subs.append(s)
+        return Dir(self._path, subs=new_subs)
 
     def __enter__(self):
         """ 使用with模式可以进行工作目录切换
@@ -196,11 +242,18 @@ class Dir(PathBase):
         切换工作目录和多线程混合使用会有意想不到的坑，要慎重！
         """
         self._origin_wkdir = os.getcwd()
-        os.chdir(self.fullpath)
+        os.chdir(str(self))
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         os.chdir(self._origin_wkdir)
+
+
+____filesxxx = """
+本来Path、File是能同时处理文件、目录的
+改版后，files底层因为有用到File，现在却不能支持目录的操作了
+可能会有些bug，尽量不要用这些旧功能，或者尽早移除
+"""
 
 
 def filescmp(f1, f2, shallow=True):
@@ -338,6 +391,7 @@ def filesmatch(patter, *, root=os.curdir, **kwargs) -> list:
     >> filesmatch('**/*', type_='file', max_size=0)  # 筛选空文件
     ['b/a', '[0-9]/3.txt']
     """
+    from pathlib import Path
     root = os.path.abspath(root)
 
     # 0 规则匹配
@@ -346,9 +400,9 @@ def filesmatch(patter, *, root=os.curdir, **kwargs) -> list:
 
     # 1 普通文本匹配  （没有通配符，单文件查找）
     if isinstance(patter, str) and glob_chars_pos == -1:
-        path = File(patter, root=root)
-        if path.exists():  # 文件存在
-            p = str(File(patter, root=root).resolve())
+        path = Path(os.path.join(root, patter))
+        if path:  # 文件存在
+            p = str(path.resolve())
             if p.startswith(root): p = p[len(root) + 1:]
             res = [p]
         else:  # 文件不存在
@@ -363,7 +417,7 @@ def filesmatch(patter, *, root=os.curdir, **kwargs) -> list:
         else:  # 模式里有套子文件夹
             dirname, basename = os.path.abspath(os.path.join(root, patter[:t])), patter[t + 1:]
         basename = basename.replace('<', '[').replace('>', ']')
-        files = map(str, File(dirname).glob(basename))
+        files = map(str, Path(dirname).glob(basename))
 
         n = len(root) + 1
         res = [(x[n:] if x.startswith(root) else x) for x in files]
@@ -414,7 +468,7 @@ def _files_copy_move_base(src, dst, filefunc, dirfunc,
             func = dirfunc
 
         # 2 根据目标是否已存在和if_exists分类处理
-        File(dst).ensure_dir(pathtype='file')
+        File(dst).ensure_dir()
         # 目前存在，且不是把文件移向文件夹的操作
         if os.path.exists(dst):
             # 根据if_exists参数情况分类处理
@@ -540,9 +594,11 @@ def writefile(ob, path='', *, encoding='utf8', if_exists='backup', suffix=None, 
     :return: 返回写入的文件名，这个主要是在写临时文件时有用
     """
     if etag is None: etag = (not path)
-    return File(path, suffix, root).write(ob,
-                                          encoding=encoding, if_exists=if_exists,
-                                          etag=etag).fullpath
+    if path == '': path = ...
+    f = File(path, root, suffix=suffix).write(ob, encoding=encoding, if_exists=if_exists)
+    if etag:
+        f = f.rename(get_etag(str(f)))
+    return str(f)
 
 
 def merge_dir(src, dst, if_exists='ignore'):
@@ -553,14 +609,14 @@ def merge_dir(src, dst, if_exists='ignore'):
         p1.copy(p2, if_exists=if_exists)
 
     # 只拷文件和空目录，不然逻辑会乱
-    Dir(src).select('**/*', type_='dir', max_size=0).select('**/*', type_='file').procfiles(func, ref_dir=dst)
+    Dir(src).select('**/*', type_='dir', max_size=0).select('**/*', type_='file').procpaths(func, ref_dir=dst)
 
 
 def extract_files(src, dst, pattern, if_exists='replace'):
     """ 提取满足pattern模式的文件
     """
     d1, d2 = Dir(src), Dir(dst)
-    files = d1.select(pattern).filepaths
+    files = d1.select(pattern).subs
     for f in files:
         p1, p2 = File(d1 / f), File(d2 / f)
         p1.copy(p2, if_exists=if_exists)

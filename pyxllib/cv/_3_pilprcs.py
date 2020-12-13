@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 # @Author : 陈坤泽
 # @Email  : 877362867@qq.com
-# @Data   : 2020/11/17 15:13
+# @Date   : 2020/11/17 15:13
 
 from pyxllib.cv._2_cvprcs import *
 

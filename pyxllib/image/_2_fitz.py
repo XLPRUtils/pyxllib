@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 # @Author : 陈坤泽
 # @Email  : 877362867@qq.com
-# @Data   : 2020/06/02 16:06
+# @Date   : 2020/06/02 16:06
 
 
 import concurrent.futures
@@ -294,4 +294,4 @@ def pdfs2pngs(src, scale=None, pinterval=None):
     """
     from functools import partial
     func = partial(pdf2png, scale=scale)
-    Dir(src).select('**/*.pdf').procfiles(func, pinterval=pinterval)
+    Dir(src).select('**/*.pdf').procpaths(func, pinterval=pinterval)

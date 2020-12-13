@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 # @Author : 陈坤泽
 # @Email  : 877362867@qq.com
-# @Data   : 2020/06/15
+# @Date   : 2020/06/15
 
 """
 oss2 · PyPI: https://pypi.org/project/oss2/
