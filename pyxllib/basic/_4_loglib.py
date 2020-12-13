@@ -214,12 +214,15 @@ ____xllog = """
 """
 
 
-def get_xllog():
+def get_xllog(*, log_file=None):
     """ 获得pyxllib库的日志类
 
-    由于日志类可能要读取yaml配置文件，需要使用Path类，所以实现代码先放在pathlib_.py
+    :param log_file: 增加输出到一个日志文件，该功能仅在xllog首次初始化时有效
+        注意这个是'w'机制，会删除之前的日志文件
+        # TODO 这样的功能设计问题挺大的，工程逻辑很莫名其妙，有空要把日志功能修缮下
+        #   例如一个通用的初始化类，然后xllog只是一个特定的实例日志类
 
-    TODO 类似企业微信机器人的机制怎么设？或者如何配置出问题发邮件？
+    TODO 增加输出到钉钉机器人、邮箱的Handler？
     """
     import logging, coloredlogs
 
@@ -238,13 +241,15 @@ def get_xllog():
             logging.config.fileConfig(XLLOG_CONF_FILE)
     else:
         # 3 否则生成一个非常简易版的xllog
-        # TODO 不同级别能设不同的格式（颜色）？
         xllog = logging.getLogger('pyxllib.xllog')
-        # ch = logging.StreamHandler()
-        # ch.setLevel(logging.DEBUG)
-        # ch.setFormatter(logging.Formatter('%(asctime)s %(message)s'))
-        # xllog.addHandler(ch)
-        coloredlogs.install(level='DEBUG', logger=xllog, fmt='%(asctime)s %(message)s')
+        fmt = '%(asctime)s %(message)s'
+        if log_file:
+            # todo 这里的格式设置是否能统一、精简？
+            file_handler = logging.FileHandler(f'{log_file}', 'w')
+            file_handler.setLevel(logging.DEBUG)
+            file_handler.setFormatter(logging.Formatter(fmt))
+            xllog.addHandler(file_handler)
+        coloredlogs.install(level='DEBUG', logger=xllog, fmt=fmt)
     return logging.getLogger('pyxllib.xllog')
 
 
