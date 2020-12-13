@@ -64,7 +64,7 @@ def magick(infile, *, outfile=None, if_exists='error', transparent=None, trim=Fa
 
     # 2
     # 200914周一20:40，这有个相对路径的bug，修复了下，否则 test/a.png 会变成 test/test/a.png
-    if File(outfile).preprocess(if_exists, exclude=File(infile)):
+    if File(outfile).exist_preprcs(if_exists, exclude=File(infile)):
         # 2.1 判断是否是支持的输入文件类型
         ext = os.path.splitext(infile)[1].lower()
         if not File(infile).is_file() or not ext in ('.png', '.eps', '.pdf', '.jpg', '.jpeg', '.wmf', '.emf'):

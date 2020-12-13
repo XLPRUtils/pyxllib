@@ -240,7 +240,6 @@ def get_xllog():
         # 3 否则生成一个非常简易版的xllog
         # TODO 不同级别能设不同的格式（颜色）？
         xllog = logging.getLogger('pyxllib.xllog')
-        # xllog.setLevel(logging.DEBUG)
         # ch = logging.StreamHandler()
         # ch.setLevel(logging.DEBUG)
         # ch.setFormatter(logging.Formatter('%(asctime)s %(message)s'))
