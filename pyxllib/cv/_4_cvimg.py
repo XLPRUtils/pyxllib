@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 # @Author : 陈坤泽
 # @Email  : 877362867@qq.com
-# @Data   : 2020/11/17 15:21
+# @Date   : 2020/11/17 15:21
 
 from pyxllib.cv._3_pilprcs import *
 
@@ -230,7 +230,7 @@ def debug_images(dir_, func, *, save=None, show=False):
     if save:
         save = File(save)
 
-    for f in dir_.files:
+    for f in dir_.subfiles:
         im1 = imread(f)
         im2 = func(im1)
 

@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 # @Author : 陈坤泽
 # @Email  : 877362867@qq.com
-# @Data   : 2020/05/30 20:37
+# @Date   : 2020/05/30 20:37
 
 
 from urllib.parse import urlparse
@@ -99,7 +99,7 @@ def test_etag2():
     print(get_etag(s))
     # FkAD2McB6ugxTiniE8ebhlNHdHh9
 
-    f = File('1.tex', root=File.TEMP).write(s, if_exists='replace').fullpath
+    f = File('1.tex', root=Dir.TEMP).write(s, if_exists='replace').fullpath
     print(get_etag(f))
     # FkAD2McB6ugxTiniE8ebhlNHdHh9
 
@@ -178,6 +178,16 @@ def get_encoding(bstr):
 
 
 ____file = """
+路径、文件、目录相关操作功能
+
+主要是为了提供readfile、wrritefile函数
+与普通的读写文件相比，有以下优点：
+1、智能识别pkl等特殊格式文件的处理
+2、智能处理编码
+3、目录不存在自动创建
+4、自动备份旧文件，而不是强制覆盖写入
+
+其他相关文件处理组件：isfile、get_encoding、ensure_folders
 """
 
 
@@ -328,42 +338,12 @@ class PathBase:
         return str(self.parent)
 
     @property
-    def stem(self) -> str:
-        r"""
-        >>> File('D:/pycode/code4101py/ckz.py').stem
-        'ckz'
-        >>> File('D:/pycode/.gitignore').stem  # os.path.splitext也是这种算法
-        '.gitignore'
-        >>> File('D:/pycode/.123.45.6').stem
-        '.123.45'
-        """
-        return self._path.stem
-
-    @property
     def parts(self) -> tuple:
         r"""
         >>> File('D:/pycode/code4101py').parts
         ('D:\\', 'pycode', 'code4101py')
         """
         return self._path.parts
-
-    @property
-    def suffix(self) -> str:
-        r"""
-        >>> File('D:/pycode/code4101py/ckz.py').suffix
-        '.py'
-        >>> File('D:/pycode/code4101py').suffix
-        ''
-        >>> File('D:/pycode/code4101py/ckz.').suffix
-        ''
-        >>> File('D:/pycode/code4101py/ckz.123.456').suffix
-        '.456'
-        >>> File('D:/pycode/code4101py/ckz.123..456').suffix
-        '.456'
-        >>> File('D:/pycode/.gitignore').suffix
-        ''
-        """
-        return self._path.suffix
 
     @property
     def backup_time(self):
@@ -428,7 +408,7 @@ class PathBase:
             None: 不做任何处理，直接运行，依赖于功能本身是否有覆盖写入机制
             'error': 如果要替换的目标文件已经存在，则报错
             'delete': 把存在的文件先删除
-            'stop': 不执行后续功能
+            'skip': 不执行后续功能
             'backup': 先做备份  （对原文件先做一个备份）
         """
         need_run = True
@@ -552,7 +532,7 @@ class File(PathBase):
         if not self._path:
             raise ValueError(f'无效路径 {self._path}')
         elif self._path.is_dir():
-            raise ValueError(f'不能用File初始化一个目录对象 {self._path}')
+            raise ValueError(f'不能用目录初始化一个File对象 {self._path}')
 
     @classmethod
     def safe_init(cls, path, root=None, *, suffix=None):
@@ -568,18 +548,22 @@ class File(PathBase):
             # PermissionError: linux上访问无权限、不存在的路径
             return None
 
-    def __truediv__(self, key):
-        r""" 路径拼接功能
-
-        >>> File('C:/a') / 'b.txt'
-        File('C:/a/b.txt')
-        """
-        return File(self._path / str(key))
-
     # 二、获取、修改路径中部分值的功能
 
     def with_dirname(self, value):
         return File(self.name, value)
+
+    @property
+    def stem(self) -> str:
+        r"""
+        >>> File('D:/pycode/code4101py/ckz.py').stem
+        'ckz'
+        >>> File('D:/pycode/.gitignore').stem  # os.path.splitext也是这种算法
+        '.gitignore'
+        >>> File('D:/pycode/.123.45.6').stem
+        '.123.45'
+        """
+        return self._path.stem
 
     def with_stem(self, stem):
         """
@@ -588,6 +572,24 @@ class File(PathBase):
             如果setter不要rename，那和用with_stem实现有什么区别？
         """
         return File(stem, self.parent, suffix=self.suffix)
+
+    @property
+    def suffix(self) -> str:
+        r"""
+        >>> File('D:/pycode/code4101py/ckz.py').suffix
+        '.py'
+        >>> File('D:/pycode/code4101py').suffix
+        ''
+        >>> File('D:/pycode/code4101py/ckz.').suffix
+        ''
+        >>> File('D:/pycode/code4101py/ckz.123.456').suffix
+        '.456'
+        >>> File('D:/pycode/code4101py/ckz.123..456').suffix
+        '.456'
+        >>> File('D:/pycode/.gitignore').suffix
+        ''
+        """
+        return self._path.suffix
 
     def with_suffix(self, suffix):
         r""" 指向同目录下后缀为suffix的文件
@@ -705,7 +707,7 @@ class File(PathBase):
         else:  # 非文件对象
             raise FileNotFoundError(f'{self} 文件不存在，无法读取。')
 
-    def write(self, ob, *, encoding=None, if_exists='error', mode=None):
+    def write(self, ob, *, encoding=None, if_exists=None, mode=None):
         """ 保存为文件
 
         :param ob: 写入的内容

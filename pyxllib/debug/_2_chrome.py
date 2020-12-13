@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 # @Author : 陈坤泽
 # @Email  : 877362867@qq.com
-# @Data   : 2020/05/30 22:43
+# @Date   : 2020/05/30 22:43
 
 
 import html
@@ -51,11 +51,11 @@ def viewfiles(procname, *files, **kwargs):
         basename, ext = os.path.splitext(kwargs['filename'])
 
     for i, t in enumerate(files):
-        if File(t).is_file() or is_url(t):
+        if File(t) or is_url(t):
             ls.append(str(t))
         else:
             bn = basename or ''
-            ls.append(File(bn, ext, File.TEMP).write(t, if_exists=kwargs.get('if_exists', 'error')).fullpath)
+            ls.append(File(bn, Dir.TEMP, suffix=ext).write(t, if_exists=kwargs.get('if_exists', 'error')).fullpath)
 
     # 2 调用程序（并计算外部操作时间）
     tictoc = TicToc()
@@ -128,7 +128,7 @@ def view_jsons_kv(fd, files='**/*.json', encoding=None, max_items=10, max_value_
     """
     kvc = KeyValuesCounter()
     d = Dir(fd)
-    for p in d.select(files).files:
+    for p in d.select(files).subfiles:
         # print(p)
         data = p.read(encoding=encoding, mode='.json')
         kvc.add(data, max_value_length=max_value_length)
@@ -152,7 +152,7 @@ def check_repeat_filenames(dir, key='stem', link=True):
     # 1 智能解析dir参数
     if not isinstance(dir, Dir):
         dir = Dir(dir)
-    if not dir.filepaths:
+    if not dir.subs:
         dir = dir.select('**/*', type_='file')
 
     # 2 辅助函数，智能解析key参数
@@ -167,7 +167,7 @@ def check_repeat_filenames(dir, key='stem', link=True):
     # 3 制作df表格数据
     columns = ['key', 'suffix', 'filename']
     li = []
-    for f in dir.filepaths:
+    for f in dir.subs:
         p = File(f)
         li.append([extract_key(p), p.suffix.lower(), f])
     df = pd.DataFrame.from_records(li, columns=columns)

@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 # @Author : 陈坤泽
 # @Email  : 877362867@qq.com
-# @Data   : 2020/11/29
+# @Date   : 2020/11/29
 
 """
 自动发布pyxllib的脚本

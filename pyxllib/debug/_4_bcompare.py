@@ -2,10 +2,10 @@
 # -*- coding: utf-8 -*-
 # @Author : 陈坤泽
 # @Email  : 877362867@qq.com
-# @Data   : 2020/06/01 18:13
+# @Date   : 2020/06/01 18:13
 
 
-from pyxllib.basic import func_input_message, dprint, natural_sort_key, File, refinepath
+from pyxllib.basic import func_input_message, dprint, natural_sort_key, File, refinepath, Dir
 from pyxllib.debug._1_typelib import prettifystr
 from pyxllib.debug._2_chrome import viewfiles
 
@@ -76,11 +76,11 @@ def bcompare(oldfile, newfile=None, basefile=None, wait=True, sameoff=False, old
         newfile = f'【共有部分】，{t[2]}\n\n【独有部分】，{t[3]}'
 
     # 2 获取文件扩展名ext
-    if File(oldfile).is_file():
+    if File(oldfile):
         ext = File(oldfile).suffix
-    elif File(newfile).is_file():
+    elif File(newfile):
         ext = File(newfile).suffix
-    elif File(basefile).is_file():
+    elif File(basefile):
         ext = File(basefile).suffix
     else:
         ext = '.txt'  # 默认为txt文件
@@ -94,8 +94,8 @@ def bcompare(oldfile, newfile=None, basefile=None, wait=True, sameoff=False, old
     def func(file, d):
         if file is not None:
             p = File(file)
-            if p.is_file():
-                ls.append(p.fullpath)
+            if p:
+                ls.append(str(p))
             else:
                 if d == 0 and oldfilename:
                     name = oldfilename
@@ -103,7 +103,7 @@ def bcompare(oldfile, newfile=None, basefile=None, wait=True, sameoff=False, old
                     name = newfilename
                 else:
                     name = refinepath(names[d] + ext)
-                ls.append(File(name, root=File.TEMP).write(file, if_exists='replace').fullpath)
+                ls.append(File(name, root=Dir.TEMP).write(file, if_exists='replace').fullpath)
 
     func(oldfile, 0)
     func(newfile, 1)
@@ -132,9 +132,9 @@ def refine_file(file, func, file_mode=None, debug=False):
     isdiff = origin_content != str(new_data)
     if isdiff:
         if debug:
-            temp_file = File('refine_file', f.suffix, root=File.TEMP).write(new_data, if_exists='replace').fullpath
-            bcompare(file, temp_file)  # 使用beyond compare软件打开对比查看
+            temp_file = File('refine_file', Dir.TEMP, suffix=f.suffix).write(new_data)
+            bcompare(file, str(temp_file))  # 使用beyond compare软件打开对比查看
         else:
-            f.write(new_data, mode=file_mode, if_exists='replace')  # 直接原地替换
+            f.write(new_data, mode=file_mode)  # 直接原地替换
 
     return isdiff

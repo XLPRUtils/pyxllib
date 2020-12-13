@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 # @Author : 陈坤泽
 # @Email  : 877362867@qq.com
-# @Data   : 2020/08/14 22:20
+# @Date   : 2020/08/14 22:20
 
 
 import subprocess

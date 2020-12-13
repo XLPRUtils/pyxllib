@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 # @Author : 陈坤泽
 # @Email  : 877362867@qq.com
-# @Data   : 2020/08/15 00:59
+# @Date   : 2020/08/15 00:59
 
 
 from pyxllib.basic import *
@@ -131,7 +131,7 @@ def get_labelme_shapes_df(dir, pattern='**/*.json', max_workers=None, pinterval=
         li.append(df)
 
     li = []
-    Dir(dir).select(pattern).procfiles(func, max_workers=max_workers, pinterval=pinterval, **kwargs)
+    Dir(dir).select(pattern).procpaths(func, max_workers=max_workers, pinterval=pinterval, **kwargs)
     shapes_df = pd.concat(li)
     # TODO flags和group_id字段可以放到最后面
     shapes_df.reset_index(inplace=True, drop=True)
