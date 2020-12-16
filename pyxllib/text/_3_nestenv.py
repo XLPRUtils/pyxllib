@@ -5,10 +5,8 @@
 # @Date   : 2019/02/20 10:03
 
 
-import bisect
-
 from pyxllib.text._1_base import *
-from pyxllib.text._3_interval import *
+from pyxllib.util.intervals import *
 
 
 def pqmove(s, p, q):

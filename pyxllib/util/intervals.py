@@ -18,7 +18,7 @@
 import collections
 import itertools
 
-from pyxllib.debug import *
+from pyxllib.basic import *
 
 
 class Interval:
@@ -773,6 +773,8 @@ def highlight_intervals(content, intervals, colors=None, background=True, showma
     """
     # 1 存储要插入的html样式
     from collections import defaultdict
+    import html
+
     d = defaultdict(str)
 
     # 2 其他所有子组从颜色列表取颜色清单，每组一个颜色
