@@ -149,11 +149,11 @@ class Dir(PathBase):
 
     def subfiles(self):
         """ 返回所有subs的File对象 （过滤掉文件夹对象） """
-        return list(filter(lambda p: not p.is_dir(), self.subpaths()))
+        return list(map(File, filter(lambda p: not p.is_dir(), self.subpaths())))
 
     def subdirs(self):
         """ 返回所有subs的File对象 （过滤掉文件对象） """
-        return list(filter(lambda p: not p.is_file(), self.subpaths()))
+        return list(map(Dir, filter(lambda p: not p.is_file(), self.subpaths())))
 
     def select(self, patter, nsort=True, **kwargs):
         r""" 增加选中文件，从filesmatch衍生而来，参数含义见 filesfilter

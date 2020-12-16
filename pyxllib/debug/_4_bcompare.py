@@ -76,11 +76,11 @@ def bcompare(oldfile, newfile=None, basefile=None, wait=True, sameoff=False, old
         newfile = f'【共有部分】，{t[2]}\n\n【独有部分】，{t[3]}'
 
     # 2 获取文件扩展名ext
-    if File(oldfile):
+    if File.safe_init(oldfile):
         ext = File(oldfile).suffix
-    elif File(newfile):
+    elif File.safe_init(newfile):
         ext = File(newfile).suffix
-    elif File(basefile):
+    elif File.safe_init(basefile):
         ext = File(basefile).suffix
     else:
         ext = '.txt'  # 默认为txt文件
