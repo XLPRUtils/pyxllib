@@ -54,7 +54,7 @@ def viewfiles(procname, *files, **kwargs):
         if File(t) or is_url(t):
             ls.append(str(t))
         else:
-            bn = basename or ''
+            bn = basename or ...
             ls.append(File(bn, Dir.TEMP, suffix=ext).write(t, if_exists=kwargs.get('if_exists', 'error')).to_str())
 
     # 2 调用程序（并计算外部操作时间）
@@ -100,9 +100,9 @@ def chrome(arg_, **kwargs):
             + f'内存消耗：{sys.getsizeof(arg_)}（递归子类总大小：{getasizeof(arg_)}）Byte ===='
         t = '<p>' + html.escape(t) + '</p>'
         content = arg.to_html(**kwargs)
-        filename = File(..., Dir.TEMP, suffix='.html').write(t + content, if_exists='skip')
-        filename.rename(get_etag(filename))
-        viewfiles('chrome.exe', str(filename))
+        f = File(..., Dir.TEMP, suffix='.html').write(t + content)
+        f = f.rename(get_etag(str(f)) + '.html', if_exists='delete')
+        viewfiles('chrome.exe', str(f))
     elif getattr(arg, 'render', None):  # pyecharts 等表格对象，可以用render生成html表格显示
         try:
             name = arg.options['title'][0]['text']
@@ -112,9 +112,9 @@ def chrome(arg_, **kwargs):
         arg.render(path=filename)
         viewfiles('chrome.exe', filename)
     else:
-        name = Datetime().strftime('%H%M%S_%f')
-        filename = File(name, Dir.TEMP, suffix='.txt').write(arg).to_str()
-        viewfiles('chrome.exe', filename)
+        f = File(..., Dir.TEMP, suffix='.txt').write(arg)
+        f = f.rename(get_etag(str(f)) + f.suffix, if_exists='delete')
+        viewfiles('chrome.exe', str(f))
 
 
 def view_jsons_kv(fd, files='**/*.json', encoding=None, max_items=10, max_value_length=100):
