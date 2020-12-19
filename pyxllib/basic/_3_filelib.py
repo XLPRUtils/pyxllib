@@ -422,7 +422,7 @@ class PathBase:
                 raise FileExistsError(f'目标文件已存在： {self}')
             elif if_exists == 'delete':
                 self.delete()
-            elif if_exists == 'stop':
+            elif if_exists == 'skip':
                 need_run = False
             elif if_exists == 'backup':
                 self.backup(move=True)
@@ -656,7 +656,7 @@ class File(PathBase):
         该接口和move的核心区别：move的dst是相对工作目录，而rename则是相对self.parent路径
         """
         # rename是move的一种特殊情况
-        return self.move(File(dst, self), if_exists)
+        return self.move(File(dst, self.parent), if_exists)
 
     def delete(self):
         r""" 删除自身文件
