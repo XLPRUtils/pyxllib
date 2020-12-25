@@ -34,7 +34,7 @@ class PilPrcs(CvPrcs):
     def write(cls, img, path, if_exists='delete', **kwargs):
         p = File(path)
         if p.exist_preprcs(if_exists):
-            p.ensure_dir()
+            p.ensure_parent()
             img.save(str(p), **kwargs)
 
     @classmethod

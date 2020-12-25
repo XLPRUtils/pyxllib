@@ -10,7 +10,7 @@
 这里要强调，推荐os.walk功能
 """
 
-from pyxllib.util.xmllib import *
+from pyxllib.text import *
 import pyxllib.util.zipfile as zipfile  # 重写了标准库的zipfile文件，cp437改为gbk，解决zip中文乱码问题
 
 # 需要使用的第三方软件
@@ -73,7 +73,7 @@ class UsedRecords:
 
     def save(self):
         """保存记录文件"""
-        File(self.dirname + '/').ensure_dir()
+        File(self.dirname + '/').ensure_parent()
         File(self.fullname).write('\n'.join(self.ls), if_exists='delete')
 
     def add(self, s):

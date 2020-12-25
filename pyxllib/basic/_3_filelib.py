@@ -487,11 +487,11 @@ class PathBase:
         # 2 执行特定功能
         if self == dst_:
             # 如果文件是自身的话，并不算exists，可以直接run，不用exist_preprcs
-            dst_.ensure_dir()
+            dst_.ensure_parent()
             func(str(self), str(dst_))
             dst_._path = dst_._path.resolve()  # 但是需要重新解析一次dst_._path，避免可能有重命名等大小写变化
         elif dst_.exist_preprcs(if_exists):
-            dst_.ensure_dir()
+            dst_.ensure_parent()
             func(str(self), str(dst_))
 
         return dst_
@@ -504,6 +504,13 @@ class PathBase:
         :param proc: 可以自定义要执行的主程序
         """
         subprocess.run([proc, str(self)])
+
+    def ensure_parent(self):
+        r""" 确保父目录存在
+        """
+        p = self.parent
+        if not p.exists():
+            os.makedirs(str(p))
 
 
 class File(PathBase):
@@ -639,13 +646,6 @@ class File(PathBase):
             dst_ = File(dst_)
         return dst_
 
-    def ensure_dir(self):
-        r""" 确保文件所在的目录存在
-        """
-        p = self.parent
-        if not p.exists():
-            os.makedirs(str(p))
-
     def copy(self, dst, if_exists=None):
         """ 复制文件
         """
@@ -733,7 +733,7 @@ class File(PathBase):
             return encoding
 
         if self.exist_preprcs(if_exists):
-            self.ensure_dir()
+            self.ensure_parent()
             name, suffix = str(self), self.suffix
             if not mode: mode = suffix
             mode = mode.lower()
@@ -765,7 +765,7 @@ def demo_file():
 
     p = File('demo_path', temp)
     p.delete()  # 如果存在先删除
-    p.ensure_dir()  # 然后再创建一个空目录
+    p.ensure_parent()  # 然后再创建一个空目录
 
     print(File('demo_path', suffix='.py'))
     # F:\work\CreatorTemp\demo_path.py
