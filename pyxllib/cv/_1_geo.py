@@ -453,7 +453,7 @@ def non_maximun_suppression(boxes, iou=0.5):
         left_boxes = []
         for i in range(1, len(boxes)):
             if intersection_over_union(b, boxes[i]) < iou:
-                left_boxes.append(b)
+                left_boxes.append(boxes[i])
         boxes = left_boxes
     return res
 
