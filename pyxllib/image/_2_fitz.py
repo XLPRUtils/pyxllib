@@ -163,7 +163,7 @@ def pdf2svg_oldversion(pdffile, target=None, *, trim=False):
     else:
         if target is None: target = pdffile[:-4] + '_svg\\'
         executor = concurrent.futures.ThreadPoolExecutor()
-        File(basename + '/').ensure_dir()
+        File(basename + '/').ensure_parent()
 
         def func(f1, f2, i):
             subprocess.run(['pdf2svg.exe', f1, f2, str(i)])
@@ -211,7 +211,7 @@ def pdf2imagebase(pdffile, target=None, scale=None, ext='.png'):
 
     newfile = File(pdffile).abs_dstpath(target).to_str()
     if newfile.endswith('.pdf'): newfile = os.path.splitext(newfile)[0] + ext
-    File(newfile).ensure_dir()
+    File(newfile).ensure_parent()
 
     # 2 图像数据的获取
     def get_svg_image(n):

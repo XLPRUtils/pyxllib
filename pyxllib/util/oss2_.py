@@ -57,7 +57,7 @@ class OssBucket:
             return False
 
     def download(self, key, localfile):
-        File(localfile).ensure_dir()
+        File(localfile).ensure_parent()
         if self.check_exists(key):
             return self.bucket.get_object_to_file(key, localfile)
         else:

@@ -442,8 +442,19 @@ def intersection_over_union(pts1, pts2):
     return inter_area / union_area
 
 
-def non_maximun_suppression():
-    raise NotImplementedError
+def non_maximun_suppression(boxes, iou=0.5):
+    res = []
+    while boxes:
+        # 1 加入权值大的框
+        b = boxes[0]
+        res.append(b)
+        # 2 抑制其他框
+        left_boxes = []
+        for i in range(1, len(boxes)):
+            if intersection_over_union(b, boxes[i]) < iou:
+                left_boxes.append(boxes)
+        boxes = left_boxes
+    return res
 
 
 ____other = """

@@ -479,7 +479,7 @@ def _files_copy_move_base(src, dst, filefunc, dirfunc,
             func = dirfunc
 
         # 2 根据目标是否已存在和if_exists分类处理
-        File(dst).ensure_dir()
+        File(dst).ensure_parent()
         # 目前存在，且不是把文件移向文件夹的操作
         if os.path.exists(dst):
             # 根据if_exists参数情况分类处理
