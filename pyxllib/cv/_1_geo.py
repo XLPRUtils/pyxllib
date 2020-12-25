@@ -443,6 +443,7 @@ def intersection_over_union(pts1, pts2):
 
 
 def non_maximun_suppression(boxes, iou=0.5):
+    """ 假设boxes已经按权重从大到小排过序 """
     res = []
     while boxes:
         # 1 加入权值大的框
