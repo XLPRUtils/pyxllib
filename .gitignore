@@ -1,5 +1,5 @@
 # PyCharm项目Config目录
-.idea/
+.idea*/
 
 *.pyc
 build/

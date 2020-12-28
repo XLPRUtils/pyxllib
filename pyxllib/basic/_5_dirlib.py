@@ -5,6 +5,7 @@
 # @Date   : 2020/05/30
 
 
+import collections
 import filecmp
 import os
 import pathlib
@@ -12,6 +13,8 @@ import random
 import re
 import shutil
 import tempfile
+
+import humanfriendly
 
 # 大小写不敏感字典
 from requests.structures import CaseInsensitiveDict
@@ -245,6 +248,20 @@ class Dir(PathBase):
             if s not in subs:
                 new_subs.append(s)
         return Dir(self._path, subs=new_subs)
+
+    def describe(self):
+        """ 输出目录的一些基本统计信息
+        """
+        msg = []
+        dir_state = self.select('*')
+        files = dir_state.subfiles()
+        suffixs = collections.Counter([f.suffix for f in files]).most_common()
+        dir_size = self.size
+        msg.append(f'size: {dir_size} ≈ {humanfriendly.format_size(dir_size, binary=True)}')
+        msg.append(f'files: {len(files)}, {suffixs}')
+        msg.append(f'dirs: {len(dir_state.subdirs())}')
+        res = '\n'.join(msg)
+        print(res)
 
     def __enter__(self):
         """ 使用with模式可以进行工作目录切换

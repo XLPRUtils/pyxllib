@@ -234,6 +234,7 @@ def coords2d(coords, m=2, dtype=None):
 
 def rect_bounds1d(coords, dtype=int):
     """ 多边形的最大外接矩形
+
     :param coords: 任意多边形的一维值[x1, y1, x2, y2, ...]，或者二维结构[(x1, y1), (x2, y2), ...]
     :param dtype: 默认存储的数值类型
     :return: rect的两个点坐标，同时也是 [left, top, right, bottom]
@@ -249,6 +250,7 @@ def rect_bounds1d(coords, dtype=int):
 
 def rect_bounds(coords, dtype=int):
     """ 多边形的最大外接矩形
+
     :param coords: 任意多边形的一维值[x1, y1, x2, y2, ...]，或者二维结构[(x1, y1), (x2, y2), ...]
     :param dtype: 默认存储的数值类型
     :return: rect的两个点坐标
@@ -286,6 +288,10 @@ def resort_quad_points(src_pts):
 
 def xywh2ltrb(p):
     return [p[0], p[1], p[0] + p[2], p[1] + p[3]]
+
+
+def ltrb2xywh(p):
+    return [p[0], p[1], p[2] - p[0], p[3] - p[1]]
 
 
 ____warp_perspective = """
@@ -344,6 +350,7 @@ def warp_points(pts, warp_mat, reserve_struct=False):
 
 def get_warp_mat(src, dst):
     """ 从前后点集计算仿射变换矩阵
+
     :param src: 原点集，支持多种格式输入
     :param dst: 变换后的点集
     :return: np.ndarray，3*3的变换矩阵
@@ -405,6 +412,7 @@ def quad_warp_wh(pts, method='average'):
 
 def warp_quad_pts(pts, method='average'):
     """ 将不规则四边形转为矩形
+
     :param pts: 不规则四边形的四个点坐标
     :param method: 计算矩形宽、高的算法
     :return: 规则矩形的四个点坐标
@@ -425,8 +433,9 @@ ____polygon = """
 
 def intersection_over_union(pts1, pts2):
     """ 两个多边形的交并比 Intersection Over Union
+
     :param pts1: 可以转成polygon的数据类型
-    :param pts2:可以转成polygon的数据类型
+    :param pts2: 可以转成polygon的数据类型
     :return: 交并比
 
     >>> intersection_over_union([[0, 0], [10, 10]], [[5, 5], [15, 15]])
