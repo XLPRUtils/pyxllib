@@ -11,9 +11,3 @@ try:
 except ModuleNotFoundError:
     subprocess.run(['pip', 'install', 'pyahocorasick'])
     import ahocorasick
-
-try:
-    import humanfriendly
-except ModuleNotFoundError:
-    subprocess.run(['pip', 'install', 'humanfriendly'])
-    import humanfriendly
