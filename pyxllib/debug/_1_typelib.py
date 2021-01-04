@@ -7,6 +7,7 @@
 
 from collections import defaultdict, Counter
 
+import numpy as np
 import pandas as pd
 
 from pyxllib.basic import *
@@ -211,10 +212,13 @@ class NestedDict:
     @classmethod
     def to_html_table(cls, data, max_items=10):
         """ 以html表格套表格的形式，展示一个嵌套结构数据
+
         :param data: 数据
         :param max_items: 项目显示上限，有些数据项目太多了，要精简下
             设为假值则不设上限
         :return:
+
+        TODO 这个速度有点慢，怎么加速？
         """
 
         def tohtml(d):
@@ -275,3 +279,70 @@ class KeyValuesCounter:
 
     def to_html_table(self, max_items=10):
         return NestedDict.to_html_table(self.kvs, max_items=max_items)
+
+
+class MatchBase:
+    """ 匹配类
+
+    MatchBase(ys, cmp_func).matches(xs, least_score)
+    """
+
+    def __init__(self, ys, cmp_func):
+        self.ys = list(ys)
+        self.cmp_func = cmp_func
+
+    def __getitem__(self, idx):
+        return self.ys[idx]
+
+    # def __del__(self, idx):
+    #     del self.ys[idx]
+
+    def __len__(self):
+        return len(self.ys)
+
+    def match(self, x, k=1):
+        """ 匹配一个对象
+
+        :param x: 待匹配的一个对象
+        :param k: 返回次优的几个结果
+        :return:
+            当k=1时，返回 (idx, score)
+            当k>1时，返回类似matchs的return结构
+        """
+        scores = [self.cmp_func(x, y) for y in self.ys]
+        if k == 1:
+            score = max(scores)
+            idx = scores.index(score)
+            return idx, score
+        else:
+            idxs = np.argsort(scores)
+            idxs = idxs[::-1][:k]
+            return [(idx, scores[idx]) for idx in idxs]
+
+    def matches(self, xs, least_score=sys.float_info.epsilon):
+        """ 同时匹配多个对象
+
+        :param xs: 要匹配的一组对象
+        :param least_score: 分数必须要不小于least_score才能算匹配，否则属于找不到匹配项
+        :return: 为每个x找到一个最佳的匹配y，存储其下标和对应的分值
+            [(idx0, score0), (idx1, score1), ...]  长度 = len(xs)
+
+        匹配到的y不会放回，如果是可放回的，可以自己用match进行列表推导式直接计算
+        ms = [self.match(x) for x in xs]
+        """
+        m = len(self.ys)
+        used = set()
+
+        res = []
+        for x in xs:
+            ms = self.match(x, k=m)
+            for idx, score in ms:
+                if score < least_score:
+                    res.append((-1, score))
+                    break
+                if idx not in used:
+                    used.add(idx)
+                    res.append((idx, score))
+                    break
+
+        return res

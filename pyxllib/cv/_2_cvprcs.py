@@ -282,12 +282,12 @@ class CvPrcs:
         return cv2.resize(img, size[::-1], **kwargs)
 
     @classmethod
-    def show(cls, img, winname=None, flags=0):
+    def show(cls, img, winname=None, flags=1):
         """ 展示窗口
 
         :param winname: 未输入时，则按test1、test2依次生成窗口
         :param flags:
-            cv2.WINDOW_NORMAL，0，输入2等偶数值好像也等价于输入0
+            cv2.WINDOW_NORMAL，0，输入2等偶数值好像也等价于输入0，可以自动拉伸窗口大小
             cv2.WINDOW_AUTOSIZE，1，输入3等奇数值好像等价于1
             cv2.WINDOW_OPENGL，4096
         :return:

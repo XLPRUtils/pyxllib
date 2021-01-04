@@ -23,7 +23,8 @@ def getasizeof(*objs, **opts):
 
 
 def viewfiles(procname, *files, **kwargs):
-    """调用procname相关的文件程序打开files
+    """ 调用procname相关的文件程序打开files
+
     :param procname: 程序名
     :param files: 一个文件名参数清单，每一个都是文件路径，或者是字符串等可以用writefile转成文件的路径
     :param kwargs:
@@ -74,7 +75,7 @@ def viewfiles(procname, *files, **kwargs):
 
 
 def chrome(arg_, **kwargs):
-    r"""使用谷歌浏览器查看变量、文件等内容，详细用法见底层函数 viewfiles
+    r""" 使用谷歌浏览器查看变量、文件等内容，详细用法见底层函数 viewfiles
 
     :param arg_: 支持输入多种类型
         文件、url，会用浏览器直接打开
@@ -89,7 +90,7 @@ def chrome(arg_, **kwargs):
     这个函数可以浏览文本、list、dict、DataFrame表格数据、图片、html等各种文件的超级工具
     """
     # 1 如果是文件、url，则直接打开
-    if is_file(arg_) or is_url(arg_):
+    if is_file(arg_) or is_url(arg_) or isinstance(arg_, File):
         viewfiles('chrome.exe', arg_)
         return
 
@@ -117,8 +118,18 @@ def chrome(arg_, **kwargs):
         viewfiles('chrome.exe', str(f))
 
 
-def view_jsons_kv(fd, files='**/*.json', encoding=None, max_items=10, max_value_length=100):
+def chrome_json(f):
+    """ 可视化一个json文件结构 """
+    data = File(f).read()
+    # 使用NestedDict.to_html_table转成html的嵌套表格代码，存储到临时文件夹
+    htmlfile = File(r'chrome_json.html', root=Dir.TEMP).write(NestedDict.to_html_table(data))
+    # 展示html文件内容
+    chrome(htmlfile)
+
+
+def crhome_jsons_kv(fd, files='**/*.json', encoding=None, max_items=10, max_value_length=100):
     """ demo_keyvaluescounter，查看目录下json数据的键值对信息
+
     :param fd: 目录
     :param files: 匹配的文件格式
     :param encoding: 文件编码
