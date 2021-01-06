@@ -49,19 +49,17 @@ class ToLabelmeJson:
             self.img = imread(str(self.imgpath))
         else:
             self.img = None
-        self.data = None  # 存储json的字典数据
+        self.data = self.get_data_base()  # 存储json的字典数据
 
     def get_data(self, infile):
         """ 格式转换接口函数，继承的类需要自己实现这个方法
 
         :param infile: 待解析的标注数据
         """
-        # s = Path(infile).read()
-        # self.data = self.get_data_base()
         raise NotImplementedError('get_data方法必须在子类中实现')
 
     def get_data_base(self, name='', height=0, width=0):
-        """ 获得一个labelme标注文件的框架
+        """ 获得一个labelme标注文件的框架 （这是标准结构，也可以自己修改定制）
 
         如果初始化时没有输入图片，也可以这里传入name等的值
         """
@@ -105,6 +103,10 @@ class ToLabelmeJson:
                  'shape_type': shape_type}
         return shape
 
+    def add_shape(self, label, points, shape_type=None, dtype=None):
+        shape = self.get_shape(label, points, shape_type, dtype)
+        self.data['shapes'].append(shape)
+
     def write(self, dst=None, if_exists='delete'):
         """
         :param dst: 往dst目标路径存入json文件，默认名称在self.imgpath同目录的同名json文件
@@ -113,6 +115,19 @@ class ToLabelmeJson:
         if dst is None and self.imgpath:
             dst = self.imgpath.with_suffix('.json')
         return File(dst).write(self.data, if_exists=if_exists)
+
+    @classmethod
+    def create_json(cls, imgpath, annotation=None):
+        """ 输入图片路径p，在同目录下生成labelme的json标注文件 """
+        try:
+            obj = type(cls)(imgpath)
+        except TypeError as e:  # 解析不了的输出错误日志
+            get_xllog().exception(e)
+            return
+        if annotation is None:
+            annotation = imgpath.with_suffix('.txt')  # 标注文件默认在图片对应目录名称的.txt文件
+        obj.get_data(annotation)
+        obj.write()  # 保存json文件到img对应目录下
 
 
 def get_labelme_shapes_df(dir, pattern='**/*.json', max_workers=None, pinterval=None, **kwargs):

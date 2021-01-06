@@ -307,7 +307,7 @@ class MatchBase:
         :param k: 返回次优的几个结果
         :return:
             当k=1时，返回 (idx, score)
-            当k>1时，返回类似matchs的return结构
+            当k>1时，返回类似matches的return结构
         """
         scores = [self.cmp_func(x, y) for y in self.ys]
         if k == 1:
