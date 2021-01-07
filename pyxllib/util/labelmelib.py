@@ -117,15 +117,13 @@ class ToLabelmeJson:
         return File(dst).write(self.data, if_exists=if_exists)
 
     @classmethod
-    def create_json(cls, imgpath, annotation=None):
-        """ 输入图片路径p，在同目录下生成labelme的json标注文件 """
+    def _create_json(cls, imgpath, annotation):
+        """ 输入图片路径p，和对应的annotation标注数据（一般是对应目录下txt文件） """
         try:
-            obj = type(cls)(imgpath)
+            obj = cls(imgpath)
         except TypeError as e:  # 解析不了的输出错误日志
             get_xllog().exception(e)
             return
-        if annotation is None:
-            annotation = imgpath.with_suffix('.txt')  # 标注文件默认在图片对应目录名称的.txt文件
         obj.get_data(annotation)
         obj.write()  # 保存json文件到img对应目录下
 
