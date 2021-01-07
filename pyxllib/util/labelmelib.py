@@ -67,7 +67,7 @@ class ToLabelmeJson:
         # 1 默认属性，和图片名、尺寸
         if self.imgpath:
             name = self.imgpath.name
-            height, width = self.img.size()
+            height, width = self.img.size
         # 2 构建结构框架
         data = {'version': '4.5.6',
                 'flags': {},
