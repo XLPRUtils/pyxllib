@@ -74,6 +74,20 @@ class Dir(PathBase):
 
         self.subs = subs or []  # 初始默认没有选中任何文件（夹）
 
+    @classmethod
+    def safe_init(cls, path, root=None, *, subs=None):
+        """ 如果失败不raise，而是返回None的初始化方式 """
+        try:
+            d = Dir(path, root, subs=subs)
+            d._path.is_file()  # 有些问题上一步不一定测的出来，要再补一个测试
+            return d
+        except (ValueError, TypeError, OSError, PermissionError):
+            # ValueError：文件名过长，代表输入很可能是一段文本，根本不是路径
+            # TypeError：不是str等正常的参数
+            # OSError：非法路径名，例如有 *? 等
+            # PermissionError: linux上访问无权限、不存在的路径
+            return None
+
     @property
     def size(self) -> int:
         """ 计算目录的大小，会递归目录计算总大小
