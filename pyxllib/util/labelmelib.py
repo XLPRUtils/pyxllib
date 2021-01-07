@@ -7,7 +7,7 @@
 
 from pyxllib.basic import *
 from pyxllib.debug import pd
-from pyxllib.cv import imread, np_array, np
+from pyxllib.cv import np_array, np, PilImg
 
 
 def is_labelme_json_data(data):
@@ -36,7 +36,7 @@ class ToLabelmeJson:
         根据需要可以定制自己的shape，修改get_shape函数
     可以调用write写入文件
 
-    具体用法可以参考 handzuowen https://www.yuque.com/xlpr/datalabel/wzu73p 的数据处理代码
+    document: https://www.yuque.com/xlpr/pyxllib/ks5h4o
     """
 
     def __init__(self, imgpath=None):
@@ -46,7 +46,8 @@ class ToLabelmeJson:
         self.imgpath = File(imgpath)
         # 读取图片数据，在一些转换规则比较复杂，有可能要用到原图数据
         if self.imgpath:
-            self.img = imread(str(self.imgpath))
+            # 一般都只需要获得尺寸，用pil读取即可，速度更快，不需要读取图片rgb数据
+            self.img = PilImg(self.imgpath)
         else:
             self.img = None
         self.data = self.get_data_base()  # 存储json的字典数据
@@ -66,7 +67,7 @@ class ToLabelmeJson:
         # 1 默认属性，和图片名、尺寸
         if self.imgpath:
             name = self.imgpath.name
-            height, width = self.img.shape[:2]
+            height, width = self.img.size()
         # 2 构建结构框架
         data = {'version': '4.5.6',
                 'flags': {},
@@ -103,9 +104,8 @@ class ToLabelmeJson:
                  'shape_type': shape_type}
         return shape
 
-    def add_shape(self, label, points, shape_type=None, dtype=None):
-        shape = self.get_shape(label, points, shape_type, dtype)
-        self.data['shapes'].append(shape)
+    def add_shape(self, *args, **kwargs):
+        self.data['shapes'].append(self.get_shape(*args, **kwargs))
 
     def write(self, dst=None, if_exists='delete'):
         """
