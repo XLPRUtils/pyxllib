@@ -117,7 +117,7 @@ class ToLabelmeJson:
         return File(dst).write(self.data, if_exists=if_exists)
 
     @classmethod
-    def _create_json(cls, imgpath, annotation):
+    def create_json(cls, imgpath, annotation):
         """ 输入图片路径p，和对应的annotation标注数据（一般是对应目录下txt文件） """
         try:
             obj = cls(imgpath)
@@ -126,6 +126,41 @@ class ToLabelmeJson:
             return
         obj.get_data(annotation)
         obj.write()  # 保存json文件到img对应目录下
+
+    @classmethod
+    def main_normal(cls, imdir, labeldir=None, label_file_suffix='.txt'):
+        """ 封装更高层的接口，输入目录，直接标注目录下所有图片
+
+        :param imdir: 图片路径
+        :param labeldir: 标注数据路径，默认跟imdir同目录
+        :return:
+        """
+        ims = Dir(imdir).select(['*.jpg', '*.png']).subfiles()
+        if not labeldir: labeldir = imdir
+        txts = [File(f.stem, labeldir, suffix=label_file_suffix) for f in ims]
+        cls.main_pair(ims, txts)
+
+    @classmethod
+    def main_pair(cls, images, labels):
+        """ 一一配对匹配处理 """
+        Iterate(zip(images, labels)).run(lambda x: cls.create_json(x[0], x[1]),
+                                         pinterval='20%', max_workers=8)
+
+
+class Quad2Labelme(ToLabelmeJson):
+    """ 四边形类标注转labelme """
+
+    def get_data(self, infile):
+        lines = File(infile).read().splitlines()
+        for line in lines:
+            # 一般是要改这里，每行数据的解析规则
+            vals = line.split(',', maxsplit=8)
+            if len(vals) < 9: continue
+            pts = [int(v) for v in vals[:8]]  # 点集
+            label = vals[-1]  # 标注的文本
+            # get_shape还有shape_type形状参数可以设置
+            #	如果是2个点的矩形，或者3个点以上的多边形，会自动判断，不用指定shape_type
+            self.add_shape(label, pts)
 
 
 def get_labelme_shapes_df(dir, pattern='**/*.json', max_workers=None, pinterval=None, **kwargs):
