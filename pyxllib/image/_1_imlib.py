@@ -9,6 +9,7 @@ from collections import defaultdict
 import concurrent.futures
 
 from PIL import Image
+import numpy as np
 
 from pyxllib.basic import *
 
@@ -30,8 +31,11 @@ def get_img_content(in_):
         img = Image.open(in_)
     elif isinstance(in_, Image.Image):
         img = in_
+    elif isinstance(in_, np.ndarray):
+        from pyxllib.cv import cv2pil
+        img = cv2pil(in_)
     else:
-        raise ValueError
+        raise ValueError(f'{type(in_)}')
 
     img = image_rgba2rgb(img)  # 如果是RGBA类型，要把透明底变成白色
     file = io.BytesIO()

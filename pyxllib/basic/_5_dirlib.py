@@ -140,7 +140,7 @@ class Dir(PathBase):
     def rename(self, dst, if_exists=None):
         r""" 重命名
         """
-        return self.move(Dir(dst, self), if_exists)
+        return self.move(Dir(dst, self.parent), if_exists)
 
     def delete(self):
         r""" 删除自身文件
@@ -176,6 +176,7 @@ class Dir(PathBase):
         r""" 增加选中文件，从filesmatch衍生而来，参数含义见 filesfilter
 
         :param nsort: 是否使用自然排序，关闭可以加速
+        :param kwargs: see filesfilter
 
         注意select和exclude的增减操作是不断叠加的，而不是每次重置！
         如果需要重置，应该重新定义一个Folder类

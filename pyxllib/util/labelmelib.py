@@ -90,7 +90,9 @@ class ToLabelmeJson:
         # 2 判断形状类型
         if shape_type is None:
             m = len(points)
-            if m == 2:
+            if m == 1:
+                shape_type = 'point'
+            elif m == 2:
                 shape_type = 'rectangle'
             elif m >= 3:
                 shape_type = 'polygon'

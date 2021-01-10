@@ -5,7 +5,7 @@
 # @Date   : 2020/06/06
 
 
-from pyxllib.basic import *
+from pyxllib.cv import *
 
 try:
     import pyautogui
@@ -21,73 +21,236 @@ except ModuleNotFoundError:
 
 import pyscreeze
 
-from pyxllib.basic import get_etag, File, Dir, dprint
 
+class NamedLocate:
+    """ 对有命名的标注数据进行定位
 
-class AutoGui:
-    """ 跟GUI有关的操作自动化功能
+    注意labelme在每张图片上写的label值最好不要有重复，否则按字典存储后可能有重复值
 
-    每帧处理要0.15秒左右，仅适用于一般的办公、回合制手游，不适合fps类游戏外挂
+    特殊取值：
+    '@IMAGE_ID' 该状态图的标志区域，即游戏中在该位置出现此子图，则认为进入了对应的图像状态
+
+    TODO 生成一个简略的概括txt，方便快速查阅有哪些接口；或者生成某种特定格式的python
+    TODO 吃土乡人物清单要用特殊技巧去获得，不能手动暴力搞；可以自动循环拼接所有图
     """
 
-    def __init__(self, figspath, grayscale=False, confidence=0.999):
+    def __init__(self, label_dir, *, grayscale=None, confidence=0.95, tolerance=20, fix_pos=True):
         """
-        :param figspath: 图片素材所在目录
-        :param grayscalse: 匹配时是否仅考虑灰度图
-        :param confidence: 匹配时允许的误差，使用该功能需要OpenCV库的支持
-            confidence参数暂未实装
+
+        :param label_dir: 标注数据所在文件夹
+            有原图jpg、png和对应的json标注数据
+        :param grayscale: 转成灰度图比较
+        :param confidence: 用于图片比较，相似度阈值
+        :param tolerance: 像素比较时能容忍的误差变化范围
+        :param fix_pos: 使用固定位置可以提高运行速度，如果窗口位置是移动的，则可以关闭该功能
+
+        TODO random_click: 增加该可选参数，返回point时，进行上下左右随机扰动
         """
-        self.figspath = str(figspath)
+        self.root = Dir(label_dir)
         self.grayscale = grayscale
         self.confidence = confidence
-        self.use_opencv = pyscreeze.useOpenCV
+        self.tolerance = tolerance
+        self.fix_pos = fix_pos
+        self.points, self.rects, self.images = self._init()
+        self.last_shot = self.update_shot()
 
-    def find(self, name, grayscale=None, confidence=None):
+    def _init(self):
         """
-        :param name: 判断当前屏幕中，是否存在图库中名为name的图
-        :param grayscale: 这里如果设置了，会覆盖类中的默认设置
-        :return: 如果存在，返回其中心坐标，否则返回None
+        points 目标的中心点坐标
+        rects 目标的矩形框位置
+        images 从rects截取出来的子图，先存在临时目录，字典值记录了图片所在路径（后还是改成了存储图片）
+            对point对象，则存储了对应位置的像素值
         """
-        grayscale = self.grayscale if grayscale is None else grayscale
-        confidence = self.confidence if confidence is None else confidence
-        file_path = os.path.join(self.figspath, name)
-        # 如果使用了cv2，是不能直接处理含中文的路径的；有的话，就要先拷贝到一个英文路径来处理
-        # 出现这种情况，均速会由0.168秒变慢18%到0.198秒。
-        if self.use_opencv and re.search(r'[\u4e00-\u9fa5，。；？（）【】、①-⑨]', file_path):
-            # TODO 除了拷贝图片的方法，应该有其他更好的策略
-            p1 = File(file_path)
-            p2 = File(get_etag(file_path), p1.suffix, root=Dir.TEMP)
-            p1.copy(p2, if_exists='skip')  # 使用etag去重，出现相同etag则不用拷贝了
-            file_path = p2.to_str()
-            # print(file_path)
-        pos = pyautogui.locateCenterOnScreen(file_path, grayscale=grayscale, confidence=confidence)
-        # pyautogui.screenshot().save('debug.jpg')
-        # dprint(name, pos)
-        return pos
+        points, rects, images = dict(), dict(), dict()
+        for path in self.root.select(['**/*.jpg', '**/*.png']).subs:
+            stem, suffix = os.path.splitext(path)
+            img_file = File(path, self.root)
+            json_file = img_file.with_suffix('.json')
+            if not json_file:
+                continue
+            img = imread(img_file)
 
-    def move_to(self, name, grayscale=None):
-        """找到则返回坐标，否则返回None"""
-        pos = self.find(name, grayscale)
-        if pos: pyautogui.moveTo(*pos)
-        return pos
+            shapes = json_file.read()['shapes']
+            for shape in shapes:
+                # 0 key
+                if shape['label'] == '@IMAGE_ID':
+                    key = f'{stem}'
+                else:
+                    key = f'{stem}/{shape["label"]}'
 
-    def click(self, name, grayscale=None, confidence=None, wait=True, back=False):
-        """找到则返回坐标，否则返回None
-        :param wait: 是否等待图标出现运行成功后再继续
+                # 1 读取point
+                # 无论任何形状，都取其points的均值作为中心点
+                # 这在point、rectangle、polygon、line等都是正确的
+                # circle类计算出的虽然不是中心点，但也在圆内（circle第1个点圆心，第2个点是圆周上的1个点）
+                # 目前情报shape都是有points成员的，还没见过没有points的类型
+                point = list(np.array(np.array(shape['points']).mean(axis=0), dtype=int))
+                points[key] = point
+
+                # 2 读取rect
+                rect = None
+                if shape['shape_type'] == 'rectangle':
+                    rect = np.array(shape['points'], dtype=int).reshape(-1).tolist()
+                    rects[key] = rect
+
+                # 3 读取image
+                if rect:
+                    subimg = get_sub_image(img, rect)
+                    # temp = File(..., Dir.TEMP, suffix=img_file.suffix)
+                    # imwrite(subimg, str(temp))
+                    # temp2 = temp.rename(get_etag(str(temp)) + temp.suffix, if_exists='delete')
+                    # images[key] = temp2
+                    images[key] = subimg
+                elif point:  # 用list存储这个位置的像素值，顺序改为RGB
+                    images[key] = tuple(img[point[1], point[0]].tolist()[::-1])
+
+        return points, rects, images
+
+    def update_shot(self, region=None):
+        self.last_shot = pil2cv(pyautogui.screenshot(region=region))
+        return self.last_shot
+
+    def get_pixel(self, point):
+        """
+         官方的pixel版本，在windows有时候会出bug
+         OSError: windll.user32.ReleaseDC failed : return 0
+        """
+        if isinstance(point, str):
+            point = self.points[point]
+        return tuple(self.last_shot[point[1], point[0]].tolist()[::-1])
+
+    def get_image(self, ltrb):
+        if isinstance(ltrb, str):
+            ltrb = self.rects[ltrb]
+        l, t, r, b = ltrb
+        return self.last_shot[t:b, l:r]
+
+    @classmethod
+    def _cmp_pixel(cls, pixel1, pixel2):
+        """ 返回最大的像素值差，如果相同返回0 """
+        return max([abs(x - y) for x, y in zip(pixel1, pixel2)])
+
+    @classmethod
+    def _cmp_image(cls, image1, image2):
+        """ 返回不相同像素占的百分比，相同返回0 """
+        cmp = np.array(abs(np.array(image1, dtype=int) - image2) > 10)  # 每个像素允许10的差距
+        return cmp.sum() / cmp.size
+
+    def _locate_point(self, name):
+        """ 这里shot是指不那么考虑内容是否匹配，返回能找到的一个最佳结果
+                后续会有find来进行最后的阈值过滤
+        """
+        if self.fix_pos:
+            return self.points[name]
+        else:
+            raise NotImplementedError
+
+    def locate_rects(self, name):
+        self.update_shot()
+        boxes = pyautogui.locateAll(self.images[name],
+                                    self.last_shot,
+                                    grayscale=self.grayscale,
+                                    confidence=self.confidence)
+        # 过滤掉重叠超过一半面积的框
+        return non_maximun_suppression([xywh2ltrb(box) for box in list(boxes)], 0.5)
+
+    def locate_rect(self, name, *, fix_pos=None):
+        fix_pos = fix_pos if fix_pos is not None else self.fix_pos
+        if fix_pos:
+            return self.rects[name]
+        else:
+            res = self.locate_rects(name)
+            return res[0] if res else None
+
+    def find(self, name):
+        self.update_shot()
+        if name in self.rects:  # 优先按照区域规则进行匹配分析
+            rect = self.locate_rect(name)
+            # print('图片相似度', 1 - self._cmp_image(self.images[name], self._get_image(rect)))
+            if (1 - self._cmp_image(self.images[name], self.get_image(rect))) >= self.confidence:
+                return rect
+            else:
+                return False
+        elif name in self.points:  # 否则进行像素匹配
+            point = self._locate_point(name)
+            if self._cmp_pixel(self.images[name], self.get_pixel(point)) <= self.tolerance:
+                return point
+            else:
+                return False
+        else:
+            raise ValueError(f'{name}')
+
+    def find_point(self, name):
+        """ 将find的结果统一转成点 """
+        res = self.find(name)
+        if not res:
+            return False
+        else:
+            n = len(res)
+            if n == 4:
+                res = list(np.array(np.array(res).reshape(2, 2).mean(axis=0), dtype=int))
+            elif n != 2:
+                raise ValueError
+            return res
+
+    def find_image(self, name):
+        """ 将find的结果统一转成点 """
+        res = self.find(name)
+        if not res:
+            return False
+        else:
+            n = len(res)
+            if n == 4:
+                res = self.get_image(res)
+            elif n != 2:
+                res = self.get_pixel(res)
+            return res
+
+    def try_click(self, name, *, back=False):
+        """ 检查是否出现了目标，有则点击，否则不进行任何操作
+
+        :param back: 点击后将鼠标move回原来的位置
         """
         pos0 = pyautogui.position()
-        while True:
-            if isinstance(name, (tuple, list)) and len(name) == 2:  # 直接输入坐标
-                pos = name
-            else:
-                pos = self.find(name, grayscale, confidence)
-            if pos: pyautogui.click(*pos)
-            if pos or not wait: break
-        if back: pyautogui.moveTo(*pos0)  # 恢复鼠标原位置
+        if isinstance(name, (tuple, list)) and len(name) == 2:  # 直接输入坐标
+            pos = name
+        elif isinstance(name, str):
+            pos = self.find_point(name)
+
+        if pos:
+            # print(pos)
+            pyautogui.click(*pos)
+        if back:
+            pyautogui.moveTo(*pos0)  # 恢复鼠标原位置
         return pos
 
-    def try_click(self, name, grayscale=None, confidence=None, back=False):
-        return self.click(name, grayscale=grayscale, confidence=confidence, wait=False, back=back)
+    def click_point(self, name, *, back=False):
+        """ 不进行内容匹配，直接点击对应位置的点 """
+        if isinstance(name, str):
+            name = self.points[name]
+        return self.try_click(name, back=back)
+
+    def wait(self, name, *, limit_seconds=None, interval_seconds=1, back=False):
+        pos = None
+        t = TicToc()
+        while not pos:
+            pos = self.find_point(name)
+            time.sleep(interval_seconds)
+            if limit_seconds and t.tocvalue() > limit_seconds:
+                break
+        return pos
+
+    def wait_click(self, name, *, limit_seconds=None, interval_seconds=1, back=False):
+        """ 等待图标出现运行成功后再点击
+
+        :poram limit_seconds: 等待秒数上限
+        :param interval_seconds: 每隔几秒检查一次
+        :param back: 点击后将鼠标move回原来的位置
+        """
+        pos = self.wait(name, limit_seconds=limit_seconds, interval_seconds=interval_seconds)
+        self.try_click(pos, back=back)
+
+    def move_to(self, name):
+        pyautogui.moveTo(*self.points[name])
 
 
 class PosTran:
@@ -161,7 +324,7 @@ class PosTran:
 
 
 def lookup_mouse_position():
-    """查看鼠标位置的工具
+    """ 查看鼠标位置的工具
     """
     from keyboard import read_key
 
