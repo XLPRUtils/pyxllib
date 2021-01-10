@@ -115,7 +115,7 @@ def pil2cv(img):
     """ pil图片转np图片 """
     x = img
     y = np_array(x)
-    y = PIL.Image.fromarray(cv2.cvtColor(y, cv2.COLOR_BGR2RGB)) if y.size else None
+    y = cv2.cvtColor(y, cv2.COLOR_BGR2RGB) if y.size else None
     return y
 
 
@@ -224,7 +224,7 @@ class CvPrcs:
         """
         if is_numpy_image(file):
             img = file
-        elif File(file):
+        elif File.safe_init(file):
             # https://www.yuque.com/xlpr/pyxllib/imread
             img = cv2.imdecode(np.fromfile(str(file), dtype=np.uint8), flags)
         elif is_pil_image(file):
