@@ -19,7 +19,7 @@ except ModuleNotFoundError:
     subprocess.run(['pip', 'install', 'keyboard'])
     import keyboard
 
-import pyscreeze
+import pyscreeze  # NOQA pyautogui安装的时候会自动安装依赖的pyscreeze
 
 
 class NamedLocate:

@@ -140,7 +140,76 @@ def warp_image(img, warp_mat, dsize=None, *, view_rate=False, max_zoom=1, reserv
     return dst
 
 
-def get_sub_image(src_image, pts, warp_quad=False):
+def pad_image(im, pad_size, constant_values=0, mode='constant', **kwargs):
+    r""" 拓宽图片上下左右尺寸
+
+    基于np.pad，定制、简化了针对图片类型数据的操作
+    https://numpy.org/doc/stable/reference/generated/numpy.pad.html
+
+    :pad_size: 输入单个整数值，对四周pad相同尺寸，或者输入四个值的list，表示对上、下、左、右的扩展尺寸
+
+    >>> a = np.ones([2, 2])
+    >>> b = np.ones([2, 2, 3])
+    >>> pad_image(a, 1).shape  # 上下左右各填充1行/列
+    (4, 4)
+    >>> pad_image(b, 1).shape
+    (4, 4, 3)
+    >>> pad_image(a, [1, 2, 3, 0]).shape  # 上填充1，下填充2，左填充3，右不填充
+    (5, 5)
+    >>> pad_image(b, [1, 2, 3, 0]).shape
+    (5, 5, 3)
+    >>> pad_image(a, [1, 2, 3, 0])
+    array([[0., 0., 0., 0., 0.],
+           [0., 0., 0., 1., 1.],
+           [0., 0., 0., 1., 1.],
+           [0., 0., 0., 0., 0.],
+           [0., 0., 0., 0., 0.]])
+    >>> pad_image(a, [1, 2, 3, 0], 255)
+    array([[255., 255., 255., 255., 255.],
+           [255., 255., 255.,   1.,   1.],
+           [255., 255., 255.,   1.,   1.],
+           [255., 255., 255., 255., 255.],
+           [255., 255., 255., 255., 255.]])
+    """
+    # 0 参数检查
+    if im.ndim < 2 or im.ndim > 3:
+        raise ValueError
+
+    if isinstance(pad_size, int):
+        ltrb = [pad_size] * 4
+    else:
+        ltrb = pad_size
+
+    # 1 pad_size转成np.pad的格式
+    pad_width = [(ltrb[0], ltrb[1]), (ltrb[2], ltrb[3])]
+    if im.ndim == 3:
+        pad_width.append((0, 0))
+
+    dst = np.pad(im, pad_width, mode, constant_values=constant_values, **kwargs)
+
+    return dst
+
+
+def _get_subrect_image(src_img, pts, fill=0):
+    """
+    :return:
+        dst_img 按外接四边形截取的子图
+        new_pts 新的变换后的点坐标
+    """
+    # 1 计算需要pad的宽度
+    x1, y1, x2, y2 = rect_bounds1d(pts)
+    h, w = src_img.shape[:2]
+    pad = [-y1, y2 - h, -x1, x2 - w]  # 各个维度要补充的宽度
+    pad = [max(0, v) for v in pad]  # 负数宽度不用补充，改为0
+
+    # 2 pad并定位rect局部图
+    tmp_img = pad_image(src_img, pad, fill) if max(pad) > 0 else src_img
+    dst_img = tmp_img[y1 + pad[0]:y2, x1 + pad[2]:x2]  # 这里越界不会报错，只是越界的那个维度shape为0
+    new_pts = [(pt[0] - x1, pt[1] - y1) for pt in pts]
+    return dst_img, new_pts
+
+
+def get_sub_image(src_image, pts, *, fill=0, warp_quad=False):
     """ 从src_image取一个子图
 
     :param src_image: 原图
@@ -150,6 +219,7 @@ def get_sub_image(src_image, pts, warp_quad=False):
         只有两个点，认为是矩形的两个对角点
         只有四个点，认为是任意四边形
         同理，其他点数量，默认为
+    :param fill: 支持pts越界选取，此时可以设置fill自动填充的颜色值
     :param warp_quad: 变形的四边形
         默认是截图pts的外接四边形区域，使用该参数
             且当pts为四个点时，是否强行扭转为矩形
@@ -160,13 +230,11 @@ def get_sub_image(src_image, pts, warp_quad=False):
     """
     src_img = imread(src_image)
     pts = coords2d(pts)
-    if not warp_quad or len(pts) != 4:
-        x1, y1, x2, y2 = rect_bounds1d(pts)
-        dst = src_img[y1:y2, x1:x2]  # 这里越界不会报错，只是越界的那个维度shape为0
-    else:
+    dst, pts = _get_subrect_image(src_img, pts)
+    if len(pts) == 4 and warp_quad:
         w, h = quad_warp_wh(pts, method=warp_quad)
         warp_mat = get_warp_mat(pts, rect2polygon([0, 0, w, h]))
-        dst = warp_image(src_img, warp_mat, (w, h))
+        dst = warp_image(dst, warp_mat, (w, h))
     return dst
 
 
