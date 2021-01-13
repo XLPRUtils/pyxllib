@@ -228,9 +228,7 @@ def get_sub_image(src_image, pts, *, fill=0, warp_quad=False):
         文件、np.ndarray --> np.ndarray
         PIL.Image --> PIL.Image
     """
-    src_img = imread(src_image)
-    pts = coords2d(pts)
-    dst, pts = _get_subrect_image(src_img, pts)
+    dst, pts = _get_subrect_image(imread(src_image), coords2d(pts), fill)
     if len(pts) == 4 and warp_quad:
         w, h = quad_warp_wh(pts, method=warp_quad)
         warp_mat = get_warp_mat(pts, rect2polygon([0, 0, w, h]))
