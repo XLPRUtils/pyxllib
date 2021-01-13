@@ -12,11 +12,11 @@ import os
 import pathlib
 import pickle
 import re
+import pyxllib.basic.stdlib.shutil  # 这个只要导入更新一遍即可，后续按照标准库的方式导入使用就正常了
 import shutil
 import subprocess
 import tempfile
 
-import chardet
 import qiniu
 import requests
 import yaml
@@ -755,6 +755,19 @@ class File(PathBase):
 
         return self
 
+    def unpack(self, dst_dir=None):
+        """ 解压缩
+
+        :param dst_dir: 如果没有输入，默认会套一层压缩文件原名的目录里
+
+        TODO 本来是想，如果没有传dst_dir，则类似Bandizip的自动解压机制，解压到当前文件夹
+            但是不太好实现
+        """
+        p = str(self)
+        if not dst_dir:
+            dst_dir = os.path.splitext(p)[0]
+        shutil.unpack_archive(p, str(dst_dir))
+
 
 def demo_file():
     """ File类的综合测试"""
@@ -828,4 +841,4 @@ class XlBytesIO(io.BytesIO):
 
 
 if __name__ == '__main__':
-    demo_file_rename()
+    print(__file__)
