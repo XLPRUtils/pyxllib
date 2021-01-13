@@ -220,6 +220,7 @@ def get_sub_image(src_image, pts, *, fill=0, warp_quad=False):
         只有四个点，认为是任意四边形
         同理，其他点数量，默认为
     :param fill: 支持pts越界选取，此时可以设置fill自动填充的颜色值
+        TODO fill填充一个rgb颜色的时候应该会不兼容报错，还要想办法优化
     :param warp_quad: 变形的四边形
         默认是截图pts的外接四边形区域，使用该参数
             且当pts为四个点时，是否强行扭转为矩形
@@ -243,7 +244,7 @@ ____other = """
 def get_background_color(src_img, edge_size=5, binary_img=None):
     """ 智能判断图片背景色
 
-    对全图二值化后，考虑最外一层宽度未edge_size的环中，0、1分布最多的作为背景色
+    对全图二值化后，考虑最外一层宽度为edge_size的环中，0、1分布最多的作为背景色
         然后取全部背景色的平均值返回
 
     :param src_img: 支持黑白图、彩图
@@ -251,7 +252,7 @@ def get_background_color(src_img, edge_size=5, binary_img=None):
     :param binary_img: 运算中需要用二值图，如果外部已经计算了，可以直接传入进来，避免重复运算
     :return: color
 
-    TODO 可以写个获得前景色，道理类似，只是最后再图片中心去取平均值
+    TODO 可以写个获得前景色，道理类似，只是最后在图片中心去取平均值
     """
     from itertools import chain
 

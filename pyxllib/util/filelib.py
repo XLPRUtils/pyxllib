@@ -11,7 +11,7 @@
 """
 
 from pyxllib.text import *
-import pyxllib.util.zipfile as zipfile  # 重写了标准库的zipfile文件，cp437改为gbk，解决zip中文乱码问题
+import pyxllib.basic.stdlib.zipfile as zipfile  # 重写了标准库的zipfile文件，cp437改为gbk，解决zip中文乱码问题
 
 # 需要使用的第三方软件
 # BCompare.exe， bcompare函数要用

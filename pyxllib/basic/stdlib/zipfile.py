@@ -1211,7 +1211,7 @@ class ZipFile:
             else:
                 # Historical ZIP filename encoding
                 # filename = filename.decode('cp437')
-                filename = filename.decode('gbk')  # code4101�޸Ĵ�
+                filename = filename.decode('gbk')  # code4101修改处
             # Create ZipInfo instance to store file information
             x = ZipInfo(filename)
             x.extra = fp.read(centdir[_CD_EXTRA_FIELD_LENGTH])
@@ -1825,7 +1825,7 @@ class PyZipFile(ZipFile):
             return
         dir, name = os.path.split(pathname)
         if os.path.isdir(pathname):
-            initname = os.path.join(pathname, "__init__.py")
+            initname = os.path.join(pathname, "../../util/__init__.py")
             if os.path.isfile(initname):
                 # This is a package directory, add it
                 if basename:
@@ -1845,7 +1845,7 @@ class PyZipFile(ZipFile):
                     path = os.path.join(pathname, filename)
                     root, ext = os.path.splitext(filename)
                     if os.path.isdir(path):
-                        if os.path.isfile(os.path.join(path, "__init__.py")):
+                        if os.path.isfile(os.path.join(path, "../../util/__init__.py")):
                             # This is a package directory, add it
                             self.writepy(path, basename,
                                          filterfunc=filterfunc)  # Recursive call
