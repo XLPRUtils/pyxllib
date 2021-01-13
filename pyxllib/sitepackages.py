@@ -10,12 +10,11 @@ r"""
 还可以下载最新源代码，然后用该脚本将pyxllib配置到site-packages里，便于索引使用
 """
 
-
 import os
 import site
 
 
-def add_project_to_sitepackages(project_path = os.path.dirname(__file__)):
+def add_project_to_sitepackages(project_path=os.path.dirname(__file__)):
     """ 将制定项目配置到sitepackages目录
     :param project_path: 项目路径
         默认本脚本所在的目录为项目路径
