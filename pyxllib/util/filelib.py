@@ -13,6 +13,25 @@
 from pyxllib.text import *
 import pyxllib.basic.stdlib.zipfile as zipfile  # 重写了标准库的zipfile文件，cp437改为gbk，解决zip中文乱码问题
 
+try:
+    import paramiko
+except ModuleNotFoundError:
+    subprocess.run(['pip', 'install', 'paramiko'])
+    import paramiko
+
+# 对 paramiko 进一步封装的库
+# try:
+#     import fabric
+# except ModuleNotFoundError:
+#     subprocess.run(['pip', 'install', 'fabric'])
+#     import fabric
+
+try:
+    import scp
+except ModuleNotFoundError:
+    subprocess.run(['pip', 'install', 'scp'])
+    import scp
+
 # 需要使用的第三方软件
 # BCompare.exe， bcompare函数要用
 
@@ -604,9 +623,17 @@ def download_file(url, fn=None, *, encoding=None, if_exists=None, ext=None, temp
     if not fn: fn = url.split('/')[-1]
     root = Dir.TEMP if temp else None
     fn = File(fn, root, suffix=ext).write(requests.get(url).content,
-                                   encoding=encoding, if_exists=if_exists, etag=(not fn))
+                                          encoding=encoding, if_exists=if_exists, etag=(not fn))
     return fn.to_str()
 
 
 ____other = """
 """
+
+
+def createSSHClient(server, port, user, password):
+    client = paramiko.SSHClient()
+    client.load_system_host_keys()
+    client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+    client.connect(server, port, user, password)
+    return client

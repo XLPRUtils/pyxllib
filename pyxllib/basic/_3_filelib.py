@@ -710,7 +710,7 @@ class File(PathBase):
         else:  # 非文件对象
             raise FileNotFoundError(f'{self} 文件不存在，无法读取。')
 
-    def write(self, ob, *, encoding=None, if_exists=None, mode=None):
+    def write(self, ob, *, encoding=None, if_exists=None, mode=None, **kwargs):
         """ 保存为文件
 
         :param ob: 写入的内容
@@ -721,6 +721,12 @@ class File(PathBase):
             当然，其实有些格式是用不到编码信息的~~例如pkl文件
         :param if_exists: 如果文件已存在，要进行的操作
         :param mode: 写入模式（例如 '.json'），默认从扩展名识别，也可以强制指定
+        :param kwargs:
+            写入json格式的时候
+                ensure_ascii: json.dump默认是True，但是我这里默认值改成了False
+                    改成False可以支持在json直接显示中文明文
+                indent: json.dump是None，我这里默认值遵循json.dump
+                    我原来是2，让文件结构更清晰、更加易读
         :return: 返回写入的文件名，这个主要是在写临时文件时有用
         """
 
@@ -742,7 +748,9 @@ class File(PathBase):
                     pickle.dump(ob, f)
             elif mode == '.json':
                 with open(name, 'w', encoding=get_enc()) as f:
-                    json.dump(ob, f, ensure_ascii=False, indent=2)
+                    if 'ensure_ascii' not in kwargs:
+                        kwargs['ensure_ascii'] = False
+                    json.dump(ob, f, **kwargs)
             elif mode == '.yaml':
                 with open(name, 'w', encoding=get_enc()) as f:
                     yaml.dump(ob, f)
@@ -829,7 +837,7 @@ class XlBytesIO(io.BytesIO):
         return struct_unpack(self, fmt)
 
     def readtext(self, char_num, encoding='gbk', errors='ignore', code_length=2):
-        """ 读取二进制流，将其解析未文本内容
+        """ 读取二进制流，将其解析为文本内容
 
         :param char_num: 字符数
         :param encoding: 所用编码，一般是gbk，因为如果是utf8是字符是变长的，不好操作

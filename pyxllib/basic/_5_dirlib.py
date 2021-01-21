@@ -663,3 +663,12 @@ def extract_files(src, dst, pattern, if_exists='delete'):
     for f in files:
         p1, p2 = File(d1 / f), File(d2 / f)
         p1.copy(p2, if_exists=if_exists)
+
+
+def file_or_dir_size(path):
+    if os.path.isfile(path):
+        return File(path).size
+    elif os.path.isdir(path):
+        return Dir(path).size
+    else:
+        return 0

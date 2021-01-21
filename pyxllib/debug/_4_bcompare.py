@@ -9,6 +9,9 @@ from pyxllib.basic import func_input_message, dprint, natural_sort_key, File, re
 from pyxllib.debug._1_typelib import prettifystr
 from pyxllib.debug._2_chrome import viewfiles
 
+import copy
+import pandas as pd
+
 
 def intersection_split(a, b):
     """输入两个对象a,b，可以是dict或set类型，list等
@@ -118,33 +121,98 @@ def bcompare(oldfile, newfile=None, basefile=None, wait=True, sameoff=False, old
     return File(ls[0]).read()
 
 
-def refine_file(file, func, file_mode=None, debug=0):
+def modify_file(file, func, *, outfile=None, file_mode=None, debug=0):
     """ 对单个文件就行优化的功能函数
 
+    这样一些底层函数功能可以写成数据级的接口，然后由这个函数负责文件的读写操作，并且支持debug比较前后内容差异
+
+    :param outfile: 默认是对file原地操作，如果使用该参数，则将处理后的内容写入outfile文件
     :param file_mode: 指定文件读取类型格式，例如'.json'是json文件，读取为字典
     :param debug: 这个功能可以对照refine分级轮理解
-        0，关闭调试，直接运行
-        1，打开BC比较差异，左边原始内容，右边参考内容
-        -1，介于完全不调试和全部人工检查之间，特殊的差异比较。左边放原始文件修改后的结果，右边对照原内容。
+        无outfile参数时，原地操作
+            0，【直接原地操作】关闭调试，直接运行 （根据outfile选择原地操作，或者生成新文件）
+            1，【进行审核】打开BC比较差异，左边原始内容，右边参考内容  （打开前后差异内容对比）
+            -1，【先斩后奏】介于完全不调试和全部人工检查之间，特殊的差异比较。左边放原始文件修改后的结果，右边对照原内容。
+        有outfile参数时
+            0 | False，直接生成目标文件，如果outfile已存在会被覆盖
+            1 | True，直接生成目标文件，但是会弹出bc比较前后内容差异 （相同内容不会弹出）
     """
-    f = File(file)
-    data = f.read(mode=file_mode)
+    infile = File(file)
+    data = infile.read(mode=file_mode)
     origin_content = str(data)
     new_data = func(data)
 
     isdiff = origin_content != str(new_data)
-    if isdiff:
-        if debug == 0:
-            f.write(new_data, mode=file_mode)  # 直接原地替换
-        elif debug == 1:
-            temp_file = File('refine_file', Dir.TEMP, suffix=f.suffix).write(new_data)
-            bcompare(f, temp_file)  # 使用beyond compare软件打开对比查看
-        elif debug == -1:
-            temp_file = File('old_content', Dir.TEMP, suffix=f.suffix)
-            f.copy(temp_file)
-            f.write(new_data, mode=file_mode)  # 把原文件内容替换了
-            bcompare(f, temp_file)  # 然后显示与旧内容进行对比
-        else:
-            raise ValueError(f'{debug}')
+    if outfile is None:  # 原地操作
+        if isdiff:  # 内容不同才会有相关debug功能，否则静默跳过就好
+            if debug == 0:
+                infile.write(new_data, mode=file_mode)  # 直接处理
+            elif debug == 1:
+                temp_file = File('refine_file', Dir.TEMP, suffix=infile.suffix).write(new_data)
+                bcompare(infile, temp_file)  # 使用beyond compare软件打开对比查看
+            elif debug == -1:
+                temp_file = File('old_content', Dir.TEMP, suffix=infile.suffix)
+                infile.copy(temp_file)
+                infile.write(new_data, mode=file_mode)  # 把原文件内容替换了
+                bcompare(infile, temp_file)  # 然后显示与旧内容进行对比
+            else:
+                raise ValueError(f'{debug}')
+    else:
+        outfile = File(outfile)
+        outfile.write(new_data, mode=file_mode)  # 直接处理
+        if debug and isdiff:
+            bcompare(infile, outfile)
 
     return isdiff
+
+
+class SetCmper:
+    """ 集合两两比较 """
+
+    def __init__(self, data):
+        """
+        :param data: 字典结构
+            key: 类别名
+            value: 该类别含有的元素（非set类型会自动转set）
+        """
+        self.data = copy.deepcopy(data)
+        for k, v in self.data.items():
+            if not isinstance(v, set):
+                self.data[k] = set(self.data[k])
+
+    def intersection(self):
+        r""" 两两集合共有元素数量
+
+        :return: df
+            df对角线存储的是每个集合自身大小，df第i行第j列是第i个集合减去第j个集合的剩余元素数
+
+        >>> s1 = {1, 2, 3, 4, 5, 6, 7, 8, 9}
+        >>> s2 = {1, 3, 5, 7, 8}
+        >>> s3 = {2, 3, 5, 8}
+        >>> df = SetCmper({'s1': s1, 's2': s2, 's3': s3}).intersection()
+        >>> df
+            s1  s2  s3
+        s1   9   5   4
+        s2   5   5   3
+        s3   4   3   4
+        >>> df.loc['s1', 's2']
+        5
+        """
+        cats = list(self.data.keys())
+        data = self.data
+        n = len(cats)
+        rows = []
+        for i, c in enumerate(cats):
+            a = data[c]
+            row = [0] * n
+            for j, d in enumerate(cats):
+                if i == j:
+                    row[j] = len(a)
+                elif j < i:
+                    row[j] = rows[j][i]
+                elif j > i:
+                    row[j] = len(a & data[d])
+            rows.append(row)
+        df = pd.DataFrame.from_records(rows, columns=cats)
+        df.index = cats
+        return df
