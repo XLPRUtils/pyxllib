@@ -1,15 +1,18 @@
 # 1 install
 
-工具包已经提交到pypi: https://pypi.org/project/pyxllib/
-可以直接安装：
-
 ```
 pip install pyxllib
 ```
 
-更详细的安装问题见：https://www.yuque.com/xlpr/pyxllib/install
+more details: https://www.yuque.com/xlpr/pyxllib/install
 
 # 2 document
 
-使用文档: https://www.yuque.com/xlpr/pyxllib ，
-正在努力完善中，欢迎更多小伙伴一起助力
+document: https://www.yuque.com/xlpr/pyxllib.
+Work hard to improve, welcome more assistant partners.
+
+# 3 Acknowledge
+
+This project uses PyCharm to develop.
+Thanks to [JetBrains'](https://www.jetbrains.com/?from=pyxllib) support
+of [free license for open sourse project development](http://pycharm.iswbm.com/zh_CN/latest/c01/c01_05.html).

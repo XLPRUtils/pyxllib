@@ -83,6 +83,7 @@ class ToLabelmeJson:
         """最基本的添加形状功能
 
         :param shape_type: 会根据points的点数量，智能判断类型，默认一般是polygon
+            其他需要自己指定的格式：line、circle
         :param dtype: 可以重置points的存储数值类型，一般是浮点数，可以转成整数更精简
         """
         # 1 优化点集数据格式
@@ -116,7 +117,7 @@ class ToLabelmeJson:
         """
         if dst is None and self.imgpath:
             dst = self.imgpath.with_suffix('.json')
-        return File(dst).write(self.data, if_exists=if_exists)
+        return File(dst).write(self.data, if_exists=if_exists, indent=None)
 
     @classmethod
     def create_json(cls, imgpath, annotation):
