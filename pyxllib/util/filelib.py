@@ -637,3 +637,65 @@ def createSSHClient(server, port, user, password):
     client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
     client.connect(server, port, user, password)
     return client
+
+
+class DataSyncBase:
+    """ 在windows和linux之间同步文件数据
+
+    DataSync只有在win平台才能用
+
+    TODO 如果本地目录a已存在，从服务器a再下载，会跑到a/a的位置
+    TODO 选择性从服务器拷贝？ 怎么获得服务器有哪些文件内容，使用ssh来获得？
+    """
+
+    def __init__(self, server, port, user, password):
+        self.ssh = createSSHClient(server, port, user, password)
+        self.scp = scp.SCPClient(self.ssh.get_transport())
+
+    @classmethod
+    def _remote_path(cls, local_path):
+        """ 本地路径和服务器路径的一些相对位置 """
+
+        # 本功能需要在继承的类上定制功能，例如：
+        # dst = local_path.replace('D:/datasets', '/home/datasets')
+        # return dst
+
+        raise NotImplementedError
+
+    @classmethod
+    def _proc_paths(cls, in_arg):
+        # 转为文件清单来同步
+        if isinstance(in_arg, Dir) and in_arg.subs:
+            # 可以输入Dir且选中部分子文件
+            paths = [str(p) for p in in_arg.subpaths()]
+        else:
+            paths = [str(in_arg)]
+        return paths
+
+    def put(self, path):
+        paths = self._proc_paths(path)
+
+        tt = TicToc()
+        for p in paths:
+            tt.tic()
+            # 其实scp也支持同时同步多文件，但是目标位置没法灵活控制，所以我这里还是一个一个同步
+            q = self._remote_path(p)
+            self.ssh.exec_command(f'mkdir -p {os.path.dirname(q)}')  # 如果不存在父目录则建立
+            self.scp.put(p, q, recursive=True)
+            t = tt.tocvalue()
+            speed = humanfriendly.format_size(file_or_dir_size(p) / t, binary=True)
+            print(f'upload {p}, ↑{speed}/s, {t:.2f}s')
+
+    def get(self, path):
+        """ 只需要写本地文件路径，会推断服务器上的位置 """
+        paths = self._proc_paths(path)
+
+        tt = TicToc()
+        for p in paths:
+            tt.tic()
+            # 目录的同步必须要开recursive，其他没什么区别
+            Dir(os.path.dirname(p)).ensure_dir()
+            self.scp.get(self._remote_path(p), p, recursive=True, preserve_times=True)
+            t = tt.tocvalue()
+            speed = humanfriendly.format_size(file_or_dir_size(p) / t, binary=True)
+            print(f'download {p}, ↓{speed}/s, {t:.2f}s')
