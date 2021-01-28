@@ -146,7 +146,12 @@ class Dir(PathBase):
         r""" 删除自身文件
         """
         if self:
-            shutil.rmtree(str(self))
+            try:
+                shutil.rmtree(str(self))
+            except OSError:
+                # OSError: Cannot call rmtree on a symbolic link
+                # TODO 本来不应该try except，而是先用os.path.islink判断的，但是这个好像有bug，判断不出来~~
+                os.unlink(str(self))
 
     # 二、目录类专有功能
 
