@@ -239,12 +239,8 @@ def rect_bounds1d(coords, dtype=int):
     :param dtype: 默认存储的数值类型
     :return: rect的两个点坐标，同时也是 [left, top, right, bottom]
     """
-    pts = coords2d(coords)
-    if len(pts) > 2:
-        p = Polygon(pts).bounds
-    else:
-        pts = coords1d(pts)
-        p = [min(pts[::2]), min(pts[1::2]), max(pts[::2]), max(pts[1::2])]
+    pts = coords1d(coords)
+    p = [min(pts[::2]), min(pts[1::2]), max(pts[::2]), max(pts[1::2])]
     return [dtype(v) for v in p]
 
 

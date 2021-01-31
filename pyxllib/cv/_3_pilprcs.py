@@ -15,7 +15,7 @@ class PilPrcs(CvPrcs):
         elif is_numpy_image(file):
             img = cv2pil(file)
         elif File(file):
-            img = Image.open(file, **kwargs)
+            img = Image.open(str(file), **kwargs)
         else:
             raise TypeError(f'类型错误或文件不存在：{type(file)} {file}')
         return cls.cvt_channel(img, flags)
