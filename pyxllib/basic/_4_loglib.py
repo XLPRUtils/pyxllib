@@ -12,6 +12,7 @@ import os
 import queue
 import sys
 import traceback
+import time
 
 # https://pypi.org/project/verboselogs/
 # import verboselogs
@@ -343,9 +344,11 @@ class Iterate:
             message = f' {self.items[i]}' if pinterval == 1 else ''
             self.xllog.info(f'{i:{self.format_width}d}/{self.n_items}={i / self.n_items:6.2%}{message}')
 
-    def _step5_finish(self, pinterval, interrupt):
+    def _step5_finish(self, pinterval, interrupt, start_time):
+        end_time = time.time()
+        speed = self.n_items / (end_time - start_time)
         if not interrupt and pinterval:
-            self.xllog.info(f'{self.n_items / self.n_items:6.2%} 完成迭代')
+            self.xllog.info(f'{self.n_items / self.n_items:6.2%} 完成迭代，总用时：，速度：{speed:.2f}it/s')
             sys.stderr.flush()
 
     def run(self, func, start=0, end=None, pinterval=None, max_workers=1, interrupt=True):
@@ -360,8 +363,6 @@ class Iterate:
         :type max_workers: int, None
         :param interrupt: 出现错误时是否中断，默认True会终止程序，否则只会输出错误日志
         :return:
-
-        # TODO 最后输出一个平均处理时间的信息
         """
 
         # 1 统一的参数处理部分
@@ -382,12 +383,13 @@ class Iterate:
                 self.xllog.error(f'💔idx={i}运行出错：{item}\n{format_exception(e)}')
 
         # 3 执行迭代
+        start_time = time.time()
         for i in range(start, end):
             self._step4_iter(i, pinterval, executor)
             executor.submit(wrap_func, func, i)
             if interrupt and error: exit(-1)
         executor.shutdown()  # 必须等executor结束，error才是准确的
-        self._step5_finish(pinterval, interrupt and error)
+        self._step5_finish(pinterval, interrupt and error, start_time)
 
 
 def mtqdm(func, iterable, *args, max_workers=1, **kwargs):
