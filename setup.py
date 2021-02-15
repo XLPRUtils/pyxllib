@@ -18,7 +18,7 @@ install_requires = open('requirements.txt').readlines()
 
 setup(
     name='pyxllib',  # pip 安装时用的名字
-    version='0.0.58.3',  # 当前版本，每次更新上传到pypi都需要修改; 第4位版本号一般是修紧急bug
+    version='0.0.59',  # 当前版本，每次更新上传到pypi都需要修改; 第4位版本号一般是修紧急bug
     author='code4101',
     author_email='877362867@qq.com',
     url='https://github.com/XLPRUtils/pyxllib',

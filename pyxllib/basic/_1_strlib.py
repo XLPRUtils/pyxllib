@@ -67,6 +67,7 @@ def natural_sort_key(key):
     >>> natural_sort_key('0.0.2') < natural_sort_key('0.0.12')
     True
     """
+
     def convert(text):
         return int(text) if text.isdigit() else text.lower()
 
@@ -950,3 +951,18 @@ def struct_unpack(f, fmt):
         return res[0]
     else:
         return res
+
+
+class ContentPartSpliter:
+    """ 文本内容分块处理 """
+
+    @classmethod
+    def multi_blank_lines(cls, content, leastlines=2):
+        """ 用多个空行隔开的情况
+
+        :param leastlines: 最少2个空行隔开，为新的一块内容
+        """
+        fmt = r'\n{' + str(leastlines) + ',}'
+        parts = [x.strip() for x in re.split(fmt, content)]
+        parts = list(filter(bool, parts))  # 删除空行
+        return parts

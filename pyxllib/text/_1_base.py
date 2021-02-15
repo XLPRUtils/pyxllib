@@ -429,6 +429,11 @@ class MatchSimString:
     def __getitem__(self, item):
         return self.origin_str[item]
 
+    def __delitem__(self, item):
+        del self.origin_str[item]
+        del self.key_str[item]
+        del self.ext_value[item]
+
     def __len__(self):
         return len(self.key_str)
 
