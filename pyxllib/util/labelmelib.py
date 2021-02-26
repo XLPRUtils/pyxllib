@@ -79,12 +79,13 @@ class ToLabelmeJson:
                 }
         return data
 
-    def get_shape(self, label, points, shape_type=None, dtype=None):
+    def get_shape(self, label, points, shape_type=None, dtype=None, group_id=None, **kwargs):
         """最基本的添加形状功能
 
         :param shape_type: 会根据points的点数量，智能判断类型，默认一般是polygon
             其他需要自己指定的格式：line、circle
         :param dtype: 可以重置points的存储数值类型，一般是浮点数，可以转成整数更精简
+        :param group_id: 本来是用来分组的，但其值会以括号的形式添加在label后面，可以在可视化中做一些特殊操作
         """
         # 1 优化点集数据格式
         points = np_array(points, dtype).reshape(-1, 2).tolist()
@@ -101,10 +102,11 @@ class ToLabelmeJson:
                 raise ValueError
         # 3 创建标注
         shape = {'flags': {},
-                 'group_id': None,
+                 'group_id': group_id,
                  'label': str(label),
                  'points': points,
                  'shape_type': shape_type}
+        shape.update(kwargs)
         return shape
 
     def add_shape(self, *args, **kwargs):
