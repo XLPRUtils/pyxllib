@@ -13,14 +13,14 @@ import pandas as pd
 try:
     from bidict import bidict
 except ModuleNotFoundError:
-    subprocess.run(['pip', 'install', 'bidict'])
+    subprocess.run(['pip3', 'install', 'bidict'])
     from bidict import bidict
 
 try:
     import sqlalchemy
 except ModuleNotFoundError:
-    subprocess.run(['pip', 'install', 'sqlalchemy'])
-    subprocess.run(['pip', 'install', 'mysqlclient'])
+    subprocess.run(['pip3', 'install', 'sqlalchemy'])
+    subprocess.run(['pip3', 'install', 'mysqlclient'])
     import sqlalchemy
 
 from pyxllib.basic import TicToc, dformat, dprint, File

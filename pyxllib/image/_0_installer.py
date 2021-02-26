@@ -9,11 +9,11 @@ import subprocess
 try:
     import PIL
 except ModuleNotFoundError:
-    subprocess.run(['pip', 'install', 'pillow'])
+    subprocess.run(['pip3', 'install', 'pillow'])
     import PIL
 
 try:
     import fitz
 except ModuleNotFoundError:
-    subprocess.run(['pip', 'install', 'PyMuPdf'])
+    subprocess.run(['pip3', 'install', 'PyMuPdf'])
     import fitz

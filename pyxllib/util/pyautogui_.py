@@ -10,13 +10,13 @@ from pyxllib.cv import *
 try:
     import pyautogui
 except ModuleNotFoundError:
-    subprocess.run(['pip', 'install', 'pyautogui'])
+    subprocess.run(['pip3', 'install', 'pyautogui'])
     import pyautogui
 
 try:
     import keyboard
 except ModuleNotFoundError:
-    subprocess.run(['pip', 'install', 'keyboard'])
+    subprocess.run(['pip3', 'install', 'keyboard'])
     import keyboard
 
 import pyscreeze  # NOQA pyautogui安装的时候会自动安装依赖的pyscreeze
