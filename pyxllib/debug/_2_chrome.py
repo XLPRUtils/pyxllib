@@ -74,6 +74,36 @@ def viewfiles(procname, *files, **kwargs):
     return tictoc.tocvalue()
 
 
+def explorer(arg_, app='explorer', **kwargs):
+    # 1 如果是文件、url，则直接打开
+    if is_file(arg_) or is_url(arg_) or isinstance(arg_, File):
+        viewfiles(app, arg_)
+        return
+
+    # 2 如果是其他类型，则先转成文件，再打开
+    arg = try2df(arg_)
+    if isinstance(arg, pd.DataFrame):  # DataFrame在网页上有更合适的显示效果
+        t = f'==== 类继承关系：{inspect.getmro(type(arg_))}，' \
+            + f'内存消耗：{sys.getsizeof(arg_)}（递归子类总大小：{getasizeof(arg_)}）Byte ===='
+        t = '<p>' + html.escape(t) + '</p>'
+        content = arg.to_html(**kwargs)
+        f = File(..., Dir.TEMP, suffix='.html').write(t + content)
+        f = f.rename(get_etag(str(f)) + '.html', if_exists='delete')
+        viewfiles(app, str(f))
+    elif getattr(arg, 'render', None):  # pyecharts 等表格对象，可以用render生成html表格显示
+        try:
+            name = arg.options['title'][0]['text']
+        except (LookupError, TypeError):
+            name = Datetime().strftime('%H%M%S_%f')
+        filename = File(name, Dir.TEMP, suffix='.html').to_str()
+        arg.render(path=filename)
+        viewfiles(app, filename)
+    else:
+        f = File(..., Dir.TEMP, suffix='.txt').write(arg)
+        f = f.rename(get_etag(str(f)) + f.suffix, if_exists='delete')
+        viewfiles(app, str(f))
+
+
 def chrome(arg_, **kwargs):
     r""" 使用谷歌浏览器查看变量、文件等内容，详细用法见底层函数 viewfiles
 
@@ -89,33 +119,12 @@ def chrome(arg_, **kwargs):
 
     这个函数可以浏览文本、list、dict、DataFrame表格数据、图片、html等各种文件的超级工具
     """
-    # 1 如果是文件、url，则直接打开
-    if is_file(arg_) or is_url(arg_) or isinstance(arg_, File):
-        viewfiles('chrome.exe', arg_)
-        return
+    explorer(arg_, 'chrome.exe', **kwargs)
 
-    # 2 如果是其他类型，则先转成文件，再打开
-    arg = try2df(arg_)
-    if isinstance(arg, pd.DataFrame):  # DataFrame在网页上有更合适的显示效果
-        t = f'==== 类继承关系：{inspect.getmro(type(arg_))}，' \
-            + f'内存消耗：{sys.getsizeof(arg_)}（递归子类总大小：{getasizeof(arg_)}）Byte ===='
-        t = '<p>' + html.escape(t) + '</p>'
-        content = arg.to_html(**kwargs)
-        f = File(..., Dir.TEMP, suffix='.html').write(t + content)
-        f = f.rename(get_etag(str(f)) + '.html', if_exists='delete')
-        viewfiles('chrome.exe', str(f))
-    elif getattr(arg, 'render', None):  # pyecharts 等表格对象，可以用render生成html表格显示
-        try:
-            name = arg.options['title'][0]['text']
-        except (LookupError, TypeError):
-            name = Datetime().strftime('%H%M%S_%f')
-        filename = File(name, Dir.TEMP, suffix='.html').to_str()
-        arg.render(path=filename)
-        viewfiles('chrome.exe', filename)
-    else:
-        f = File(..., Dir.TEMP, suffix='.txt').write(arg)
-        f = f.rename(get_etag(str(f)) + f.suffix, if_exists='delete')
-        viewfiles('chrome.exe', str(f))
+
+def msedge(arg_, **kwargs):
+    """ 用 edge 打开 """
+    explorer(arg_, 'msedge.exe', **kwargs)
 
 
 def chrome_json(f):
