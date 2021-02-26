@@ -9,19 +9,19 @@ import subprocess
 try:
     import PIL
 except ModuleNotFoundError:
-    subprocess.run(['pip', 'install', 'pillow'])
+    subprocess.run(['pip3', 'install', 'pillow'])
     import PIL
 
 try:
     from get_image_size import get_image_size
 except ModuleNotFoundError:
-    subprocess.run(['pip', 'install', 'opsdroid-get-image-size'])
+    subprocess.run(['pip3', 'install', 'opsdroid-get-image-size'])
     from get_image_size import get_image_size
 
 try:
     import cv2
 except ModuleNotFoundError:
-    subprocess.run(['pip', 'install', 'opencv-python'])
+    subprocess.run(['pip3', 'install', 'opencv-python'])
     import cv2
 
 try:
@@ -32,5 +32,5 @@ except ModuleNotFoundError:
         import shapely
     except FileNotFoundError:
         # 这个库用pip安装是不够的，正常要用conda，有些dll才会自动配置上
-        subprocess.run(['pip', 'install', 'shapely'])
+        subprocess.run(['pip3', 'install', 'shapely'])
         import shapely

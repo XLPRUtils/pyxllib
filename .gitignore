@@ -1,8 +1,13 @@
-# PyCharm项目Config目录
-.idea*/
+# PyCharm config dir
+.idea/
 
-*.pyc
+# compile files
 build/
-pyxllib.egg-info/
 dist/
+*.egg-info/
+
+# ingore file types
+*.pyc
+*.pyd
+*.so
 *.pkl

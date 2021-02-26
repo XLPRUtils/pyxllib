@@ -22,4 +22,9 @@ opsdroid-get-image-size
 opencv-python
 shapely
 
+python-Levenshtein
+pyspellchecker
 pyahocorasick
+
+paramiko
+scp

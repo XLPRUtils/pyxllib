@@ -16,20 +16,20 @@ import pyxllib.basic.stdlib.zipfile as zipfile  # 重写了标准库的zipfile�
 try:
     import paramiko
 except ModuleNotFoundError:
-    subprocess.run(['pip', 'install', 'paramiko'])
+    subprocess.run(['pip3', 'install', 'paramiko'])
     import paramiko
 
 # 对 paramiko 进一步封装的库
 # try:
 #     import fabric
 # except ModuleNotFoundError:
-#     subprocess.run(['pip', 'install', 'fabric'])
+#     subprocess.run(['pip3', 'install', 'fabric'])
 #     import fabric
 
 try:
     import scp
 except ModuleNotFoundError:
-    subprocess.run(['pip', 'install', 'scp'])
+    subprocess.run(['pip3', 'install', 'scp'])
     import scp
 
 # 需要使用的第三方软件

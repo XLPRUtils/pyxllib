@@ -53,7 +53,7 @@ class TicToc:
         """Start the timer."""
         self.start = timeit.default_timer()
 
-    def toc(self, msg='用时', restart=False):
+    def toc(self, msg='elapsed', restart=False):
         """
         Report time elapsed since last call to tic().
 
@@ -61,9 +61,12 @@ class TicToc:
             msg     - String to replace default message of 'Elapsed time is'
             restart - Boolean specifying whether to restart the timer
         """
+        from humanfriendly import format_timespan
+
         self.end = timeit.default_timer()
         self.elapsed = self.end - self.start
-        print(f'{self.title} {msg} {self.elapsed:.3f} 秒.')
+        # print(f'{self.title} {msg} {self.elapsed:.3f} 秒.')
+        print(f'{self.title} {msg} {format_timespan(self.elapsed)}.')
         if restart:
             self.start = timeit.default_timer()
 
@@ -225,6 +228,11 @@ class PerfTest:
     """
 
     def perf(self, number=1, repeat=1, globals=None):
+        """
+
+        :param number: 有些代码运算过快，可以多次运行迭代为一个单元
+        :param number: 对单元重复执行次数，最后会计算平均值、标准差
+        """
         # 1 找到所有perf_为前缀，且callable的函数方法
         funcnames = []
         for k in dir(self):

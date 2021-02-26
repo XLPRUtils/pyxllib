@@ -9,5 +9,5 @@ import subprocess
 try:
     import ahocorasick
 except ModuleNotFoundError:
-    subprocess.run(['pip', 'install', 'pyahocorasick'])
+    subprocess.run(['pip3', 'install', 'pyahocorasick'])
     import ahocorasick
