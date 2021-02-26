@@ -345,10 +345,16 @@ class Iterate:
             self.xllog.info(f'{i:{self.format_width}d}/{self.n_items}={i / self.n_items:6.2%}{message}')
 
     def _step5_finish(self, pinterval, interrupt, start_time):
+        from humanfriendly import format_timespan
         end_time = time.time()
-        speed = self.n_items / (end_time - start_time)
+        span = end_time - start_time
+        if span:
+            speed = self.n_items / span
+            msg = f'总用时：{format_timespan(span)}，速度：{speed:.2f}it/s'
+        else:
+            msg = f'总用时：{format_timespan(span)}'
         if not interrupt and pinterval:
-            self.xllog.info(f'{self.n_items / self.n_items:6.2%} 完成迭代，总用时：，速度：{speed:.2f}it/s')
+            self.xllog.info(f'{self.n_items / self.n_items:6.2%} 完成迭代，{msg}')
             sys.stderr.flush()
 
     def run(self, func, start=0, end=None, pinterval=None, max_workers=1, interrupt=True):

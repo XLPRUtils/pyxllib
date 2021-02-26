@@ -13,6 +13,7 @@ import copy
 import io
 import logging
 import math
+import os
 import pprint
 import re
 import socket
@@ -966,3 +967,7 @@ class ContentPartSpliter:
         parts = [x.strip() for x in re.split(fmt, content)]
         parts = list(filter(bool, parts))  # 删除空行
         return parts
+
+
+def get_username():
+    return os.path.split(os.path.expanduser('~'))[-1]

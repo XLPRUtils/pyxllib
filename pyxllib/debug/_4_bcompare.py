@@ -96,7 +96,7 @@ def bcompare(oldfile, newfile=None, basefile=None, wait=True, sameoff=False, old
 
     def func(file, d):
         if file is not None:
-            p = File(file)
+            p = File.safe_init(file)
             if p:
                 ls.append(str(p))
             else:
