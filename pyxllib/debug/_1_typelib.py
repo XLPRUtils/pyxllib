@@ -326,6 +326,7 @@ class MatchBase:
         :param least_score: 分数必须要不小于least_score才能算匹配，否则属于找不到匹配项
         :return: 为每个x找到一个最佳的匹配y，存储其下标和对应的分值
             [(idx0, score0), (idx1, score1), ...]  长度 = len(xs)
+            匹配不到的，idx记录为-1
 
         匹配到的y不会放回，如果是可放回的，可以自己用match进行列表推导式直接计算
         ms = [self.match(x) for x in xs]

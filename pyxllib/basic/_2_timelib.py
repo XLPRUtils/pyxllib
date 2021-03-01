@@ -84,9 +84,9 @@ class TicToc:
         return self.elapsed
 
     @staticmethod
-    def process_time(msg='程序已启动'):
+    def process_time(msg='Program start'):
         """计算从python程序启动到目前为止总用时"""
-        print(f'{msg} {time.process_time():.3f} 秒')
+        print(f'{msg} {time.process_time():.3f} seconds.')
 
     def __enter__(self):
         """Start the timer when using TicToc in a context manager."""
@@ -96,7 +96,7 @@ class TicToc:
         """On exit, print time elapsed since entering context manager."""
         self.end = timeit.default_timer()
         self.elapsed = self.end - self.start
-        print(f'{self.title} {self.elapsed:.3f} 秒.')
+        print(f'{self.title} {self.elapsed:.3f} seconds.')
 
 
 ____timer = """
