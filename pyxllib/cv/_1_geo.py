@@ -73,6 +73,7 @@ def to_list(x, dtype=None, shape=None):
 
 def rect2polygon(src):
     """ 矩形转成四边形结构来表达存储
+    （输入左上、右下两个顶点坐标）
 
     >>> rect2polygon([[0, 0], [10, 20]])
     array([[ 0,  0],
@@ -447,20 +448,33 @@ def intersection_over_union(pts1, pts2):
     return inter_area / union_area
 
 
-def non_maximun_suppression(boxes, iou=0.5):
-    """ 假设boxes已经按权重从大到小排过序 """
-    res = []
-    while boxes:
+def non_maximun_suppression(boxes, iou=0.5, *, index=False):
+    """ 假设boxes已经按权重从大到小排过序
+
+    :param boxes: 支持输入一组box列表 [box1, box2, box3, ...]
+    :param index: 返回不是原始框，而是对应的下标 [i1, i2, i3, ...]
+    """
+    # 1 映射到items来操作
+    items = list(enumerate(boxes))
+
+    # 2 正常nms功能
+    idxs = []
+    while items:
         # 1 加入权值大的框
-        b = boxes[0]
-        res.append(b)
+        i, b = items[0]
+        idxs.append(i)
         # 2 抑制其他框
-        left_boxes = []
-        for i in range(1, len(boxes)):
-            if intersection_over_union(b, boxes[i]) < iou:
-                left_boxes.append(boxes[i])
-        boxes = left_boxes
-    return res
+        left_items = []
+        for j in range(1, len(items)):
+            if intersection_over_union(b, items[j][1]) < iou:
+                left_items.append(items[j])
+        items = left_items
+
+    # 3 返回值
+    if index:
+        return idxs
+    else:
+        return [boxes[i] for i in idxs]
 
 
 ____other = """
