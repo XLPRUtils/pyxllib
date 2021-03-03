@@ -484,19 +484,3 @@ class RunOnlyOnce:
 
     def reset(self):
         self.results = {}
-
-
-class XlMain:
-    """ 上下文管理器，用来在程序运行前后输出计时信息 """
-
-    def __init__(self, name=None):
-        self.name = name
-        self.tictoc = TicToc()
-        self.log = get_xllog()
-
-    def __enter__(self):
-        if self.name == '__main__':
-            self.log.info(f'Program start {time.process_time():.3f} seconds.')
-
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        self.log.info(f'{self.__class__.__name__} elapsed {format_timespan(self.tictoc.tocvalue())}.')

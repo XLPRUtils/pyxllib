@@ -13,6 +13,8 @@ import timeit
 
 import arrow
 
+from humanfriendly import format_timespan
+
 from pyxllib.basic._1_strlib import shorten, natural_sort, listalign
 
 ____tictoc = """
@@ -53,7 +55,7 @@ class TicToc:
         """Start the timer."""
         self.start = timeit.default_timer()
 
-    def toc(self, msg='elapsed', restart=False):
+    def toc(self, msg='', restart=False):
         """
         Report time elapsed since last call to tic().
 
@@ -61,12 +63,10 @@ class TicToc:
             msg     - String to replace default message of 'Elapsed time is'
             restart - Boolean specifying whether to restart the timer
         """
-        from humanfriendly import format_timespan
-
         self.end = timeit.default_timer()
         self.elapsed = self.end - self.start
         # print(f'{self.title} {msg} {self.elapsed:.3f} 秒.')
-        print(f'{self.title} {msg} {format_timespan(self.elapsed)}.')
+        print(f'{self.title} {msg} elapsed {format_timespan(self.elapsed)}.')
         if restart:
             self.start = timeit.default_timer()
 
@@ -84,19 +84,28 @@ class TicToc:
         return self.elapsed
 
     @staticmethod
-    def process_time(msg='Program start'):
+    def process_time(msg='time.process_time():'):
         """计算从python程序启动到目前为止总用时"""
-        print(f'{msg} {time.process_time():.3f} seconds.')
+        print(f'{msg} {format_timespan(time.process_time())}.')
 
     def __enter__(self):
         """Start the timer when using TicToc in a context manager."""
+        if self.title == '__main__':
+            from pyxllib.basic._4_loglib import get_xllog
+            get_xllog().info(f'time.process_time(): {format_timespan(time.process_time())}.')
         self.start = timeit.default_timer()
 
-    def __exit__(self, *args):
+    def __exit__(self, exc_type, exc_val, exc_tb):
         """On exit, print time elapsed since entering context manager."""
-        self.end = timeit.default_timer()
-        self.elapsed = self.end - self.start
-        print(f'{self.title} {self.elapsed:.3f} seconds.')
+        from pyxllib.basic._4_loglib import get_xllog
+
+        elapsed = self.tocvalue()
+        xllog = get_xllog()
+
+        if exc_tb is None:
+            xllog.info(f'{self.title} finished in {format_timespan(elapsed)}.')
+        else:
+            xllog.info(f'{self.title} interrupt in {format_timespan(elapsed)},')
 
 
 ____timer = """
