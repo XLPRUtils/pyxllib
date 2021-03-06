@@ -281,8 +281,8 @@ class KeyValuesCounter:
         return NestedDict.to_html_table(self.kvs, max_items=max_items)
 
 
-class MatchBase:
-    """ 匹配类
+class MatchPairs:
+    """ 匹配类，对X,Y两组数据中的x,y等对象按照cmp_func的规则进行相似度配对
 
     MatchBase(ys, cmp_func).matches(xs, least_score)
     """
@@ -306,8 +306,8 @@ class MatchBase:
         :param x: 待匹配的一个对象
         :param k: 返回次优的几个结果
         :return:
-            当k=1时，返回 (idx, score)
-            当k>1时，返回类似matches的return结构
+            当 k = 1 时，返回 (idx, score)
+            当 k > 1 时，返回 [(idx1, score1), (idx2, score2), ...]
         """
         scores = [self.cmp_func(x, y) for y in self.ys]
         if k == 1:
@@ -315,35 +315,82 @@ class MatchBase:
             idx = scores.index(score)
             return idx, score
         else:
+            # 按权重从大到小排序
             idxs = np.argsort(scores)
             idxs = idxs[::-1][:k]
             return [(idx, scores[idx]) for idx in idxs]
 
-    def matches(self, xs, least_score=sys.float_info.epsilon):
-        """ 同时匹配多个对象
+    def matches(self, xs):
+        """ 对xs中每个元素都找到一个最佳匹配对象
+
+        注意：这个功能是支持ys中的元素被重复匹配的，而且哪怕相似度很低，也会返回一个最佳匹配结果
+            如果想限定相似度，或者不支持重复匹配，请到隔壁使用 matchpairs
 
         :param xs: 要匹配的一组对象
-        :param least_score: 分数必须要不小于least_score才能算匹配，否则属于找不到匹配项
         :return: 为每个x找到一个最佳的匹配y，存储其下标和对应的分值
             [(idx0, score0), (idx1, score1), ...]  长度 = len(xs)
-            匹配不到的，idx记录为-1
 
-        匹配到的y不会放回，如果是可放回的，可以自己用match进行列表推导式直接计算
-        ms = [self.match(x) for x in xs]
+        >>> m = MatchPairs([1, 5, 8, 9, 2], lambda x,y: 1-abs(x-y)/max(x,y))
+        >>> m.matches([4, 6])  # 这里第1个值是下标，所以分别是对应5、8
+        [(1, 0.8), (1, 0.8333333333333334)]
+
+        # 要匹配的对象多于实际ys，则只会返回前len(ys)个结果
+        # 这种情况建议用matchpairs功能实现，或者实在想用就对调xs、ys
+        >>> m.matches([4, 6, 1, 2, 9, 4, 5])
+        [(1, 0.8), (1, 0.8333333333333334), (0, 1.0), (4, 1.0), (3, 1.0), (1, 0.8), (1, 1.0)]
         """
-        m = len(self.ys)
-        used = set()
+        return [self.match(x) for x in xs]
 
-        res = []
-        for x in xs:
-            ms = self.match(x, k=m)
-            for idx, score in ms:
-                if score < least_score:
-                    res.append((-1, score))
-                    break
-                if idx not in used:
-                    used.add(idx)
-                    res.append((idx, score))
-                    break
 
-        return res
+def matchpairs(xs, ys, cmp_func, least_score=sys.float_info.epsilon, *, index=False):
+    r""" 匹配两组数据
+
+    :param xs: 第一组数据
+    :param ys: 第二组数据
+    :param cmp_func: 所用的比较函数，值越大表示两个对象相似度越高
+    :param least_score: 允许匹配的最低分，默认必须要大于0
+    :param index: 返回的不是原值，而是下标
+    :return: 返回结构[(x1, y1, score1), (x2, y2, score2), ...]，注意长度肯定不会超过min(len(xs), len(ys))
+
+    注意：这里的功能①不支持重复匹配，②任何一个x,y都有可能没有匹配到
+        如果每个x必须都要有一个匹配，或者支持重复配对，请到隔壁使用 MatchPairs
+
+    TODO 这里很多中间步骤结果都是很有分析价值的，能改成类，然后支持分析中间结果？
+    TODO 这样全量两两比较是很耗性能的，可以加个参数草算，不用精确计算的功能？
+
+    >>> xs, ys = [4, 6, 1, 2, 9, 4, 5], [1, 5, 8, 9, 2]
+    >>> cmp_func = lambda x,y: 1-abs(x-y)/max(x,y)
+    >>> matchpairs(xs, ys, cmp_func)
+    [(1, 1, 1.0), (2, 2, 1.0), (9, 9, 1.0), (5, 5, 1.0), (6, 8, 0.75)]
+    >>> matchpairs(ys, xs, cmp_func)
+    [(1, 1, 1.0), (5, 5, 1.0), (9, 9, 1.0), (2, 2, 1.0), (8, 6, 0.75)]
+    >>> matchpairs(xs, ys, cmp_func, 0.9)
+    [(1, 1, 1.0), (2, 2, 1.0), (9, 9, 1.0), (5, 5, 1.0)]
+    >>> matchpairs(xs, ys, cmp_func, 0.9, index=True)
+    [(2, 0, 1.0), (3, 4, 1.0), (4, 3, 1.0), (6, 1, 1.0)]
+    """
+    # 1 计算所有两两相似度
+    n, m = len(xs), len(ys)
+    all_pairs = []
+    for i in range(n):
+        for j in range(m):
+            score = cmp_func(xs[i], ys[j])
+            if score >= least_score:
+                all_pairs.append([i, j, score])
+    # 按分数权重排序，如果分数有很多相似并列，就只能按先来后到排序啦
+    all_pairs = sorted(all_pairs, key=lambda v: (-v[2], v[0], v[1]))
+
+    # 2 过滤出最终结果
+    pairs = []
+    x_used, y_used = set(), set()
+    for p in all_pairs:
+        i, j, score = p
+        if i not in x_used and j not in y_used:
+            if index:
+                pairs.append((i, j, score))
+            else:
+                pairs.append((xs[i], ys[j], score))
+            x_used.add(i)
+            y_used.add(j)
+
+    return pairs
