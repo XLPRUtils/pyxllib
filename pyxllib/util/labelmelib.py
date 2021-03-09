@@ -109,8 +109,20 @@ class ToLabelmeJson:
         shape.update(kwargs)
         return shape
 
+    def get_shape2(self, **kwargs):
+        """ 完全使用字典的接口形式 """
+        label = kwargs.get('label', '')
+        points = kwargs['points']  # 这个是必须要有的字段
+        kw = copy.deepcopy(kwargs)
+        del kw['label']
+        del kw['points']
+        return self.get_shape(label, points, **kw)
+
     def add_shape(self, *args, **kwargs):
         self.data['shapes'].append(self.get_shape(*args, **kwargs))
+
+    def add_shape2(self, **kwargs):
+        self.data['shapes'].append(self.get_shape2(**kwargs))
 
     def write(self, dst=None, if_exists='delete'):
         """
