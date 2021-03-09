@@ -136,6 +136,15 @@ def chrome_json(f):
     chrome(htmlfile)
 
 
+def msedge_json(f):
+    """ 可视化一个json文件结构 """
+    data = File(f).read()
+    # 使用NestedDict.to_html_table转成html的嵌套表格代码，存储到临时文件夹
+    htmlfile = File(r'msedge_json.html', root=Dir.TEMP).write(NestedDict.to_html_table(data))
+    # 展示html文件内容
+    msedge_json(htmlfile)
+
+
 def crhome_jsons_kv(fd, files='**/*.json', encoding=None, max_items=10, max_value_length=100):
     """ demo_keyvaluescounter，查看目录下json数据的键值对信息
 

@@ -388,7 +388,7 @@ class Iterate:
             try:
                 func(item)
             except Exception as e:
-                error = True
+                error = e
                 self.xllog.error(f'💔idx={i}运行出错：{item}\n{format_exception(e)}')
 
         # 3 执行迭代
@@ -396,7 +396,8 @@ class Iterate:
         for i in range(start, end):
             self._step4_iter(i, pinterval, executor)
             executor.submit(wrap_func, func, i)
-            if interrupt and error: exit(-1)
+            if interrupt and error:
+                raise error
         executor.shutdown()  # 必须等executor结束，error才是准确的
         self._step5_finish(pinterval, interrupt and error, start_time)
 
@@ -435,8 +436,7 @@ def mtqdm(func, iterable, *args, max_workers=1, **kwargs):
             try:
                 func(x)
             except Exception as e:
-                error = True
-                raise e
+                error = e
 
         # 3 多线程和进度条功能的结合
         executor = concurrent.futures.ThreadPoolExecutor(max_workers)
@@ -445,7 +445,7 @@ def mtqdm(func, iterable, *args, max_workers=1, **kwargs):
                 pass
             executor.submit(wrap_func, x)
             if error:
-                exit(-1)
+                raise error
 
         executor.shutdown()
 

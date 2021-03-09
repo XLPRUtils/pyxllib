@@ -15,7 +15,7 @@ class CvImg:
     prcs = CvPrcs
     __slots__ = ('img',)
 
-    def __init__(self, img, flags=None, **kwargs):
+    def __init__(self, img, flags=1, **kwargs):
         if isinstance(img, type(self)):
             img = img.img
         else:
