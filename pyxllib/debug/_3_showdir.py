@@ -13,7 +13,7 @@ from bs4 import BeautifulSoup
 
 from pyxllib.basic import *
 from pyxllib.debug._1_typelib import dataframe_str
-from pyxllib.debug._2_chrome import getasizeof
+from pyxllib.debug._2_browser import getasizeof
 
 
 def getmembers(object, predicate=None):

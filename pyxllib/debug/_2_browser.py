@@ -188,8 +188,7 @@ class Browser(Explorer):
         """ 该版本会把args中的参数全部转为文件名
 
         :param file: 默认可以不输入，会按七牛的etag哈希值生成临时文件
-            如果输入，可以直接输入一个字符串，也可以输入一个list[str]，表示多个args依次对应的文件名
-            filename的长度可以跟args不一致，多的不用，少的自动生成
+            如果输入，则按照指定的名称生成文件
         """
         file = str(self.to_brower_file(arg, file, to_html_args=to_html_args))
         super().__call__(str(file), wait=wait, **kwargs)
@@ -205,15 +204,6 @@ def chrome_json(f):
     htmlfile = File(r'chrome_json.html', root=Dir.TEMP).write(NestedDict.to_html_table(data))
     # 展示html文件内容
     browser(htmlfile)
-
-
-def msedge_json(f):
-    """ 可视化一个json文件结构 """
-    data = File(f).read()
-    # 使用NestedDict.to_html_table转成html的嵌套表格代码，存储到临时文件夹
-    htmlfile = File(r'msedge_json.html', root=Dir.TEMP).write(NestedDict.to_html_table(data))
-    # 展示html文件内容
-    msedge_json(htmlfile)
 
 
 def chrome_jsons_kv(fd, files='**/*.json', encoding=None, max_items=10, max_value_length=100):
