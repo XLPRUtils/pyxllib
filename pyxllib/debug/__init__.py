@@ -41,7 +41,7 @@ def render_echart(ob, name, show=False):
     if not ob.page_title or ob.page_title == 'Awesome-pyecharts':
         ob.page_title = name
     f = ob.render(str(File(f'{name}.html', Dir.TEMP)))
-    if show: chrome(f)
+    if show: browser(f)
     return f
 
 

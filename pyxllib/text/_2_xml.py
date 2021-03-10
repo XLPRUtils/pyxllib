@@ -544,7 +544,7 @@ class XmlParser:
                 ls2.append([k, v])
 
         # 3 显示有重复的情况
-        # chrome(ls1, filename='检查名称空间问题')
+        # browser(ls1, filename='检查名称空间问题')
         return ls1
 
 
@@ -598,7 +598,7 @@ def 自动制作网页标题的导航栏(html_content, title='temphtml'):
 
     # 读取csdn博客并展示目录 （不过因为这个存在跳级，效果不是那么好）
     >> file = 自动制作网页标题的导航栏(requests.get(r'https://blog.csdn.net/code4101/article/details/83009000').content.decode('utf8'))
-    >> chrome(str(file))
+    >> browser(str(file))
     http://i2.tiimg.com/582188/64f40d235705de69.png
     """
     # 1 对原html，设置锚点，生成一个新的文件f2；生成导航目录文件f1。

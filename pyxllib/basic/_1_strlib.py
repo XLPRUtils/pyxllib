@@ -699,7 +699,7 @@ def arr2table(arr, rowmerge=False):
     :return: html文本格式的<table>
 
     这个arr2table是用来画合并单元格的
-    >> chrome(arr2table([['A', 1, 'a'], ['', 2, 'b'], ['B', 3, 'c'], ['', '', 'd'], ['', 5, 'e']], True), 'a.html')
+    >> browser(arr2table([['A', 1, 'a'], ['', 2, 'b'], ['B', 3, 'c'], ['', '', 'd'], ['', 5, 'e']], True), 'a.html')
     效果图：http://i1.fuimg.com/582188/c452f40b5a072f8d.png
     """
     n = len(arr)

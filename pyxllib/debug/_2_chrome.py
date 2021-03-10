@@ -74,57 +74,128 @@ def viewfiles(procname, *files, **kwargs):
     return tictoc.tocvalue()
 
 
-def explorer(arg_, app='explorer', **kwargs):
-    # 1 如果是文件、url，则直接打开
-    if is_file(arg_) or is_url(arg_) or isinstance(arg_, File):
-        viewfiles(app, arg_)
-        return
+class Explorer:
+    def __init__(self, app='explorer', shell=False):
+        self.app = app
+        self.shell = shell
 
-    # 2 如果是其他类型，则先转成文件，再打开
-    arg = try2df(arg_)
-    if isinstance(arg, pd.DataFrame):  # DataFrame在网页上有更合适的显示效果
-        t = f'==== 类继承关系：{inspect.getmro(type(arg_))}，' \
-            + f'内存消耗：{sys.getsizeof(arg_)}（递归子类总大小：{getasizeof(arg_)}）Byte ===='
-        t = '<p>' + html.escape(t) + '</p>'
-        content = arg.to_html(**kwargs)
-        f = File(..., Dir.TEMP, suffix='.html').write(t + content)
-        f = f.rename(get_etag(str(f)) + '.html', if_exists='delete')
-        viewfiles(app, str(f))
-    elif getattr(arg, 'render', None):  # pyecharts 等表格对象，可以用render生成html表格显示
+    # def check_app(self, raise_error=False):
+    #     """ 检查是否能找到对应的app
+    #
+    #     FIXME 不能提前检查，因为有些命令运行是会产生实际影响的，无法静默测试
+    #         例如explorer是会打开资源管理器的
+    #     """
+    #     try:
+    #         subprocess.run(self.app)
+    #         return True
+    #     except FileNotFoundError:
+    #         if raise_error:
+    #             raise FileNotFoundError(f'Application/Command not found：{self.app}')
+    #         return False
+
+    def __call__(self, *args, wait=True, **kwargs):
+        """
+        :param args: 命令行参数
+        :param wait: 是否等待程序运行结束再继续执行后续python命令
+        :param kwargs: 扩展参数，参考subprocess接口
+        :return:
+
+        TODO 获得返回值分析
+        """
+        args = [self.app] + list(args)
+        if 'shell' not in kwargs:
+            kwargs.update({'shell': self.shell})
+
         try:
-            name = arg.options['title'][0]['text']
-        except (LookupError, TypeError):
-            name = Datetime().strftime('%H%M%S_%f')
-        filename = File(name, Dir.TEMP, suffix='.html').to_str()
-        arg.render(path=filename)
-        viewfiles(app, filename)
-    else:
-        f = File(..., Dir.TEMP, suffix='.txt').write(arg)
-        f = f.rename(get_etag(str(f)) + f.suffix, if_exists='delete')
-        viewfiles(app, str(f))
+            if wait:
+                subprocess.run(args, **kwargs)
+            else:
+                subprocess.Popen(args, **kwargs)
+        except FileNotFoundError:
+            raise FileNotFoundError(f'Application/Command not found：{self.app}')
 
 
-def chrome(arg_, **kwargs):
-    r""" 使用谷歌浏览器查看变量、文件等内容，详细用法见底层函数 viewfiles
+class Browser(Explorer):
+    """ 使用浏览器查看数据文件 """
 
-    :param arg_: 支持输入多种类型
-        文件、url，会用浏览器直接打开
-        dict，会先转df
-    :param kwargs: 如果数据可以转为df，在使用to_html接口的时候可以设置相关格式参数，常用的有
-        escape=True，是否解析html内容，默认True不解析
+    def __init__(self, app=None, shell=False):
+        """
+        :param app: 使用的浏览器程序，例如'msedge', 'chrome'，也可以输入程序绝对路径
+            默认值None会自动检测标准的msedge、chrome目录是否在环境变量，自动获取
+            如果要用其他浏览器，或者不在标准目录，请务必要设置app参数值
+            在找没有的情况下，默认使用 'explorer'
+        :param shell:
+        """
 
-    >> chrome(r'C:\Users\kzche\Desktop\b.xml')  # 使用chrome查看文件内容
-    >> chrome('aabb')  # 使用chrome查看一个字符串值
-    >> chrome([123, 456])  # 使用chrome查看一个变量值
+        if app is None:
+            # 智能判断环境变量，选择存在的浏览器，我的偏好 msedge > chrome
+            paths = os.environ['PATH']
+            msedge_dir = r'C:\Program Files (x86)\Microsoft\Edge\Application'
+            chrome_dir = r'C:\Program Files\Google\Chrome\Application'
+            if msedge_dir in paths:
+                app = 'msedge'
+            elif chrome_dir in paths:
+                app = 'chrome'
+            else:
+                app = 'explorer'
+        super().__init__(app, shell)
 
-    这个函数可以浏览文本、list、dict、DataFrame表格数据、图片、html等各种文件的超级工具
-    """
-    explorer(arg_, 'chrome.exe', **kwargs)
+    @classmethod
+    def to_brower_file(cls, arg, file=None, to_html_args=None):
+        """ 将任意数值类型的arg转存到文件，转换风格会尽量适配浏览器的使用
+
+        :param arg: 任意类型的一个数据
+        :param file: 想要存储的文件名，没有输入的时候会默认生成到临时文件夹，文件名使用哈希值避重
+        :param to_html_args: df.to_html相关格式参数，写成字典的形式输入，常用的参数有如下
+            escape, 默认True，将内容转移明文显示；可以设为False，这样在df存储的链接等html语法会起作用
+
+        说明：其实所谓的用更适合浏览器的方式查看，在我目前的算法版本里，就是尽可能把数据转成DataFrame表格
+        """
+        # 1 如果已经是文件、url，则不处理
+        if is_file(arg) or is_url(arg) or isinstance(arg, File):
+            return arg
+
+        # 2 如果是其他类型，则先转成文件，再打开
+        arg_ = TypeConvert.try2df(arg)
+        if isinstance(arg_, pd.DataFrame):  # DataFrame在网页上有更合适的显示效果
+            t = f'==== 类继承关系：{inspect.getmro(type(arg))}，' \
+                + f'内存消耗：{sys.getsizeof(arg)}（递归子类总大小：{getasizeof(arg)}）Byte ===='
+            t = '<p>' + html.escape(t) + '</p>'
+            # TODO 把标题栏改成蓝色~~
+            content = arg.to_html(**(to_html_args or {}))
+            if file is None:
+                file = File(..., Dir.TEMP, suffix='.html').write(t + content)
+                file = file.rename(get_etag(str(file)) + '.html', if_exists='delete')
+            else:
+                file = File(file).write(t + content)
+        elif getattr(arg, 'render', None):  # pyecharts 等表格对象，可以用render生成html表格显示
+            try:
+                name = arg.options['title'][0]['text']
+            except (LookupError, TypeError):
+                name = Datetime().strftime('%H%M%S_%f')
+            if file is None:
+                file = File(name, Dir.TEMP, suffix='.html').to_str()
+            arg.render(path=str(file))
+        else:  # 不在预设格式里的数据，转成普通的txt查看
+            if file is None:
+                file = File(..., Dir.TEMP, suffix='.txt').write(arg)
+                file = file.rename(get_etag(str(file)) + file.suffix, if_exists='delete')
+            else:
+                file = File(file).write(arg)
+        return file
+
+    def __call__(self, arg, file=None, *, wait=True, to_html_args=None, **kwargs):  # NOQA Browser的操作跟标准接口略有差异
+        """ 该版本会把args中的参数全部转为文件名
+
+        :param file: 默认可以不输入，会按七牛的etag哈希值生成临时文件
+            如果输入，可以直接输入一个字符串，也可以输入一个list[str]，表示多个args依次对应的文件名
+            filename的长度可以跟args不一致，多的不用，少的自动生成
+        """
+        file = str(self.to_brower_file(arg, file, to_html_args=to_html_args))
+        super().__call__(str(file), wait=wait, **kwargs)
 
 
-def msedge(arg_, **kwargs):
-    """ 用 edge 打开 """
-    explorer(arg_, 'msedge.exe', **kwargs)
+browser = Browser()
 
 
 def chrome_json(f):
@@ -133,7 +204,7 @@ def chrome_json(f):
     # 使用NestedDict.to_html_table转成html的嵌套表格代码，存储到临时文件夹
     htmlfile = File(r'chrome_json.html', root=Dir.TEMP).write(NestedDict.to_html_table(data))
     # 展示html文件内容
-    chrome(htmlfile)
+    browser(htmlfile)
 
 
 def msedge_json(f):
@@ -145,7 +216,7 @@ def msedge_json(f):
     msedge_json(htmlfile)
 
 
-def crhome_jsons_kv(fd, files='**/*.json', encoding=None, max_items=10, max_value_length=100):
+def chrome_jsons_kv(fd, files='**/*.json', encoding=None, max_items=10, max_value_length=100):
     """ demo_keyvaluescounter，查看目录下json数据的键值对信息
 
     :param fd: 目录
@@ -164,7 +235,7 @@ def crhome_jsons_kv(fd, files='**/*.json', encoding=None, max_items=10, max_valu
         kvc.add(data, max_value_length=max_value_length)
     p = File(r'demo_keyvaluescounter.html', Dir.TEMP)
     p.write(kvc.to_html_table(max_items=max_items), if_exists='delete')
-    chrome(p.to_str())
+    browser(p.to_str())
 
 
 def check_repeat_filenames(dir, key='stem', link=True):
@@ -222,5 +293,5 @@ def check_repeat_filenames(dir, key='stem', link=True):
     view_table = pd.concat([view_table, count_df], axis=1)
     view_table.rename({'filename': 'count'}, axis=1, inplace=True)
 
-    chrome(view_table, escape=not link)
+    browser(view_table, escape=not link)
     return df

@@ -37,11 +37,12 @@ class Dir(PathBase):
     __slots__ = ('_path', 'subs', '_origin_wkdir')
 
     # 零、常用的目录类
-    TEMP = tempfile.gettempdir()
+    TEMP = pathlib.Path(tempfile.gettempdir())
     if os.environ.get('Desktop', None):  # 如果修改了win10默认的桌面路径，需要在环境变量添加一个正确的Desktop路径值
         DESKTOP = os.environ['Desktop']
     else:
         DESKTOP = os.path.join(str(pathlib.Path.home()), 'Desktop')  # 这个不一定准，桌面是有可能被移到D盘等的
+    DESKTOP = pathlib.Path(DESKTOP)
 
     # 添加 HOME 目录？ 方便linux操作？
 
