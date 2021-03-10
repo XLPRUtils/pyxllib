@@ -19,7 +19,7 @@ ____main = """
 
 from ._0_installer import *
 from ._1_typelib import *
-from ._2_chrome import *
+from ._2_browser import *
 from ._3_showdir import *
 from ._4_bcompare import *
 

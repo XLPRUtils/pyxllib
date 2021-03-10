@@ -7,7 +7,7 @@
 
 from pyxllib.basic import func_input_message, dprint, natural_sort_key, File, refinepath, Dir
 from pyxllib.debug._1_typelib import prettifystr
-from pyxllib.debug._2_chrome import viewfiles
+from pyxllib.debug._2_browser import Explorer
 
 import copy
 import pandas as pd
@@ -49,76 +49,77 @@ def intersection_split(a, b):
     return ls1, ls2, ls3, ls4
 
 
-def bcompare(oldfile, newfile=None, basefile=None, wait=True, sameoff=False, oldfilename=None, newfilename=None):
-    """ 调用Beyond Compare软件对比两段文本（请确保有把BC的bcompare.exe加入环境变量）
+class BCompare(Explorer):
+    def __init__(self, app='BCompare', shell=False):
+        super().__init__(app, shell)
 
-    :param oldfile:
-    :param newfile:
-    :param basefile: 一般用于冲突合并时，oldfile、newfile共同依赖的旧版本
-    :param wait: 见viewfiles的kwargs参数解释
-        一般调用bcompare的时候，默认值wait=True，python是打开一个子进程并等待bcompare软件关闭后，才继续执行后续代码。
-        如果你的业务场景并不需要等待bcompare关闭后执行后续python代码，可以设为wait=False，不等待。
-    :param sameoff: 如果设为True，则会判断内容，两份内容如果相同则不打开bc
-        这个参数一定程度会影响性能，非必要的时候不要开。
-        或者在外部的时候，更清楚数据情况，可以在外部判断内容不重复再跑bcompare函数。
-    :param oldfilename: 强制指定旧的文件名，如果oldfile已经是一个文件路径，则不生效
-    :param newfilename: 强制指定新的文件名，如果newfile已经是一个文件路径，则不生效
-    :return: 程序返回被修改的oldfile内容
-        注意如果没有修改，或者wait=False，会返回原始值
-    这在进行调试、检测一些正则、文本处理算法是否正确时，特别方便有用
-    >> bcompare('oldfile.txt', 'newfile.txt')
+    @classmethod
+    def to_bcompare_files(cls, *args, files=None):
+        """ 这个需要一次性获得所有的数据，才适合分析整体上要怎么获取对应的多个文件
 
-    180913周四：如果第1、2个参数都是set或都是dict，会进行特殊的文本化后比较
-    """
-    # 1 如果oldfile和newfile都是dict、set、list、tuple，则使用特殊方法文本化
-    #   如果两个都是list，不应该提取key后比较，所以限制第1个类型必须是dict或set，然后第二个类型可以适当放宽条件
-    if not oldfile: oldfile = str(oldfile)
-    if isinstance(oldfile, (dict, set)) and isinstance(newfile, (dict, set, list, tuple)):
-        t = [prettifystr(li) for li in intersection_split(oldfile, newfile)]
-        oldfile = f'【共有部分】，{t[0]}\n\n【独有部分】，{t[1]}'
-        newfile = f'【共有部分】，{t[2]}\n\n【独有部分】，{t[3]}'
+        :param files: 每个arg对应的文件名，默认按 'left'、'right', 'base' 来生成
+            也可以输入一个list[str]，表示多个args依次对应的文件名
+            filename的长度可以跟args不一致，多的不用，少的自动生成
+        """
+        # 1 如果oldfile和newfile都是dict、set、list、tuple，则使用特殊方法文本化
+        #   如果两个都是list，不应该提取key后比较，所以限制第1个类型必须是dict或set，然后第二个类型可以适当放宽条件
+        # if not oldfile: oldfile = str(oldfile)
+        if len(args) > 1 and isinstance(args[0], (dict, set)) and isinstance(args[1], (dict, set, list, tuple)):
+            args = copy.copy(list(args))
+            t = [prettifystr(li) for li in intersection_split(args[0], args[1])]
+            args[0] = f'【共有部分】，{t[0]}\n\n【独有部分】，{t[1]}'
+            args[1] = f'【共有部分】，{t[2]}\n\n【独有部分】，{t[3]}'
 
-    # 2 获取文件扩展名ext
-    if File.safe_init(oldfile):
-        ext = File(oldfile).suffix
-    elif File.safe_init(newfile):
-        ext = File(newfile).suffix
-    elif File.safe_init(basefile):
-        ext = File(basefile).suffix
-    else:
-        ext = '.txt'  # 默认为txt文件
+        # 2 参数对齐
+        if not isinstance(files, (list, tuple)):
+            files = [files]
+        if len(files) < len(args):
+            files += [None] * (len(args) - len(files))
+        ref_names = ['left', 'right', 'base']
 
-    # 3 生成所有文件
-    ls = []
-    names = func_input_message()['argnames']
-    if not names[0]:
-        names = ('oldfile.txt', 'newfile.txt', 'basefile.txt')
+        # 3 将每个参数转成一个文件
+        new_args = []
+        default_suffix = None
+        for i, arg in enumerate(args):
+            f = File.safe_init(arg)
+            if f:  # 是文件对象，且存在
+                new_args.append(f)
+                if not default_suffix:
+                    default_suffix = f.suffix
+            elif isinstance(f, File):
+                # 是文件对象，但不存在 -> 报错
+                raise FileNotFoundError(f'{f}')
+            else:  # 不是文件对象，要转存到文件
+                if not files[i]:  # 没有设置文件名则生成一个
+                    files[i] = File(ref_names[i], Dir.TEMP, suffix=default_suffix)
+                files[i].write(arg)
+                new_args.append(files[i])
 
-    def func(file, d):
-        if file is not None:
-            p = File.safe_init(file)
-            if p:
-                ls.append(str(p))
-            else:
-                if d == 0 and oldfilename:
-                    name = oldfilename
-                elif d == 1 and newfilename:
-                    name = newfilename
-                else:
-                    name = refinepath(names[d] + ext)
-                ls.append(File(name, Dir.TEMP).write(file, if_exists='delete').to_str())
+        return new_args
 
-    func(oldfile, 0)
-    func(newfile, 1)
-    func(basefile, 2)  # 注意这里不要写names[2]，因为names[2]不一定有存在
+    def __call__(self, *args, wait=True, files=None, sameoff=False, **kwargs):
+        r"""
+        :param wait:
+            一般调用bcompare的时候，默认值wait=True，python是打开一个子进程并等待bcompare软件关闭后，才继续执行后续代码。
+            如果你的业务场景并不需要等待bcompare关闭后执行后续python代码，可以设为wait=False，不等待。
+        :param sameoff: 如果设为True，则会判断内容，两份内容如果相同则不打开bc
+            这个参数一定程度会影响性能，非必要的时候不要开。
+            或者在外部的时候，更清楚数据情况，可以在外部判断内容不重复再跑bcompare函数
+            这个目前的实现策略，是读取文件重新判断的，会有性能开销，默认关闭该功能
+        :return: 程序返回被修改的oldfile内容
+            注意如果没有修改，或者wait=False，会返回原始值
+        """
+        files = self.to_bcompare_files(*args, files=files)
 
-    # 4 调用程序（并计算外部操作时间）
-    if sameoff:
-        if File(ls[0]).read() != File(ls[1]).read():
-            viewfiles('BCompare.exe', *ls, wait=wait)
-    else:
-        viewfiles('BCompare.exe', *ls, wait=wait)
-    return File(ls[0]).read()
+        if sameoff and len(files) > 1:
+            if files[0].read() == files[1].read():
+                return
+        super().__call__(*([str(f) for f in files]), wait=wait, **kwargs)
+        # bc软件操作中可能会修改原文内容，所以这里需要重新读取，不能用前面算过的结果
+        return files[0].read()
+
+
+bcompare = BCompare()
 
 
 def modify_file(file, func, *, outfile=None, file_mode=None, debug=0):
