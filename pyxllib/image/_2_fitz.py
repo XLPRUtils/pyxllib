@@ -35,7 +35,7 @@ class DemoFitz:
     def getToC(self):
         """获得书签目录"""
         toc = self.doc.getToC()
-        chrome(toc)
+        browser(toc)
 
     def setToC(self):
         """设置书签目录
@@ -46,7 +46,7 @@ class DemoFitz:
         self.doc.setToC(toc)
         file = File('a.pdf', Dir.TEMP).to_str()
         self.doc.save(file, garbage=4)
-        chrome(file)
+        browser(file)
 
     def setToC2(self):
         """修改人教版教材的标签名"""
@@ -73,7 +73,7 @@ class DemoFitz:
         self.doc.select([0, 0, 1])  # 第1页展示两次后，再跟第2页
         file = writefile(b'', 'a.pdf', root=Dir.TEMP, if_exists='delete')
         self.doc.save(file, garbage=4)  # 注意要设置garbage，否则文档并没有实际删除内容压缩文件大小
-        chrome(file)
+        browser(file)
 
     def page2png(self):
         """查看单页渲染图片"""
@@ -83,7 +83,7 @@ class DemoFitz:
         pix = page.getPixmap()  # 获得页面的RGBA图像，Pixmap类型；还可以用page.getSVGimage()获得矢量图
         # pix.writePNG('page-0.png')  # 将Pixmal
         pngdata = pix.getPNGData()  # 获png文件的bytes字节码
-        chrome(pngdata, 'a.png')  # 用我的工具函数打开图片
+        browser(pngdata, 'a.png')  # 用我的工具函数打开图片
         return pngdata
 
     def pagetext(self):
@@ -97,7 +97,7 @@ class DemoFitz:
         # 获得页面上的所有文本（返回字典对象）
         textdict = page.getText('dict')
         textdict['blocks'] = textdict['blocks'][:-1]
-        chrome(pprint.pformat(textdict))
+        browser(pprint.pformat(textdict))
 
     def text(self):
         """获得整份pdf的所有文本"""
@@ -110,7 +110,7 @@ class DemoFitz:
         for i in range(1, n):  # 注意下标实际要从1卡开始
             # 可以边遍历边删除，不影响下标位置，因为其本质只是去除关联引用而已
             xrefstr.append(self.doc._getXrefString(i))
-        chrome('\n'.join(xrefstr))
+        browser('\n'.join(xrefstr))
 
     def page_add_ele(self):
         """往页面添加元素
@@ -122,7 +122,7 @@ class DemoFitz:
         file = File('a.pdf', Dir.TEMP).to_str()
         dprint(file)
         self.doc.save(file, garbage=4)
-        chrome(file)
+        browser(file)
 
 
 def pdf2svg_oldversion(pdffile, target=None, *, trim=False):

@@ -262,7 +262,7 @@ class Git:
         :param files: 要搜索的文件清单
 
         191108周五10:40，目前跑 c:/pycode 要2分钟
-        >> chrome(Git('C:/pycode/').find_pattern(re.compile(r'ssb等改明文')))
+        >> browser(Git('C:/pycode/').find_pattern(re.compile(r'ssb等改明文')))
 
         """
         # 1 主对象

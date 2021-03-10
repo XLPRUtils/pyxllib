@@ -321,9 +321,9 @@ class Worksheet(openpyxl.worksheet.worksheet.Worksheet):
         cel = self.findcel(pattern, *args, **kwargs)
         return cel.column if cel else 0
 
-    def chrome(self):
+    def browser(self):
         """注意，这里会去除掉合并单元格"""
-        chrome(pd.DataFrame(self.values))
+        browser(pd.DataFrame(self.values))
 
     def select_columns(self, columns, column_name='searchkey'):
         r"""获取表中columns属性列的值，返回dataframe数据类型
