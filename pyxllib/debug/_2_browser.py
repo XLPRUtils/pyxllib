@@ -112,7 +112,7 @@ class Explorer:
             else:
                 subprocess.Popen(args, **kwargs)
         except FileNotFoundError:
-            raise FileNotFoundError(f'Application/Command not found：{self.app}')
+            raise FileNotFoundError(f'Application/Command not found：{" ".join(args)}')
 
 
 class Browser(Explorer):
@@ -141,11 +141,12 @@ class Browser(Explorer):
         super().__init__(app, shell)
 
     @classmethod
-    def to_brower_file(cls, arg, file=None, to_html_args=None):
+    def to_brower_file(cls, arg, file=None, clsmsg=True, to_html_args=None):
         """ 将任意数值类型的arg转存到文件，转换风格会尽量适配浏览器的使用
 
         :param arg: 任意类型的一个数据
         :param file: 想要存储的文件名，没有输入的时候会默认生成到临时文件夹，文件名使用哈希值避重
+        :param clsmsg: 显示开头一段类型继承关系、对象占用空间的信息
         :param to_html_args: df.to_html相关格式参数，写成字典的形式输入，常用的参数有如下
             escape, 默认True，将内容转移明文显示；可以设为False，这样在df存储的链接等html语法会起作用
 
@@ -158,16 +159,19 @@ class Browser(Explorer):
         # 2 如果是其他类型，则先转成文件，再打开
         arg_ = TypeConvert.try2df(arg)
         if isinstance(arg_, pd.DataFrame):  # DataFrame在网页上有更合适的显示效果
-            t = f'==== 类继承关系：{inspect.getmro(type(arg))}，' \
-                + f'内存消耗：{sys.getsizeof(arg)}（递归子类总大小：{getasizeof(arg)}）Byte ===='
-            t = '<p>' + html.escape(t) + '</p>'
+            if clsmsg:
+                t = f'==== 类继承关系：{inspect.getmro(type(arg))}，' \
+                    + f'内存消耗：{sys.getsizeof(arg)}（递归子类总大小：{getasizeof(arg)}）Byte ===='
+                content = '<p>' + html.escape(t) + '</p>'
+            else:
+                content = ''
             # TODO 把标题栏改成蓝色~~
-            content = arg.to_html(**(to_html_args or {}))
+            content += arg.to_html(**(to_html_args or {}))
             if file is None:
-                file = File(..., Dir.TEMP, suffix='.html').write(t + content)
+                file = File(..., Dir.TEMP, suffix='.html').write(content)
                 file = file.rename(get_etag(str(file)) + '.html', if_exists='delete')
             else:
-                file = File(file).write(t + content)
+                file = File(file).write(content)
         elif getattr(arg, 'render', None):  # pyecharts 等表格对象，可以用render生成html表格显示
             try:
                 name = arg.options['title'][0]['text']
@@ -184,13 +188,13 @@ class Browser(Explorer):
                 file = File(file).write(arg)
         return file
 
-    def __call__(self, arg, file=None, *, wait=True, to_html_args=None, **kwargs):  # NOQA Browser的操作跟标准接口略有差异
-        """ 该版本会把args中的参数全部转为文件名
+    def __call__(self, arg, file=None, *, wait=True, clsmsg=True, to_html_args=None, **kwargs):  # NOQA Browser的操作跟标准接口略有差异
+        """ 该版本会把arg转存文件重设为文件名
 
         :param file: 默认可以不输入，会按七牛的etag哈希值生成临时文件
             如果输入，则按照指定的名称生成文件
         """
-        file = str(self.to_brower_file(arg, file, to_html_args=to_html_args))
+        file = str(self.to_brower_file(arg, file, clsmsg=clsmsg, to_html_args=to_html_args))
         super().__call__(str(file), wait=wait, **kwargs)
 
 

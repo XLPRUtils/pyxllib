@@ -445,7 +445,7 @@ def intersection_over_union(pts1, pts2):
     polygon1, polygon2 = shapely_polygon(pts1), shapely_polygon(pts2)
     inter_area = polygon1.intersection(polygon2).area
     union_area = polygon1.area + polygon2.area - inter_area
-    return inter_area / union_area
+    return (inter_area / union_area) if union_area else 0
 
 
 def non_maximun_suppression(boxes, iou=0.5, *, index=False):
