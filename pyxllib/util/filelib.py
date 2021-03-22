@@ -684,7 +684,7 @@ class DataSyncBase:
             self.scp.put(p, q, recursive=True)
             t = tt.tocvalue()
             speed = humanfriendly.format_size(file_or_dir_size(p) / t, binary=True)
-            print(f'upload {p}, ↑{speed}/s, {t:.2f}s')
+            print(f'upload to {q}, ↑{speed}/s, {t:.2f}s')
 
     def get(self, path):
         """ 只需要写本地文件路径，会推断服务器上的位置 """
@@ -699,3 +699,20 @@ class DataSyncBase:
             t = tt.tocvalue()
             speed = humanfriendly.format_size(file_or_dir_size(p) / t, binary=True)
             print(f'download {p}, ↓{speed}/s, {t:.2f}s')
+
+
+def cache_file(file, make_data_func, *, reset=False, **kwargs):
+    """
+    :param file: 需要缓存的文件路径
+    :param make_data_func: 如果文件不存在，则需要生成一份，要提供数据生成函数
+    :param reset: 如果file是否已存在，都用make_data_func强制重置一遍
+    :param kwargs: 可以传递read、write支持的扩展参数
+    :return: 从缓存文件直接读取到的数据
+    """
+    file = File(file)
+    if file and not reset:  # 文件存在，直接读取返回
+        data = file.read(**kwargs)
+    else:  # 文件不存在则要生成一份数据
+        data = make_data_func()
+        file.write(data, **kwargs)
+    return data

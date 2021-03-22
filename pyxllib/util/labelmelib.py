@@ -131,7 +131,8 @@ class ToLabelmeJson:
         """
         if dst is None and self.imgpath:
             dst = self.imgpath.with_suffix('.json')
-        return File(dst).write(self.data, if_exists=if_exists, indent=None)
+        # 官方json支持indent=None的写法，但是ujson必须要显式写indent=0
+        return File(dst).write(self.data, if_exists=if_exists, indent=0)
 
     @classmethod
     def create_json(cls, imgpath, annotation):

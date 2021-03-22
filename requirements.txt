@@ -7,3 +7,4 @@ disjoint-set==0.6.3
 coloredlogs
 humanfriendly
 tqdm
+ujson
