@@ -7,7 +7,7 @@
 
 from urllib.parse import urlparse
 import io
-import json
+import ujson
 import os
 import pathlib
 import pickle
@@ -122,8 +122,8 @@ def get_encoding(bstr):
         """ https://mp.weixin.qq.com/s/gSXNf3K_JWydhej8KpyhMg """
         from chardet.universaldetector import UniversalDetector
         detector = UniversalDetector()
-        for line in bdata.splitlines():
-            detector.feed(line)
+        for part in bdata.split():
+            detector.feed(part)
             if detector.done:
                 break
         detector.close()
@@ -689,7 +689,7 @@ class File(PathBase):
                 # 先读成字符串，再解析，会比rb鲁棒性更强，能自动过滤掉开头可能非正文特殊标记的字节
                 if not encoding: encoding = self.encoding
                 with open(name, 'r', encoding=encoding) as f:
-                    return json.loads(f.read())
+                    return ujson.loads(f.read())
             elif mode == '.yaml':
                 with open(name, 'r', encoding=encoding) as f:
                     return yaml.safe_load(f.read())
@@ -750,7 +750,7 @@ class File(PathBase):
                 with open(name, 'w', encoding=get_enc()) as f:
                     if 'ensure_ascii' not in kwargs:
                         kwargs['ensure_ascii'] = False
-                    json.dump(ob, f, **kwargs)
+                    ujson.dump(ob, f, **kwargs)
             elif mode == '.yaml':
                 with open(name, 'w', encoding=get_enc()) as f:
                     yaml.dump(ob, f)
