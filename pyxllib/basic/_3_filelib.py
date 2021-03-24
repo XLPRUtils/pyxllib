@@ -17,6 +17,7 @@ import shutil
 import subprocess
 import tempfile
 
+import chardet
 import qiniu
 import requests
 import yaml
@@ -108,7 +109,7 @@ ____chardet = """
 """
 
 
-def get_encoding(bstr):
+def get_encoding_old(bstr):
     """ 输入二进制字符串或文本文件，返回字符编码
 
     https://www.yuque.com/xlpr/pyxllib/get_encoding
@@ -175,6 +176,30 @@ def get_encoding(bstr):
         encoding = 'utf8'
 
     return encoding
+
+
+def get_encoding(bstr, *, maxn=100):
+    # 1 从第一个大于127的字节开始判断
+    for start_idx in range(len(bstr)):
+        if bstr[start_idx] > 127:
+            break
+    else:  # 没有>127的字节
+        return 'utf8'
+
+    # 只要截取部分子节就能大概分析出了
+    enc = chardet.detect(bstr[start_idx:start_idx + maxn])['encoding']
+
+    # 2 转换为常见编码名
+    if enc in ('utf-8', 'ascii', 'ISO-8859-1'):
+        return 'utf8'
+    elif enc in ('UTF-8-SIG',):
+        return 'utf-8-sig'
+    elif enc in ('GB2312', 'GBK'):
+        return 'gbk'
+    elif enc in ('UTF-16',):
+        return 'utf16'
+    else:
+        raise ValueError(f"{enc}: Can't get file encoding")
 
 
 ____file = """
@@ -615,14 +640,14 @@ class File(PathBase):
 
     # 三、获取文件相关属性值功能
 
-    @property
-    def encoding(self):
-        """ 文件的编码
-
-        非文件、不存在时返回 None
-        """
-        if self:
-            return get_encoding(str(self))
+    # @property
+    # def encoding(self):
+    #     """ 文件的编码
+    #
+    #     非文件、不存在时返回 None
+    #     """
+    #     if self:
+    #         return get_encoding(str(self))
 
     @property
     def size(self) -> int:
@@ -687,9 +712,10 @@ class File(PathBase):
                     return pickle.load(f)
             elif mode == '.json':
                 # 先读成字符串，再解析，会比rb鲁棒性更强，能自动过滤掉开头可能非正文特殊标记的字节
-                if not encoding: encoding = self.encoding
-                with open(name, 'r', encoding=encoding) as f:
-                    return ujson.loads(f.read())
+                with open(name, 'rb') as f:
+                    bstr = f.read()
+                    if not encoding: encoding = get_encoding(bstr)
+                return ujson.loads(bstr.decode(encoding=encoding))
             elif mode == '.yaml':
                 with open(name, 'r', encoding=encoding) as f:
                     return yaml.safe_load(f.read())
@@ -701,7 +727,7 @@ class File(PathBase):
                 with open(name, 'rb') as f:
                     bstr = f.read()
                 if not encoding:
-                    encoding = self.encoding
+                    encoding = get_encoding(bstr)
                     if not encoding:
                         raise ValueError(f'{self} 自动识别编码失败，请手动指定文件编码')
                 s = bstr.decode(encoding=encoding, errors='ignore')
@@ -710,7 +736,7 @@ class File(PathBase):
         else:  # 非文件对象
             raise FileNotFoundError(f'{self} 文件不存在，无法读取。')
 
-    def write(self, ob, *, encoding=None, if_exists=None, mode=None, **kwargs):
+    def write(self, ob, *, encoding='utf8', if_exists=None, mode=None, **kwargs):
         """ 保存为文件
 
         :param ob: 写入的内容
@@ -730,13 +756,13 @@ class File(PathBase):
         :return: 返回写入的文件名，这个主要是在写临时文件时有用
         """
 
-        # 将ob写入文件path
-        def get_enc():
-            # 编码在需要的时候才获取分析，减少不必要的运算开销
-            # 所以封装一个函数接口，需要的时候再计算
-            if encoding is None:
-                return self.encoding or 'utf8'
-            return encoding
+        # # 将ob写入文件path
+        # def get_enc():
+        #     # 编码在需要的时候才获取分析，减少不必要的运算开销
+        #     # 所以封装一个函数接口，需要的时候再计算
+        #     if encoding is None:
+        #         # return self.encoding or 'utf8'
+        #     return encoding
 
         if self.exist_preprcs(if_exists):
             self.ensure_parent()
@@ -747,18 +773,18 @@ class File(PathBase):
                 with open(name, 'wb') as f:
                     pickle.dump(ob, f)
             elif mode == '.json':
-                with open(name, 'w', encoding=get_enc()) as f:
+                with open(name, 'w', encoding=encoding) as f:
                     if 'ensure_ascii' not in kwargs:
                         kwargs['ensure_ascii'] = False
                     ujson.dump(ob, f, **kwargs)
             elif mode == '.yaml':
-                with open(name, 'w', encoding=get_enc()) as f:
+                with open(name, 'w', encoding=encoding) as f:
                     yaml.dump(ob, f)
             elif isinstance(ob, bytes):
                 with open(name, 'wb') as f:
                     f.write(ob)
             else:  # 其他类型认为是文本类型
-                with open(name, 'w', errors='ignore', encoding=get_enc()) as f:
+                with open(name, 'w', errors='ignore', encoding=encoding) as f:
                     f.write(str(ob))
 
         return self

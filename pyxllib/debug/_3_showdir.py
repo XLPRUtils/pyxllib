@@ -13,7 +13,7 @@ from bs4 import BeautifulSoup
 
 from pyxllib.basic import *
 from pyxllib.debug._1_typelib import dataframe_str
-from pyxllib.debug._2_browser import getasizeof
+from pyxllib.debug._2_browser import getasizeof, browser
 
 
 def getmembers(object, predicate=None):
@@ -149,11 +149,7 @@ def showdir(c, *, to_html=None, printf=True):
     if to_html:
         filename = File(object_name, Dir.TEMP, suffix='.html'). \
             write(ensure_gbk(res), if_exists='delete').to_str()
-        try:
-            subprocess.run(['chrome.exe', filename])
-        except FileNotFoundError:
-            subprocess.run(['explorer', filename], shell=True)
-            logging.warning('启动chrome.exe失败，可能是没有安装谷歌浏览器或配置环境变量。')
+        browser(filename)
     else:  # linux环境直接输出表格
         print(res)
 

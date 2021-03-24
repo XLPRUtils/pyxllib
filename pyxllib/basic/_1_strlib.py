@@ -971,3 +971,9 @@ class ContentPartSpliter:
 
 def get_username():
     return os.path.split(os.path.expanduser('~'))[-1]
+
+
+def linux_path_fmt(p):
+    p = str(p)
+    p = p.replace('\\', '/')
+    return p
