@@ -95,7 +95,7 @@ class Dir(PathBase):
 
         https://stackoverflow.com/questions/1392413/calculating-a-directory-size-using-python
 
-        >> Path('D:/slns/pyxllib').size  # 这个算的就是真实大小，不是占用空间
+        >> Dir('D:/slns/pyxllib').size  # 这个算的就是真实大小，不是占用空间
         2939384
         """
         if self:
