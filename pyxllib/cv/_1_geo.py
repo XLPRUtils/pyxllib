@@ -10,6 +10,7 @@ import copy
 import re
 
 import numpy as np
+from deprecated import deprecated
 from shapely.geometry import Polygon
 
 from pyxllib.util.intervals import Intervals
@@ -71,7 +72,7 @@ def to_list(x, dtype=None, shape=None):
     return y
 
 
-def rect2polygon(src):
+def rect2polygon(src, dtype=None):
     """ 矩形转成四边形结构来表达存储
     （输入左上、右下两个顶点坐标）
 
@@ -87,7 +88,7 @@ def rect2polygon(src):
            [ 0, 20]])
     """
     x1, y1, x2, y2 = np_array(src).reshape(-1)
-    dst = np.array([[x1, y1], [x2, y1], [x2, y2], [x1, y2]])
+    dst = np.array([[x1, y1], [x2, y1], [x2, y2], [x1, y2]], dtype=dtype)
     return dst
 
 
@@ -428,24 +429,53 @@ ____polygon = """
 """
 
 
+class ComputeIou:
+    """ 两个多边形的交并比 Intersection Over Union """
+
+    @classmethod
+    def ltrb(cls, pts1, pts2):
+        """ https://gist.github.com/meyerjo/dd3533edc97c81258898f60d8978eddc
+
+        TODO 还没详细研究细节和计时，初步看是比shapely快多了，但可能还有更快的方法
+        """
+        # determine the (x, y)-coordinates of the intersection rectangle
+        x_a = max(pts1[0], pts2[0])
+        y_a = max(pts1[1], pts2[1])
+        x_b = min(pts1[2], pts2[2])
+        y_b = min(pts1[3], pts2[3])
+
+        # compute the area of intersection rectangle
+        inter_area = abs(max((x_b - x_a, 0)) * max((y_b - y_a), 0))
+        if inter_area == 0:
+            return 0
+        # compute the area of both the prediction and ground-truth
+        # rectangles
+        box_a_area = abs((pts1[2] - pts1[0]) * (pts1[3] - pts1[1]))
+        box_b_area = abs((pts2[2] - pts2[0]) * (pts2[3] - pts2[1]))
+
+        # compute the intersection over union by taking the intersection
+        # area and dividing it by the sum of prediction + ground-truth
+        # areas - the interesection area
+        iou = inter_area / float(box_a_area + box_b_area - inter_area)
+
+        # return the intersection over union value
+        return iou
+
+    @classmethod
+    def shapely(cls, pts1, pts2):
+        """
+        >>> ComputeIou.shapely([[0, 0], [10, 10]], [[5, 5], [15, 15]])
+        0.14285714285714285
+        """
+        inter_area = pts1.intersection(pts2).area
+        union_area = pts1.area + pts2.area - inter_area
+        return (inter_area / union_area) if union_area else 0
+
+
+@deprecated(reason='intersection_over_union -> ComputeIou.shapely')
 def intersection_over_union(pts1, pts2):
-    """ 两个多边形的交并比 Intersection Over Union
-
-    :param pts1: 可以转成polygon的数据类型
-    :param pts2: 可以转成polygon的数据类型
-    :return: 交并比
-
-    >>> intersection_over_union([[0, 0], [10, 10]], [[5, 5], [15, 15]])
-    0.14285714285714285
-
-    TODO 其实，如果有大量的双循环两两对比，每次判断shapely类型是比较浪费性能的
-        此时可以考虑直接在业务层用三行代码计算，不必调用该函数
-        同时，我也要注意一些密集型的底层计算函数，应该尽量避免这种工程性类型判断的泛用操作，会影响性能
-    """
     polygon1, polygon2 = shapely_polygon(pts1), shapely_polygon(pts2)
-    inter_area = polygon1.intersection(polygon2).area
-    union_area = polygon1.area + polygon2.area - inter_area
-    return (inter_area / union_area) if union_area else 0
+    return ComputeIou.shapely(polygon1, polygon2)
 
 
 def non_maximun_suppression(boxes, iou=0.5, *, index=False):

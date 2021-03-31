@@ -8,3 +8,4 @@ coloredlogs
 humanfriendly
 tqdm
 ujson
+Deprecated
