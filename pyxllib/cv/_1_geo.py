@@ -435,8 +435,6 @@ class ComputeIou:
     @classmethod
     def ltrb(cls, pts1, pts2):
         """ https://gist.github.com/meyerjo/dd3533edc97c81258898f60d8978eddc
-
-        TODO 还没详细研究细节和计时，初步看是比shapely快多了，但可能还有更快的方法
         """
         # determine the (x, y)-coordinates of the intersection rectangle
         x_a = max(pts1[0], pts2[0])
@@ -462,9 +460,9 @@ class ComputeIou:
         return iou
 
     @classmethod
-    def shapely(cls, pts1, pts2):
+    def polygon(cls, pts1, pts2):
         """
-        >>> ComputeIou.shapely([[0, 0], [10, 10]], [[5, 5], [15, 15]])
+        >>> ComputeIou.polygon([[0, 0], [10, 10]], [[5, 5], [15, 15]])
         0.14285714285714285
         """
         inter_area = pts1.intersection(pts2).area
@@ -475,7 +473,7 @@ class ComputeIou:
 @deprecated(reason='intersection_over_union -> ComputeIou.shapely')
 def intersection_over_union(pts1, pts2):
     polygon1, polygon2 = shapely_polygon(pts1), shapely_polygon(pts2)
-    return ComputeIou.shapely(polygon1, polygon2)
+    return ComputeIou.polygon(polygon1, polygon2)
 
 
 def non_maximun_suppression(boxes, iou=0.5, *, index=False):
