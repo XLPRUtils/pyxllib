@@ -10,7 +10,7 @@ import concurrent.futures
 import fitz
 
 from pyxllib.basic import *
-from pyxllib.debug import chrome
+from pyxllib.debug import browser
 from pyxllib.image._1_imlib import zoomsvg
 
 

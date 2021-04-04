@@ -8,8 +8,8 @@
 from collections import defaultdict
 import concurrent.futures
 
-from PIL import Image
 import numpy as np
+from PIL import Image
 
 from pyxllib.basic import *
 
@@ -68,7 +68,7 @@ def magick(infile, *, outfile=None, if_exists='error', transparent=None, trim=Fa
 
     # 2
     # 200914周一20:40，这有个相对路径的bug，修复了下，否则 test/a.png 会变成 test/test/a.png
-    if File(outfile).exist_preprcs(if_exists, exclude=File(infile)):
+    if File(outfile).exist_preprcs(if_exists):
         # 2.1 判断是否是支持的输入文件类型
         ext = os.path.splitext(infile)[1].lower()
         if not File(infile) or not ext in ('.png', '.eps', '.pdf', '.jpg', '.jpeg', '.wmf', '.emf'):
@@ -197,6 +197,9 @@ def reduce_image_filesize(path, filesize):
     :return:
 
     >> reduce_image_filesize('a.jpg', 300*1024)
+
+    注意：因为要写入文件能比较快捷判断出最终占用大小，所以目前只支持原地修改文件操作
+    TODO 但也是有办法把图片存在内存中判断字节大小的，待优化
     """
     from PIL import Image
 
