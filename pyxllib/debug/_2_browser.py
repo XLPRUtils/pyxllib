@@ -188,7 +188,8 @@ class Browser(Explorer):
                 file = File(file).write(arg)
         return file
 
-    def __call__(self, arg, file=None, *, wait=True, clsmsg=True, to_html_args=None, **kwargs):  # NOQA Browser的操作跟标准接口略有差异
+    def __call__(self, arg, file=None, *, wait=True, clsmsg=True, to_html_args=None,
+                 **kwargs):  # NOQA Browser的操作跟标准接口略有差异
         """ 该版本会把arg转存文件重设为文件名
 
         :param file: 默认可以不输入，会按七牛的etag哈希值生成临时文件
@@ -289,3 +290,21 @@ def check_repeat_filenames(dir, key='stem', link=True):
 
     browser(view_table, escape=not link)
     return df
+
+
+def dataframes_to_excel(outfile, dataframes):
+    """ 将多个dataframe表格写入一个excel文件
+
+    >> dataframes_to_excel('test.xlsx', {'images': df1, 'annotations': df2})
+    """
+    with pd.ExcelWriter(str(outfile)) as writer:
+        # 标题比正文11号大1号，并且蓝底白字，左对齐，上下垂直居中
+        # head_format = writer.book.add_format({'font_size': 12, 'font_color': 'blue',
+        #                                       'align': 'left', 'valign': 'vcenter'})
+        for k, v in dataframes.items():
+            # 设置首行冻结
+            v.to_excel(writer, sheet_name=k, freeze_panes=(1, 0))
+            # 首行首列特殊标记  （这个不能随便加，对group、mul index、含名称index等场合不适用）
+            # writer.sheets[k].write('A1', '_order', head_format)
+            # 特殊标记第一行的格式
+            # writer.sheets[k].set_row(0, cell_format=head_format)  # 这个不知道为什么不起作用~~

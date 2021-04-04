@@ -138,4 +138,5 @@ def demo_aipocr():
 
 if __name__ == '__main__':
     # create_account_df()
-    demo_aipocr()
+    # demo_aipocr()
+    print(File('aipocraccount.pkl').read())

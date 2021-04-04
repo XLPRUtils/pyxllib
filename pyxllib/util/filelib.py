@@ -650,8 +650,8 @@ class DataSync:
     TODO 好像不需要使用scp，也能自动传文件？
     """
 
-    def __init__(self, server, port, user, password):
-        self.client = createSSHClient(server, port, user, password)
+    def __init__(self, server, port, user, passwd):
+        self.client = createSSHClient(server, port, user, passwd)
         self.scp = scp.SCPClient(self.client.get_transport())
 
     def put(self, local_path, remote_path, *, printf=True):
@@ -682,6 +682,11 @@ class DataSync:
         speed = humanfriendly.format_size(file_or_dir_size(local_path) / t, binary=True)
         if printf: print(f'download {local_path}, ↓{speed}/s, {t:.2f}s')
 
+    def client_exec(self, cmd):
+        """ 执行远程服务器命令 """
+        stdin, stdout, stderr = self.client.exec_command(cmd)
+        return '\n'.join([f.strip() for f in list(stdout)])
+
     def remote_files(self, remote_dir):
         """ 远程某个目录下，递归获取所有文件清单
 
@@ -702,6 +707,8 @@ class DataSync:
         from tqdm import tqdm
         from pyxllib.tool.listfiles import listfiles
 
+        local_dir, remote_dir = str(local_dir), str(remote_dir)
+
         with TicToc('初始化计算'):
             local_files = listfiles(local_dir)
             remote_files = self.remote_files(remote_dir)
@@ -716,6 +723,8 @@ class DataSync:
         """ 控制同步的文件上限数 """
         from tqdm import tqdm
         from pyxllib.tool.listfiles import listfiles
+
+        local_dir, remote_dir = str(local_dir), str(remote_dir)
 
         with TicToc('初始化计算'):
             local_files = listfiles(local_dir)

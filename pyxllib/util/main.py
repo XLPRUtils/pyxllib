@@ -622,139 +622,6 @@ def GetFullPathClass(s):
     return p
 
 
-def ________E_图像处理________():
-    pass
-
-
-################################################################################
-### 图 像 处 理 操 作
-################################################################################
-import PIL
-import PIL.ExifTags
-from PIL import Image
-
-
-def 图像实际视图(img):
-    """Image.open读取图片时，是手机严格正放时拍到的图片效果，
-    但手机拍照时是会记录旋转位置的，即可以判断是物理空间中，实际朝上、朝下的方向，
-    从而识别出正拍（代号1），顺时针旋转90度拍摄（代号8），顺时针180度拍摄（代号3）,顺时针270度拍摄（代号6）。
-    windows上的图片查阅软件能识别方向代号后正确摆放；
-    为了让python处理图片的时候能增加这个属性的考虑，这个函数能修正识别角度返回新的图片。
-    """
-    exif_data = img._getexif()
-    if exif_data:
-        exif = {
-            PIL.ExifTags.TAGS[k]: v
-            for k, v in exif_data.items()
-            if k in PIL.ExifTags.TAGS
-        }
-        方向 = exif['Orientation']
-        if 方向 == 8:
-            img = img.transpose(PIL.Image.ROTATE_90)
-        elif 方向 == 3:
-            img = img.transpose(PIL.Image.ROTATE_180)
-        elif 方向 == 6:
-            img = img.transpose(PIL.Image.ROTATE_270)
-    return img
-
-
-def 查看图片的Exif信息(img):
-    exif_data = img._getexif()
-    if exif_data:
-        exif = {
-            PIL.ExifTags.TAGS[k]: v
-            for k, v in exif_data.items()
-            if k in PIL.ExifTags.TAGS
-        }
-    else:
-        exif = None
-    return exif
-
-
-def 缩放目录下所有png图片(folder, rate=120):
-    """rate可以控制缩放比例，正常是100
-    再乘120是不想缩放太多，理论上乘100是正常比例
-    """
-    fd = CBaseFolder(folder)
-    for imgFile in fd.Files('*.png'):
-        files = pathjoin(fd.name, imgFile)
-        try:
-            im = Image.open(files)
-            if 'dpi' in im.info:
-                if im.info['dpi'][0] in (305, 610):  # 这个是magick转换过来的特殊值，不能缩放
-                    continue  # 180920周四，610是为欧龙加的，欧龙双师需要设置-density 240
-                # print(files, im.info)  # dpi: 600
-                # print(查看图片的Exif信息(im))
-                s = list(im.size)
-                s[0] = int(s[0] / im.info['dpi'][0] * rate)
-                s[1] = int(s[1] / im.info['dpi'][1] * rate)
-                im = im.resize(s, Image.ANTIALIAS)
-            im.save(files)
-        except:
-            print('无法处理图片：', files)
-            continue
-
-
-def 缩放目录下所有png图片2(folder, scale=1.0):
-    """rate可以控制缩放比例，正常是100
-    再乘120是不想缩放太多，理论上乘100是正常比例
-    """
-    fd = CBaseFolder(folder)
-    for imgFile in fd.Files('*.png'):
-        files = pathjoin(fd.name, imgFile)
-        im = Image.open(files)
-        s = list(im.size)
-        s[0] = int(s[0] * scale)
-        s[1] = int(s[1] * scale)
-        im = im.resize(s, Image.ANTIALIAS)
-        im.save(files)
-
-
-def 查看目录下png图片信息(folder):
-    fd = CBaseFolder(folder)
-    ls = list()
-    for imgFile in fd.Files('*.png'):
-        file = File(pathjoin(fd.name, imgFile))
-        im = Image.open(file.name)
-        d0, d1 = im.info['dpi'] if 'dpi' in im.info else ('', '')
-        # 处理eps格式
-        epsFile = file.with_suffix('.eps')
-        if epsFile:
-            epsSize, epsIm = epsFile.大小(), Image.open(epsFile.name)
-            boundingBox = epsIm.info['BoundingBox'].replace(' ', ',') if 'BoundingBox' in epsIm.info else ''
-        else:
-            epsSize, boundingBox = '', ''
-        # 处理pdf格式
-        pdfFile = File(file.name[:-4] + '-eps-converted-to.pdf')
-        pdfSize = pdfFile.size if pdfFile else ''
-        # 存储到列表
-        ls.append((imgFile, im.size[0], im.size[1], d0, d1,
-                   file.size, file.mtime.strftime(' %y%m%d-%H%M%S'),
-                   epsSize, boundingBox, pdfSize))
-    df = pd.DataFrame.from_records(ls,
-                                   columns=('fileName', 'width', 'height', 'dpi_w', 'dpi_h', 'size', 'time', 'epsSize',
-                                            'boundingBox', 'pdfSize'))
-    PrintFullTable(df)
-    return df
-
-
-def MakeColorTransparent(image, color, thresh2=0):
-    """
-    将指定颜色转为透明
-
-    https://stackoverflow.com/questions/765736/using-pil-to-make-all-white-pixels-transparent/765829"""
-    from PIL import ImageMath
-
-    def Distance2(a, b):
-        return (a[0] - b[0]) * (a[0] - b[0]) + (a[1] - b[1]) * (a[1] - b[1]) + (a[2] - b[2]) * (a[2] - b[2])
-
-    image = image.convert("RGBA")
-    red, green, blue, alpha = image.split()
-    image.putalpha(ImageMath.eval("""convert(((((t - d(c, (r, g, b))) >> 31) + 1) ^ 1) * a, 'L')""",
-                                  t=thresh2, d=Distance2, c=color, r=red, g=green, b=blue, a=alpha))
-    return image
-
-
 ____other = """"""
 
 mydecrypt = base64.b64decode
@@ -819,6 +686,102 @@ class LengthFormatter:
             self.__dict__['mm'] = value * self.ratio[key]
         else:
             raise ValueError(f'不存在的长度单位类型：{key}')
+
+
+____image = """
+暂时还没空整理的一些图片功能
+"""
+
+
+def 缩放目录下所有png图片(folder, rate=120):
+    """rate可以控制缩放比例，正常是100
+    再乘120是不想缩放太多，理论上乘100是正常比例
+
+    旧函数名：缩放目录下所有png图片
+    """
+    fd = Dir(folder)
+    for f in fd.select('*.png').subfiles():
+        try:
+            im = Image.open(str(f))
+            if 'dpi' in im.info:
+                if im.info['dpi'][0] in (305, 610):  # 这个是magick转换过来的特殊值，不能缩放
+                    continue  # 180920周四，610是为欧龙加的，欧龙双师需要设置-density 240
+                # print(files, im.info)  # dpi: 600
+                # print(查看图片的Exif信息(im))
+                s = list(im.size)
+                s[0] = int(s[0] / im.info['dpi'][0] * rate)
+                s[1] = int(s[1] / im.info['dpi'][1] * rate)
+                im = im.resize(s, Image.ANTIALIAS)
+            im.save(str(f))
+        except:
+            print('无法处理图片：', f)
+            continue
+
+
+def 缩放目录下所有png图片2(folder, scale=1.0):
+    """rate可以控制缩放比例，正常是100
+    再乘120是不想缩放太多，理论上乘100是正常比例
+
+    旧函数名：缩放目录下所有png图片2
+    """
+    fd = Dir(folder)
+    for f in fd.select('*.png').subfiles():
+        im = Image.open(str(f))
+        s = list(im.size)
+        s[0] = int(s[0] * scale)
+        s[1] = int(s[1] * scale)
+        im = im.resize(s, Image.ANTIALIAS)
+        im.save(str(f))
+
+
+def 查看目录下png图片信息(folder):
+    """
+    旧函数名：查看目录下png图片信息
+    """
+    fd = Dir(folder)
+    ls = list()
+    for f in fd.select('*.png').subfiles():
+        im = Image.open(str(f))
+        d0, d1 = im.info['dpi'] if 'dpi' in im.info else ('', '')
+        # 处理eps格式
+        epsFile = f.with_suffix('.eps')
+        if epsFile:
+            epsSize, epsIm = epsFile.大小(), Image.open(epsFile.name)
+            boundingBox = epsIm.info['BoundingBox'].replace(' ', ',') if 'BoundingBox' in epsIm.info else ''
+        else:
+            epsSize, boundingBox = '', ''
+        # 处理pdf格式
+        pdfFile = File(f.name[:-4] + '-eps-converted-to.pdf')
+        pdfSize = pdfFile.size if pdfFile else ''
+        # 存储到列表
+        ls.append((f, im.size[0], im.size[1], d0, d1,
+                   f.size, f.mtime.strftime(' %y%m%d-%H%M%S'),
+                   epsSize, boundingBox, pdfSize))
+    df = pd.DataFrame.from_records(ls,
+                                   columns=('fileName', 'width', 'height', 'dpi_w', 'dpi_h', 'size', 'time', 'epsSize',
+                                            'boundingBox', 'pdfSize'))
+    with pd.option_context('display.max_colwidth', -1, 'display.max_columns', 20,
+                           'display.width', 200):  # 上下文控制格式
+        print(df)
+    return df
+
+
+def make_color_transparent(image, color, thresh2=0):
+    """ 将指定颜色转为透明
+    https://stackoverflow.com/questions/765736/using-pil-to-make-all-white-pixels-transparent/765829
+
+    旧函数名：MakeColorTransparent
+    """
+    from PIL import ImageMath
+
+    def distance2(a, b):
+        return (a[0] - b[0]) * (a[0] - b[0]) + (a[1] - b[1]) * (a[1] - b[1]) + (a[2] - b[2]) * (a[2] - b[2])
+
+    image = image.convert("RGBA")
+    red, green, blue, alpha = image.split()
+    image.putalpha(ImageMath.eval("""convert(((((t - d(c, (r, g, b))) >> 31) + 1) ^ 1) * a, 'L')""",
+                                  t=thresh2, d=distance2, c=color, r=red, g=green, b=blue, a=alpha))
+    return image
 
 
 if __name__ == '__main__':
