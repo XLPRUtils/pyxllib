@@ -9,3 +9,4 @@ humanfriendly
 tqdm
 ujson
 Deprecated
+pyperclip
