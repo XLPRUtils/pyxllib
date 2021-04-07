@@ -4,13 +4,18 @@
 # @Email  : 877362867@qq.com
 # @Date   : 2020/11/17 15:13
 
-from pyxllib.cv._2_cvprcs import *
+import io
+
 import PIL.ExifTags
 
+from pyxllib.cv._2_cvprcs import *
 
-class PilPrcs(CvPrcs):
+
+class PilPrcsBase(CvPrcsBase):
+    """ 相同功能，但pil要另外实现的算法 """
+
     @classmethod
-    def read(cls, file, flags=1, **kwargs):
+    def read(cls, file, flags=None, **kwargs):
         if is_pil_image(file):
             im = file
         elif is_numpy_image(file):
@@ -49,7 +54,7 @@ class PilPrcs(CvPrcs):
         >>> im = PilPrcs.read(np.zeros([100, 200], dtype='uint8'), 0)
         >>> im.size
         (100, 200)
-        >>> im2 = im.reduce_by_area(50*50, **kwargs)
+        >>> im2 = im.reduce_area(50*50, **kwargs)
         >>> im2.size
         (35, 70)
         """
@@ -69,6 +74,10 @@ class PilPrcs(CvPrcs):
     @classmethod
     def show(cls, im, title=None, command=None):
         return cls.show(im, title, command)
+
+
+class PilPrcs(PilPrcsBase):
+    """ pil暂时独有的功能 """
 
     @classmethod
     def random_direction(cls, im):
@@ -121,3 +130,43 @@ class PilPrcs(CvPrcs):
         else:
             exif = None
         return exif
+
+    @classmethod
+    def rgba2rgb(cls, im):
+        if im.mode in ('RGBA', 'P'):
+            # 判断图片mode模式，如果是RGBA或P等可能有透明底，则和一个白底图片合成去除透明底
+            background = Image.new('RGBA', im.size, (255, 255, 255))
+            # composite是合成的意思。将右图的alpha替换为左图内容
+            im = Image.alpha_composite(background, im.convert('RGBA')).convert('RGB')
+        return im
+
+    @classmethod
+    def reduce_filesize(cls, im, filesize=None, suffix='jpeg'):
+        """ 按照保存后的文件大小来压缩im
+        :param filesize: 单位Bytes
+            可以用 300*1024 来表示 300KB
+            可以不输入，默认读取后按原尺寸返回，这样看似没变化，其实图片一读一写，是会对手机拍照的很多大图进行压缩的
+        :param suffix: 使用的图片类型
+
+        >> reduce_filesize(im, 300*1024, 'jpg')
+        """
+        # 1 工具
+        # save接口不支持jpg参数
+        if suffix == 'jpg':
+            suffix = 'jpeg'
+
+        def get_file_size(im):
+            file = io.BytesIO()
+            im.save(file, suffix)
+            return len(file.getvalue())
+
+        # 2 然后开始循环处理
+        while filesize:
+            r = get_file_size(im) / filesize
+            if r <= 1:
+                break
+
+            # 假设图片面积和文件大小成正比，如果r=4，表示长宽要各减小至1/(r**0.5)才能到目标文件大小
+            rate = min(1 / (r ** 0.5), 0.95)  # 并且限制每轮至少要缩小至95%，避免可能会迭代太多轮
+            im = im.resize((int(im.size[0] * rate), int(im.size[1] * rate)))
+        return im
