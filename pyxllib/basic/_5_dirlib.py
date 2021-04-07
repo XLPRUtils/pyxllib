@@ -108,6 +108,11 @@ class Dir(PathBase):
             total_size = 0
         return total_size
 
+    @property
+    def psize(self) -> str:
+        """ 美化显示的文件大小 """
+        return humanfriendly.format_size(self.size, binary=True)
+
     def __truediv__(self, key) -> pathlib.Path:
         r""" 路径拼接功能
 
