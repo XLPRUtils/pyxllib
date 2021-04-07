@@ -12,6 +12,7 @@ import numpy as np
 from PIL import Image
 
 from pyxllib.basic import *
+from pyxllib.cv import cv2pil, PilPrcs
 
 
 def get_img_content(in_):
@@ -32,12 +33,11 @@ def get_img_content(in_):
     elif isinstance(in_, Image.Image):
         img = in_
     elif isinstance(in_, np.ndarray):
-        from pyxllib.cv import cv2pil
         img = cv2pil(in_)
     else:
         raise ValueError(f'{type(in_)}')
 
-    img = image_rgba2rgb(img)  # 如果是RGBA类型，要把透明底变成白色
+    img = PilPrcs.rgba2rgb(img)  # 如果是RGBA类型，要把透明底变成白色
     file = io.BytesIO()
     img.save(file, 'JPEG')
     content = file.getvalue()
@@ -187,46 +187,3 @@ def zoomsvg(file, scale=1):
             File(file).write(s, if_exists='delete')
     elif isinstance(file, str) and '<svg ' in file:  # 输入svg的代码文本
         return re.sub(r'<svg .+?>', func, file, flags=re.DOTALL)
-
-
-def reduce_image_filesize(path, filesize):
-    """
-    :param path: 图片路径，支持png、jpg等多种格式
-    :param filesize: 单位Bytes
-        可以用 300*1024 来表示 300KB
-    :return:
-
-    >> reduce_image_filesize('a.jpg', 300*1024)
-
-    注意：因为要写入文件能比较快捷判断出最终占用大小，所以目前只支持原地修改文件操作
-    TODO 但也是有办法把图片存在内存中判断字节大小的，待优化
-    """
-    from PIL import Image
-
-    path = File(path)
-    # 1 无论什么情况，都先做个100%的resize处理，很可能会去掉一些没用的冗余信息
-    im = Image.open(f'{path}')
-    im.resize(im.size).save(f'{path}')
-
-    # 2 然后开始循环处理
-    while True:
-        r = path.size / filesize
-        if r <= 1: break
-        # 假设图片面积和文件大小成正比，如果r=4，表示长宽要各减小至1/(r**0.5)才能到目标文件大小
-        rate = min(1 / (r ** 0.5), 0.95)  # 并且限制每轮至少要缩小至95%，避免可能会迭代太多轮
-        im = Image.open(f'{path}')
-        im.resize((int(im.size[0] * rate), int(im.size[1] * rate))).save(f'{path}')
-
-
-def image_rgba2rgb(im):
-    if im.mode in ('RGBA', 'P'):
-        # 判断图片mode模式，如果是RGBA或P等可能有透明底，则和一个白底图片合成去除透明底
-        background = Image.new('RGBA', im.size, (255, 255, 255))
-        # composite是合成的意思。将右图的alpha替换为左图内容
-        im = Image.alpha_composite(background, im.convert('RGBA')).convert('RGB')
-    return im
-
-
-____section_temp = """
-临时添加的新功能
-"""
