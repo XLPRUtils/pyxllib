@@ -37,7 +37,7 @@ class PilPrcsBase(CvPrcsBase):
         return im
 
     @classmethod
-    def write(cls, im, path, if_exists='delete', **kwargs):
+    def write(cls, im, path, if_exists=None, **kwargs):
         p = File(path)
         if p.exist_preprcs(if_exists):
             p.ensure_parent()

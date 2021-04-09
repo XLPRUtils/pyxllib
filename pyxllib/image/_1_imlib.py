@@ -161,7 +161,8 @@ def ensure_pngs(folder, *, if_exists='skip',
 
 
 def zoomsvg(file, scale=1):
-    """
+    """ 缩放svg文件
+
     :param file:
         如果输入一个目录，会处理目录下所有的svg图片
         否则只处理指定的文件

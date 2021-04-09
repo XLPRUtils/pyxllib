@@ -9,9 +9,92 @@ import concurrent.futures
 
 import fitz
 
-from pyxllib.basic import *
-from pyxllib.debug import browser
+from pyxllib.debug import *
+from pyxllib.cv import *
 from pyxllib.image._1_imlib import zoomsvg
+
+
+class FitzPdf:
+    def __init__(self, file):
+        self.src_file = File(file)
+        self.doc = fitz.open(file)
+
+    def to_images(self, dst_dir=None, file_fmt='{filestem}_{number}.png', num_width=None, *,
+                  scale=1, start=1, fmt_onepage=False):
+        """ 将pdf转为若干页图片
+
+        :param dst_dir: 目标目录
+            默认情况下，只有一页pdf则存储到对应的pdf目录，多页则存储到同名子目录下
+            如果不想这样被智能控制，只要指定明确的dst即可
+        :param file_fmt: 后缀格式，包括修改导出的图片类型，注意要用 {} 占位符表示页码编号
+        :param num_width: 生成的每一页文件编号，使用的数字前导0域宽
+            默认根据pdf总页数来设置对应所用域宽
+            0表示不设域宽
+        :param scale: 对每页图片进行缩放
+        :param start: 起始页码
+        :param fmt_onepage: 当pdf就只有一页的时候，是否还对导出的图片编号
+            默认只有一页的时候，进行优化，不增设后缀格式
+
+        注：如果要导出单张图，可以用 FitzPdfPage.get_cv_image
+        """
+        # 1 基本参数计算
+        srcfile, doc = self.src_file, self.doc
+        filestem, n_page = srcfile.stem, doc.pageCount
+
+        # 自动推导目标目录
+        if dst_dir is None:
+            dst_dir = Dir(srcfile.stem, srcfile.parent) if n_page > 1 else Dir(srcfile.parent)
+        Dir(dst_dir).ensure_dir()
+
+        # 域宽
+        if num_width is None:
+            num_width = math.ceil(math.log10(n_page + 1))  # 根据总页数计算需要的对齐域宽
+
+        # 2 导出图片
+        if fmt_onepage or n_page != 1:  # 多页的处理规则
+            for i in range(n_page):
+                im = FitzPdfPage(self.doc.loadPage(i)).get_cv_image(scale)
+                number = ('{:0' + str(num_width) + 'd}').format(i + start)  # 前面的括号不要删，这样才是完整的一个字符串来使用format
+                imwrite(im, File(file_fmt.format(filestem=filestem, number=number), dst_dir))
+        else:
+            im = FitzPdfPage(self.doc.loadPage[0]).get_cv_image(scale)
+            imwrite(im, File(srcfile.stem + os.path.splitext(file_fmt)[1], dst_dir))
+
+    def get_page(self, number):
+        return self.doc.loadPage(number)
+
+
+class FitzPdfPage:
+    def __init__(self, page):
+        self.page = page
+
+    def get_svg_image(self, scale=1):
+        # svg 是一段表述性文本
+        txt = self.page.getSVGimage()
+        if scale != 1:
+            txt = zoomsvg(txt, scale)
+        return txt
+
+    def _get_png_data(self, scale=1):
+        # TODO 增加透明通道？
+        if scale != 1:
+            pix = self.page.getPixmap(fitz.Matrix(scale, scale))  # 长宽放大到scale倍
+        else:
+            pix = self.page.getPixmap()
+        return pix.getPNGData()
+
+    def get_cv_image(self, scale=1):
+        arr = np.fromstring(self._get_png_data(scale), dtype=np.uint8)
+        return cv2.imdecode(arr, flags=1)
+
+    def get_pil_image(self, scale=1):
+        raise NotImplementedError
+
+    def get_text(self, fmt='text'):
+        """
+        :param fmt: 存储格式，可以获得整页的纯文本，也可以获得dict结构存储的内容
+        """
+        return self.page.getText(fmt)
 
 
 class DemoFitz:
@@ -75,15 +158,17 @@ class DemoFitz:
         self.doc.save(file, garbage=4)  # 注意要设置garbage，否则文档并没有实际删除内容压缩文件大小
         browser(file)
 
-    def page2png(self):
-        """查看单页渲染图片"""
-        page = self.doc.loadPage(0)  # 索引第i页，下标规律同py，支持-1索引最后页
-        dprint(page.bound())  # 页面边界，x,y轴同图像处理中的常识定义，返回Rect(x0, y0, x1, y1)
+    def page2png(self, page=0):
+        """ 查看单页渲染图片 """
+        page = self.doc.loadPage(page)  # 索引第i页，下标规律同py，支持-1索引最后页
+        # dprint(page.bound())  # 页面边界，x,y轴同图像处理中的常识定义，返回Rect(x0, y0, x1, y1)
 
-        pix = page.getPixmap()  # 获得页面的RGBA图像，Pixmap类型；还可以用page.getSVGimage()获得矢量图
+        pix = page.getPixmap(fitz.Matrix(2, 2))  # 获得页面的RGBA图像，Pixmap类型；还可以用page.getSVGimage()获得矢量图
         # pix.writePNG('page-0.png')  # 将Pixmal
         pngdata = pix.getPNGData()  # 获png文件的bytes字节码
-        browser(pngdata, 'a.png')  # 用我的工具函数打开图片
+        # print(len(pngdata))
+        # browser(pngdata, 'a.png')  # 用我的工具函数打开图片
+
         return pngdata
 
     def pagetext(self):
@@ -195,8 +280,9 @@ def pdf2imagebase(pdffile, target=None, scale=None, ext='.png'):
         1：原尺寸
         1.5：放大为原来的1.5倍
     :param ext: 导出的图片格式
-    :param return: 返回生成的图片列表
+    :return: 返回生成的图片列表
     """
+
     import fitz
     # 1 基本参数计算
     pdf = fitz.open(pdffile)
@@ -209,7 +295,7 @@ def pdf2imagebase(pdffile, target=None, scale=None, ext='.png'):
         else:
             target = File(pdffile).dirname + '/'
 
-    newfile = File(pdffile).abs_dstpath(target).to_str()
+    newfile = File(target, pdffile.parent).to_str()
     if newfile.endswith('.pdf'): newfile = os.path.splitext(newfile)[0] + ext
     File(newfile).ensure_parent()
 
@@ -274,7 +360,7 @@ def pdf2svg(pdffile, target=None, scale=None, trim=False):
     """
     if trim:  # 先对pdf文件进行裁剪再转换
         pdf = File(pdffile)
-        newfile = pdf.abs_dstpath('origin.pdf').to_str()
+        newfile = File('origin.pdf', pdf.parent).to_str()
         pdf.copy(newfile)
         # subprocess.run(['pdf-crop-margins.exe', '-p', '0', newfile, '-o', pdffile], stderr=subprocess.PIPE) # 本少： 会裁过头！
         # 本少： 对于上下边处的 [] 分数等，会裁过头，先按百分比 -p 0 不留边，再按绝对点数收缩/扩张 -a -1  负数为扩张，单位为bp
@@ -287,6 +373,7 @@ def pdf2svg(pdffile, target=None, scale=None, trim=False):
 
 def pdfs2pngs(src, scale=None, pinterval=None):
     """ 将目录下所有pdf转png
+
     :param src: 原pdf数据路径
     :param scale: 转图片时缩放比例，例如2表示长宽放大至2被
     :param pinterval: 每隔多少个pdf输出处理进度
