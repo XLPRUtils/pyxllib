@@ -8,33 +8,17 @@
 
 from pyxllib.utools import xxxx
 
-cmds = dict()
-cmds['isWin'] = {{isWin}}  # 是否Window系统, 返回1或0
-cmds['LocalId'] = '{{LocalId}}'  # 本机唯一ID
-cmds['BrowserUrl'] = r'''{{BrowserUrl}}'''  # 浏览器当前链接
-cmds['ClipText'] = r'''{{ClipText}}'''  # 剪切板的文本（为了避免出bug，建议用 pyperclip.paste().replace('\r\n', '\n') 实现 ）
-cmds['subinput'] = r'''{{subinput}}'''  # 子输入框的文本
-cmds['type'] = '{{type}}'  # 专业模式的type
-cmds['payload'] = r'''{{payload}}'''  # 专业模式的payload, JSON格式字符串
-
-# 划词可用
-cmds['input'] = r'''{{input}}'''  # 主输入框的文本
-
-# 窗口可用
-cmds['pwd'] = '{{pwd}}'  # 文件管理器当前目录
-cmds['WindowInfo'] = '''{{WindowInfo}}'''  # 当前窗口信息, JSON格式字符串
-cmds['SelectFile'] = '''{{SelectFile}}'''  # 文件管理器选中的文件，不支持Linux (实测在win也用不了。。。)
-
-# 文件可用
-cmds['MatchedFiles'] = '''{{MatchedFiles}}'''  # 匹配的文件，JSON格式字符串
-
 xxxx(**kwargs)
 """
 
 import pyperclip
 
-from pyxllib.debug import *
-from pyxllib.cv import PilImg
+from pyxllib.image import *
+
+try:
+    from xlproject.kzconfig import *
+except ModuleNotFoundError:
+    pass
 
 
 def _print_df_result(df, outfmt='text'):
@@ -94,6 +78,11 @@ class UtoolsBase:
             # 在有些软件中，比如everything，是可以选中多个不同目录的文件的。。。所以严格来说不能直接按第一个文件算pwd
             # 但这个讯息是可以写一个工具分析的
             # self.cmds['pwd'] = os.path.dirname(self.cmds['MatchedFiles'][0]['path'])
+
+            # TODO 如果选中的文件全部是同一个目录下的，要存储pwd
+            dirs = {os.path.dirname(f['path']) for f in self.cmds['MatchedFiles']}
+            if len(dirs) == 1:
+                self.cmds['pwd'] = list(dirs)[0]
 
         # 4 当前工作目录
         # 要根据场景切换pwd
@@ -157,12 +146,14 @@ class UtoolsFile(UtoolsBase):
         """
         from functools import reduce
 
+        tt = TicToc()
+
         # 1 获得所有标识符
         # 每个单词前后都有空格，方便定界
         keywords = filter(lambda x: re.match(r'[a-zA-Z_]+$', x),
                           set(re.findall(r'\.?[a-zA-Z_]+\(?', self.cmds['subinput'])))
         keywords = ' ' + ' '.join(keywords) + ' '
-        print('keywords:', keywords)
+        # print('keywords:', keywords)
 
         # 2 生成一些备用的智能参数
         # 一级目录下选中的文件
@@ -185,12 +176,15 @@ class UtoolsFile(UtoolsBase):
         if m:
             name = m.group(1)
             objs = eval(name + 's')
-            print(name + 's:', len(objs))
+            print('len(' + name + 's)=', len(objs))
             for x in objs:
                 locals()[name] = x
                 eval(self.cmds['subinput'])
         else:  # 没有的话就直接处理所有文件
             eval(self.cmds['subinput'])
+
+        # 4 运行结束标志
+        print(f'finished in {format_timespan(tt.tocvalue())}.')
 
 
 if __name__ == '__main__':

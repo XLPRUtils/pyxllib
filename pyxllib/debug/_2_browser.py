@@ -202,7 +202,7 @@ class Browser(Explorer):
 browser = Browser()
 
 
-def chrome_json(f):
+def browser_json(f):
     """ 可视化一个json文件结构 """
     data = File(f).read()
     # 使用NestedDict.to_html_table转成html的嵌套表格代码，存储到临时文件夹
@@ -211,7 +211,7 @@ def chrome_json(f):
     browser(htmlfile)
 
 
-def chrome_jsons_kv(fd, files='**/*.json', encoding=None, max_items=10, max_value_length=100):
+def browser_jsons_kv(fd, files='**/*.json', encoding=None, max_items=10, max_value_length=100):
     """ demo_keyvaluescounter，查看目录下json数据的键值对信息
 
     :param fd: 目录

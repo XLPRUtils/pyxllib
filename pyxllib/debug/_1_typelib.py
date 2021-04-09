@@ -147,7 +147,7 @@ class PrettifyStrDecorator:
 
 class TypeConvert:
     @classmethod
-    def dict2list(d: dict, *, nsort=False):
+    def dict2list(cls, d: dict, *, nsort=False):
         """ 字典转n*2的list
 
         :param d: 字典
