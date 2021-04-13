@@ -5,10 +5,6 @@
 # @Date   : 2021/04/04 17:03
 
 """ 专门给utools的快捷命令扩展的一系列python工具库
-
-from pyxllib.utools import xxxx
-
-xxxx(**kwargs)
 """
 
 import pyperclip
@@ -107,6 +103,17 @@ class UtoolsBase:
         df = pd.DataFrame.from_records([(k, v) for k, v in self.cmds.items()],
                                        columns=['key', 'content'])
         _print_df_result(df, self.outfmt)
+
+
+class UtoolsRegex(UtoolsBase):
+    def __init__(self, cmds, *, outfmt='text'):
+        super().__init__(cmds, outfmt=outfmt)
+
+    def coderegex(self):
+        tt = TicToc()
+        text = self.cmds['ClipText']
+        eval(self.cmds['subinput'])
+        print(f'finished in {format_timespan(tt.tocvalue())}.')
 
 
 class UtoolsFile(UtoolsBase):
