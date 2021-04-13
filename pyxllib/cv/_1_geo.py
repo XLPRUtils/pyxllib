@@ -550,18 +550,23 @@ def split_vector_interval(vec, maxsplit=None, minwidth=3):
             使得背景在非正数，背景概率越大，负值绝对值越大
             前景在正值，前景概率越大，数值越大
         要得到能量最大（数值最大、前景内容）的几个区域
-        但是因为有噪声的原因，该算法要有一定的扛干扰能力
+        但是因为有噪声的原因，该算法要有一定的抗干扰能力
     :param maxsplit: 最大切分数量，即最多得到几个子区间
         没设置的时候，会对所有满足条件的情况进行切割
     :param minwidth: 每个切分位置最小具有的宽度
     :return: [(l, r), (l, r), ...]  每一段文本的左右区间
     """
     # 1 裁剪左边、右边
-    left, right = 0, len(vec)
+    n_vec = len(vec)
+    left, right = 0, n_vec
     while left < right and vec[left] <= 0:
         left += 1
     while right > left and vec[right - 1] <= 0:
         right -= 1
+    # 左右空白至少也要达到minwidth才去除
+    if left < minwidth: left = 0
+    if n_vec - right + 1 < minwidth: right = n_vec
+
     vec = vec[left:right]
     width = len(vec)
     if width == 0:
