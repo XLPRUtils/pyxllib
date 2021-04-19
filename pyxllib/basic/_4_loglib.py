@@ -184,6 +184,46 @@ def dprint(*args, **kwargs):
     print(dformat(depth=3, **kwargs))
 
 
+class DPrint:
+    """ 用来存储上下文相关变量，进行全局性地调试
+
+    TODO 需要跟logging库一样，可以获取不同名称的配置
+        可以进行很多扩展，比如输出到stderr还是stdout
+    """
+
+    watch = {}
+
+    @classmethod
+    def reset(cls):
+        cls.watch = {}
+
+    @classmethod
+    def format(cls, watch2, show_type=False, sep=' '):
+        """
+        :param watch2: 必须也是字典类型
+        :param show_type: 是否显示每个数值的类型
+        :param sep: 每部分的间隔符
+        """
+        msg = []
+        input_msg = func_input_message(2)
+        filename, lineno = input_msg['filename'], input_msg['lineno']
+        msg.append(f'{filename}/{lineno}')
+
+        watch3 = cls.watch.copy()
+        watch3.update(watch2)
+        for k, v in watch3.items():
+            if k.startswith('$'):
+                # 用 $ 修饰的不显示变量名，直接显示值
+                msg.append(f'{v}')
+            else:
+                if show_type:
+                    msg.append(f'{k}<{typename(v)}>={repr(v)}')
+                else:
+                    msg.append(f'{k}={repr(v)}')
+
+        return sep.join(msg)
+
+
 def demo_dprint():
     """这里演示dprint常用功能
     """

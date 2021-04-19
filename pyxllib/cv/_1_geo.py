@@ -551,6 +551,12 @@ def split_vector_interval(vec, maxsplit=None, minwidth=3):
             前景在正值，前景概率越大，数值越大
         要得到能量最大（数值最大、前景内容）的几个区域
         但是因为有噪声的原因，该算法要有一定的抗干扰能力
+
+        一般情况下
+            用 0 代表背景
+            用 <1 的正值表示这一列黑点所占比例（np.mean）
+            用 np.sum 传入整数暂时也行，但考虑以后功能扩展性，用比例会更好
+            传入负数，表示特殊背景，该背景可以抵消掉的minwidth宽度数
     :param maxsplit: 最大切分数量，即最多得到几个子区间
         没设置的时候，会对所有满足条件的情况进行切割
     :param minwidth: 每个切分位置最小具有的宽度
@@ -564,8 +570,8 @@ def split_vector_interval(vec, maxsplit=None, minwidth=3):
     while right > left and vec[right - 1] <= 0:
         right -= 1
     # 左右空白至少也要达到minwidth才去除
-    if left < minwidth: left = 0
-    if n_vec - right + 1 < minwidth: right = n_vec
+    # if left < minwidth: left = 0
+    # if n_vec - right + 1 < minwidth: right = n_vec
 
     vec = vec[left:right]
     width = len(vec)
@@ -579,8 +585,10 @@ def split_vector_interval(vec, maxsplit=None, minwidth=3):
     def update_fg():
         """ 遇到前景内容，或者循环结束，更新一下 """
         nonlocal cnt
-        if cnt >= minwidth:
-            itv, prob = [bg_start, bg_start + cnt], vec[bg_start:bg_start + cnt].sum()
+        prob = vec[bg_start:bg_start + cnt].sum()
+        # print(cnt, prob)
+        if cnt >= (minwidth + prob):  # 负值可以减小minwidth限定
+            itv = [bg_start, bg_start + cnt]
             bg_probs.append([itv, prob])
         cnt = 0
 
