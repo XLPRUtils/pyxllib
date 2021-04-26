@@ -39,7 +39,7 @@ class ToLabelmeJson:
     document: https://www.yuque.com/xlpr/pyxllib/ks5h4o
     """
 
-    def __init__(self, imgpath=None):
+    def __init__(self, imgpath):
         """
         :param imgpath: 可选参数图片路径，强烈建议要输入，否则建立的label json会少掉图片宽高信息
         """
