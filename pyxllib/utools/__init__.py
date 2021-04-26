@@ -9,7 +9,7 @@
 
 import pyperclip
 
-from pyxllib.image import *
+from pyxllib.debug import *
 
 try:
     from xlproject.kzconfig import *
@@ -192,6 +192,44 @@ class UtoolsFile(UtoolsBase):
 
         # 4 运行结束标志
         print(f'finished in {format_timespan(tt.tocvalue())}.')
+
+
+class UtoolsText(UtoolsBase):
+    """ 目录路径生成工具 """
+
+    def wpath(self):
+        """ windows上的路径 """
+        from xlproject.kzconfig import CommonDir
+
+        p = getattr(CommonDir, self.cmds['subinput'])
+        # slns比较特别，本地要重定向到D:/slns
+        p = str(p).replace('D:/home/chenkunze/slns', 'D:/slns')
+        p = p.replace('/', '\\')
+        print(p, end='')
+
+    def upath(self):
+        """ unix上的路径 """
+        from xlproject.kzconfig import CommonDir
+
+        p = getattr(CommonDir, self.cmds['subinput'])
+        # 因为用了符号链接，实际位置会变回D:/slns，这里需要反向替换下
+        p = str(p).replace('D:/slns', 'D:/home/chenkunze/slns')
+        p = str(p)[2:]
+        print(p, end='')
+
+    def wdate(self):
+        """ 输入一周的简略日期值 """
+        import pyautogui
+
+        start = int(self.cmds['subinput'])
+
+        for i in range(7):
+            dt = Datetime(start + i)
+            pyperclip.copy(dt.strftime('%y%m%d周%k'))
+            # pyperclip.paste()  # 这个没用
+            # pyautogui.write('210503周一')  # 这个也没用
+            pyautogui.hotkey('ctrl', 'v')
+            pyautogui.press('down')
 
 
 if __name__ == '__main__':
