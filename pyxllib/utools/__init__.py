@@ -11,11 +11,6 @@ import pyperclip
 
 from pyxllib.debug import *
 
-try:
-    from xlproject.kzconfig import *
-except ModuleNotFoundError:
-    pass
-
 
 def _print_df_result(df, outfmt='text'):
     # subinput可以强制重置输出类型
@@ -152,6 +147,10 @@ class UtoolsFile(UtoolsBase):
             imfile，图片文件
         """
         from functools import reduce
+        try:
+            from xlproject.kzconfig import KzDataSync
+        except ModuleNotFoundError:
+            pass
 
         tt = TicToc()
 
@@ -194,28 +193,46 @@ class UtoolsFile(UtoolsBase):
         print(f'finished in {format_timespan(tt.tocvalue())}.')
 
 
+def clipboard_paste(func):
+    def wrapper(*args, **kwargs):
+        import pyautogui
+        s = func(*args, **kwargs)
+
+        # print(s, end='')
+        pyperclip.copy(s)
+        # pyperclip.paste()  # 这个没用
+        # pyautogui.write(s)  # 这个也不能写入中文
+        pyautogui.hotkey('ctrl', 'v')  # 目前来看就这个方法最靠谱
+
+        return s
+
+    return wrapper
+
+
 class UtoolsText(UtoolsBase):
     """ 目录路径生成工具 """
 
+    @clipboard_paste
     def wpath(self):
         """ windows上的路径 """
-        from xlproject.kzconfig import CommonDir
+        from xlproject.kzpaths import CommonDir
 
         p = getattr(CommonDir, self.cmds['subinput'])
         # slns比较特别，本地要重定向到D:/slns
         p = str(p).replace('D:/home/chenkunze/slns', 'D:/slns')
         p = p.replace('/', '\\')
-        print(p, end='')
+        return p
 
+    @clipboard_paste
     def upath(self):
         """ unix上的路径 """
-        from xlproject.kzconfig import CommonDir
+        from xlproject.kzpaths import CommonDir
 
         p = getattr(CommonDir, self.cmds['subinput'])
         # 因为用了符号链接，实际位置会变回D:/slns，这里需要反向替换下
         p = str(p).replace('D:/slns', 'D:/home/chenkunze/slns')
         p = str(p)[2:]
-        print(p, end='')
+        return p
 
     def wdate(self):
         """ 输入一周的简略日期值 """

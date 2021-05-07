@@ -21,11 +21,16 @@ def is_labelme_json_data(data):
 
 def reduce_labelme_jsonfile(jsonpath):
     """ 删除imageData """
-    p = File(jsonpath)
-    data = p.read(mode='.json')
+    p = str(jsonpath)
+
+    with open(p, 'rb') as f:
+        bstr = f.read()
+    encoding = get_encoding(bstr)
+    data = ujson.loads(bstr.decode(encoding=encoding))
+
     if is_labelme_json_data(data) and data['imageData']:
         data['imageData'] = None
-        p.write(data, encoding=p.encoding, if_exists='delete')
+        File(p).write(data, encoding=encoding, if_exists='delete')
 
 
 class ToLabelmeJson:
