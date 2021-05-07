@@ -25,7 +25,7 @@ import pyscreeze  # NOQA pyautogui安装的时候会自动安装依赖的pyscree
 class NamedLocate:
     """ 对有命名的标注数据进行定位
 
-    注意labelme在每张图片上写的label值最好不要有重复，否则按字典存储后可能有重复值
+    注意labelme在每张图片上写的label值最好不要有重复，否则按字典存储后可能会被覆盖
 
     特殊取值：
     '@IMAGE_ID' 该状态图的标志区域，即游戏中在该位置出现此子图，则认为进入了对应的图像状态
@@ -62,9 +62,9 @@ class NamedLocate:
             对point对象，则存储了对应位置的像素值
         """
         points, rects, images = dict(), dict(), dict()
-        for path in self.root.select(['**/*.jpg', '**/*.png']).subs:
-            stem, suffix = os.path.splitext(path)
-            img_file = File(path, self.root)
+        for f in self.root.select(['**/*.jpg', '**/*.png']).subfiles():
+            stem, suffix = f.stem, f.suffix
+            img_file = File(f, self.root)
             json_file = img_file.with_suffix('.json')
             if not json_file:
                 continue
@@ -108,6 +108,13 @@ class NamedLocate:
     def update_shot(self, region=None):
         self.last_shot = pil2cv(pyautogui.screenshot(region=region))
         return self.last_shot
+
+    def screenshot(self, region=None):
+        if isinstance(region, str):
+            im = pyautogui.screenshot(region=ltrb2xywh(self.rects[region]))
+        else:
+            im = pyautogui.screenshot(region=region)
+        return pil2cv(im)
 
     def get_pixel(self, point):
         """
@@ -164,8 +171,9 @@ class NamedLocate:
     def find(self, name):
         self.update_shot()
         if name in self.rects:  # 优先按照区域规则进行匹配分析
+
             rect = self.locate_rect(name)
-            # print('图片相似度', 1 - self._cmp_image(self.images[name], self._get_image(rect)))
+            # print(name, '图片相似度', 1 - self._cmp_image(self.images[name], self.get_image(rect)))
             if (1 - self._cmp_image(self.images[name], self.get_image(rect))) >= self.confidence:
                 return rect
             else:
@@ -193,7 +201,7 @@ class NamedLocate:
             return res
 
     def find_image(self, name):
-        """ 将find的结果统一转成点 """
+        """ 将find的结果统一转成图片数据 """
         res = self.find(name)
         if not res:
             return False
@@ -215,6 +223,8 @@ class NamedLocate:
             pos = name
         elif isinstance(name, str):
             pos = self.find_point(name)
+        else:
+            raise TypeError
 
         if pos:
             # print(pos)
