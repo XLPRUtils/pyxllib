@@ -149,6 +149,7 @@ class UtoolsFile(UtoolsBase):
         from functools import reduce
         try:
             from xlproject.kzconfig import KzDataSync
+            from pyxllib.util.labelmelib import reduce_labelme_jsonfile
         except ModuleNotFoundError:
             pass
 
