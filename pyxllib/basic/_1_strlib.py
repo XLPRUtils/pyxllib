@@ -21,7 +21,10 @@ import struct
 import sys
 import textwrap
 
+from deprecated import deprecated
 from disjoint_set import DisjointSet
+
+from pyxllib import VERSION
 
 HOSTNAME = socket.getfqdn()
 
@@ -816,8 +819,10 @@ def halfwidth2fullwidth(ustring):
     return ''.join(ss)
 
 
+@deprecated(version=VERSION, reason='这个实现方式不佳，请参考 make_index_function')
 def sort_by_given_list(a, b):
-    r"""本函数一般用在数据透视表中，分组中元素名为中文，没有按指定规律排序的情况
+    r""" 本函数一般用在数据透视表中，分组中元素名为中文，没有按指定规律排序的情况
+
     :param a: 需要排序的对象
     :param b: 参照的排序数组
     :return: 排序后的a
@@ -843,6 +848,34 @@ def sort_by_given_list(a, b):
     a1 = sorted(a1, key=lambda x: d[x])
     a2 = sorted(a2)
     return a1 + a2
+
+
+def make_index_function(li, *, start=0, nan=None):
+    """ 返回一个函数，输入值，返回对应下标，找不到时返回 not_found
+
+    :param li: 列表数据
+    :param start: 起始下标
+    :param nan: 找不到对应元素时的返回值
+        注意这里找不到默认不是-1，而是li的长度，这样用于排序时，找不到的默认会排在尾巴
+
+    >>> func = make_index_function(['少儿', '小学', '初中', '高中'])
+    >>> sorted(['初中', '小学', '高中'], key=func)
+    ['小学', '初中', '高中']
+
+    # 不在枚举项目里的，会统一列在最后面
+    >>> sorted(['初中', '小学', '高中', '幼儿'], key=func)
+    ['小学', '初中', '高中', '幼儿']
+    """
+    data = {x: i for i, x in enumerate(li, start=start)}
+    if nan is None:
+        nan = len(li)
+
+    def warpper(x, default=None):
+        if default is None:
+            default = nan
+        return data.get(x, default)
+
+    return warpper
 
 
 ____disjoint_set = """

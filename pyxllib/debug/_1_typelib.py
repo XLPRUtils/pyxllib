@@ -353,13 +353,15 @@ class MatchPairs:
         return [self.match(x) for x in xs]
 
 
-def matchpairs(xs, ys, cmp_func, least_score=sys.float_info.epsilon, *, index=False):
+def matchpairs(xs, ys, cmp_func, least_score=sys.float_info.epsilon, *,
+               key=None, index=False):
     r""" 匹配两组数据
 
     :param xs: 第一组数据
     :param ys: 第二组数据
     :param cmp_func: 所用的比较函数，值越大表示两个对象相似度越高
     :param least_score: 允许匹配的最低分，默认必须要大于0
+    :param key: 是否需要对xs, ys进行映射后再传入 cmp_func 操作
     :param index: 返回的不是原值，而是下标
     :return: 返回结构[(x1, y1, score1), (x2, y2, score2), ...]，注意长度肯定不会超过min(len(xs), len(ys))
 
@@ -380,12 +382,19 @@ def matchpairs(xs, ys, cmp_func, least_score=sys.float_info.epsilon, *, index=Fa
     >>> matchpairs(xs, ys, cmp_func, 0.9, index=True)
     [(2, 0, 1.0), (3, 4, 1.0), (4, 3, 1.0), (6, 1, 1.0)]
     """
+    # 0 实际计算使用的是 xs_, ys_
+    if key:
+        xs_ = [key(x) for x in xs]
+        ys_ = [key(y) for y in ys]
+    else:
+        xs_, ys_ = xs, ys
+
     # 1 计算所有两两相似度
     n, m = len(xs), len(ys)
     all_pairs = []
     for i in range(n):
         for j in range(m):
-            score = cmp_func(xs[i], ys[j])
+            score = cmp_func(xs_[i], ys_[j])
             if score >= least_score:
                 all_pairs.append([i, j, score])
     # 按分数权重排序，如果分数有很多相似并列，就只能按先来后到排序啦

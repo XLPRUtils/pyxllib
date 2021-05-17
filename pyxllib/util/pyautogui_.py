@@ -51,8 +51,41 @@ class NamedLocate:
         self.confidence = confidence
         self.tolerance = tolerance
         self.fix_pos = fix_pos
-        self.points, self.rects, self.images = self._init()
+        self.points, self.rects, self.images = dict(), dict(), dict()
+        self._init()
         self.last_shot = self.update_shot()
+
+    def update_from_shape(self, stem, img, shape):
+        # 0 key
+        if shape['label'] == '@IMAGE_ID':
+            key = f'{stem}'
+        else:
+            key = f'{stem}/{shape["label"]}'
+
+        # 1 读取point
+        # 无论任何形状，都取其points的均值作为中心点
+        # 这在point、rectangle、polygon、line等都是正确的
+        # circle类计算出的虽然不是中心点，但也在圆内（circle第1个点圆心，第2个点是圆周上的1个点）
+        # 目前情报shape都是有points成员的，还没见过没有points的类型
+        point = list(np.array(np.array(shape['points']).mean(axis=0), dtype=int))
+        self.points[key] = point
+
+        # 2 读取rect
+        rect = None
+        if shape['shape_type'] == 'rectangle':
+            rect = np.array(shape['points'], dtype=int).reshape(-1).tolist()
+            self.rects[key] = rect
+
+        # 3 读取image
+        if rect:
+            subimg = get_sub_image(img, rect)
+            # temp = File(..., Dir.TEMP, suffix=img_file.suffix)
+            # imwrite(subimg, str(temp))
+            # temp2 = temp.rename(get_etag(str(temp)) + temp.suffix, if_exists='delete')
+            # images[key] = temp2
+            self.images[key] = subimg
+        elif point:  # 用list存储这个位置的像素值，顺序改为RGB
+            self.images[key] = tuple(img[point[1], point[0]].tolist()[::-1])
 
     def _init(self):
         """
@@ -61,7 +94,6 @@ class NamedLocate:
         images 从rects截取出来的子图，先存在临时目录，字典值记录了图片所在路径（后还是改成了存储图片）
             对point对象，则存储了对应位置的像素值
         """
-        points, rects, images = dict(), dict(), dict()
         for f in self.root.select(['**/*.jpg', '**/*.png']).subfiles():
             stem, suffix = f.stem, f.suffix
             img_file = File(f, self.root)
@@ -72,38 +104,7 @@ class NamedLocate:
 
             shapes = json_file.read()['shapes']
             for shape in shapes:
-                # 0 key
-                if shape['label'] == '@IMAGE_ID':
-                    key = f'{stem}'
-                else:
-                    key = f'{stem}/{shape["label"]}'
-
-                # 1 读取point
-                # 无论任何形状，都取其points的均值作为中心点
-                # 这在point、rectangle、polygon、line等都是正确的
-                # circle类计算出的虽然不是中心点，但也在圆内（circle第1个点圆心，第2个点是圆周上的1个点）
-                # 目前情报shape都是有points成员的，还没见过没有points的类型
-                point = list(np.array(np.array(shape['points']).mean(axis=0), dtype=int))
-                points[key] = point
-
-                # 2 读取rect
-                rect = None
-                if shape['shape_type'] == 'rectangle':
-                    rect = np.array(shape['points'], dtype=int).reshape(-1).tolist()
-                    rects[key] = rect
-
-                # 3 读取image
-                if rect:
-                    subimg = get_sub_image(img, rect)
-                    # temp = File(..., Dir.TEMP, suffix=img_file.suffix)
-                    # imwrite(subimg, str(temp))
-                    # temp2 = temp.rename(get_etag(str(temp)) + temp.suffix, if_exists='delete')
-                    # images[key] = temp2
-                    images[key] = subimg
-                elif point:  # 用list存储这个位置的像素值，顺序改为RGB
-                    images[key] = tuple(img[point[1], point[0]].tolist()[::-1])
-
-        return points, rects, images
+                self.update_from_shape(stem, img, shape)
 
     def update_shot(self, region=None):
         self.last_shot = pil2cv(pyautogui.screenshot(region=region))
@@ -248,6 +249,16 @@ class NamedLocate:
             if limit_seconds and t.tocvalue() > limit_seconds:
                 break
         return pos
+
+    def wait_leave(self, name, *, limit_seconds=None, interval_seconds=1, back=False):
+        """ 和wait逻辑相反，确保当前界面没有name元素的时候结束循环，没有返回值 """
+        pos = True
+        t = TicToc()
+        while pos:
+            pos = self.find_point(name)
+            time.sleep(interval_seconds)
+            if limit_seconds and t.tocvalue() > limit_seconds:
+                break
 
     def wait_click(self, name, *, limit_seconds=None, interval_seconds=1, back=False):
         """ 等待图标出现运行成功后再点击

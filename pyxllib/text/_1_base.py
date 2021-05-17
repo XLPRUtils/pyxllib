@@ -1237,3 +1237,60 @@ def count_words(content, word, scope=2, exclude=None):
                 new_c[k] = c[k]
         c = new_c
     return c
+
+
+class StrDiffType:
+    typename = {
+        0: '完全相同',
+        1: '忽略case后，相同',
+        2: '忽略blank后，相同',
+        3: '忽略case+blank后，相同',
+        4: 'dt是gt局部信息（精度ok，召回不行）',
+        5: '忽略case后，dt是gt局部信息',
+        6: '忽略blank后，dt是gt局部信息',
+        7: '忽略case+blank后，dt是gt局部信息',
+        8: 'gt是dt局部信息（召回ok，精度不行）',
+        9: '忽略case后，gt是dt局部信息',
+        10: '忽略blank后，gt是dt局部信息',
+        11: '忽略case+blank后，gt是dt局部信息',
+        16: '其他情况 （可以根据实验情况，后续继续细分类别）'
+    }
+
+    @classmethod
+    def main_difftype(cls, dt, gt):
+        if not dt or not gt:
+            return 16
+        elif dt == gt:
+            return 0
+        elif dt in gt:
+            return 4
+        elif gt in dt:
+            return 8
+        else:
+            return 16
+
+    @classmethod
+    def difftype(cls, dt, gt):
+        """ 判断两段字符串dt,gt的差异所属类别
+        """
+        if not dt or not gt: return 16
+
+        t = cls.main_difftype(dt, gt)
+        if t < 16:
+            return t
+
+        t = cls.main_difftype(dt.lower(), gt.lower()) + 1
+        if t < 16:
+            return t
+
+        dt2, gt2 = re.sub(r'\s+', '', dt), re.sub(r'\s+', '', gt)
+        t = cls.main_difftype(dt2, gt2) + 2
+        if t < 16:
+            return t
+
+        dt3, gt3 = dt2.lower(), gt2.lower()
+        t = cls.main_difftype(dt3, gt3) + 3
+        if t < 16:
+            return t
+        else:
+            return 16

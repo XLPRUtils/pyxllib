@@ -86,9 +86,9 @@ class BCompare(Explorer):
                 new_args.append(f)
                 if not default_suffix:
                     default_suffix = f.suffix
-            elif isinstance(f, File):
-                # 是文件对象，但不存在 -> 报错
-                raise FileNotFoundError(f'{f}')
+            # elif isinstance(f, File):  # 文本内容也可能生成合法的伪路径，既然找不到还是统一按字符串对比差异好
+            #     # 是文件对象，但不存在 -> 报错
+            #     raise FileNotFoundError(f'{f}')
             else:  # 不是文件对象，要转存到文件
                 if not files[i]:  # 没有设置文件名则生成一个
                     files[i] = File(ref_names[i], Dir.TEMP, suffix=default_suffix)
@@ -217,3 +217,27 @@ class SetCmper:
         df = pd.DataFrame.from_records(rows, columns=cats)
         df.index = cats
         return df
+
+
+class PairContent:
+    """ 配对文本类，主要用于bc差异比较 """
+
+    def __init__(self, left_file_name=None, right_file_name=None):
+        self.left_file = File(left_file_name) if left_file_name else left_file_name
+        self.right_file = File(right_file_name) if right_file_name else right_file_name
+        self.left, self.right = [], []
+
+    def add(self, lt, rt=None):
+        """ rt不加，默认本轮内容是同lt """
+        lt = str(lt)
+        self.left.append(lt)
+        rt = lt if rt is None else str(rt)
+        self.right.append(rt)
+
+    def bcompare(self, **kwargs):
+        left, right = '\n'.join(self.left), '\n'.join(self.right)
+        if self.left_file is not None:
+            left = self.left_file.write(left)
+        if self.right_file is not None:
+            right = self.right_file.write(right)
+        bcompare(left, right, **kwargs)

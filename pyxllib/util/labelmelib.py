@@ -9,6 +9,10 @@ from pyxllib.basic import *
 from pyxllib.debug import pd
 from pyxllib.cv import np_array, np, PilImg
 
+# 我自己按照“红橙黄绿蓝靛紫”的顺序展示
+LABEL_COLORMAP7 = [(0, 0, 0), (255, 0, 0), (255, 125, 0), (255, 255, 0),
+                   (0, 255, 0), (0, 0, 255), (0, 255, 255), (255, 0, 255)]
+
 
 def is_labelme_json_data(data):
     """ 是labelme的标注格式

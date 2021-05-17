@@ -506,7 +506,7 @@ class PathBase:
             默认分别是self和dst的字符串
         :return : 返回dst
         """
-        # 1 判断目标是有已存在，进行不同的指定规则处理
+        # 1 判断目标是否已存在，进行不同的指定规则处理
         dst_ = self.absdst(dst)
 
         # 2 执行特定功能
@@ -543,7 +543,7 @@ class File(PathBase):
 
     document: https://www.yuque.com/xlpr/python/pyxllib.debug.path
     """
-
+    __slots__ = ('_path', )
     # 一、基础功能
 
     def __init__(self, path, root=None, *, suffix=None):
