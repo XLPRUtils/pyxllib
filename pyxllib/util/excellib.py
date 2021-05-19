@@ -194,51 +194,6 @@ class Openpyxl:
         # target_ws.freeze_panes = origin_ws.freeze_panes
 
 
-def product(*iterables, order=None, repeat=1):
-    """ 对 itertools 的product扩展orders参数的更高级的product迭代器
-    :param order: 假设iterables有n=3个迭代器，则默认 orders=[1, 2, 3] （起始编号1）
-        即标准的product，是按顺序对每个迭代器进行重置、遍历的
-        但是我扩展的这个接口，允许调整每个维度的更新顺序
-        例如设置为 [-2, 1, 3]，表示先对第2维降序，然后按第1、3维的方式排序获得各个坐标点
-        注：可以只输入[-2]，默认会自动补充维[1, 3]
-
-    for x in product('ab', 'cd', 'ef', order=[3, -2, 1]):
-        print(x)
-
-    ['a', 'd', 'e']
-    ['b', 'd', 'e']
-    ['a', 'c', 'e']
-    ['b', 'c', 'e']
-    ['a', 'd', 'f']
-    ['b', 'd', 'f']
-    ['a', 'c', 'f']
-    ['b', 'c', 'f']
-
-    TODO 我在想numpy这么牛逼，会不会有等价的功能接口可以实现，我不用重复造轮子？
-    """
-    import itertools, numpy
-
-    # 一、标准调用方式
-    if order is None:
-        for x in itertools.product(*iterables, repeat=repeat):
-            yield x
-        return
-
-    # 二、输入orders参数的调用方式
-    # 1 补全orders参数长度
-    n = len(iterables)
-    for i in range(1, n + 1):
-        if not (i in order or -i in order):
-            order.append(i)
-    if len(order) != n: return ValueError(f'orders参数值有问题 {order}')
-
-    # 2 生成新的迭代器组
-    new_iterables = [(iterables[i - 1] if i > 0 else reversed(iterables[-i - 1])) for i in order]
-    idx = numpy.argsort([abs(i) - 1 for i in order])
-    for y in itertools.product(*new_iterables, repeat=repeat):
-        yield [y[i] for i in idx]
-
-
 class Worksheet(openpyxl.worksheet.worksheet.Worksheet):
     """ 扩展标准的Workshhet功能
     >> wb = openpyxl.load_workbook(filename='高中数学知识树匹配终稿.xlsx', data_only=True)

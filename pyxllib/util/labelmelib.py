@@ -4,6 +4,9 @@
 # @Email  : 877362867@qq.com
 # @Date   : 2020/08/15 00:59
 
+from collections import defaultdict
+
+from tqdm import tqdm
 
 from pyxllib.basic import *
 from pyxllib.debug import pd
@@ -37,6 +40,75 @@ def reduce_labelme_jsonfile(jsonpath):
         File(p).write(data, encoding=encoding, if_exists='delete')
 
 
+class GenLabelme:
+    @classmethod
+    def data(cls, imfile=None, **kwargs):
+        """ 主要框架结构
+        :param imfile: 可以传入一张图片路径
+        """
+        # 1 传入图片路径的初始化
+        if imfile:
+            file = File(imfile)
+            name = file.name
+            img = PilImg(str(file))
+            height, width = img.size()
+        else:
+            name, height, width = '', 0, 0
+
+        # 2 字段值
+        data = {'version': '4.5.7',
+                'flags': {},
+                'shapes': [],
+                'imagePath': name,
+                'imageData': None,
+                'imageWidth': width,
+                'imageHeight': height,
+                }
+        if kwargs: data.update(kwargs)
+        return data
+
+    @classmethod
+    def shape(cls, label, points, shape_type=None, dtype=None, group_id=None, **kwargs):
+        """ 最基本的添加形状功能
+
+        :param shape_type: 会根据points的点数量，智能判断类型，默认一般是polygon
+            其他需要自己指定的格式：line、circle
+        :param dtype: 可以重置points的存储数值类型，一般是浮点数，可以转成整数更精简
+        :param group_id: 本来是用来分组的，但其值会以括号的形式添加在label后面，可以在可视化中做一些特殊操作
+        """
+        # 1 优化点集数据格式
+        points = np_array(points, dtype).reshape(-1, 2).tolist()
+        # 2 判断形状类型
+        if shape_type is None:
+            m = len(points)
+            if m == 1:
+                shape_type = 'point'
+            elif m == 2:
+                shape_type = 'rectangle'
+            elif m >= 3:
+                shape_type = 'polygon'
+            else:
+                raise ValueError
+        # 3 创建标注
+        shape = {'flags': {},
+                 'group_id': group_id,
+                 'label': str(label),
+                 'points': points,
+                 'shape_type': shape_type}
+        shape.update(kwargs)
+        return shape
+
+    @classmethod
+    def shape2(cls, **kwargs):
+        """ 完全使用字典的接口形式 """
+        label = kwargs.get('label', '')
+        points = kwargs['points']  # 这个是必须要有的字段
+        kw = copy.deepcopy(kwargs)
+        del kw['label']
+        del kw['points']
+        return cls.shape(label, points, **kw)
+
+
 class ToLabelmeJson:
     """ 标注格式转label形式
 
@@ -48,6 +120,7 @@ class ToLabelmeJson:
     document: https://www.yuque.com/xlpr/pyxllib/ks5h4o
     """
 
+    @deprecated(version=VERSION, reason='建议使用GenLabelme实现')
     def __init__(self, imgpath):
         """
         :param imgpath: 可选参数图片路径，强烈建议要输入，否则建立的label json会少掉图片宽高信息
@@ -186,29 +259,98 @@ class Quad2Labelme(ToLabelmeJson):
             pts = [int(v) for v in vals[:8]]  # 点集
             label = vals[-1]  # 标注的文本
             # get_shape还有shape_type形状参数可以设置
-            #	如果是2个点的矩形，或者3个点以上的多边形，会自动判断，不用指定shape_type
+            #  如果是2个点的矩形，或者3个点以上的多边形，会自动判断，不用指定shape_type
             self.add_shape(label, pts)
 
 
-def get_labelme_shapes_df(dir, pattern='**/*.json', max_workers=None, pinterval=None, **kwargs):
-    """ 获得labelme文件的shapes清单列表
+class LabelmeData:
+    def __init__(self, root, data):
+        """
+        :param root: 文件根目录
+        :param data: {'PMC4055390_00006': [file, lmdata], ...}
+            其中 lmdata 为一个labelme文件格式的标准内容
+        """
+        self.root, self.data = Dir(root), data
 
-    :param max_workers: 这个运算还不是很快，默认需要开多线程
-    """
+    @classmethod
+    def init(cls, root, *, disable=True, filter_json=None):
+        """ 标准init方法，init_from_labelme, 已经有labelme的json标注文件，可以用该方法初始化
 
-    def func(p):
-        data = p.read()
-        if not data['shapes']: return
-        df = pd.DataFrame.from_records(data['shapes'])
-        df['filename'] = p.relpath(dir)
-        # 坐标转成整数，看起来比较精简点
-        df['points'] = [np.array(v, dtype=int).tolist() for v in df['points']]
-        li.append(df)
+        :param root: 数据根目录
+        :param disable: True, 不显示读取进度条； False，显示读取进度条
+        :param filter_json: 初始化模式
+            None，遍历所有json来初始化
+            'fmt', filter by json format, 根据json是否为labelme格式进行过滤
+            'img', filter by image, 根据是否有配对的图片文件过滤json文件
+        """
+        root = Dir(root)
+        # 1 筛选过滤json文件
+        if filter_json == 'img':
+            pattern = re.compile(r'.+\.(jpe?g|png|bmp)$', flags=re.IGNORECASE)
+            imfiles = root.select(pattern).subfiles()
+            files = []
+            for imf in imfiles:
+                f = imf.with_suffix('.json')
+                if f:
+                    files.append(f)
+        else:
+            files = root.select('**/*.json').subfiles()
 
-    li = []
-    Dir(dir).select(pattern).procpaths(func, max_workers=max_workers, pinterval=pinterval, **kwargs)
-    shapes_df = pd.concat(li)
-    # TODO flags和group_id字段可以放到最后面
-    shapes_df.reset_index(inplace=True, drop=True)
+        # 2 读取内存数据
+        data = defaultdict(list)  # List[[File, lmdata]]
+        for file in tqdm(files, desc='读取labelme json数据', disable=disable):
+            lmdata = file.read()
+            if filter_json == 'fmt' and not is_labelme_json_data(lmdata):
+                continue
+            data[file.stem] = [file, lmdata]
 
-    return shapes_df
+        return cls(root, data)
+
+    def __len__(self):
+        return len(self.data)
+
+    def reduce(self):
+        """ 移除imageData字段值 """
+        for _, data in self.data.values():
+            data['imageData'] = None
+
+    def writes(self, *, max_workers=8, disable=True):
+        """ 重新写入json文件
+
+        可能是内存里修改了数据，需要重新覆盖
+        也可能是从coco初始化来的内存数据，需要生成对应的json文件
+        """
+
+        def write(x):
+            file, lmdata = x
+            if file:  # 如果文件存在，要遵循原有的编码规则
+                with open(str(file), 'rb') as f:
+                    bstr = f.read()
+                encoding = get_encoding(bstr)
+                file.write(lmdata, encoding=encoding, if_exists='delete')
+            else:  # 否则直接写入
+                file.write(lmdata)
+
+        mtqdm(write, self.data.values(), desc='写入labelme json数据', max_workers=max_workers, disable=disable)
+
+    def to_df(self, *, disable=True):
+        """ 转成dataframe表格查看 """
+
+        def read(x):
+            file, lmdata = x
+            if not lmdata['shapes']:
+                return
+            df = pd.DataFrame.from_records(lmdata['shapes'])
+            df['filename'] = file.relpath(self.root)
+            # 坐标转成整数，看起来比较精简点
+            df['points'] = [np.array(v, dtype=int).tolist() for v in df['points']]
+            ls.append(df)
+
+        ls = []
+        # 这个不建议开多线程，顺序会乱
+        mtqdm(read, self.data.values(), desc='labelme转df', disable=disable)
+        shapes_df = pd.concat(ls)
+        # TODO flags 和 group_id 字段可以放到最后面
+        shapes_df.reset_index(inplace=True, drop=True)
+
+        return shapes_df
