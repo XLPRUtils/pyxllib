@@ -7,6 +7,7 @@
 
 from urllib.parse import urlparse
 import io
+import json
 import ujson
 import os
 import pathlib
@@ -715,7 +716,10 @@ class File(PathBase):
                 with open(name, 'rb') as f:
                     bstr = f.read()
                     if not encoding: encoding = get_encoding(bstr)
-                return ujson.loads(bstr.decode(encoding=encoding))
+                try:
+                    return ujson.loads(bstr.decode(encoding=encoding))
+                except ValueError:  # ujson会有些不太标准的情况处理不了
+                    return json.loads(bstr.decode(encoding=encoding))
             elif mode == '.yaml':
                 with open(name, 'r', encoding=encoding) as f:
                     return yaml.safe_load(f.read())
