@@ -113,23 +113,44 @@ ____timer = """
 """
 
 
-def parse_perf(data):
-    """ 输出性能分析报告，data是每次运行得到的时间数组
-    """
-    n, sum_ = len(data), sum(data)
+class ValuesStat:
+    """ 一串数值的相关统计分析 """
 
-    if n > 1:  # 有多轮，则应该输出些参考统计指标
+    def __init__(self, values):
+        self.values = values
+        self.n = len(values)
+        self.sum = sum(values)
         # np有标准差等公式，但这是basic底层库，不想依赖太多第三方库，所以手动实现
-        mean = sum_ / n
-        std = math.sqrt((sum([(x - mean) ** 2 for x in data]) / n))
-        li = [f'总耗时: {sum_:.3f}s', f'均值标准差: {mean:.3f}±{std:.3f}s',
-              f'总数: {n}', f'最小值: {min(data):.3f}s', f'最大值: {max(data):.3f}s']
-        return '\t'.join(li)
-    elif n == 1:  # 只有一轮，则简单地输出耗时即可
-        sum_ = sum(data)
-        return f'用时: {sum_:.3f}s'
-    else:
-        raise ValueError
+        if self.n:
+            self.mean = self.sum / self.n
+            self.std = math.sqrt((sum([(x - self.mean) ** 2 for x in values]) / self.n))
+            self.min, self.max = min(values), max(values)
+        else:
+            self.mean = self.std = self.min = self.max = float('nan')
+
+    def __len__(self):
+        return self.n
+
+    def summary(self, valfmt='g'):
+        """ 输出性能分析报告，data是每次运行得到的时间数组
+
+        :param valfmt: 数值显示的格式
+            g是比较智能的一种模式
+            也可以用 '.3f'表示保留3位小数
+
+            也可以传入长度5的格式清单，表示 [和、均值、标准差、最小值、最大值] 一次展示的格式
+        """
+        if isinstance(valfmt, str):
+            valfmt = [valfmt] * 5
+
+        if self.n > 1:  # 有多轮，则应该输出些参考统计指标
+            ls = [f'总和: {self.sum:{valfmt[0]}}', f'均值标准差: {self.mean:{valfmt[1]}}±{self.std:{valfmt[2]}}',
+                  f'总数: {self.n}', f'最小值: {self.min:{valfmt[3]}}', f'最大值: {self.max:{valfmt[4]}}']
+            return '\t'.join(ls)
+        elif self.n == 1:  # 只有一轮，则简单地输出即可
+            return f'{self.sum:{valfmt[0]}}'
+        else:
+            raise ValueError
 
 
 class Timer:
@@ -161,7 +182,7 @@ class Timer:
         n = len(self.data)
 
         if n >= 1:
-            print(msg, parse_perf(self.data))
+            print(msg, '用时(秒) ' + ValuesStat(self.data).summary(valfmt='.3f'))
         elif n == 1:
             sum_ = sum(self.data)
             print(f'{msg} 用时: {sum_:.3f}s')
@@ -184,7 +205,7 @@ def performit(title, stmt="pass", setup="pass", repeat=1, number=1, globals=None
     :return: 返回原函数单次执行结果
     """
     data = timeit.repeat(stmt=stmt, setup=setup, repeat=repeat, number=number, globals=globals)
-    print(title, parse_perf(data))
+    print(title, '用时(秒) ' + ValuesStat(data).summary(valfmt='.3f'))
     return data
 
 
@@ -225,7 +246,7 @@ def perftest(title, stmt="pass", repeat=1, number=1, globals=None, res_width=Non
     else:
         res = '运行结果：' + shorten(str(res), res_width)
     if print_:
-        print(title, parse_perf(data), res)
+        print(title, '用时(秒) ' + ValuesStat(data).summary(valfmt='.3f'), res)
 
     return data
 

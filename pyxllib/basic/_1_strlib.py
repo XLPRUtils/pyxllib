@@ -10,6 +10,7 @@ TODO 这个文件结构还有点乱，需要梳理
 """
 
 import copy
+from collections import defaultdict
 import io
 import logging
 import math

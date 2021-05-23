@@ -414,3 +414,106 @@ def matchpairs(xs, ys, cmp_func, least_score=sys.float_info.epsilon, *,
             y_used.add(j)
 
     return pairs
+
+
+class Groups:
+    def __init__(self, data):
+        """ 分组
+
+        TODO 显示一些数值统计信息，甚至图表
+        TODO 转文本表达，方便bc比较
+        """
+        if not isinstance(data, dict):
+            new_data = dict()
+            # 否要要转字典类型，自动从1~n编组
+            for k, v in enumerate(data, start=1):
+                new_data[k] = v
+            data = new_data
+        self.data = data
+        self.ctr = Counter({k: len(x) for k, x in self.data.items()})
+        self.stat = ValuesStat(self.ctr.values())
+
+    def __repr__(self):
+        ls = []
+        for i, (k, v) in enumerate(self.data.items(), start=1):
+            ls.append(f'{i}, {k}：{v}')
+        return '\n'.join(ls)
+
+    @classmethod
+    def groupby(cls, ls, key, ykey=None):
+        """
+        :param ls: 可迭代等数组类型
+        :param key: 映射规则，ls中每个元素都会被归到映射的key组上
+            Callable[Any, 不可变类型]
+            None，未输入时，默认输入的ls已经是分好组的数据
+        :param ykey: 是否对分组后存储的内容y，也做一个函数映射
+        :return: dict
+        """
+        data = defaultdict(list)
+        for x in ls:
+            k = key(x)
+            if ykey:
+                x = ykey(x)
+            data[k].append(x)
+        return cls(data)
+
+
+class PathGroups(Groups):
+    """ 按文件名（不含后缀）分组的相关功能 """
+
+    @classmethod
+    def groupby(cls, files, key=lambda x: os.path.splitext(str(x))[0], ykey=lambda y: y.suffix[1:]):
+        """
+        :param files: 用Dir.select选中的文件、目录清单
+        :param key: D:/home/datasets/textGroup/SROIE2019+/data/task3_testcrop/images/X00016469670
+        :param ykey: ['jpg', 'json', 'txt']
+        :return: dict
+            1, task3_testcrop/images/X00016469670：['jpg', 'json', 'txt']
+            2, task3_testcrop/images/X00016469671：['jpg', 'json', 'txt']
+            3, task3_testcrop/images/X51005200931：['jpg', 'json', 'txt']
+        """
+        return super().groupby(files, key, ykey)
+
+    def select_group(self, judge):
+        """ 对于某一组，只要该组有满足judge的元素则保留该组 """
+        data = {k: v for k, v in self.data.items() if judge(k, v)}
+        return type(self)(data)
+
+    def select_group_which_hassuffix(self, pattern, flags=re.IGNORECASE):
+        def judge(k, values):
+            for v in values:
+                m = re.match(pattern, v, flags=flags)
+                if m and len(m.group()) == len(v):
+                    # 不仅要match满足，还需要整串匹配，比如jpg就必须是jpg，不能是jpga
+                    return True
+            return False
+        return self.select_group(judge)
+
+    def select_group_which_hasimage(self, pattern=r'jpe?g|png|bmp', flags=re.IGNORECASE):
+        """ 只保留含有图片格式的分组数据 """
+        return self.select_group_which_hassuffix(pattern, flags)
+
+    def find_files(self, name, *, count=-1):
+        """ 找指定后缀的文件
+
+        :param name: 支持 '1.jpg', 'a/1.jpg' 等格式
+        :param count: 返回匹配数量上限，-1表示返回所有匹配项
+        :return: 找到第一个匹配项后返回
+            找的有就返回File对象
+            找没有就返回None
+
+        注意这个功能是大小写敏感的，如果出现大小写不匹配
+            要么改文件名本身，要么改name的格式
+
+        TODO 如果有大量的检索，这样每次遍历会很慢，可能要考虑构建后缀树来处理
+        """
+        ls = []
+        stem, ext = os.path.splitext(name)
+        stem = '/' + stem.replace('\\', '/')
+        ext = ext[1:]
+        for k, v in self.data.items():
+            if k.endswith(stem) and ext in v:
+                ls.append(File(k, suffix=ext))
+                if len(ls) >= count:
+                    break
+        return ls
