@@ -656,7 +656,7 @@ class DataSync:
         self.client = createSSHClient(server, port, user, passwd)
         self.scp = scp.SCPClient(self.client.get_transport())
 
-    def put(self, local_path, remote_path, *, printf=True):
+    def put(self, local_path, remote_path, *, prt=True):
         """ 将本地的local_path上传到服务器的remote_path
 
         差不多是标准的scp接口，可以强制上传一个文件，或者一个目录
@@ -670,9 +670,9 @@ class DataSync:
         self.scp.put(local_path, remote_path, recursive=True)
         t = tt.tocvalue()
         speed = humanfriendly.format_size(file_or_dir_size(local_path) / t, binary=True)
-        if printf: print(f'upload to {remote_path}, ↑{speed}/s, {t:.2f}s')
+        if prt: print(f'upload to {remote_path}, ↑{speed}/s, {t:.2f}s')
 
-    def get(self, local_path, remote_path, *, printf=True):
+    def get(self, local_path, remote_path, *, prt=True):
         """ 将服务器的remote_path下载到本地的local_path """
         tt = TicToc()
         tt.tic()
@@ -682,7 +682,7 @@ class DataSync:
         self.scp.get(remote_path, local_path, recursive=True, preserve_times=True)
         t = tt.tocvalue()
         speed = humanfriendly.format_size(file_or_dir_size(local_path) / t, binary=True)
-        if printf: print(f'download {local_path}, ↓{speed}/s, {t:.2f}s')
+        if prt: print(f'download {local_path}, ↓{speed}/s, {t:.2f}s')
 
     def client_exec(self, cmd):
         """ 执行远程服务器命令 """
@@ -719,7 +719,7 @@ class DataSync:
 
         for f in tqdm(local_files, '上传文件到服务器', smoothing=0, mininterval=1):  # 这里开多线程好像会有点问题，先串行使用
             if f.lower() not in remote_files:
-                self.put(os.path.join(local_dir, f), os.path.join(remote_dir, f), printf=False)
+                self.put(os.path.join(local_dir, f), os.path.join(remote_dir, f), prt=False)
 
     def rget(self, local_dir, remote_dir, *, maxn=None):
         """ 控制同步的文件上限数 """
@@ -737,7 +737,7 @@ class DataSync:
 
         for f in tqdm(remote_files, '从服务器下载文件到本地', smoothing=0, mininterval=1):
             if f.lower() not in local_files:
-                self.get(os.path.join(local_dir, f), os.path.join(remote_dir, f), printf=False)
+                self.get(os.path.join(local_dir, f), os.path.join(remote_dir, f), prt=False)
 
 
 def cache_file(file, make_data_func: Callable[[], Any] = None, *, reset=False, **kwargs):

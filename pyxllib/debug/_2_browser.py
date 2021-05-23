@@ -288,7 +288,7 @@ def check_repeat_filenames(dir, key='stem', link=True):
     view_table = pd.concat([view_table, count_df], axis=1)
     view_table.rename({'filename': 'count'}, axis=1, inplace=True)
 
-    browser(view_table, escape=not link)
+    browser(view_table, to_html_args={'escape': not link})
     return df
 
 
