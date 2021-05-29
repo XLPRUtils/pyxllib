@@ -696,6 +696,7 @@ class DataSync:
         """
         remote_dir = linux_path_fmt(remote_dir)
         stdin, stdout, stderr = self.client.exec_command(f'python3 -m pyxllib.tool.listfiles "{remote_dir}"')
+        # TODO 这里报错应该要提示
         return [f.strip() for f in list(stdout)]
 
     def rput(self, local_dir, remote_dir):

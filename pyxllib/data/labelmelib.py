@@ -205,11 +205,11 @@ class BasicLabelData:
                 如果是json则直接保存json内存对象结构
                 如果是txt可能会进行一定的结构化解析存储
         :param extdata: 可以存储一些扩展信息内容
-        :param fltr: PathGroups 的过滤规则
+        :param fltr: filter的缩写，PathGroups 的过滤规则
             None，没有过滤规则，就算不存在slt格式的情况下，也会保留分组
             'json'等字符串规则, 使用 select_group_which_hassuffix，必须含有特定后缀的分组
             judge(k, v)，自定义函数规则
-        :param slt: 要选中的标注文件后缀格式
+        :param slt: select的缩写，要选中的标注文件后缀格式
             如果传入slt参数，该 Basic 基础类只会预设好 file 参数，数据部分会置 None，需要后续主动读取
         """
         # 1 基础操作
