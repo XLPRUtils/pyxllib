@@ -44,7 +44,7 @@ class XlLineEdit(QtWidgets.QLineEdit):
         """
         :param valcvt: 数值类型转换器
         """
-        super().__init__(text, parent)
+        super().__init__(str(text), parent)
 
         def check():
             # TODO 目前是强制重置样式，可以考虑怎么保留原样式基础上修改属性值
@@ -60,7 +60,7 @@ class XlLineEdit(QtWidgets.QLineEdit):
                 self.setToolTip(f'输入数据不是{valcvt}类型')
                 self.wrongChanged.emit(s)
 
-        self.editingFinished.connect(check)
+        self.textChanged.connect(check)
         if text:
             check()
 
@@ -182,7 +182,7 @@ def get_input_widget(items=None, cur_value=None, *, valcvt=None,
         raise ValueError(f'{type(items)}')
 
     # 3 通用配置
-    if text_changed:
+    if callable(text_changed):
         w.correctChanged.connect(text_changed)
     if not enabled:
         w.setEnabled(enabled)

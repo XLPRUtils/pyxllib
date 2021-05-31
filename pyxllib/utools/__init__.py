@@ -242,7 +242,7 @@ class UtoolsText(UtoolsBase):
         start = int(self.cmds['subinput'])
 
         for i in range(7):
-            dt = Datetime(start + i)
+            dt = Datetime(start) + i
             pyperclip.copy(dt.strftime('%y%m%d周%k'))
             # pyperclip.paste()  # 这个没用
             # pyautogui.write('210503周一')  # 这个也没用

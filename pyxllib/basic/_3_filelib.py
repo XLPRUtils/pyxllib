@@ -609,6 +609,9 @@ class File(PathBase):
         """
         return File(stem, self.parent, suffix=self.suffix)
 
+    def with_name(self, name):
+        return File(name, self.parent)
+
     @property
     def suffix(self) -> str:
         r"""
