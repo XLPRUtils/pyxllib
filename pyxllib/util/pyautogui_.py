@@ -4,8 +4,9 @@
 # @Email  : 877362867@qq.com
 # @Date   : 2020/06/06
 
-
+from pyxllib.debug import *
 from pyxllib.cv import *
+from pyxllib.data import *
 
 try:
     import pyautogui
@@ -22,7 +23,137 @@ except ModuleNotFoundError:
 import pyscreeze  # NOQA pyautogui安装的时候会自动安装依赖的pyscreeze
 
 
-class NamedLocate:
+class AutoGuiLabelData:
+    """ AutoGuiLabelData """
+
+    def __init__(self, root):
+        """
+        data：dict
+            key: 相对路径/图片stem （这一节称为loc）
+                label名称：对应属性dict1 （跟loc拼在一起，称为loclabel）
+                label2：dict2
+        """
+        self.root = Dir(root)
+        self.data = defaultdict(dict)
+        self.imfiles = {}
+
+        for file in self.root.select('**/*.json').subfiles():
+            lmdata = file.read()
+            imfile = file.with_name(lmdata['imagePath'])
+            img = imread(imfile)
+            loc = file.relpath(self.root).replace('\\', '/')[:-5]
+            self.imfiles[loc] = imfile
+
+            for shape in lmdata['shapes']:
+                attrs = self.parse_shape(shape, img)
+                self.data[loc][attrs['label']] = attrs
+
+    @classmethod
+    def parse_shape(cls, shape, image=None):
+        """ 解析一个shape的数据为dict字典 """
+        # 1 解析原label为字典
+        label = shape['label']
+        attrs = shape.copy()
+        try:
+            data = json.loads(label)
+            if isinstance(data, dict):
+                attrs.update(data)
+        except json.decoder.JSONDecodeError:
+            pass
+        # 如果label是普通字符串，则labelattr强升为字典
+        if not attrs:
+            attrs['label'] = label
+
+        # 2 中心点 center
+        shape_type = shape['shape_type']
+        pts = shape['points']
+        if shape_type in ('rectangle', 'polygon', 'line'):
+            attrs['center'] = np.array(np.array(pts).mean(axis=0), dtype=int).tolist()
+        elif shape_type == 'circle':
+            attrs['center'] = pts[0]
+
+        # 3 外接矩形 rect
+        if shape_type in ('rectangle', 'polygon'):
+            attrs['ltrb'] = np.array(pts, dtype=int).reshape(-1).tolist()
+        elif shape_type == 'circle':
+            x, y = pts[0]
+            r = ((x - pts[1][0]) ** 2 + (y - pts[1][1]) ** 2) ** 0.5
+            attrs['ltrb'] = [int(v) for v in [x - r, y - r, x + r, y + r]]
+
+        # 4 图片数据 img, etag
+        if image is not None and attrs['ltrb']:
+            attrs['img'] = get_sub_image(image, attrs['ltrb'])
+            # attrs['etag'] = get_etag(attrs['img'])
+            # TODO 这里目的其实就是让相同图片对比尽量相似，所以可以用dhash而不是etag
+
+        # 5 中心点像素值 pixel
+        p = attrs['center']
+        if image is not None and p:
+            attrs['pixel'] = tuple(image[p[1], p[0]].tolist()[::-1])
+
+        # if 'rect' in attrs:
+        #     del attrs['rect']  # 旧版的格式数据，删除
+
+        return attrs
+
+    def update_loclabel_img(self, loclabel, img):
+        """ 添加一张图片数据 """
+        loc, label = os.path.split(loclabel)
+        h, w = img.shape[:2]
+
+        # 1 如果loc图片不存在，则新建一个jpg图片
+        if loc not in self.data:
+            imfile = imwrite(img, File(loc, self.root, suffix='.jpg'))
+            self.imfiles[loc] = imfile
+            shape = LabelmeData.gen_shape(label, [[0, 0], [w, h]])
+            self.data[loc][label] = self.parse_shape(shape)
+        # 2 不存在的标签，则在最后一行新建一张图
+        elif label not in self.data[loc]:
+            image = imread(self.imfiles[loc])
+            height, width = image.shape[:2]
+            assert width == w  # 先按行拼接，以后有时间可以扩展更灵活的拼接操作
+            # 拼接，并重新存储为图片
+            image = np.concatenate([image, img])
+            imwrite(image, self.imfiles[loc])
+            shape = LabelmeData.gen_shape(label, [[0, height], [width, height + h]])
+            self.data[loc][label] = self.parse_shape(shape)
+        # 3 已有的图，则进行替换
+        else:
+            image = imread(self.imfiles[loc])
+            [x1, y1, x2, y2] = self.data[loc][label]['ltrb']
+            image[y1:y2, x1:x2] = img
+            imwrite(image, self.imfiles[loc])
+        # 该更新，需要实时保存到文件中
+        self.write(loc)
+
+    def write(self, loc):
+        f = File(loc, self.root, suffix='.json')
+        imfile = self.imfiles[loc]
+        lmdata = LabelmeData.gen_data(imfile)
+        for label, ann in self.data[loc].items():
+            a = ann.copy()
+            if 'img' in a:
+                del a['img']
+            shape = LabelmeData.gen_shape(json.dumps(a, ensure_ascii=False),
+                                          a['points'], a['shape_type'],
+                                          group_id=a['group_id'], flags=a['flags'])
+            lmdata['shapes'].append(shape)
+        f.write(lmdata, indent=2)
+
+    def writes(self):
+        for loc in self.data.keys():
+            self.write(loc)
+
+    def __getitem__(self, loclabel):
+        loc, label = os.path.split(loclabel)
+        return self.data[loc][label]
+
+    def __setitem__(self, loclabel, value):
+        loc, label = os.path.split(loclabel)
+        self.data[loc][label] = value
+
+
+class NamedLocate(AutoGuiLabelData):
     """ 对有命名的标注数据进行定位
 
     注意labelme在每张图片上写的label值最好不要有重复，否则按字典存储后可能会被覆盖
@@ -34,10 +165,10 @@ class NamedLocate:
     TODO 吃土乡人物清单要用特殊技巧去获得，不能手动暴力搞；可以自动循环拼接所有图
     """
 
-    def __init__(self, label_dir, *, grayscale=None, confidence=0.95, tolerance=20, fix_pos=True):
+    def __init__(self, root, *, grayscale=None, confidence=0.95, tolerance=20, fix_pos=True):
         """
 
-        :param label_dir: 标注数据所在文件夹
+        :param root: 标注数据所在文件夹
             有原图jpg、png和对应的json标注数据
         :param grayscale: 转成灰度图比较
         :param confidence: 用于图片比较，相似度阈值
@@ -46,71 +177,21 @@ class NamedLocate:
 
         TODO random_click: 增加该可选参数，返回point时，进行上下左右随机扰动
         """
-        self.root = Dir(label_dir)
+        super().__init__(root)
         self.grayscale = grayscale
         self.confidence = confidence
         self.tolerance = tolerance
         self.fix_pos = fix_pos
-        self.points, self.rects, self.images = dict(), dict(), dict()
-        self._init()
         self.last_shot = self.update_shot()
-
-    def update_from_shape(self, stem, img, shape):
-        # 0 key
-        if shape['label'] == '@IMAGE_ID':
-            key = f'{stem}'
-        else:
-            key = f'{stem}/{shape["label"]}'
-
-        # 1 读取point
-        # 无论任何形状，都取其points的均值作为中心点
-        # 这在point、rectangle、polygon、line等都是正确的
-        # circle类计算出的虽然不是中心点，但也在圆内（circle第1个点圆心，第2个点是圆周上的1个点）
-        # 目前情报shape都是有points成员的，还没见过没有points的类型
-        point = list(np.array(np.array(shape['points']).mean(axis=0), dtype=int))
-        self.points[key] = point
-
-        # 2 读取rect
-        rect = None
-        if shape['shape_type'] == 'rectangle':
-            rect = np.array(shape['points'], dtype=int).reshape(-1).tolist()
-            self.rects[key] = rect
-
-        # 3 读取image
-        if rect:
-            subimg = get_sub_image(img, rect)
-            # temp = File(..., Dir.TEMP, suffix=img_file.suffix)
-            # imwrite(subimg, str(temp))
-            # temp2 = temp.rename(get_etag(str(temp)) + temp.suffix, if_exists='delete')
-            # images[key] = temp2
-            self.images[key] = subimg
-        elif point:  # 用list存储这个位置的像素值，顺序改为RGB
-            self.images[key] = tuple(img[point[1], point[0]].tolist()[::-1])
-
-    def _init(self):
-        """
-        points 目标的中心点坐标
-        rects 目标的矩形框位置
-        images 从rects截取出来的子图，先存在临时目录，字典值记录了图片所在路径（后还是改成了存储图片）
-            对point对象，则存储了对应位置的像素值
-        """
-        for f in self.root.select(['**/*.jpg', '**/*.png']).subfiles():
-            stem, suffix = f.stem, f.suffix
-            img_file = File(f, self.root)
-            json_file = img_file.with_suffix('.json')
-            if not json_file:
-                continue
-            img = imread(img_file)
-
-            shapes = json_file.read()['shapes']
-            for shape in shapes:
-                self.update_from_shape(stem, img, shape)
 
     def update_shot(self, region=None):
         self.last_shot = pil2cv(pyautogui.screenshot(region=region))
         return self.last_shot
 
     def screenshot(self, region=None):
+        """
+        :param region: ltrb
+        """
         if isinstance(region, str):
             im = pyautogui.screenshot(region=ltrb2xywh(self.rects[region]))
         else:
@@ -119,16 +200,23 @@ class NamedLocate:
 
     def get_pixel(self, point):
         """
+
+        :param point: 支持输入 (x, y) 坐标，或者 loclabel
+            后面很多参数都是类似，除了标准数据类型，同时支持 loclabel 定位模式
+
          官方的pixel版本，在windows有时候会出bug
          OSError: windll.user32.ReleaseDC failed : return 0
         """
         if isinstance(point, str):
-            point = self.points[point]
+            point = self[point]['center']
         return tuple(self.last_shot[point[1], point[0]].tolist()[::-1])
 
     def get_image(self, ltrb):
+        """
+        :param ltrb: 可以输入坐标定位，也可以输入 loclabel 定位
+        """
         if isinstance(ltrb, str):
-            ltrb = self.rects[ltrb]
+            ltrb = self[ltrb]['ltrb']
         l, t, r, b = ltrb
         return self.last_shot[t:b, l:r]
 
@@ -139,58 +227,70 @@ class NamedLocate:
 
     @classmethod
     def _cmp_image(cls, image1, image2):
-        """ 返回不相同像素占的百分比，相同返回0 """
+        """ 返回距离：不相同像素占的百分比，相同返回0 """
         cmp = np.array(abs(np.array(image1, dtype=int) - image2) > 10)  # 每个像素允许10的差距
         return cmp.sum() / cmp.size
 
-    def _locate_point(self, name):
+    def _locate_point(self, loclabel, fix_pos=None):
         """ 这里shot是指不那么考虑内容是否匹配，返回能找到的一个最佳结果
                 后续会有find来进行最后的阈值过滤
         """
-        if self.fix_pos:
-            return self.points[name]
+        if fix_pos:
+            return self[loclabel]['center']
         else:
             raise NotImplementedError
 
-    def locate_rects(self, name):
+    def locate_rects(self, loclabel):
+        """ 根据预存的img数据，匹配出多个内容对应的所在的rect位置 """
         self.update_shot()
-        boxes = pyautogui.locateAll(self.images[name],
+        boxes = pyautogui.locateAll(self[loclabel]['img'],
                                     self.last_shot,
                                     grayscale=self.grayscale,
                                     confidence=self.confidence)
         # 过滤掉重叠超过一半面积的框
         return non_maximun_suppression([xywh2ltrb(box) for box in list(boxes)], 0.5)
 
-    def locate_rect(self, name, *, fix_pos=None):
+    def locate_rect(self, loclabel, *, fix_pos=None):
+        """ 按内容匹配找出区域，如果使用 fix_pos 则只取固定位置上的图片内容
+        """
         fix_pos = fix_pos if fix_pos is not None else self.fix_pos
         if fix_pos:
-            return self.rects[name]
+            return self[loclabel]['ltrb']
         else:
-            res = self.locate_rects(name)
+            res = self.locate_rects(loclabel)
             return res[0] if res else None
 
-    def find(self, name):
+    def find(self, loclabel, fix_pos=None, *, confidence=None, tolerance=None):
+        """ 多模式智能匹配 """
         self.update_shot()
-        if name in self.rects:  # 优先按照区域规则进行匹配分析
+        ann = self[loclabel]
 
-            rect = self.locate_rect(name)
-            # print(name, '图片相似度', 1 - self._cmp_image(self.images[name], self.get_image(rect)))
-            if (1 - self._cmp_image(self.images[name], self.get_image(rect))) >= self.confidence:
+        # TODO 取第一个非None值功能组件
+        fix_pos = fix_pos if fix_pos is not None else self.fix_pos
+        confidence = confidence if confidence is not None else self.confidence
+        tolerance = tolerance if tolerance is not None else self.tolerance
+
+        # 1 优先按照区域规则进行匹配分析
+        if 'ltrb' in ann:
+            rect = self.locate_rect(loclabel, fix_pos=fix_pos)
+            # print(loclabel, '图片相似度', 1 - self._cmp_image(self[loclabel]['img'], self.get_image(rect)))
+            if (1 - self._cmp_image(self[loclabel]['img'], self.get_image(rect))) >= confidence:
                 return rect
             else:
                 return False
-        elif name in self.points:  # 否则进行像素匹配
-            point = self._locate_point(name)
-            if self._cmp_pixel(self.images[name], self.get_pixel(point)) <= self.tolerance:
+        # 2 否则进行像素匹配
+        elif 'center' in ann:
+            point = self._locate_point(loclabel, fix_pos)
+            if self._cmp_pixel(self[loclabel]['img'], self.get_pixel(point)) <= self.tolerance:
                 return point
             else:
                 return False
         else:
-            raise ValueError(f'{name}')
+            raise ValueError(f'{loclabel}')
 
-    def find_point(self, name):
+    def find_point(self, loclabel, fix_pos=None):
         """ 将find的结果统一转成点 """
-        res = self.find(name)
+        res = self.find(loclabel, fix_pos)
         if not res:
             return False
         else:
@@ -201,9 +301,9 @@ class NamedLocate:
                 raise ValueError
             return res
 
-    def find_image(self, name):
+    def find_image(self, loclabel):
         """ 将find的结果统一转成图片数据 """
-        res = self.find(name)
+        res = self.find(loclabel)
         if not res:
             return False
         else:
@@ -214,16 +314,16 @@ class NamedLocate:
                 res = self.get_pixel(res)
             return res
 
-    def try_click(self, name, *, back=False):
+    def try_click(self, loclabel, *, back=False):
         """ 检查是否出现了目标，有则点击，否则不进行任何操作
 
         :param back: 点击后将鼠标move回原来的位置
         """
         pos0 = pyautogui.position()
-        if isinstance(name, (tuple, list)) and len(name) == 2:  # 直接输入坐标
-            pos = name
-        elif isinstance(name, str):
-            pos = self.find_point(name)
+        if isinstance(loclabel, (tuple, list)) and len(loclabel) == 2:  # 直接输入坐标
+            pos = loclabel
+        elif isinstance(loclabel, str):
+            pos = self.find_point(loclabel)
         else:
             raise TypeError
 
@@ -234,40 +334,46 @@ class NamedLocate:
             pyautogui.moveTo(*pos0)  # 恢复鼠标原位置
         return pos
 
-    def click_point(self, name, *, back=False):
+    def click_point(self, point, *, back=False):
         """ 不进行内容匹配，直接点击对应位置的点 """
-        if isinstance(name, str):
-            name = self.points[name]
-        return self.try_click(name, back=back)
+        if isinstance(point, str):
+            point = self[point]['center']
+        return self.try_click(point, back=back)
 
-    def wait(self, name, *, limit_seconds=None, interval_seconds=1, back=False):
+    def wait(self, loclabel, *, fix_pos=None, limit_seconds=None, interval_seconds=1, back=False):
+        """
+        :param fix_pos:
+            True，在固定位置出现目标图片数据
+            False，在图片中任意位置出现了目标数据
+        """
         pos = None
         t = TicToc()
         while not pos:
-            pos = self.find_point(name)
+            # 找到后可以转为point点
+            pos = self.find_point(loclabel, fix_pos)
             time.sleep(interval_seconds)
             if limit_seconds and t.tocvalue() > limit_seconds:
                 break
         return pos
 
-    def wait_leave(self, name, *, limit_seconds=None, interval_seconds=1, back=False):
+    def wait_leave(self, loclabel, *, limit_seconds=None, interval_seconds=1, back=False):
         """ 和wait逻辑相反，确保当前界面没有name元素的时候结束循环，没有返回值 """
         pos = True
         t = TicToc()
         while pos:
-            pos = self.find_point(name)
+            pos = self.find_point(loclabel)
             time.sleep(interval_seconds)
             if limit_seconds and t.tocvalue() > limit_seconds:
                 break
 
-    def wait_click(self, name, *, limit_seconds=None, interval_seconds=1, back=False):
+    def wait_click(self, loclabel, *, limit_seconds=None, interval_seconds=1, back=False):
         """ 等待图标出现运行成功后再点击
 
         :poram limit_seconds: 等待秒数上限
         :param interval_seconds: 每隔几秒检查一次
         :param back: 点击后将鼠标move回原来的位置
         """
-        pos = self.wait(name, limit_seconds=limit_seconds, interval_seconds=interval_seconds)
+        pos = self.wait(loclabel, limit_seconds=limit_seconds, interval_seconds=interval_seconds)
         self.try_click(pos, back=back)
 
     def move_to(self, name):
@@ -470,3 +576,8 @@ if sys.platform == 'win32':
     #     PressKey(0x20)
     #     ReleaseKey(0x20)
     #     time.sleep(0.1)
+
+if __name__ == '__main__':
+    with TicToc(__name__):
+        agld = AutoGuiLabelData(r'D:\slns\py4101\py4101\touhou\label')
+        agld.writes()

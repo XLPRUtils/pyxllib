@@ -420,6 +420,9 @@ class Groups:
     def __init__(self, data):
         """ 分组
 
+        :param data: 输入字典结构直接赋值
+            或者其他结构，会自动按相同项聚合
+
         TODO 显示一些数值统计信息，甚至图表
         TODO 转文本表达，方便bc比较
         """
@@ -429,9 +432,9 @@ class Groups:
             for k, v in enumerate(data, start=1):
                 new_data[k] = v
             data = new_data
-        self.data = data
-        self.ctr = Counter({k: len(x) for k, x in self.data.items()})
-        self.stat = ValuesStat(self.ctr.values())
+        self.data = data  # 字典存原数据
+        self.ctr = Counter({k: len(x) for k, x in self.data.items()})  # 计数
+        self.stat = ValuesStat(self.ctr.values())  # 综合统计数据
 
     def __repr__(self):
         ls = []
