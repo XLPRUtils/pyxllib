@@ -19,10 +19,10 @@ import humanfriendly
 # 大小写不敏感字典
 from requests.structures import CaseInsensitiveDict
 
-from pyxllib.basic._1_strlib import strfind, natural_sort
-from pyxllib.basic._2_timelib import Datetime
-from pyxllib.basic._3_filelib import get_etag, PathBase, File
-from pyxllib.basic._4_loglib import Iterate
+from pyxllib.basic.str import strfind, natural_sort
+from pyxllib.basic.time import Datetime
+from pyxllib.basic.file import get_etag, PathBase, File
+from pyxllib.basic.log import Iterate
 
 ____dir = """
 支持文件或文件夹的对比复制删除等操作的函数：filescmp、filesdel、filescopy

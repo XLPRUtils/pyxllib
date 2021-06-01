@@ -6,7 +6,6 @@
 
 import concurrent.futures
 import inspect
-import logging
 import math
 import os
 import queue
@@ -20,9 +19,8 @@ import time
 
 from humanfriendly import format_timespan
 
-from pyxllib.basic._1_strlib import shorten
-from pyxllib.basic._2_timelib import TicToc
-from pyxllib.basic._3_filelib import File
+from pyxllib.basic.str import shorten
+from pyxllib.basic.file import File
 
 XLLOG_CONF_FILE = 'xllog.yaml'
 
@@ -227,7 +225,7 @@ class DPrint:
 def demo_dprint():
     """这里演示dprint常用功能
     """
-    from ._2_timelib import TicToc
+    from .time import TicToc
 
     # 1 查看程序是否运行到某个位置
     dprint()

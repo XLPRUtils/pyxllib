@@ -8,10 +8,11 @@
 自动发布pyxllib的脚本
 """
 
-from pyxllib.basic import *
+import subprocess
+from pyxllib.basic.dir import *
 
 # 1 每次发布版本，只要在这个文件改一次就行，会自动修改其他有需要用到的两个版本号位置
-VERSION = '0.0.78'
+VERSION = '0.0.79'
 
 
 def update_version(f):

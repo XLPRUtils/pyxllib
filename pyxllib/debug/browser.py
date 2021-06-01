@@ -7,7 +7,7 @@
 
 import html
 
-from pyxllib.debug._1_typelib import *
+from pyxllib.debug.type import *
 
 
 def getasizeof(*objs, **opts):

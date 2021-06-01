@@ -3,14 +3,19 @@
 # @Author : 陈坤泽
 # @Email  : 877362867@qq.com
 # @Date   : 2020/06/02 11:09
-
-
+import os
+import re
 from collections import defaultdict, Counter
+import pprint
+import sys
+import textwrap
 
 import numpy as np
 import pandas as pd
 
-from pyxllib.basic import *
+from pyxllib.basic.str import typename, natural_sort_key, shorten
+from pyxllib.basic.time import ValuesStat
+from pyxllib.basic.file import File
 
 
 def east_asian_len(s, ambiguous_width=None):
@@ -490,6 +495,7 @@ class PathGroups(Groups):
                     # 不仅要match满足，还需要整串匹配，比如jpg就必须是jpg，不能是jpga
                     return True
             return False
+
         return self.select_group(judge)
 
     def select_group_which_hasimage(self, pattern=r'jpe?g|png|bmp', flags=re.IGNORECASE):

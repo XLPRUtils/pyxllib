@@ -11,7 +11,7 @@ import fitz
 
 from pyxllib.debug import *
 from pyxllib.cv import *
-from pyxllib.image._1_imlib import zoomsvg
+from pyxllib.image.im import zoomsvg
 
 
 class FitzPdf:

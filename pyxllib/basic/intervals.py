@@ -17,8 +17,8 @@
 
 import collections
 import itertools
-
-from pyxllib.basic import *
+import math
+import re
 
 
 class Interval:

@@ -10,10 +10,9 @@ import copy
 import re
 
 import numpy as np
-from deprecated import deprecated
 from shapely.geometry import Polygon
 
-from pyxllib.util.intervals import Intervals
+from pyxllib.basic.intervals import Intervals
 
 import cv2
 
@@ -461,48 +460,68 @@ class ComputeIou:
 
     @classmethod
     def polygon(cls, pts1, pts2):
-        """
-        >>> ComputeIou.polygon([[0, 0], [10, 10]], [[5, 5], [15, 15]])
-        0.14285714285714285
-        """
         inter_area = pts1.intersection(pts2).area
         union_area = pts1.area + pts2.area - inter_area
         return (inter_area / union_area) if union_area else 0
 
+    @classmethod
+    def polygon2(cls, pts1, pts2):
+        """ 会强制转为polygon对象再处理
 
-@deprecated(reason='intersection_over_union -> ComputeIou.shapely')
-def intersection_over_union(pts1, pts2):
-    polygon1, polygon2 = shapely_polygon(pts1), shapely_polygon(pts2)
-    return ComputeIou.polygon(polygon1, polygon2)
+        >>> ComputeIou.polygon2([[0, 0], [10, 10]], [[5, 5], [15, 15]])
+        0.14285714285714285
+        """
+        polygon1, polygon2 = shapely_polygon(pts1), shapely_polygon(pts2)
+        return cls.polygon(polygon1, polygon2)
 
+    @classmethod
+    def nms_basic(cls, boxes, func, iou=0.5, *, key=None, index=False):
+        """ 假设boxes已经按权重从大到小排过序
 
-def non_maximun_suppression(boxes, iou=0.5, *, index=False):
-    """ 假设boxes已经按权重从大到小排过序
+        :param boxes: 支持输入一组box列表 [box1, box2, box3, ...]
+        :param key: 将框映射为可计算对象
+        :param index: 返回不是原始框，而是对应的下标 [i1, i2, i3, ...]
+        """
+        # 1 映射到items来操作
+        if callable(key):
+            items = list(enumerate([key(b) for b in boxes]))
+        else:
+            items = list(enumerate(boxes))
 
-    :param boxes: 支持输入一组box列表 [box1, box2, box3, ...]
-    :param index: 返回不是原始框，而是对应的下标 [i1, i2, i3, ...]
-    """
-    # 1 映射到items来操作
-    items = list(enumerate(boxes))
+        # 2 正常nms功能
+        idxs = []
+        while items:
+            # 1 加入权值大的框
+            i, b = items[0]
+            idxs.append(i)
+            # 2 抑制其他框
+            left_items = []
+            for j in range(1, len(items)):
+                if func(b, items[j][1]) < iou:
+                    left_items.append(items[j])
+            items = left_items
 
-    # 2 正常nms功能
-    idxs = []
-    while items:
-        # 1 加入权值大的框
-        i, b = items[0]
-        idxs.append(i)
-        # 2 抑制其他框
-        left_items = []
-        for j in range(1, len(items)):
-            if intersection_over_union(b, items[j][1]) < iou:
-                left_items.append(items[j])
-        items = left_items
+        # 3 返回值
+        if index:
+            return idxs
+        else:
+            return [boxes[i] for i in idxs]
 
-    # 3 返回值
-    if index:
-        return idxs
-    else:
-        return [boxes[i] for i in idxs]
+    @classmethod
+    def nms_ltrb(cls, boxes, iou=0.5, *, key=None, index=False):
+        return cls.nms_basic(boxes, cls.ltrb, iou, key=key, index=index)
+
+    @classmethod
+    def nms_xywh(cls, boxes, iou=0.5, *, key=None, index=False):
+        if callable(key):
+            func = lambda x: xywh2ltrb(key(x))
+        else:
+            func = xywh2ltrb
+        return cls.nms_ltrb(boxes, iou, key=func, index=index)
+
+    @classmethod
+    def nms_polygon(cls, boxes, iou=0.5, *, key=shapely_polygon, index=False):
+        return cls.nms_basic(boxes, cls.polygon, iou, key=key, index=index)
 
 
 ____other = """

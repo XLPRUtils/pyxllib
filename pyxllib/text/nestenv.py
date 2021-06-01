@@ -5,8 +5,8 @@
 # @Date   : 2019/02/20 10:03
 
 
-from pyxllib.text._1_base import *
-from pyxllib.util.intervals import *
+from pyxllib.text.base import *
+from pyxllib.basic.intervals import *
 
 
 def pqmove(s, p, q):

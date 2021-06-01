@@ -15,7 +15,7 @@ import arrow
 
 from humanfriendly import format_timespan
 
-from pyxllib.basic._1_strlib import shorten, natural_sort, listalign
+from pyxllib.basic.str import shorten, natural_sort, listalign
 
 ____tictoc = """
 基于 pytictoc 代码，做了些自定义扩展
@@ -30,7 +30,7 @@ __version_date__ = '29 April 2017'
 
 
 class TicToc:
-    """ 
+    """
     Replicate the functionality of MATLAB's tic and toc.
 
     #Methods
@@ -91,13 +91,13 @@ class TicToc:
     def __enter__(self):
         """Start the timer when using TicToc in a context manager."""
         if self.title == '__main__':
-            from pyxllib.basic._4_loglib import get_xllog
+            from pyxllib.basic.log import get_xllog
             get_xllog().info(f'time.process_time(): {format_timespan(time.process_time())}.')
         self.start = timeit.default_timer()
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         """On exit, print time elapsed since entering context manager."""
-        from pyxllib.basic._4_loglib import get_xllog
+        from pyxllib.basic.log import get_xllog
 
         elapsed = self.tocvalue()
         xllog = get_xllog()
@@ -511,16 +511,3 @@ class Datetime(arrow.Arrow):
                 tag = tag.replace('{placeholder}', texts[i], 1)
             tag = tag.replace('%k', '日一二三四五六'[self.isoweekday() % 7])
         return tag
-
-
-if __name__ == '__main__':
-    # demo：每个脚本开头结尾都可以这样写来统计程序用时
-    TicToc.process_time(f'{__file__} 启动准备共用时')
-    # D:/slns/pyxllib/pyxllib/basic/_2_timelib.py 启动准备共用时 0.031 秒
-
-    tictoc = TicToc(__file__)
-
-    time.sleep(2)
-
-    tictoc.toc()
-    # D:/slns/pyxllib/pyxllib/basic/_2_timelib.py 用时 2.000 秒.
