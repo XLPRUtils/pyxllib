@@ -53,6 +53,18 @@ pyspellchecker
 pyahocorasick
 """
 
+data = """
+oss2
+sqlalchemy
+mysqlclient
+"""
+
+# 这一块比较特别，可能都是比较小众的功能，强烈建议需要的时候手动安装依赖项
+robot = """
+pyautogui
+keyboard
+"""
+
 more = """
 paramiko
 scp
@@ -64,8 +76,10 @@ extras_require['debug'] = '\n'.join((basic + debug).splitlines())
 extras_require['image'] = '\n'.join((basic + image).splitlines())
 extras_require['cv'] = '\n'.join((basic + cv).splitlines())
 extras_require['text'] = '\n'.join((basic + text).splitlines())
+extras_require['data'] = '\n'.join((basic + data).splitlines())
+extras_require['robot'] = '\n'.join((basic + robot).splitlines())
 extras_require['more'] = '\n'.join((basic + more).splitlines())
-extras_require['all'] = '\n'.join((basic + debug + image + cv + text + more).splitlines())
+extras_require['most'] = '\n'.join((basic + debug + image + cv + text + data + more).splitlines())
 
 setup(
     name='pyxllib',  # pip 安装时用的名字

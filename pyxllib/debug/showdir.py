@@ -11,7 +11,7 @@ import html
 import pandas as pd
 from bs4 import BeautifulSoup
 
-from pyxllib.basic import *
+from pyxllib.basic.most import *
 from pyxllib.debug.type import dataframe_str
 from pyxllib.debug.browser import getasizeof, browser
 

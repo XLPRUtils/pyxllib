@@ -4,22 +4,14 @@
 # @Email  : 877362867@qq.com
 # @Date   : 2020/06/06
 
-from pyxllib.debug import *
-from pyxllib.cv import *
-from pyxllib.data import *
+from collections import defaultdict
 
-try:
-    import pyautogui
-except ModuleNotFoundError:
-    subprocess.run(['pip3', 'install', 'pyautogui'])
-    import pyautogui
+from pyxllib.basic.most import *
+from pyxllib.cv.most import *
+from pyxllib.data.label import *
 
-try:
-    import keyboard
-except ModuleNotFoundError:
-    subprocess.run(['pip3', 'install', 'keyboard'])
-    import keyboard
-
+import pyautogui
+import keyboard
 import pyscreeze  # NOQA pyautogui安装的时候会自动安装依赖的pyscreeze
 
 

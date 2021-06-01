@@ -9,7 +9,7 @@
 
 import pyperclip
 
-from pyxllib.debug import *
+from pyxllib.debug.most import *
 
 
 def _print_df_result(df, outfmt='text'):

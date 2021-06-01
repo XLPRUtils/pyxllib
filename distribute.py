@@ -23,7 +23,7 @@ def update_version(f):
 
 
 update_version('setup.py')
-update_version('pyxllib/__init__.py')
+update_version('pyxllib/utools.py')
 
 # 2 打包发布
 subprocess.run('python setup.py sdist')  # 本地生成的.gz可以检查上传的内容

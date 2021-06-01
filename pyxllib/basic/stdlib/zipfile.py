@@ -1839,7 +1839,7 @@ class PyZipFile(ZipFile):
                     print("Adding", arcname)
                 self.write(fname, arcname)
                 dirlist = os.listdir(pathname)
-                dirlist.remove("__init__.py")
+                dirlist.remove("utools.py")
                 # Add all *.py files and package subdirectories
                 for filename in dirlist:
                     path = os.path.join(pathname, filename)

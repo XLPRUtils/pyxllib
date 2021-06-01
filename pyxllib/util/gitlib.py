@@ -27,8 +27,6 @@ except ModuleNotFoundError:
     subprocess.run(['pip3', 'install', 'gitpython'])
     import git
 
-from pyxllib.util.filelib import *
-
 
 class Git:
     def __init__(self, repo_path):

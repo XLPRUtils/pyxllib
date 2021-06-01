@@ -10,6 +10,7 @@ xml等网页结构方面的处理
 """
 
 from pyxllib.text.base import *
+from bs4 import BeautifulSoup
 
 ____section_1_dfs_base = """
 一个通用的递归功能
