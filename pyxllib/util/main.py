@@ -14,17 +14,12 @@
 
 import filecmp
 import shutil
-import sys, json
+import sys
 import textwrap
-from os.path import getmtime
 from os.path import join as pathjoin
-from collections import OrderedDict, Counter, defaultdict
+from collections import OrderedDict, Counter
 
 from bs4 import BeautifulSoup
-
-from pyxllib.debug import *
-from pyxllib.image import *
-from pyxllib.util.filelib import *
 
 
 def ________B_数据结构________():
@@ -149,7 +144,6 @@ class CExcel:
                 如果设为bool值true或false，
         """
         import win32com.client as win32
-        import win32com
 
         self.__dict__['app'] = win32.gencache.EnsureDispatch('Excel.Application')
         if isinstance(visible, bool): self.app.Visible = visible

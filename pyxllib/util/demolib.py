@@ -18,7 +18,7 @@ perf：性能测试，注重分析代码的运行效率
 import socket
 import tempfile
 
-from pyxllib.basic import *
+from pyxllib.basic.most import *
 
 ____stdlib = """
 标准库相关

@@ -191,7 +191,7 @@ def get_encoding(bstr, *, maxn=100):
     enc = chardet.detect(bstr[start_idx:start_idx + maxn])['encoding']
 
     # 2 转换为常见编码名
-    if enc in ('utf-8', 'ascii', 'ISO-8859-1', 'Windows-1252'):
+    if enc in ('utf-8', 'ascii', 'ISO-8859-1', 'Windows-1252', 'Windows-1254', 'ISO-8859-9'):
         return 'utf8'
     elif enc in ('UTF-8-SIG',):
         return 'utf-8-sig'

@@ -12,7 +12,7 @@ CASIA 在线和离线中文手写数据库的一些数据读取功能
 
 """
 
-from pyxllib.basic import *
+from pyxllib.basic.most import *
 import numpy as np
 
 

@@ -11,7 +11,7 @@ import concurrent.futures
 import numpy as np
 from PIL import Image
 
-from pyxllib.basic import *
+from pyxllib.basic.most import *
 from pyxllib.cv import cv2pil, PilPrcs
 
 

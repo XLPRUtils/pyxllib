@@ -10,12 +10,7 @@ oss2 · PyPI: https://pypi.org/project/oss2/
 
 import subprocess
 from pyxllib.basic import File
-
-try:
-    import oss2
-except ModuleNotFoundError:
-    subprocess.run(['pip3', 'install', 'oss2'])
-    import oss2
+import oss2
 
 
 class OssBucket:

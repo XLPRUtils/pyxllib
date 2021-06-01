@@ -4,7 +4,7 @@
 # @Email  : 877362867@qq.com
 # @Date   : 2018/07/12 09:09
 
-"""
+""" 高级的文件处理功能
 各种文件遍历功能
 
 这里要强调，推荐os.walk功能
@@ -12,8 +12,10 @@
 
 from typing import Callable, Any
 
-from pyxllib.text import *
 import pyxllib.basic.stdlib.zipfile as zipfile  # 重写了标准库的zipfile文件，cp437改为gbk，解决zip中文乱码问题
+from pyxllib.basic.most import *
+from pyxllib.debug.most import *
+from pyxllib.text.most import *
 
 try:
     import paramiko

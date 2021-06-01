@@ -8,7 +8,7 @@ from pyxllib.basic.most import *
 from pyxllib.debug.type import *
 from pyxllib.debug.browser import *
 from pyxllib.debug.showdir import *
-from pyxllib.debug.bcompare import *
+from pyxllib.debug.bc import *
 
 ____other = """
 """
