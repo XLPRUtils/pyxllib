@@ -11,7 +11,7 @@ from pyxlib.cv.debugtools import *
 """
 
 from pyxllib.basic import *
-from pyxllib.cv._4_cvimg import *
+from pyxllib.cv.cvimg import *
 
 
 class TrackbarTool:

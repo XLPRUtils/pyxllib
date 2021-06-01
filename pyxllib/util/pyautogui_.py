@@ -153,6 +153,24 @@ class AutoGuiLabelData:
         self.data[loc][label] = value
 
 
+def xlwait(func, condition=bool, *, limit=None, interval=1):
+    """ 不断重复执行func，直到得到满足condition条件的期望值
+
+    :param condition: 退出等待的条件，默认为bool真值
+    :param limit: 重复执行的上限时间（单位 秒），默认一直等待
+    :param interval: 重复执行间隔 （单位 秒）
+
+    """
+    t = TicToc()
+    while True:
+        res = func()
+        if condition(res):
+            return res
+        elif limit and t.tocvalue() > limit:
+            return res  # 超时也返回目前得到的结果
+        time.sleep(interval)
+
+
 class NamedLocate(AutoGuiLabelData):
     """ 对有命名的标注数据进行定位
 
@@ -165,7 +183,7 @@ class NamedLocate(AutoGuiLabelData):
     TODO 吃土乡人物清单要用特殊技巧去获得，不能手动暴力搞；可以自动循环拼接所有图
     """
 
-    def __init__(self, root, *, grayscale=None, confidence=0.95, tolerance=20, fix_pos=True):
+    def __init__(self, root, *, grayscale=None, confidence=0.95, tolerance=20):
         """
 
         :param root: 标注数据所在文件夹
@@ -173,7 +191,6 @@ class NamedLocate(AutoGuiLabelData):
         :param grayscale: 转成灰度图比较
         :param confidence: 用于图片比较，相似度阈值
         :param tolerance: 像素比较时能容忍的误差变化范围
-        :param fix_pos: 使用固定位置可以提高运行速度，如果窗口位置是移动的，则可以关闭该功能
 
         TODO random_click: 增加该可选参数，返回point时，进行上下左右随机扰动
         """
@@ -181,24 +198,22 @@ class NamedLocate(AutoGuiLabelData):
         self.grayscale = grayscale
         self.confidence = confidence
         self.tolerance = tolerance
-        self.fix_pos = fix_pos
         self.last_shot = self.update_shot()
-
-    def update_shot(self, region=None):
-        self.last_shot = pil2cv(pyautogui.screenshot(region=region))
-        return self.last_shot
 
     def screenshot(self, region=None):
         """
         :param region: ltrb
         """
         if isinstance(region, str):
-            im = pyautogui.screenshot(region=ltrb2xywh(self.rects[region]))
-        else:
-            im = pyautogui.screenshot(region=region)
+            region = ltrb2xywh(self[region])
+        im = pyautogui.screenshot(region=region)
         return pil2cv(im)
 
-    def get_pixel(self, point):
+    def update_shot(self, region=None):
+        self.last_shot = self.screenshot(region)
+        return self.last_shot
+
+    def point2pixel(self, point):
         """
 
         :param point: 支持输入 (x, y) 坐标，或者 loclabel
@@ -211,7 +226,7 @@ class NamedLocate(AutoGuiLabelData):
             point = self[point]['center']
         return tuple(self.last_shot[point[1], point[0]].tolist()[::-1])
 
-    def get_image(self, ltrb):
+    def rect2img(self, ltrb):
         """
         :param ltrb: 可以输入坐标定位，也可以输入 loclabel 定位
         """
@@ -221,163 +236,119 @@ class NamedLocate(AutoGuiLabelData):
         return self.last_shot[t:b, l:r]
 
     @classmethod
-    def _cmp_pixel(cls, pixel1, pixel2):
+    def pixel_distance(cls, pixel1, pixel2):
         """ 返回最大的像素值差，如果相同返回0 """
         return max([abs(x - y) for x, y in zip(pixel1, pixel2)])
 
     @classmethod
-    def _cmp_image(cls, image1, image2):
-        """ 返回距离：不相同像素占的百分比，相同返回0 """
-        cmp = np.array(abs(np.array(image1, dtype=int) - image2) > 10)  # 每个像素允许10的差距
+    def img_distance(cls, img1, img2, *, tolerance=10):
+        """ 返回距离：不相同像素占的百分比，相同返回0
+
+        :param tolerance: 每个像素允许10的差距
+        """
+        cmp = np.array(abs(np.array(img1, dtype=int) - img2) > tolerance)
         return cmp.sum() / cmp.size
 
-    def _locate_point(self, loclabel, fix_pos=None):
-        """ 这里shot是指不那么考虑内容是否匹配，返回能找到的一个最佳结果
-                后续会有find来进行最后的阈值过滤
+    def check_pixel(self, loclabel, *, tolerance=None):
+        """ 判断对应位置上的像素值是否相同
         """
-        if fix_pos:
-            return self[loclabel]['center']
-        else:
-            raise NotImplementedError
-
-    def locate_rects(self, loclabel):
-        """ 根据预存的img数据，匹配出多个内容对应的所在的rect位置 """
-        self.update_shot()
-        boxes = pyautogui.locateAll(self[loclabel]['img'],
-                                    self.last_shot,
-                                    grayscale=self.grayscale,
-                                    confidence=self.confidence)
-        # 过滤掉重叠超过一半面积的框
-        return non_maximun_suppression([xywh2ltrb(box) for box in list(boxes)], 0.5)
-
-    def locate_rect(self, loclabel, *, fix_pos=None):
-        """ 按内容匹配找出区域，如果使用 fix_pos 则只取固定位置上的图片内容
-        """
-        fix_pos = fix_pos if fix_pos is not None else self.fix_pos
-        if fix_pos:
-            return self[loclabel]['ltrb']
-        else:
-            res = self.locate_rects(loclabel)
-            return res[0] if res else None
-
-    def find(self, loclabel, fix_pos=None, *, confidence=None, tolerance=None):
-        """ 多模式智能匹配 """
-        self.update_shot()
-        ann = self[loclabel]
-
-        # TODO 取第一个非None值功能组件
-        fix_pos = fix_pos if fix_pos is not None else self.fix_pos
-        confidence = confidence if confidence is not None else self.confidence
         tolerance = tolerance if tolerance is not None else self.tolerance
+        p1 = self[loclabel]['pixel']
+        p2 = self.point2pixel(loclabel)
+        return self.pixel_distance(p1, p2) < tolerance
 
-        # 1 优先按照区域规则进行匹配分析
-        if 'ltrb' in ann:
-            rect = self.locate_rect(loclabel, fix_pos=fix_pos)
-            # print(loclabel, '图片相似度', 1 - self._cmp_image(self[loclabel]['img'], self.get_image(rect)))
-            if (1 - self._cmp_image(self[loclabel]['img'], self.get_image(rect))) >= confidence:
-                return rect
-            else:
-                return False
-        # 2 否则进行像素匹配
-        elif 'center' in ann:
-            point = self._locate_point(loclabel, fix_pos)
-            if self._cmp_pixel(self[loclabel]['img'], self.get_pixel(point)) <= self.tolerance:
-                return point
-            else:
-                return False
-        else:
-            raise ValueError(f'{loclabel}')
+    def check_img(self, loclabel, *, grayscale=None, confidence=None):
+        grayscale = grayscale if grayscale is not None else self.grayscale
+        confidence = confidence if confidence is not None else self.confidence
+        boxes = pyautogui.locateAll(self[loclabel]['img'], self.screenshot(loclabel),
+                                    grayscale=grayscale, confidence=confidence)
+        boxes = [xywh2ltrb(box) for box in list(boxes)]
+        return len(boxes)
 
-    def find_point(self, loclabel, fix_pos=None):
-        """ 将find的结果统一转成点 """
-        res = self.find(loclabel, fix_pos)
-        if not res:
-            return False
-        else:
-            n = len(res)
-            if n == 4:
-                res = list(np.array(np.array(res).reshape(2, 2).mean(axis=0), dtype=int))
-            elif n != 2:
-                raise ValueError
-            return res
+    def img2rects(self, img, *, grayscale=None, confidence=None):
+        """ 根据预存的img数据，匹配出多个内容对应的所在的rect位置 """
+        # 1 配置参数
+        if isinstance(img, str):
+            img = self[img]['img']
+        grayscale = grayscale if grayscale is not None else self.grayscale
+        confidence = confidence if confidence is not None else self.confidence
+        # 2 查找子图
+        self.update_shot()
+        boxes = pyautogui.locateAll(img, self.last_shot,
+                                    grayscale=grayscale,
+                                    confidence=confidence)
+        # 3 过滤掉重叠超过一半面积的框
+        return ComputeIou.nms_ltrb([xywh2ltrb(box) for box in list(boxes)])
 
-    def find_image(self, loclabel):
-        """ 将find的结果统一转成图片数据 """
-        res = self.find(loclabel)
-        if not res:
-            return False
-        else:
-            n = len(res)
-            if n == 4:
-                res = self.get_image(res)
-            elif n != 2:
-                res = self.get_pixel(res)
-            return res
-
-    def try_click(self, loclabel, *, back=False):
-        """ 检查是否出现了目标，有则点击，否则不进行任何操作
-
-        :param back: 点击后将鼠标move回原来的位置
+    def img2rect(self, img, *, grayscale=None, confidence=None):
+        """ img2rects的简化，只返回一个匹配框
         """
-        pos0 = pyautogui.position()
-        if isinstance(loclabel, (tuple, list)) and len(loclabel) == 2:  # 直接输入坐标
-            pos = loclabel
-        elif isinstance(loclabel, str):
-            pos = self.find_point(loclabel)
-        else:
-            raise TypeError
+        rects = self.img2rects(img, grayscale=grayscale, confidence=confidence)
+        return rects[0] if rects else None
 
-        if pos:
-            # print(pos)
-            pyautogui.click(*pos)
+    def img2point(self, img, *, grayscale=None, confidence=None):
+        """ 将 img2rect 的结果统一转成点 """
+        res = self.img2rect(img, grayscale=grayscale, confidence=confidence)
+        if res:
+            return np.array(np.array(res).reshape(2, 2).mean(axis=0), dtype=int).tolist()
+
+    def img2img(self, img, *, grayscale=None, confidence=None):
+        """ 找到rect后，返回匹配的目标img图片内容 """
+        ltrb = self.img2rect(img, grayscale=grayscale, confidence=confidence)
+        if ltrb:
+            l, t, r, b = ltrb
+            return self.last_shot[t:b, l:r]
+
+    def click(self, point, *, back=False, wait_change=False):
+        """
+        :param back: 点击后鼠标移回原坐标位置
+        :param wait_change: 点击后，等待画面产生变化，才结束函数
+            point为 loclabel 才能用这个功能
+        """
+        # 1 判断类型
+        if isinstance(point, str):
+            loclabel = point
+            point = self[loclabel]['center']
+        else:
+            loclabel = ''
+
+        # 2 鼠标移动
+        pos0 = pyautogui.position()
+        pyautogui.click(*point)
         if back:
             pyautogui.moveTo(*pos0)  # 恢复鼠标原位置
-        return pos
 
-    def click_point(self, point, *, back=False):
-        """ 不进行内容匹配，直接点击对应位置的点 """
+        # 3 等待画面变化
+        if loclabel and wait_change:
+            func = lambda: self.img_distance(self[loclabel]['img'],
+                                             self.rect2img(loclabel)) > self.confidence
+            xlwait(func)
+
+        return point
+
+    def move_to(self, point):
         if isinstance(point, str):
             point = self[point]['center']
-        return self.try_click(point, back=back)
+        pyautogui.moveTo(*point)
 
-    def wait(self, loclabel, *, fix_pos=None, limit_seconds=None, interval_seconds=1, back=False):
-        """
-        :param fix_pos:
-            True，在固定位置出现目标图片数据
-            False，在图片中任意位置出现了目标数据
-        """
-        pos = None
-        t = TicToc()
-        while not pos:
-            # 找到后可以转为point点
-            pos = self.find_point(loclabel, fix_pos)
-            time.sleep(interval_seconds)
-            if limit_seconds and t.tocvalue() > limit_seconds:
-                break
-        return pos
+    def wait(self, loclabel, *, fixpos=False):
+        """ 封装的比较高层的功能 """
+        if fixpos:
+            xlwait(lambda: self.check_img(loclabel))
+            point = self[loclabel]['center']
+        else:
+            point = xlwait(lambda: self.img2point(loclabel))
+        return point
 
-    def wait_leave(self, loclabel, *, limit_seconds=None, interval_seconds=1, back=False):
-        """ 和wait逻辑相反，确保当前界面没有name元素的时候结束循环，没有返回值 """
-        pos = True
-        t = TicToc()
-        while pos:
-            pos = self.find_point(loclabel)
-            time.sleep(interval_seconds)
-            if limit_seconds and t.tocvalue() > limit_seconds:
-                break
+    def check_click(self, loclabel, *, back=False, wait_change=False):
+        point = self.img2point(loclabel)
+        if point:
+            self.click(point, back=back, wait_change=wait_change)
 
-    def wait_click(self, loclabel, *, limit_seconds=None, interval_seconds=1, back=False):
-        """ 等待图标出现运行成功后再点击
-
-        :poram limit_seconds: 等待秒数上限
-        :param interval_seconds: 每隔几秒检查一次
-        :param back: 点击后将鼠标move回原来的位置
-        """
-        pos = self.wait(loclabel, limit_seconds=limit_seconds, interval_seconds=interval_seconds)
-        self.try_click(pos, back=back)
-
-    def move_to(self, name):
-        pyautogui.moveTo(*self.points[name])
+    def wait_click(self, loclabel, *, fixpos=False, back=False, wait_change=False):
+        """ 封装的比较高层的功能 """
+        point = self.wait(loclabel, fixpos=fixpos)
+        self.click(point, back=back, wait_change=wait_change)
 
 
 class PosTran:

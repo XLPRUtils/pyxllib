@@ -12,8 +12,8 @@ import pandas as pd
 from bs4 import BeautifulSoup
 
 from pyxllib.basic import *
-from pyxllib.debug._1_typelib import dataframe_str
-from pyxllib.debug._2_browser import getasizeof, browser
+from pyxllib.debug.type import dataframe_str
+from pyxllib.debug.browser import getasizeof, browser
 
 
 def getmembers(object, predicate=None):

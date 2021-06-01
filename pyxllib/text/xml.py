@@ -9,7 +9,7 @@
 xml等网页结构方面的处理
 """
 
-from pyxllib.text._1_base import *
+from pyxllib.text.base import *
 
 ____section_1_dfs_base = """
 一个通用的递归功能

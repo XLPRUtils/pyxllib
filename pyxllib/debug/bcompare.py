@@ -6,8 +6,8 @@
 
 
 from pyxllib.basic import func_input_message, dprint, natural_sort_key, File, refinepath, Dir
-from pyxllib.debug._1_typelib import prettifystr
-from pyxllib.debug._2_browser import Explorer
+from pyxllib.debug.type import prettifystr
+from pyxllib.debug.browser import Explorer
 
 import copy
 import pandas as pd

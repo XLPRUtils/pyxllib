@@ -6,7 +6,7 @@
 
 from pyxllib.basic import File
 from pyxllib.debug import dprint
-from pyxllib.cv._1_geo import *
+from pyxllib.cv.geo import *
 
 import cv2
 import PIL.Image

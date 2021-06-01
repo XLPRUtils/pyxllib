@@ -8,7 +8,7 @@ import io
 
 import PIL.ExifTags
 
-from pyxllib.cv._2_cvprcs import *
+from pyxllib.cv.cvprcs import *
 
 
 class PilPrcsBase(CvPrcsBase):
