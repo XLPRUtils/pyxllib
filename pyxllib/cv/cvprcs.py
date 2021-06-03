@@ -15,7 +15,7 @@ try:
 except ImportError:
     accimage = None
 
-____functional = """
+__functional = """
 torchvision.transforms搬过来的功能
 
 这个库太大了，底层又依赖tensor，
@@ -103,7 +103,7 @@ def cv2pil(pic, mode=None):
     return Image.fromarray(npim, mode=mode)
 
 
-____other_func = """
+__other_func = """
 """
 
 
@@ -115,7 +115,7 @@ def pil2cv(im):
     return y
 
 
-____opencv = """
+__opencv = """
 opencv-python文档： https://opencv-python-tutroals.readthedocs.io/en/latest/
 pillow文档： https://pillow.readthedocs.io/en/stable/reference/
 

@@ -4,8 +4,6 @@
 # @Email  : 877362867@qq.com
 # @Date   : 2020/11/17 15:21
 
-
-from functools import partial
 from pyxllib.cv.pilprcs import *
 from pyxllib.file.file import File
 

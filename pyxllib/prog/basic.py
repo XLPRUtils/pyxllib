@@ -2,28 +2,16 @@
 # -*- coding: utf-8 -*-
 # @Author : 陈坤泽
 # @Email  : 877362867@qq.com
-# @Date   : 2021/06/03 17:38
+# @Date   : 2021/06/03 23:21
 
-"""
-程序开发、工程化相关工具组件
-"""
-
-from urllib.parse import urlparse
+import io
 import os
-import pprint
-import queue
-import re
-import subprocess
-import sys
-import concurrent.futures
 import math
-import time
+import queue
 import traceback
+from urllib.parse import urlparse
 
-from deprecated import deprecated
-from tqdm import tqdm
-
-from pyxllib.text import shorten
+from pyxllib.excel.index import int2excel_col_name
 
 
 def typename(c):
@@ -146,8 +134,151 @@ class RunOnlyOnce:
         self.results = {}
 
 
-____iterate = """
-"""
+def len_in_dim2_min(arr):
+    """ 计算类List结构在第2维上的最小长度
+
+    >>> len_in_dim2([[1,1], [2], [3,3,3]])
+    3
+
+    >>> len_in_dim2([1, 2, 3])  # TODO 是不是应该改成0合理？但不知道牵涉到哪些功能影响
+    1
+    """
+    if not isinstance(arr, (list, tuple)):
+        raise TypeError('类型错误，不是list构成的二维数组')
+
+    # 找出元素最多的列
+    column_num = math.inf
+    for i, item in enumerate(arr):
+        if isinstance(item, (list, tuple)):  # 该行是一个一维数组
+            column_num = min(column_num, len(item))
+        else:  # 如果不是数组，是指单个元素，当成1列处理
+            column_num = min(column_num, 1)
+            break  # 只要有个1，最小长度就一定是1了
+
+    return column_num
+
+
+def len_in_dim2(arr):
+    """ 计算类List结构在第2维上的最大长度
+
+    >>> len_in_dim2([[1,1], [2], [3,3,3]])
+    3
+
+    >>> len_in_dim2([1, 2, 3])  # TODO 是不是应该改成0合理？但不知道牵涉到哪些功能影响
+    1
+    """
+    if not isinstance(arr, (list, tuple)):
+        raise TypeError('类型错误，不是list构成的二维数组')
+
+    # 找出元素最多的列
+    column_num = 0
+    for i, item in enumerate(arr):
+        if isinstance(item, (list, tuple)):  # 该行是一个一维数组
+            column_num = max(column_num, len(item))
+        else:  # 如果不是数组，是指单个元素，当成1列处理
+            column_num = max(column_num, 1)
+
+    return column_num
+
+
+def ensure_array(arr, default_value=''):
+    """对一个由list、tuple组成的二维数组，确保所有第二维的列数都相同
+
+    >>> ensure_array([[1,1], [2], [3,3,3]])
+    [[1, 1, ''], [2, '', ''], [3, 3, 3]]
+    """
+    max_cols = len_in_dim2(arr)
+    if max_cols == 1:
+        return arr
+    dv = str(default_value)
+    a = [[]] * len(arr)
+    for i, ls in enumerate(arr):
+        if isinstance(ls, (list, tuple)):
+            t = list(arr[i])
+        else:
+            t = [ls]  # 如果不是数组，是指单个元素，当成1列处理
+        a[i] = t + [dv] * (max_cols - len(t))  # 左边的写list，是防止有的情况是tuple，要强制转list后拼接
+    return a
+
+
+def swap_rowcol(a, *, ensure_arr=False, default_value=''):
+    """矩阵行列互换
+
+    注：如果列数是不均匀的，则会以最小列数作为行数
+
+    >>> swap_rowcol([[1,2,3], [4,5,6]])
+    [[1, 4], [2, 5], [3, 6]]
+    """
+    if ensure_arr:
+        a = ensure_array(a, default_value)
+    # 这是非常有教学意义的行列互换实现代码
+    return list(map(list, zip(*a)))
+
+
+def gentuple(n, tag):
+    """ 有点类似range函数，但生成的数列更加灵活
+
+    :param n:
+        数组长度
+    :param tag:
+        int类型，从指定数字开始编号
+            0，从0开始编号
+            1，从1开始编号
+        'A'，用Excel的形式编号
+        tuple，按枚举值循环显示
+            ('A', 'B')：循环使用A、B编号
+
+    >>> gentuple(4, 'A')
+    ('A', 'B', 'C', 'D')
+    """
+    a = [''] * n
+    if isinstance(tag, int):
+        for i in range(n):
+            a[i] = i + tag
+    elif tag == 'A':
+        a = tuple(map(lambda x: int2excel_col_name(x + 1), range(n)))
+    elif isinstance(tag, (list, tuple)):
+        k = len(tag)
+        a = tuple(map(lambda x: tag[x % k], range(n)))
+    return a
+
+
+def funcmsg(func):
+    """输出函数func所在的文件、函数名、函数起始行"""
+    # showdir(func)
+    if not hasattr(func, '__name__'):  # 没有__name__属性表示这很可能是一个装饰器去处理原函数了
+        if hasattr(func, 'func'):  # 我的装饰器常用func成员存储原函数对象
+            func = func.func
+        else:
+            return f'装饰器：{type(func)}，无法定位'
+    return f'函数名：{func.__name__}，来自文件：{func.__code__.co_filename}，所在行号={func.__code__.co_firstlineno}'
+
+
+def print2string(*args, **kwargs):
+    """https://stackoverflow.com/questions/39823303/python3-print-to-string"""
+    output = io.StringIO()
+    print(*args, file=output, **kwargs)
+    contents = output.getvalue()
+    output.close()
+    return contents
+
+
+class GrowingList(list):
+    """可变长list"""
+
+    def __init__(self, default_value=None):
+        super().__init__(self)
+        self.default_value = default_value
+
+    def __getitem__(self, index):
+        if index >= len(self):
+            self.extend([self.default_value] * (index + 1 - len(self)))
+        return list.__getitem__(self, index)
+
+    def __setitem__(self, index, value):
+        if index >= len(self):
+            self.extend([self.default_value] * (index + 1 - len(self)))
+        list.__setitem__(self, index, value)
 
 
 class EmptyPoolExecutor:
@@ -170,66 +301,6 @@ class EmptyPoolExecutor:
     def shutdown(self):
         # print('并行执行结束')
         pass
-
-
-def mtqdm(func, iterable, *args, max_workers=1, **kwargs):
-    """ 对tqdm的封装，增加了多线程的支持
-
-    这里名称前缀多出的m有multi的意思
-
-    :param max_workers: 默认是单线程，改成None会自动变为多线程
-        或者可以自己指定线程数
-    :param smoothing: tqdm官方默认值是0.3
-        这里关掉指数移动平均，直接计算整体平均速度
-        因为对我个人来说，大部分时候需要严谨地分析性能，得到整体平均速度，而不是预估当前速度
-    :param mininterval: 官方默认值是0.1，表示显示更新间隔秒数
-        这里不用那么频繁，每秒更新就行了~~
-
-    整体功能类似Iterate
-    """
-    from tqdm import tqdm
-
-    # 0 个人习惯参数
-    kwargs['smoothing'] = kwargs.get('smoothing', 0)
-    kwargs['mininterval'] = kwargs.get('mininterval', 1)
-
-    if max_workers == 1:
-        # 1 如果只用一个线程，则不使用concurrent.futures.ThreadPoolExecutor，能加速
-        for x in tqdm(iterable, *args, **kwargs):
-            func(x)
-    else:
-        # 2 默认的多线程运行机制，出错是不会暂停的；这里对原函数功能进行封装，增加报错功能
-        error = False
-
-        def wrap_func(x):
-            nonlocal error
-            try:
-                func(x)
-            except Exception as e:
-                error = e
-
-        # 3 多线程和进度条功能的结合
-        executor = concurrent.futures.ThreadPoolExecutor(max_workers)
-        for x in tqdm(iterable, *args, **kwargs):
-            while executor._work_queue.qsize():
-                pass
-            executor.submit(wrap_func, x)
-            if error:
-                raise error
-
-        executor.shutdown()
-
-
-def getasizeof(*objs, **opts):
-    """获得所有类的大小，底层用pympler.asizeof实现"""
-    from pympler import asizeof
-
-    try:
-        res = asizeof.asizeof(*objs, **opts)
-    # except TypeError:  # sqlalchemy.exc.InvalidRequestError
-    except:
-        res = -1
-    return res
 
 
 def format_exception(e):

@@ -4,7 +4,7 @@
 # @Email  : 877362867@qq.com
 # @Date   : 2020/12/08 17:02
 
-from pyxllib.text.str import *
+from pyxllib.text.xlalign import *
 from pyxllib.text.nestenv import *
 
 

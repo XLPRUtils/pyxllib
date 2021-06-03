@@ -4,9 +4,8 @@
 # @Email  : 877362867@qq.com
 # @Date   : 2021/06/03 20:41
 
-from pyxllib.prog import *
-from pyxllib.file import *
-from pyxllib.time import *
+from pyxllib.file.basic import *
+from pyxllib.file.advance import *
 
 try:
     import paramiko

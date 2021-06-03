@@ -5,7 +5,6 @@
 # @Date   : 2020/05/30 20:37
 
 
-from urllib.parse import urlparse
 import io
 import json
 import ujson
@@ -16,16 +15,17 @@ import re
 import shutil
 import subprocess
 import tempfile
+from typing import Callable, Any
 
 import chardet
 import qiniu
 import requests
 import yaml
 
-from pyxllib.algo import Groups
-from pyxllib.file import struct_unpack
-from pyxllib.time import Datetime
-from pyxllib.prog import is_url, is_file
+from pyxllib.algo.group import Groups
+from pyxllib.file.basic import struct_unpack
+from pyxllib.time.datetime import Datetime
+from pyxllib.prog.basic import is_url, is_file
 
 ____judge = """
 """
@@ -921,6 +921,35 @@ class PathGroups(Groups):
                 if len(ls) >= count:
                     break
         return ls
+
+
+def cache_file(file, make_data_func: Callable[[], Any] = None, *, reset=False, **kwargs):
+    """ 局部函数功能结果缓存
+
+    输入的文件file如果存在则直接读取内容；
+    否则用make_data_func生成，并且备份一个file文件
+
+    :param file: 需要缓存的文件路径
+    :param make_data_func: 如果文件不存在，则需要生成一份，要提供数据生成函数
+        cache_file可以当装饰器用，此时不用显式指定该参数
+    :param reset: 如果file是否已存在，都用make_data_func强制重置一遍
+    :param kwargs: 可以传递read、write支持的扩展参数
+    :return: 从缓存文件直接读取到的数据
+    """
+
+    def decorator(func):
+        def wrapper(*args2, **kwargs2):
+            f = File(file)
+            if f and not reset:  # 文件存在，直接读取返回
+                data = f.read(**kwargs)
+            else:  # 文件不存在则要生成一份数据
+                data = func(*args2, **kwargs2)
+                f.write(data, **kwargs)
+            return data
+
+        return wrapper
+
+    return decorator(make_data_func)() if make_data_func else decorator
 
 
 if __name__ == '__main__':

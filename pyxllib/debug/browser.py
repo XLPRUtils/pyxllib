@@ -4,13 +4,27 @@
 # @Email  : 877362867@qq.com
 # @Date   : 2020/05/30 22:43
 
-
 import html
 import inspect
+import subprocess
 
-from pyxllib.file import File, Dir, get_etag
-from pyxllib.time import TicToc, Datetime
-from pyxllib.prog import *
+from pyxllib.prog.basic import *
+from pyxllib.file.dir import File, Dir, get_etag
+from pyxllib.time.tictoc import TicToc
+from pyxllib.time.datetime import Datetime
+from pyxllib.debug.type import *
+
+
+def getasizeof(*objs, **opts):
+    """获得所有类的大小，底层用pympler.asizeof实现"""
+    from pympler import asizeof
+
+    try:
+        res = asizeof.asizeof(*objs, **opts)
+    # except TypeError:  # sqlalchemy.exc.InvalidRequestError
+    except:
+        res = -1
+    return res
 
 
 def viewfiles(procname, *files, **kwargs):
