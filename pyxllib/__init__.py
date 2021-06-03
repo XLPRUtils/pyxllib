@@ -26,6 +26,11 @@
 13、text，文本处理
 14、time，时间
 15、tool，工具
+
+模块整理计划
+1、0.0.x->0.1.x，把basic,debug,cv,util模式拆的更加精细，15个模块
+    暂时仍使用 from pyxllib.xx import * 的导入模式
+2、一个一个模块精简，尽量剥离对三方依赖小的功能出来
 """
 
-VERSION = '0.1.0'
+VERSION = '0.1.1'

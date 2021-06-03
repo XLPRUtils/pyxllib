@@ -32,6 +32,7 @@ except ModuleNotFoundError:
 from openpyxl.styles import Font
 
 from pyxllib.debug import *
+from pyxllib.algo import product
 
 
 class Openpyxl:

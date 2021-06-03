@@ -7,6 +7,7 @@
 
 from functools import partial
 from pyxllib.cv.pilprcs import *
+from pyxllib.file.file import File
 
 ____XxImg = """
 对CvPrcs、PilPrcs的类层级接口封装

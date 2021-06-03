@@ -18,7 +18,9 @@ perf：性能测试，注重分析代码的运行效率
 import socket
 import tempfile
 
+from pyxllib.prog import *
 from pyxllib.time import *
+from pyxllib.debug import *
 
 ____stdlib = """
 标准库相关
@@ -105,7 +107,6 @@ def demo_timer():
     """
     import math
     import numpy
-    from pyxllib.basic import Timer, dformat, dprint
 
     print('1、普通用法（循环5*1000万次用时）')
     timer = Timer('循环')

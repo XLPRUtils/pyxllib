@@ -4,13 +4,16 @@
 # @Email  : 877362867@qq.com
 # @Date   : 2020/06/02 20:16
 
-
 """
 xml等网页结构方面的处理
 """
 
-from pyxllib.text.base import *
+import requests
+import bs4
 from bs4 import BeautifulSoup
+
+from pyxllib.text.base import *
+from pyxllib.text.str import *
 
 ____section_1_dfs_base = """
 一个通用的递归功能

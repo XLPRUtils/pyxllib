@@ -19,7 +19,13 @@ import collections
 
 from pyxllib.debug import *
 
-import ahocorasick
+import subprocess
+
+try:
+    import ahocorasick
+except ModuleNotFoundError:
+    subprocess.run(['pip3', 'install', 'pyahocorasick'])
+    import ahocorasick
 
 ____section_0_import = """
 try ... except不影响效率的

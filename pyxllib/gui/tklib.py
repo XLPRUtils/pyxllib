@@ -12,7 +12,7 @@ __date__ = '2018/07/24 19:42'
 
 import tkinter as tk
 
-from pyxllib.debug import *
+from pyxllib.text import strwidth
 
 
 def askquestion(title='code4101py', message='void', **options):

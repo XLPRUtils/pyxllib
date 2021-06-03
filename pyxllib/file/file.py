@@ -22,21 +22,13 @@ import qiniu
 import requests
 import yaml
 
-from pyxllib.text.str import struct_unpack
-from pyxllib.time.__init__ import Datetime
+from pyxllib.algo import Groups
+from pyxllib.file import struct_unpack
+from pyxllib.time import Datetime
+from pyxllib.prog import is_url, is_file
 
 ____judge = """
 """
-
-
-def is_url(arg):
-    """输入是一个字符串，且值是一个合法的url"""
-    if not isinstance(arg, str): return False
-    try:
-        result = urlparse(arg)
-        return all([result.scheme, result.netloc])
-    except ValueError:
-        return False
 
 
 def is_url_connect(url, timeout=5):
@@ -46,18 +38,6 @@ def is_url_connect(url, timeout=5):
     except requests.ConnectionError:
         pass
     return False
-
-
-def is_file(arg, exists=True):
-    """相较于标准库的os.path.isfile，对各种其他错误类型也会判False
-
-    :param exists: arg不仅需要是一个合法的文件名，还要求其实际存在
-        设为False，则只判断文件名合法性，不要求其一定要存在
-    """
-    if not isinstance(arg, str): return False
-    if not exists:
-        raise NotImplementedError
-    return os.path.isfile(arg)
 
 
 ____qiniu = """
@@ -543,7 +523,8 @@ class File(PathBase):
 
     document: https://www.yuque.com/xlpr/python/pyxllib.debug.path
     """
-    __slots__ = ('_path', )
+    __slots__ = ('_path',)
+
     # 一、基础功能
 
     def __init__(self, path, root=None, *, suffix=None):
@@ -878,6 +859,68 @@ class XlBytesIO(io.BytesIO):
         :return: 文本内容
         """
         return self.read(code_length * char_num).decode(encoding, errors)
+
+
+class PathGroups(Groups):
+    """ 按文件名（不含后缀）分组的相关功能 """
+
+    @classmethod
+    def groupby(cls, files, key=lambda x: os.path.splitext(str(x))[0], ykey=lambda y: y.suffix[1:]):
+        """
+        :param files: 用Dir.select选中的文件、目录清单
+        :param key: D:/home/datasets/textGroup/SROIE2019+/data/task3_testcrop/images/X00016469670
+        :param ykey: ['jpg', 'json', 'txt']
+        :return: dict
+            1, task3_testcrop/images/X00016469670：['jpg', 'json', 'txt']
+            2, task3_testcrop/images/X00016469671：['jpg', 'json', 'txt']
+            3, task3_testcrop/images/X51005200931：['jpg', 'json', 'txt']
+        """
+        return super().groupby(files, key, ykey)
+
+    def select_group(self, judge):
+        """ 对于某一组，只要该组有满足judge的元素则保留该组 """
+        data = {k: v for k, v in self.data.items() if judge(k, v)}
+        return type(self)(data)
+
+    def select_group_which_hassuffix(self, pattern, flags=re.IGNORECASE):
+        def judge(k, values):
+            for v in values:
+                m = re.match(pattern, v, flags=flags)
+                if m and len(m.group()) == len(v):
+                    # 不仅要match满足，还需要整串匹配，比如jpg就必须是jpg，不能是jpga
+                    return True
+            return False
+
+        return self.select_group(judge)
+
+    def select_group_which_hasimage(self, pattern=r'jpe?g|png|bmp', flags=re.IGNORECASE):
+        """ 只保留含有图片格式的分组数据 """
+        return self.select_group_which_hassuffix(pattern, flags)
+
+    def find_files(self, name, *, count=-1):
+        """ 找指定后缀的文件
+
+        :param name: 支持 '1.jpg', 'a/1.jpg' 等格式
+        :param count: 返回匹配数量上限，-1表示返回所有匹配项
+        :return: 找到第一个匹配项后返回
+            找的有就返回File对象
+            找没有就返回None
+
+        注意这个功能是大小写敏感的，如果出现大小写不匹配
+            要么改文件名本身，要么改name的格式
+
+        TODO 如果有大量的检索，这样每次遍历会很慢，可能要考虑构建后缀树来处理
+        """
+        ls = []
+        stem, ext = os.path.splitext(name)
+        stem = '/' + stem.replace('\\', '/')
+        ext = ext[1:]
+        for k, v in self.data.items():
+            if k.endswith(stem) and ext in v:
+                ls.append(File(k, suffix=ext))
+                if len(ls) >= count:
+                    break
+        return ls
 
 
 if __name__ == '__main__':

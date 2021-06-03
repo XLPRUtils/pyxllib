@@ -8,13 +8,25 @@
 
 import copy
 import re
+import subprocess
+
+try:
+    import shapely
+except ModuleNotFoundError:
+    try:
+        subprocess.run(['conda', 'install', 'shapely'])
+        import shapely
+    except FileNotFoundError:
+        # 这个库用pip安装是不够的，正常要用conda，有些dll才会自动配置上
+        subprocess.run(['pip3', 'install', 'shapely'])
+        import shapely
 
 import numpy as np
 from shapely.geometry import Polygon
+import cv2
 
 from pyxllib.algo.intervals import Intervals
-
-import cv2
+from pyxllib.algo.geo_basic import *
 
 # import PIL.Image
 
@@ -169,12 +181,6 @@ ____base = """
 """
 
 
-def get_ndim(coords):
-    # 注意 np.array(coords[:1])，只需要取第一个元素就可以判断出ndim
-    coords = coords if isinstance(coords, np.ndarray) else np.array(coords[:1])
-    return coords.ndim
-
-
 def coords1d(coords, dtype=None):
     """ 转成一维点数据
 
@@ -281,14 +287,6 @@ def resort_quad_points(src_pts):
         pts[0], pts[1] = pts[1], pts[0]
         pts[2], pts[3] = pts[3], pts[2]
     return ensure_array_type(pts, src_type)
-
-
-def xywh2ltrb(p):
-    return [p[0], p[1], p[0] + p[2], p[1] + p[3]]
-
-
-def ltrb2xywh(p):
-    return [p[0], p[1], p[2] - p[0], p[3] - p[1]]
 
 
 ____warp_perspective = """

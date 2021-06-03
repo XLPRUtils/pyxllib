@@ -6,7 +6,8 @@
 
 """ 列出目录下所有文件清单的命令行工具 """
 
-from pyxllib.basic.most import *
+import os
+import subprocess
 
 try:
     import fire

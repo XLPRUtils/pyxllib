@@ -3,10 +3,16 @@ chardet
 requests
 qiniu
 pyyaml
-disjoint-set==0.6.3
 coloredlogs
 humanfriendly
 tqdm
 ujson
 Deprecated
 pyperclip
+
+pympler
+lxml
+beautifulsoup4
+numpy
+Jinja2
+pandas>=0.23.4

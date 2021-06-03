@@ -6,21 +6,11 @@
 
 
 import html
-import subprocess
+import inspect
 
-from pyxllib.debug.type import *
-
-
-def getasizeof(*objs, **opts):
-    """获得所有类的大小，底层用pympler.asizeof实现"""
-    from pympler import asizeof
-
-    try:
-        res = asizeof.asizeof(*objs, **opts)
-    # except TypeError:  # sqlalchemy.exc.InvalidRequestError
-    except:
-        res = -1
-    return res
+from pyxllib.file import File, Dir, get_etag
+from pyxllib.time import TicToc, Datetime
+from pyxllib.prog import *
 
 
 def viewfiles(procname, *files, **kwargs):

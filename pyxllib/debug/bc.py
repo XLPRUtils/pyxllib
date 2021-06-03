@@ -4,49 +4,13 @@
 # @Email  : 877362867@qq.com
 # @Date   : 2020/06/01 18:13
 
-
-from pyxllib.basic.most import func_input_message, dprint, natural_sort_key, File, refinepath, Dir
-from pyxllib.debug.type import prettifystr
-from pyxllib.debug.browser import Explorer
-
 import copy
 import pandas as pd
 
-
-def intersection_split(a, b):
-    """输入两个对象a,b，可以是dict或set类型，list等
-
-    会分析出二者共有的元素值关系
-    返回值是 ls1, ls2, ls3, ls4，大部分是list类型，但也有可能遵循原始情况是set类型
-        ls1：a中，与b共有key的元素值
-        ls2：a中，独有key的元素值
-        ls3：b中，与a共有key的元素值
-        ls4：b中，独有key的元素值
-    """
-    # 1 获得集合的key关系
-    keys1 = set(a)
-    keys2 = set(b)
-    keys0 = keys1 & keys2  # 两个集合共有的元素
-
-    # TODO 如果是字典，希望能保序
-
-    # 2 组合出ls1、ls2、ls3、ls4
-
-    def split(t, s, ks):
-        """原始元素为t，集合化的值为s，共有key是ks"""
-        if isinstance(t, (set, list, tuple)):
-            return ks, s - ks
-        elif isinstance(t, dict):
-            ls1 = sorted(map(lambda x: (x, t[x]), ks), key=lambda x: natural_sort_key(x[0]))
-            ls2 = sorted(map(lambda x: (x, t[x]), s - ks), key=lambda x: natural_sort_key(x[0]))
-            return ls1, ls2
-        else:
-            dprint(type(s))  # s不是可以用来进行集合规律分析的类型
-            raise ValueError
-
-    ls1, ls2 = split(a, keys1, keys0)
-    ls3, ls4 = split(b, keys2, keys0)
-    return ls1, ls2, ls3, ls4
+from pyxllib.algo import intersection_split
+from pyxllib.file import File, Dir
+from pyxllib.prog import prettifystr
+from pyxllib.debug.browser import Explorer
 
 
 class BCompare(Explorer):

@@ -4,9 +4,11 @@
 # @Email  : 877362867@qq.com
 # @Date   : 2020/08/15 00:59
 
-from tqdm import tqdm
-from pyxllib.debug.most import *
-from pyxllib.cv.most import *
+from pyxllib.algo import Groups
+from pyxllib.prog import *
+from pyxllib.file import *
+from pyxllib.cv import *
+from pyxllib.debug import *
 
 __0_basic = """
 """
@@ -140,7 +142,7 @@ class ToLabelmeJson:
     document: https://www.yuque.com/xlpr/pyxllib/ks5h4o
     """
 
-    @deprecated(version=VERSION, reason='建议使用GenLabelme实现')
+    @deprecated(reason='建议使用GenLabelme实现')
     def __init__(self, imgpath):
         """
         :param imgpath: 可选参数图片路径，强烈建议要输入，否则建立的label json会少掉图片宽高信息
@@ -395,6 +397,7 @@ class LabelmeData(BasicLabelData):
 
         可以处理旧版不动产标注 content_class 等问题
         """
+
         def cvt(shape):
             # 1 属性字典，至少先初始化一个label属性
             labelattr = dict()

@@ -31,58 +31,6 @@ ____str_funcs = """
 """
 
 
-def shorten(s, width=200, placeholder='...'):
-    """
-    :param width: 这个长度是上限，即使用placeholder时的字符串总长度也在这个范围内
-
-    >>> shorten('aaa', 10)
-    'aaa'
-    >>> shorten('hell world! 0123456789 0123456789', 11)
-    'hell wor...'
-    >>> shorten("Hello  world!", width=12)
-    'Hello world!'
-    >>> shorten("Hello  world!", width=11)
-    'Hello wo...'
-    >>> shorten('0123456789 0123456789', 2, 'xyz')  # 自己写的shorten
-    'xy'
-
-    注意textwrap.shorten的缩略只针对空格隔开的单词有效，我这里的功能与其不太一样
-    >>> textwrap.shorten('0123456789 0123456789', 11)  # 全部字符都被折叠了
-    '[...]'
-    >>> shorten('0123456789 0123456789', 11)  # 自己写的shorten
-    '01234567...'
-    """
-    s = re.sub(r'\s+', ' ', str(s))
-    n, m = len(s), len(placeholder)
-    if n > width:
-        s = s[:max(width - m, 0)] + placeholder
-    return s[:width]  # 加了placeholder在特殊情况下也会超，再做个截断最保险
-
-    # return textwrap.shorten(str(s), width)
-
-
-def strwidth(s):
-    """ string width
-
-    中英字符串实际宽度
-    >>> strwidth('ab')
-    2
-    >>> strwidth('a⑪中⑩')
-    7
-
-    ⑩等字符的宽度还是跟字体有关的，不过在大部分地方好像都是域宽2，目前算法问题不大
-    """
-    try:
-        res = len(s.encode('gbk'))
-    except UnicodeEncodeError:
-        count = len(s)
-        for x in s:
-            if ord(x) > 127:
-                count += 1
-        res = count
-    return res
-
-
 def strwidth_proc(s, fmt='r', chinese_char_width=1.8):
     """ 此函数可以用于每个汉字域宽是w=1.8等奇怪的情况
 
@@ -789,61 +737,6 @@ ____other = """
 """
 
 
-def struct_unpack(f, fmt):
-    r""" 类似np.fromfile的功能，读取并解析二进制数据
-
-    :param f:
-        如果带有read方法，则用read方法读取指定字节数
-        如果bytes对象则直接处理
-    :param fmt: 格式
-        默认按小端解析(2, 1, 0, 0) -> 258，如果需要大端，可以加前缀'>'
-        字节：c=char, b=signed char, B=unsigned char, ?=bool
-        2字节整数：h=short, H=unsigned short（后文同理，大写只是变成unsigned模式，不在累述）
-        4字节整数：i, I, l, L
-        8字节整数：q, Q
-        浮点数：e=2字节，f=4字节，d=8字节
-
-    >>> b = struct.pack('B', 127)
-    >>> b
-    b'\x7f'
-    >>> struct_unpack(b, 'c')
-    b'\x7f'
-    >>> struct_unpack(b, 'B')
-    127
-
-    >>> b = struct.pack('I', 258)
-    >>> b
-    b'\x02\x01\x00\x00'
-    >>> struct_unpack(b, 'I')  # 默认都是按小端打包、解析
-    258
-    >>> struct_unpack(b, '>I') # 错误示范，按大端解析的值
-    33619968
-    >>> struct_unpack(b, 'H'*2)  # 解析两个值，fmt*2即可
-    (258, 0)
-
-    >>> f = io.BytesIO(b'\x02\x01\x03\x04')
-    >>> struct_unpack(f, 'B'*3)  # 取前3个值，等价于np.fromfile(f, dtype='uint8', count=3)
-    (2, 1, 3)
-    >>> struct_unpack(f, 'B')  # 取出第4个值
-    4
-    """
-    # 1 取数据
-    size_ = struct.calcsize(fmt)
-    if hasattr(f, 'read'):
-        data = f.read(size_)
-        if len(data) < size_:
-            raise ValueError(f'剩余数据长度 {len(data)} 小于 fmt 需要的长度 {size_}')
-    else:  # 对于bytes等矩阵，可以多输入，但是只解析前面一部分
-        data = f[:size_]
-
-    # 2 解析
-    res = struct.unpack(fmt, data)
-    if len(res) == 1:  # 解析结果恰好只有一个的时候，返回值本身
-        return res[0]
-    else:
-        return res
-
-
 class ContentPartSpliter:
     """ 文本内容分块处理 """
 
@@ -861,9 +754,3 @@ class ContentPartSpliter:
 
 def get_username():
     return os.path.split(os.path.expanduser('~'))[-1]
-
-
-def linux_path_fmt(p):
-    p = str(p)
-    p = p.replace('\\', '/')
-    return p
