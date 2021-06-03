@@ -16,7 +16,6 @@ chardet
 requests
 qiniu
 pyyaml
-disjoint-set==0.6.3
 coloredlogs
 humanfriendly
 tqdm
@@ -71,7 +70,7 @@ scp
 """
 
 extras_require = {}
-extras_require['basic'] = '\n'.join(basic.splitlines())
+extras_require['file'] = '\n'.join(basic.splitlines())
 extras_require['debug'] = '\n'.join((basic + debug).splitlines())
 extras_require['image'] = '\n'.join((basic + image).splitlines())
 extras_require['cv'] = '\n'.join((basic + cv).splitlines())

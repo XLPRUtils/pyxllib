@@ -5,8 +5,8 @@
 # @Date   : 2020/08/15 00:59
 
 from tqdm import tqdm
-from pyxllib.debug import *
-from pyxllib.cv import *
+from pyxllib.debug.most import *
+from pyxllib.cv.most import *
 
 __0_basic = """
 """
@@ -18,10 +18,10 @@ class BasicLabelData:
     def __init__(self, root, data=None, *, fltr=None, slt=None, extdata=None):
         """
         :param root: 数据所在根目录
-        :param data: [(file1, data1), (file2, data2), ...]
+        :param data: {relpath: data1, 'a/1.txt': data2, ...}
             如果未传入data具体值，则根据目录里的情况自动初始化获得data的值
 
-            file是对应的File标注文件
+            relpath是对应的File标注文件的相对路径
             data1, data2 是读取的标注数据，根据不同情况，会存成不同格式
                 如果是json则直接保存json内存对象结构
                 如果是txt可能会进行一定的结构化解析存储
@@ -32,16 +32,22 @@ class BasicLabelData:
             judge(k, v)，自定义函数规则
         :param slt: select的缩写，要选中的标注文件后缀格式
             如果传入slt参数，该 Basic 基础类只会预设好 file 参数，数据部分会置 None，需要后续主动读取
+
+        >> BasicLabelData('textGroup/aabb', {'a.json': ..., 'a/1.json': ...})
+        >> BasicLabelData('textGroup/aabb', slt='json')
+        >> BasicLabelData('textGroup/aabb', fltr='jpg', slt='json')  # 只获取有对应jpg图片的json文件
+        >> BasicLabelData('textGroup/aabb', fltr='jpg|png', slt='json')
         """
+
         # 1 基础操作
         root = Dir(root)
-        self.root, self.data, self.extdata = root, data or [], extdata
+        self.root, self.data, self.extdata = root, data or {}, extdata
 
         if data is not None or slt is None:
             return
 
         # 2 如果没有默认data数据，以及传入slt参数，则需要使用默认文件关联方式读取标注
-        data = []
+        data = {}
         gs = PathGroups.groupby(Dir(root).select('**/*').subfiles())
         if isinstance(fltr, str):
             gs = gs.select_group_which_hassuffix(fltr)
@@ -49,12 +55,38 @@ class BasicLabelData:
             gs = gs.select_group(fltr)
 
         for k in gs.data.keys():
-            data.append((File(k, suffix=slt), None))
+            f = File(k, suffix=slt)
+            data[f.relpath(self.root)] = f.read()
 
         self.data = data
 
     def __len__(self):
         return len(self.data)
+
+    def read(self, relpath, **kwargs):
+        """
+        :param relpath: 必须是斜杠表示的相对路径 'a/1.txt'、'b/2.json'
+        """
+        self.data[relpath] = File(relpath, self.root).read(**kwargs)
+
+    def reads(self, prt=False, **kwargs):
+        """ 为了性能效率，初始化默认不会读取数据，需要调用reads才会开始读取数据 """
+        for k in tqdm(self.data.keys(), f'读取{self.__class__.__name__}数据', disable=not prt):
+            self.data[k] = File(k, self.root).read(**kwargs)
+
+    def write(self, relpath):
+        """
+        :param relpath: 必须是斜杠表示的相对路径 'a/1.txt'、'b/2.json'
+        """
+        data = self.data[relpath]
+        file = File(relpath, self.root)
+        if file:  # 如果文件存在，要遵循原有的编码规则
+            with open(str(file), 'rb') as f:
+                bstr = f.read()
+            encoding = get_encoding(bstr)
+            file.write(data, encoding=encoding, if_exists='delete')
+        else:  # 否则直接写入
+            file.write(data)
 
     def writes(self, *, max_workers=8, prt=False):
         """ 重新写入每份标注文件
@@ -62,18 +94,7 @@ class BasicLabelData:
         可能是内存里修改了数据，需要重新覆盖
         也可能是从coco等其他格式初始化，转换而来的内存数据，需要生成对应的新标注文件
         """
-
-        def write(x):
-            file, data = x  # noqa
-            if file:  # 如果文件存在，要遵循原有的编码规则
-                with open(str(file), 'rb') as f:
-                    bstr = f.read()
-                encoding = get_encoding(bstr)
-                file.write(data, encoding=encoding, if_exists='delete')
-            else:  # 否则直接写入
-                file.write(data)
-
-        mtqdm(write, self.data, desc=f'{self.__class__.__name__}写入标注数据',
+        mtqdm(self.write, self.data.keys(), desc=f'{self.__class__.__name__}写入标注数据',
               max_workers=max_workers, disable=not prt)
 
 
@@ -334,19 +355,13 @@ class LabelmeData(BasicLabelData):
     def __init__(self, root, data=None, *, prt=False, fltr='json', slt='json', extdata=None):
         """
         :param root: 文件根目录
-        :param data: [[jsonfile, lmdata], ...]，其中 lmdata 为一个labelme文件格式的标准内容
+        :param data: {jsonfile: lmdata, ...}，其中 lmdata 为一个labelme文件格式的标准内容
             如果未传入data具体值，则根据目录里的情况自动初始化获得data的值
-        :param prt: 是否显示进度、中间运行信息
+
+            210602周三16:26，为了工程等一些考虑，删除了 is_labelme_json_data 的检查
+                尽量通过 fltr、slt 的机制选出正确的 json 文件
         """
         super().__init__(root, data, fltr=fltr, slt=slt, extdata=extdata)
-
-        # 需要进一步读取数据，并过滤掉非labelme格式的json
-        data = []
-        for file, lmdata in tqdm(self.data, f'读取{self.__class__.__name__}数据', disable=not prt):
-            lmdata = lmdata or file.read(mode='.json')
-            if is_labelme_json_data(lmdata):
-                data.append((file, lmdata))
-        self.data = data
 
     def reduce(self):
         """ 移除imageData字段值 """
@@ -375,67 +390,70 @@ class LabelmeData(BasicLabelData):
 
         return shapes_df
 
-    @classmethod
-    def init_from_coco(cls, root, gt_dict, *, prt=False):
+    def update_label(self):
+        """ 将shape['label'] 升级为字典类型
+
+        可以处理旧版不动产标注 content_class 等问题
         """
-        :param root: 图片根目录
-        :param gt_dict: coco格式的字典
-            会将 ann json.dumps 为 str 存储为 label
-            因为image标记方式的原因，如果在root找到多个匹配，会取第一匹配项
-        :return:
-            extdata，存储了一些匹配异常信息
+        def cvt(shape):
+            # 1 属性字典，至少先初始化一个label属性
+            labelattr = dict()
+            try:
+                data = json.loads(shape['label'])
+                if isinstance(data, dict):
+                    labelattr = data
+            except json.decoder.JSONDecodeError:
+                labelattr['label'] = shape['label']
+
+            # 2 填充其他扩展属性值
+            keys = set(shape.keys())
+            stdkeys = set('label,points,group_id,shape_type,flags'.split(','))
+            for k in (keys - stdkeys):
+                labelattr[k] = shape[k]
+                del shape[k]
+
+            # 3 写会shape
+            shape['label'] = json.dumps(labelattr, ensure_ascii=False)
+
+        for jsonfile, lmdata in self.data.items():
+            for shape in lmdata['shapes']:
+                cvt(shape)
+
+    def update_label2(self):
+        """ 相比 update_label多了几何信息的处理
+        如果有会更新对应的seg、bbox、segmentation等几何位置信息
+        否则也会添加seg属性
         """
-        root, data = Dir(root), []
+        self.update_label()
 
-        # 1 准备工作，构建文件名索引字典
-        files = root.select('**/*').subfiles()
-        gs = PathGroups.groupby(files)
+        def cvt(shape):
+            labelattr = json.loads(shape['label'])
 
-        # 2 遍历生成labelme数据
-        cd = CocoData(gt_dict)
-        not_finds = set()  # coco里有的图片，root里没有找到
-        multimatch = dict()  # coco里的某张图片，在root找到多个匹配文件
-        for img, anns in cd.group_gt(reserve_empty=True):
-            # 2.1 文件匹配
-            imfiles = gs.find_files(img['file_name'])
-            if not imfiles:  # 没有匹配图片的，不处理
-                not_finds.add(img['file_name'])
-                continue
-            elif len(imfiles) > 1:
-                multimatch[img['file_name']] = imfiles
-                imfile = imfiles[0]
-            else:
-                imfile = imfiles[0]
+            shape['label'] = json.dumps(labelattr, ensure_ascii=False)
 
-            # 2.2 数据内容转换
-            lmdata = LabelmeData.gen_data(imfile)
-            lmdata['shapes'].append(LabelmeData.gen_shape(json.dumps(img, ensure_ascii=False), [[-10, 0], [-5, 0]]))
-            for ann in anns:
-                label = json.dumps(ann, ensure_ascii=False)
-                points = xywh2ltrb(ann['bbox'])
-                shape = LabelmeData.gen_shape(label, points)
-                lmdata['shapes'].append(shape)
-            data.append([imfile.with_suffix('.json'), lmdata])
+        for jsonfile, lmdata in self.data.items():
+            for shape in lmdata['shapes']:
+                cvt(shape)
 
-        return cls(root, data,
-                   extdata={'categories': cd.gt_dict['categories'],
-                            'not_finds': not_finds,
-                            'multimatch': Groups(multimatch)})
+    def to_cocogt(self, categories=None, *, outfile=None):
+        """ 将labelme转成 coco gt 标注的格式
 
-    def to_coco(self, categories=None, *, cat_id=None, outfile=None):
-        """ 分两种大情况
+        分两种大情况
         1、一种是raw原始数据转labelme标注后，首次转coco格式，这种编号等相关数据都可以重新生成
             raw_data --可视化--> labelme --转存--> coco
         2、还有种原来就是coco，转labelme修改标注后，又要再转回coco，这种应该尽量保存原始值
             coco --> labelme --手动修改--> labelme' --> coco'
-        +、 1, 2两种情况是可以连在一起，然后形成 labelme 和 coco 之间的多次互转的
+            这种在coco转labelme时，会做一些特殊标记，方便后续转回coco
+        3、 1, 2两种情况是可以连在一起，然后形成 labelme 和 coco 之间的多次互转的
+
+        to_cocogt只处理第一种情况，to_cocogt2用于处理第2、3种情况
+
+
+        对于第1种情况，直接全局重置一套image_id、box_id编号系统
 
         :param categories: 类别
             默认只设一个类别 {'id': 0, 'name': 'text', 'supercategory'}
-            支持自定义，所有annotations的category_id会取自定义cat的首项id值
-        :param cat_id: 对于手动添加的普通labelme标注框，本来是没有类别的
-            如果要转成coco，需要设置一个默认的类别id
-            该默认值从categories第1项取
+            支持自定义，所有annotations的category_id
         :param outfile: 得到格式后直接转存为文件
         :return: gt_dict
             注意，如果对文件顺序、ann顺序有需求的，请先自行操作self.data数据后，再调用该to_coco函数
@@ -443,29 +461,71 @@ class LabelmeData(BasicLabelData):
         """
         if not categories:
             categories = [{'id': 0, 'name': 'text', 'supercategory': ''}]
-        cat_id = categories[0]['id'] if cat_id is None else cat_id
-        ann_id = -1  # 新增的框box id为-1，然后每新增一个，递减1
+
+        img_id, ann_id = 0, 0
         images, annotations = [], []
 
-        for jsonfile, lmdata in self.data:
-            img_id = -1
+        for jsonfile, lmdata in self.data.items():
+            img_id += 1
+            # TODO file_name 加上相对路径？
+            images.append(CocoGtData.gen_image(img_id, lmdata['imagePath'],
+                                               lmdata['imageHeight'], lmdata['imageWidth']))
             for sp in lmdata['shapes']:
+                ann_id += 1
                 d = json.loads(sp['label'])
-                if isinstance(d, dict):
-                    if sp['points'][0][0] < 0:  # 图像级标注
-                        img_id = d['id']
-                        images.append(d)
-                    else:  # 普通框
-                        annotations.append(d)
+                d['image_id'] = img_id
+                d['id'] = ann_id
+                d['seg'] = sp['points']
+                d.update(sp['label'])
+                # 如果没有框类别，会默认设置一个。 （强烈建议外部业务功能代码自行设置好category_id）
+                if 'category_id' not in d:
+                    d['category_id'] = categories[0]['id']
+                ann = CocoGtData.gen_annotation(**d)
+                annotations.append(ann)
+        return CocoGtData.gen_data(images, annotations, categories, outfile)
+
+    def to_cocogt2(self, categories=None, *, outfile=None):
+        """ 之前就是用coco转成labelme，现在要转回coco的情景
+
+        执行该功能前一般都要跑一下 cvt2cocolike
+
+        包括：
+            新增一个 image 级别的标准框
+            将shape下扩展的所有字段属性attrs，集成存储到label字段中
+
+        xltype，用来标识一些特殊标注框：
+        """
+        if not categories:
+            categories = [{'id': 0, 'name': 'text', 'supercategory': ''}]
+
+        images, annotations = [], []
+
+        for jsonfile, lmdata in self.data.items():
+            for sp in lmdata['shapes']:
+                label = json.loads(sp['label'])
+                if 'xltype' not in label:
+                    # 普通的标注框
+                    pass
+                elif label['xltype'] == 'image':
+                    # image，图像级标注数据
+                    pass
+                elif label['xltype'] == 'seg':
+                    # seg，衍生的分割标注框，在转回coco时可以丢弃
+                    pass
                 else:
-                    # 这种一般是手动新增的框
-                    pts = [round(v, 2) for v in coords1d(sp['points'])]
-                    ann = CocoGtData.gen_annotation(image_id=img_id, id=ann_id,
-                                                    bbox=ltrb2xywh(pts),
-                                                    label=sp['label'],
-                                                    category_id=cat_id)
-                    annotations.append(ann)
-                    ann_id -= 1
+                    raise ValueError
+
+                ann_id += 1
+                d = json.loads(sp['label'])
+                d['image_id'] = img_id
+                d['id'] = ann_id
+                d['seg'] = sp['points']
+                d.update(sp['label'])
+                # 如果没有框类别，会默认设置一个。 （强烈建议外部业务功能代码自行设置好category_id）
+                if 'category_id' not in d:
+                    d['category_id'] = categories[0]['id']
+                ann = CocoGtData.gen_annotation(**d)
+                annotations.append(ann)
         return CocoGtData.gen_data(images, annotations, categories, outfile)
 
 
@@ -474,7 +534,10 @@ __2_coco = """
 
 
 class CocoGtData:
-    """ 需要同时绑定coco.json和图片目录，方便做些集成操作 """
+    """ 类coco格式的json数据处理 """
+
+    def __init__(self, gt):
+        self.gt_dict = gt if isinstance(gt, dict) else File(gt).read()
 
     @classmethod
     def gen_image(cls, image_id, file_name, height, width, **kwargs):
@@ -512,9 +575,9 @@ class CocoGtData:
         # a = {'id': 0, 'area': 0, 'bbox': [0, 0, 0, 0],
         #       'category_id': 1, 'image_id': 0, 'iscrowd': 0, 'segmentation': []}
 
-        if 'seg' in a:  # seg是一个特殊参数，使用一个多边形来标注
+        if 'seg' in a:  # seg是一个特殊参数，使用“一个”多边形来标注（注意区别segmentation是多个多边形）
             if 'segmentation' not in a:
-                a['segmentation'] = [a['seg']]
+                a['segmentation'] = [coords1d(a['seg'])]
             del a['seg']
         if 'bbox' not in a:
             pts = []
@@ -577,60 +640,12 @@ class CocoGtData:
             File(outfile).write(data)
         return data
 
-
-class CocoDtData:
-    pass
-
-
-class CocoData:
-    """ 这个类可以封装一些需要gt和dt衔接的功能 """
-
-    def __init__(self, gt, dt=None, *, min_score=0):
-        """
-        :param gt: gt的dict或文件
-            gt是必须传入的，可以只传入gt
-            有些任务理论上可以只有dt，但把配套的gt传入，能做更多事
-        :param dt: dt的list或文件
-        :param min_score: CocoMatch这个系列的类，初始化增加min_score参数，支持直接滤除dt低置信度的框
-        """
-
-        def get_dt_list(dt, min_score=0):
-            # dt
-            default_dt = []
-            # default_dt = [{'image_id': self.gt_dict['images'][0]['id'],
-            #                'category_id': self.gt_dict['categories'][0]['id'],
-            #                'bbox': [0, 0, 1, 1],
-            #                'score': 1}]
-            # 这样直接填id有很大的风险，可能会报错。但是要正确填就需要gt的信息，传参麻烦~~
-            # default_dt = [{'image_id': 1, 'category_id': 1, 'bbox': [0, 0, 1, 1], 'score': 1}]
-
-            if not dt:
-                dt_list = default_dt
-            else:
-                dt_list = dt if isinstance(dt, (list, tuple)) else File(dt).read()
-                if min_score:
-                    dt_list = [b for b in dt_list if (b['score'] >= min_score)]
-                if not dt_list:
-                    dt_list = default_dt
-            return dt_list
-
-        self.gt_dict = gt if isinstance(gt, dict) else File(gt).read()
-        self.dt_list = get_dt_list(dt, min_score)
-
     @classmethod
     def is_gt_dict(cls, gt_dict):
         if isinstance(gt_dict, (tuple, list)):
             return False
         has_keys = set('images annotations categories'.split())
         return not (has_keys - gt_dict.keys())
-
-    @classmethod
-    def is_dt_list(cls, dt_list):
-        if not isinstance(dt_list, (tuple, list)):
-            return False
-        item = dt_list[0]
-        has_keys = set('score image_id category_id bbox'.split())
-        return not (has_keys - item.keys())
 
     def clear_gt_segmentation(self, *, inplace=False):
         """ 有的coco json文件太大，如果只做普通的bbox检测任务，可以把segmentation的值删掉
@@ -639,6 +654,48 @@ class CocoData:
         for an in gt_dict['annotations']:
             an['segmentation'] = []
         return gt_dict
+
+    def get_catname_func(self):
+        id2name = {x['id']: x['name'] for x in self.gt_dict['categories']}
+
+        def warpper(cat_id, default=...):
+            """
+            :param cat_id:
+            :param default: 没匹配到的默认值
+                ... 不是默认值，而是代表匹配不到直接报错
+            :return:
+            """
+            if cat_id in id2name:
+                return id2name[cat_id]
+            else:
+                if default is ...:
+                    raise IndexError(f'{cat_id}')
+                else:
+                    return default
+
+        return warpper
+
+    def _group_base(self, group_anns, reserve_empty=False):
+        if reserve_empty:
+            for im in self.gt_dict['images']:
+                yield im, group_anns.get(im['id'], [])
+        else:
+            id2im = {im['id']: im for im in self.gt_dict['images']}
+            for k, v in group_anns.items():
+                yield id2im[k], v
+
+    def group_gt(self, *, reserve_empty=False):
+        """ 遍历gt的每一张图片的标注
+
+        这个是用字典的方式来实现分组，没用 df.groupby 的功能
+
+        :param reserve_empty: 是否保留空im对应的结果
+
+        :return: [(im, annos), ...] 每一组是im标注和对应的一组annos标注
+        """
+        group_anns = defaultdict(list)
+        [group_anns[an['image_id']].append(an) for an in self.gt_dict['annotations']]
+        return self._group_base(group_anns, reserve_empty)
 
     def select_gt(self, ids, *, inplace=False):
         """ 删除一些images标注（会删除对应的annotations），挑选数据，或者减小json大小
@@ -669,21 +726,6 @@ class CocoData:
         if inplace: self.gt_dict = gt_dict
         return gt_dict
 
-    def select_dt(self, ids, *, inplace=False):
-        gt_dict, dt_list = self.gt_dict, self.dt_list
-        # 1 ids 统一为int类型的id值
-        if not isinstance(ids, (list, tuple, set)):
-            ids = [ids]
-        if gt_dict:
-            map_name2id = {item['file_name']: item['id'] for item in gt_dict['images']}
-            ids = [(map_name2id[x] if isinstance(x, str) else x) for x in ids]
-        ids = set(ids)
-
-        # 2 简化images
-        dst = [x for x in dt_list if (x['image_id'] in ids)]
-        if inplace: self.dt_list = dst
-        return dst
-
     def select_gt_by_imdir(self, imdir, *, inplace=False):
         """ 基于imdir目录下的图片来过滤src_json """
         # 1 对比下差异
@@ -698,41 +740,6 @@ class CocoData:
         gt_dict = self.select_gt(json_images & dir_images)
         if inplace: self.gt_dict = gt_dict
         return gt_dict
-
-    def _group_base(self, group_anns, reserve_empty=False):
-        if reserve_empty:
-            for im in self.gt_dict['images']:
-                yield im, group_anns.get(im['id'], [])
-        else:
-            id2im = {im['id']: im for im in self.gt_dict['images']}
-            for k, v in group_anns.items():
-                yield id2im[k], v
-
-    def group_gt(self, *, reserve_empty=False):
-        """ 遍历gt的每一张图片的标注
-
-        这个是用字典的方式来实现分组，没用 df.groupby 的功能
-
-        :param reserve_empty: 是否保留空im对应的结果
-
-        :return: [(im, annos), ...] 每一组是im标注和对应的一组annos标注
-        """
-        group_anns = defaultdict(list)
-        [group_anns[an['image_id']].append(an) for an in self.gt_dict['annotations']]
-        return self._group_base(group_anns, reserve_empty)
-
-    def group_dt(self, *, reserve_empty=False):
-        """ 对annos按image_id分组，如果有"""
-        group_anns = defaultdict(list)
-        [group_anns[an['image_id']].append(an) for an in self.dt_list]
-        return self._group_base(group_anns, reserve_empty)
-
-    def group_gt_dt(self, *, reserve_empty=False):
-        """ 获得一张图片上gt和dt的标注结果
-
-        [(im, gt_anns, dt_anns), ...]
-        """
-        raise NotImplementedError
 
     def reset_image_id(self, start=1, *, inplace=False):
         """ 按images顺序对图片重编号 """
@@ -757,6 +764,124 @@ class CocoData:
         for i, anno in enumerate(anns, start=start):
             anno['id'] = i
         return anns
+
+    def to_labelme(self, root, gt_dict, *, prt=False):
+        """
+        :param root: 图片根目录
+        :param gt_dict: coco格式的字典
+            会将 ann json.dumps 为 str 存储为 label
+            因为image标记方式的原因，如果在root找到多个匹配，会取第一匹配项
+        :return:
+            extdata，存储了一些匹配异常信息
+        """
+        root, data = Dir(root), []
+
+        # 1 准备工作，构建文件名索引字典
+        files = root.select('**/*').subfiles()
+        gs = PathGroups.groupby(files)
+
+        # 2 遍历生成labelme数据
+        cd = CocoData(gt_dict)
+        not_finds = set()  # coco里有的图片，root里没有找到
+        multimatch = dict()  # coco里的某张图片，在root找到多个匹配文件
+        for img, anns in cd.group_gt(reserve_empty=True):
+            # 2.1 文件匹配
+            imfiles = gs.find_files(img['file_name'])
+            if not imfiles:  # 没有匹配图片的，不处理
+                not_finds.add(img['file_name'])
+                continue
+            elif len(imfiles) > 1:
+                multimatch[img['file_name']] = imfiles
+                imfile = imfiles[0]
+            else:
+                imfile = imfiles[0]
+
+            # 2.2 数据内容转换
+            lmdata = LabelmeData.gen_data(imfile)
+            lmdata['shapes'].append(LabelmeData.gen_shape(json.dumps(img, ensure_ascii=False), [[-10, 0], [-5, 0]]))
+            for ann in anns:
+                label = json.dumps(ann, ensure_ascii=False)
+                points = xywh2ltrb(ann['bbox'])
+                shape = LabelmeData.gen_shape(label, points)
+                lmdata['shapes'].append(shape)
+            data.append([imfile.with_suffix('.json'), lmdata])
+
+        return LabelmeData(root, data,
+                           extdata={'categories': cd.gt_dict['categories'],
+                                    'not_finds': not_finds,
+                                    'multimatch': Groups(multimatch)})
+
+
+class CocoData(CocoGtData):
+    """ 这个类可以封装一些需要gt和dt衔接的功能 """
+
+    def __init__(self, gt, dt=None, *, min_score=0):
+        """
+        :param gt: gt的dict或文件
+            gt是必须传入的，可以只传入gt
+            有些任务理论上可以只有dt，但把配套的gt传入，能做更多事
+        :param dt: dt的list或文件
+        :param min_score: CocoMatch这个系列的类，初始化增加min_score参数，支持直接滤除dt低置信度的框
+        """
+        super().__init__(gt)
+
+        def get_dt_list(dt, min_score=0):
+            # dt
+            default_dt = []
+            # default_dt = [{'image_id': self.gt_dict['images'][0]['id'],
+            #                'category_id': self.gt_dict['categories'][0]['id'],
+            #                'bbox': [0, 0, 1, 1],
+            #                'score': 1}]
+            # 这样直接填id有很大的风险，可能会报错。但是要正确填就需要gt的信息，传参麻烦~~
+            # default_dt = [{'image_id': 1, 'category_id': 1, 'bbox': [0, 0, 1, 1], 'score': 1}]
+
+            if not dt:
+                dt_list = default_dt
+            else:
+                dt_list = dt if isinstance(dt, (list, tuple)) else File(dt).read()
+                if min_score:
+                    dt_list = [b for b in dt_list if (b['score'] >= min_score)]
+                if not dt_list:
+                    dt_list = default_dt
+            return dt_list
+
+        self.dt_list = get_dt_list(dt, min_score)
+
+    @classmethod
+    def is_dt_list(cls, dt_list):
+        if not isinstance(dt_list, (tuple, list)):
+            return False
+        item = dt_list[0]
+        has_keys = set('score image_id category_id bbox'.split())
+        return not (has_keys - item.keys())
+
+    def select_dt(self, ids, *, inplace=False):
+        gt_dict, dt_list = self.gt_dict, self.dt_list
+        # 1 ids 统一为int类型的id值
+        if not isinstance(ids, (list, tuple, set)):
+            ids = [ids]
+        if gt_dict:
+            map_name2id = {item['file_name']: item['id'] for item in gt_dict['images']}
+            ids = [(map_name2id[x] if isinstance(x, str) else x) for x in ids]
+        ids = set(ids)
+
+        # 2 简化images
+        dst = [x for x in dt_list if (x['image_id'] in ids)]
+        if inplace: self.dt_list = dst
+        return dst
+
+    def group_dt(self, *, reserve_empty=False):
+        """ 对annos按image_id分组，如果有"""
+        group_anns = defaultdict(list)
+        [group_anns[an['image_id']].append(an) for an in self.dt_list]
+        return self._group_base(group_anns, reserve_empty)
+
+    def group_gt_dt(self, *, reserve_empty=False):
+        """ 获得一张图片上gt和dt的标注结果
+
+        [(im, gt_anns, dt_anns), ...]
+        """
+        raise NotImplementedError
 
     def to_icdar_label_quad(self, outfile, *, min_score=0):
         """ 将coco的dt结果转为icdar的标注格式
@@ -789,23 +914,3 @@ class CocoData:
             quads = [','.join(map(str, x)) for x in quads]
             myzip.writestr(label_file, '\n'.join(quads))
         myzip.close()
-
-    def get_catname_func(self):
-        id2name = {x['id']: x['name'] for x in self.gt_dict['categories']}
-
-        def warpper(cat_id, default=...):
-            """
-            :param cat_id:
-            :param default: 没匹配到的默认值
-                ... 不是默认值，而是代表匹配不到直接报错
-            :return:
-            """
-            if cat_id in id2name:
-                return id2name[cat_id]
-            else:
-                if default is ...:
-                    raise IndexError(f'{cat_id}')
-                else:
-                    return default
-
-        return warpper

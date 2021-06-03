@@ -6,7 +6,7 @@
 
 
 from pyxllib.text.base import *
-from pyxllib.basic.intervals import *
+from pyxllib.algo.intervals import *
 
 
 def pqmove(s, p, q):

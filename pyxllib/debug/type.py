@@ -13,8 +13,8 @@ import textwrap
 import numpy as np
 import pandas as pd
 
-from pyxllib.basic.str import typename, natural_sort_key, shorten
-from pyxllib.basic.time import ValuesStat
+from pyxllib.text.str import typename, natural_sort_key, shorten
+from pyxllib.time.__init__ import ValuesStat
 from pyxllib.basic.file import File
 
 
