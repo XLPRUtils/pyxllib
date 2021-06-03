@@ -4,10 +4,8 @@
 # @Email  : 877362867@qq.com
 # @Date   : 2020/06/06
 
-from collections import defaultdict
+from pandas.api.types import is_list_like
 
-from pyxllib.basic.most import *
-from pyxllib.cv.most import *
 from pyxllib.data.label import *
 
 import pyautogui
@@ -88,13 +86,19 @@ class AutoGuiLabelData:
 
         return attrs
 
-    def update_loclabel_img(self, loclabel, img):
-        """ 添加一张图片数据 """
+    def update_loclabel_img(self, loclabel, img, *, if_exists='update'):
+        """ 添加一张图片数据
+
+        :param if_exists:
+            update，更新
+            skip，跳过，不更新
+        """
         loc, label = os.path.split(loclabel)
         h, w = img.shape[:2]
 
         # 1 如果loc图片不存在，则新建一个jpg图片
-        if loc not in self.data:
+        update = True
+        if loc not in self.data or not self.data[loc]:
             imfile = imwrite(img, File(loc, self.root, suffix='.jpg'))
             self.imfiles[loc] = imfile
             shape = LabelmeData.gen_shape(label, [[0, 0], [w, h]])
@@ -110,13 +114,16 @@ class AutoGuiLabelData:
             shape = LabelmeData.gen_shape(label, [[0, height], [width, height + h]])
             self.data[loc][label] = self.parse_shape(shape)
         # 3 已有的图，则进行替换
-        else:
+        elif if_exists == 'update':
             image = imread(self.imfiles[loc])
             [x1, y1, x2, y2] = self.data[loc][label]['ltrb']
             image[y1:y2, x1:x2] = img
             imwrite(image, self.imfiles[loc])
-        # 该更新，需要实时保存到文件中
-        self.write(loc)
+        else:
+            update = False
+
+        if update:  # 需要实时保存到文件中
+            self.write(loc)
 
     def write(self, loc):
         f = File(loc, self.root, suffix='.json')
@@ -138,7 +145,10 @@ class AutoGuiLabelData:
 
     def __getitem__(self, loclabel):
         loc, label = os.path.split(loclabel)
-        return self.data[loc][label]
+        try:
+            return self.data[loc][label]
+        except KeyError:
+            return None
 
     def __setitem__(self, loclabel, value):
         loc, label = os.path.split(loclabel)
@@ -171,8 +181,12 @@ class NamedLocate(AutoGuiLabelData):
     特殊取值：
     '@IMAGE_ID' 该状态图的标志区域，即游戏中在该位置出现此子图，则认为进入了对应的图像状态
 
-    TODO 生成一个简略的概括txt，方便快速查阅有哪些接口；或者生成某种特定格式的python
-    TODO 吃土乡人物清单要用特殊技巧去获得，不能手动暴力搞；可以自动循环拼接所有图
+    截图：screenshot，update_shot
+    检查固定位像素：point2pixel，pixel_distance，check_pixel
+    检查固定位图片：rect2img，img_distance，check_img
+    检索图片：img2rects, img2rect，img2point，img2img
+    操作：click，move_to
+    高级：wait，check_click，wait_click
     """
 
     def __init__(self, root, *, grayscale=None, confidence=0.95, tolerance=20):
@@ -197,7 +211,7 @@ class NamedLocate(AutoGuiLabelData):
         :param region: ltrb
         """
         if isinstance(region, str):
-            region = ltrb2xywh(self[region])
+            region = ltrb2xywh(self[region]['ltrb'])
         im = pyautogui.screenshot(region=region)
         return pil2cv(im)
 
@@ -249,10 +263,14 @@ class NamedLocate(AutoGuiLabelData):
         p2 = self.point2pixel(loclabel)
         return self.pixel_distance(p1, p2) < tolerance
 
-    def check_img(self, loclabel, *, grayscale=None, confidence=None):
+    def check_img(self, loclabel, img=None, *, grayscale=None, confidence=None):
         grayscale = grayscale if grayscale is not None else self.grayscale
         confidence = confidence if confidence is not None else self.confidence
-        boxes = pyautogui.locateAll(self[loclabel]['img'], self.screenshot(loclabel),
+        if img is None:
+            img = self[loclabel]['img']
+        elif isinstance(img, str):
+            img = self[img]['img']
+        boxes = pyautogui.locateAll(img, self.screenshot(loclabel),
                                     grayscale=grayscale, confidence=confidence)
         boxes = [xywh2ltrb(box) for box in list(boxes)]
         return len(boxes)
@@ -323,13 +341,23 @@ class NamedLocate(AutoGuiLabelData):
             point = self[point]['center']
         pyautogui.moveTo(*point)
 
-    def wait(self, loclabel, *, fixpos=False):
+    def wait(self, loclabel, *, fixpos=False, limit=None, interval=1):
+        """ 封装的比较高层的功能 """
+        # dprint(loclabel, fixpos)
+        if fixpos:
+            xlwait(lambda: self.check_img(loclabel))
+            point = self[loclabel]['center']
+        else:
+            point = xlwait(lambda: self.img2point(loclabel), limit=limit, interval=interval)
+        return point
+
+    def wait_leave(self, loclabel, *, fixpos=False, limit=None, interval=1):
         """ 封装的比较高层的功能 """
         if fixpos:
             xlwait(lambda: self.check_img(loclabel))
             point = self[loclabel]['center']
         else:
-            point = xlwait(lambda: self.img2point(loclabel))
+            point = xlwait(lambda: not self.img2point(loclabel), limit=limit, interval=interval)
         return point
 
     def check_click(self, loclabel, *, back=False, wait_change=False):
@@ -341,6 +369,58 @@ class NamedLocate(AutoGuiLabelData):
         """ 封装的比较高层的功能 """
         point = self.wait(loclabel, fixpos=fixpos)
         self.click(point, back=back, wait_change=wait_change)
+
+    def point2loclabels(self, point, loclabels):
+        """ 判断loc这张图里有哪些标签覆盖到了point这个点
+
+        :param loclabels: 可以输入一张图的定位
+            也可以输入多个loclabel清单，会返回所有满足的loclabel名称
+        """
+        from shapely.geometry import Point
+
+        # 1 loclabels
+        if not is_list_like(loclabels):
+            loclabels = [loclabels]
+        point = Point(*point)
+
+        # 2 result
+        res = []
+        for loclabel in loclabels:
+            if loclabel in self.data:
+                for k, v in self.data.items():
+                    if 'ltrb' in v:
+                        if point.within(shapely_polygon(v['ltrb'])):
+                            res.append(f'{loclabel}/{k}')
+            else:
+                v = self[loclabel]
+                if 'ltrb' in v:
+                    if point.within(shapely_polygon(v['ltrb'])):
+                        res.append(f'{loclabel}')
+
+        return res
+
+    def point2loclabel(self, point, loclabels):
+        """ 只返回第一个匹配结果
+        """
+        from shapely.geometry import Point
+
+        # 1 loclabels
+        if not is_list_like(loclabels):
+            loclabels = [loclabels]
+        point = Point(*point)
+
+        # 2 result
+        for loclabel in loclabels:
+            if loclabel in self.data:
+                for k, v in self.data.items():
+                    if 'ltrb' in v:
+                        if point.within(shapely_polygon(v['ltrb'])):
+                            return f'{loclabel}/{k}'
+            else:
+                v = self[loclabel]
+                if 'ltrb' in v:
+                    if point.within(shapely_polygon(v['ltrb'])):
+                        return f'{loclabel}'
 
 
 class PosTran:
