@@ -12,8 +12,8 @@ import requests
 import bs4
 from bs4 import BeautifulSoup
 
-from pyxllib.text.base import *
-from pyxllib.text.str import *
+from pyxllib.text.advance import *
+from pyxllib.text.xlalign import *
 
 ____section_1_dfs_base = """
 一个通用的递归功能

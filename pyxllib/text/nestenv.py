@@ -5,7 +5,7 @@
 # @Date   : 2019/02/20 10:03
 
 
-from pyxllib.text.base import *
+from pyxllib.text.advance import *
 from pyxllib.algo.intervals import *
 
 

@@ -18,11 +18,11 @@ import humanfriendly
 
 # 大小写不敏感字典
 
-from pyxllib.algo import natural_sort
-from pyxllib.text.str import strfind
-from pyxllib.time import Datetime
-from pyxllib.file import get_etag, PathBase, File
-from pyxllib.debug import Iterate
+from pyxllib.algo.order import natural_sort
+from pyxllib.text.basic import strfind
+from pyxllib.time.datetime import Datetime
+from pyxllib.file.file import get_etag, PathBase, File
+from pyxllib.debug.xllog import Iterate
 
 ____dir = """
 支持文件或文件夹的对比复制删除等操作的函数：filescmp、filesdel、filescopy

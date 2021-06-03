@@ -4,79 +4,16 @@
 # @Email  : 877362867@qq.com
 # @Date   : 2020/06/02 11:09
 
-import os
-import re
 from collections import defaultdict, Counter
 import pprint
 import sys
-import textwrap
 
-import numpy as np
 import pandas as pd
 
-from pyxllib.text import shorten
-from pyxllib.algo import natural_sort_key
-from pyxllib.prog.base import typename
-
-
-def east_asian_len(s, ambiguous_width=None):
-    import pandas.io.formats.format as fmt
-    return fmt.EastAsianTextAdjustment().len(s)
-
-
-def east_asian_shorten(s, width=50, placeholder='...'):
-    """考虑中文情况下的域宽截断
-
-    :param s: 要处理的字符串
-    :param width: 宽度上限，仅能达到width-1的宽度
-    :param placeholder: 如果做了截断，末尾补足字符
-
-    # width比placeholder还小
-    >>> east_asian_shorten('a', 2)
-    'a'
-    >>> east_asian_shorten('a啊b'*4, 3)
-    '..'
-    >>> east_asian_shorten('a啊b'*4, 4)
-    '...'
-
-    >>> east_asian_shorten('a啊b'*4, 5, '...')
-    'a...'
-    >>> east_asian_shorten('a啊b'*4, 11)
-    'a啊ba啊...'
-    >>> east_asian_shorten('a啊b'*4, 16, '...')
-    'a啊ba啊ba啊b...'
-    >>> east_asian_shorten('a啊b'*4, 18, '...')
-    'a啊ba啊ba啊ba啊b'
-    """
-    # 一、如果字符串本身不到width设限，返回原值
-    s = textwrap.shorten(s, width * 3, placeholder='')  # 用textwrap的折行功能，尽量不删除文本
-    n = east_asian_len(s)
-    if n < width: return s
-
-    # 二、如果输入的width比placeholder还短
-    width -= 1
-    m = east_asian_len(placeholder)
-    if width <= m:
-        return placeholder[:width]
-
-    # 三、需要添加 placeholder
-    # 1 计算长度
-    width -= m
-
-    # 2 截取s
-    try:
-        s = s.encode('gbk')[:width].decode('gbk', errors='ignore')
-    except UnicodeEncodeError:
-        i, count = 0, m
-        while i < n and count <= width:
-            if ord(s[i]) > 127:
-                count += 2
-            else:
-                count += 1
-            i += 1
-        s = s[:i]
-
-    return s + placeholder
+from pyxllib.text.basic import shorten
+from pyxllib.text.xlalign import east_asian_shorten
+from pyxllib.algo.order import natural_sort_key
+from pyxllib.prog.basic import typename
 
 
 def dataframe_str(df, *args, ambiguous_as_wide=None, shorten=True):

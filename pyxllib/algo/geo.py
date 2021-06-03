@@ -21,7 +21,6 @@ except ModuleNotFoundError:
         subprocess.run(['pip3', 'install', 'shapely'])
         import shapely
 
-import numpy as np
 from shapely.geometry import Polygon
 import cv2
 

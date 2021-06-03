@@ -7,9 +7,9 @@
 import copy
 import pandas as pd
 
-from pyxllib.algo import intersection_split
-from pyxllib.file import File, Dir
-from pyxllib.prog import prettifystr
+from pyxllib.algo.group import intersection_split
+from pyxllib.file.dir import File, Dir
+from pyxllib.debug.type import prettifystr
 from pyxllib.debug.browser import Explorer
 
 

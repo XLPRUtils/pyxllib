@@ -12,7 +12,7 @@ def unpack_zipfile(filename, extract_dir):
     """ 为了修复zipfile底层的中文解压乱码问题，修改了shutil._UNPACK_FORMATS的底层功能
     """
     from pyxllib.stdlib import zipfile
-    from pyxllib.basic import Dir, File
+    from pyxllib.xl import Dir, File
     from shutil import ReadError
 
     zip = zipfile.ZipFile(filename)

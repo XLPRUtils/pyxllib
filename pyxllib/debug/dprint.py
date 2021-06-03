@@ -7,8 +7,8 @@
 import inspect
 import os
 
-from pyxllib.time import TicToc
-from pyxllib.prog import typename
+from pyxllib.time.tictoc import TicToc
+from pyxllib.prog.basic import typename
 
 ____dprint = """
 调试相关功能
