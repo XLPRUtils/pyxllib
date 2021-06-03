@@ -4,15 +4,27 @@
 # @Email  : 877362867@qq.com
 # @Date   : 2020/06/03 09:52
 
-
 import math
+import subprocess
+
+try:
+    from bidict import bidict
+except ModuleNotFoundError:
+    subprocess.run(['pip3', 'install', 'bidict'])
+    from bidict import bidict
+
+try:
+    import sqlalchemy
+except ModuleNotFoundError:
+    subprocess.run(['pip3', 'install', 'sqlalchemy'])
+    subprocess.run(['pip3', 'install', 'mysqlclient'])
+    import sqlalchemy
 
 import pandas as pd
 
-from bidict import bidict
-import sqlalchemy
-
-from pyxllib.basic.most import TicToc, dformat, dprint, File
+from pyxllib.time import TicToc
+from pyxllib.debug import dformat
+from pyxllib.file import File
 
 SQL_LIB_ACCOUNT_FILE = File(__file__).parent / 'sqllibaccount.pkl'
 

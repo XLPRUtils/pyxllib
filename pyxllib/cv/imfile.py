@@ -7,12 +7,17 @@
 
 from collections import defaultdict
 import concurrent.futures
+import io
+import os
+import re
+import requests
+import subprocess
 
 import numpy as np
 from PIL import Image
 
-from pyxllib.basic.most import *
-from pyxllib.cv.most import cv2pil, PilPrcs
+from pyxllib.cv.cvimg import cv2pil, PilPrcs
+from pyxllib.file import File
 
 
 def get_img_content(in_):
@@ -20,7 +25,7 @@ def get_img_content(in_):
 
     :param in_: 可以是本地文件，也可以是图片url地址，也可以是Image对象
     """
-    from pyxllib.basic.most import is_url, is_file
+    from pyxllib.file import is_url, is_file
 
     # 1 取不同来源的数据
     if is_url(in_):

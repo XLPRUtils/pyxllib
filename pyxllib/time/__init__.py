@@ -8,14 +8,17 @@
 import datetime
 import math
 import re
+import time
 import timeit
 
 import arrow
 
 from humanfriendly import format_timespan
 
-from pyxllib.text.str import shorten, listalign
+from pyxllib.text import shorten
+from pyxllib.text.str import listalign
 from pyxllib.algo.order import natural_sort
+from pyxllib.algo import ValuesStat
 
 ____tictoc = """
 基于 pytictoc 代码，做了些自定义扩展
@@ -86,18 +89,18 @@ class TicToc:
     @staticmethod
     def process_time(msg='time.process_time():'):
         """计算从python程序启动到目前为止总用时"""
-        print(f'{msg} {format_timespan(__init__.process_time())}.')
+        print(f'{msg} {format_timespan(time.process_time())}.')
 
     def __enter__(self):
         """Start the timer when using TicToc in a context manager."""
         if self.title == '__main__':
-            from pyxllib.debug.log import get_xllog
-            get_xllog().info(f'time.process_time(): {format_timespan(__init__.process_time())}.')
+            from pyxllib.debug import get_xllog
+            get_xllog().info(f'time.process_time(): {format_timespan(time.process_time())}.')
         self.start = timeit.default_timer()
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         """On exit, print time elapsed since entering context manager."""
-        from pyxllib.debug.log import get_xllog
+        from pyxllib.debug import get_xllog
 
         elapsed = self.tocvalue()
         xllog = get_xllog()
@@ -111,46 +114,6 @@ class TicToc:
 ____timer = """
 
 """
-
-
-class ValuesStat:
-    """ 一串数值的相关统计分析 """
-
-    def __init__(self, values):
-        self.values = values
-        self.n = len(values)
-        self.sum = sum(values)
-        # np有标准差等公式，但这是basic底层库，不想依赖太多第三方库，所以手动实现
-        if self.n:
-            self.mean = self.sum / self.n
-            self.std = math.sqrt((sum([(x - self.mean) ** 2 for x in values]) / self.n))
-            self.min, self.max = min(values), max(values)
-        else:
-            self.mean = self.std = self.min = self.max = float('nan')
-
-    def __len__(self):
-        return self.n
-
-    def summary(self, valfmt='g'):
-        """ 输出性能分析报告，data是每次运行得到的时间数组
-
-        :param valfmt: 数值显示的格式
-            g是比较智能的一种模式
-            也可以用 '.3f'表示保留3位小数
-
-            也可以传入长度5的格式清单，表示 [和、均值、标准差、最小值、最大值] 一次展示的格式
-        """
-        if isinstance(valfmt, str):
-            valfmt = [valfmt] * 5
-
-        if self.n > 1:  # 有多轮，则应该输出些参考统计指标
-            ls = [f'总和: {self.sum:{valfmt[0]}}', f'均值标准差: {self.mean:{valfmt[1]}}±{self.std:{valfmt[2]}}',
-                  f'总数: {self.n}', f'最小值: {self.min:{valfmt[3]}}', f'最大值: {self.max:{valfmt[4]}}']
-            return '\t'.join(ls)
-        elif self.n == 1:  # 只有一轮，则简单地输出即可
-            return f'{self.sum:{valfmt[0]}}'
-        else:
-            raise ValueError
 
 
 class Timer:
@@ -232,10 +195,10 @@ def perftest(title, stmt="pass", repeat=1, number=1, globals=None, res_width=Non
     data = []
     res = ''
     for i in range(repeat):
-        start = __init__.__init__()
+        start = time.clock()
         for j in range(number):
             res = func()
-        data.append(__init__.__init__() - start)
+        data.append(time.clock() - start)
 
     # 3 报告格式
     if res_width is None:

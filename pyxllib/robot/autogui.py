@@ -8,8 +8,20 @@ from pandas.api.types import is_list_like
 
 from pyxllib.data.label import *
 
-import pyautogui
-import keyboard
+import subprocess
+
+try:
+    import pyautogui
+except ModuleNotFoundError:
+    subprocess.run(['pip3', 'install', 'pyautogui'])
+    import pyautogui
+
+try:
+    import keyboard
+except ModuleNotFoundError:
+    subprocess.run(['pip3', 'install', 'keyboard'])
+    import keyboard
+
 import pyscreeze  # NOQA pyautogui安装的时候会自动安装依赖的pyscreeze
 
 

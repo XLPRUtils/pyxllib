@@ -17,9 +17,8 @@ except ModuleNotFoundError:
     subprocess.run(['pip3', 'install', 'baidu-aip'])
     import aip
 
-from pyxllib.basic.most import File
-from pyxllib.image.most import get_img_content
-
+from pyxllib.file import File
+from pyxllib.cv.imfile import get_img_content
 
 AIP_OCR_ACCOUNT_FILE = File(__file__).parent / 'aipocraccount.pkl'
 
@@ -105,7 +104,7 @@ class AipOcr:
                 # {'error_code': 18, 'error_msg': 'Open api qps request limit reached'}，继续尝试
                 continue
             else:
-                 break
+                break
         return t
 
 

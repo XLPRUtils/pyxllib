@@ -4,12 +4,25 @@
 # @Email  : 877362867@qq.com
 # @Date   : 2020/06/02 16:06
 
-
 import concurrent.futures
+import math
+import pprint
 
-import fitz
+import cv2
+import numpy as np
 
-from pyxllib.cv.im import zoomsvg
+import subprocess
+
+try:
+    import fitz
+except ModuleNotFoundError:
+    subprocess.run(['pip3', 'install', 'PyMuPdf'])
+    import fitz
+
+from pyxllib.cv.cvimg import imwrite
+from pyxllib.cv.imfile import zoomsvg
+from pyxllib.file import *
+from pyxllib.debug import dprint, browser
 
 
 class FitzPdf:

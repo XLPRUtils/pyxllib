@@ -16,5 +16,6 @@ basic中依赖的三方库有直接写到 requirements.txt 中
     及pyinstaller -F打包生成的exe也不大的库
 """
 
+from pyxllib.file.base import *
 from pyxllib.file.file import *
 from pyxllib.file.dir import *
