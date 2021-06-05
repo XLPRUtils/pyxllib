@@ -4,11 +4,26 @@
 # @Email  : 877362867@qq.com
 # @Date   : 2020/08/15 00:59
 
-from pyxllib.algo import Groups
-from pyxllib.prog import *
-from pyxllib.file import *
-from pyxllib.cv import *
-from pyxllib.debug import *
+from collections import defaultdict
+from tqdm import tqdm
+from zipfile import ZipFile
+import json
+import os
+import pathlib
+import random
+import ujson
+
+from pyxllib.prog.deprecatedlib import deprecated
+import pandas as pd
+
+from pyxllib.algo.geo import *
+from pyxllib.algo.group import Groups
+from pyxllib.cv.cvimg import PilImg, Image
+from pyxllib.debug.xllog import get_xllog, Iterate
+from pyxllib.file.dir import Dir
+from pyxllib.file.file import File, PathGroups, get_encoding
+from pyxllib.prog.basic import DictTool
+from pyxllib.prog.advance import mtqdm
 
 __0_basic = """
 """
@@ -17,13 +32,13 @@ __0_basic = """
 class BasicLabelData:
     """ 一张图一份标注文件的一些基本操作功能 """
 
-    def __init__(self, root, data=None, *, fltr=None, slt=None, extdata=None):
+    def __init__(self, root, data=None, *, prt=False, fltr=None, slt=None, extdata=None):
         """
         :param root: 数据所在根目录
         :param data: {relpath: data1, 'a/1.txt': data2, ...}
             如果未传入data具体值，则根据目录里的情况自动初始化获得data的值
 
-            relpath是对应的File标注文件的相对路径
+            relpath是对应的File标注文件的相对路径字符串
             data1, data2 是读取的标注数据，根据不同情况，会存成不同格式
                 如果是json则直接保存json内存对象结构
                 如果是txt可能会进行一定的结构化解析存储
@@ -56,7 +71,7 @@ class BasicLabelData:
         elif callable(fltr):
             gs = gs.select_group(fltr)
 
-        for k in gs.data.keys():
+        for k in tqdm(gs.data.keys(), disable=not prt):
             f = File(k, suffix=slt)
             data[f.relpath(self.root)] = f.read()
 
@@ -142,7 +157,7 @@ class ToLabelmeJson:
     document: https://www.yuque.com/xlpr/pyxllib/ks5h4o
     """
 
-    @deprecated(reason='建议使用GenLabelme实现')
+    @deprecated(reason='建议使用LabelmeData实现')
     def __init__(self, imgpath):
         """
         :param imgpath: 可选参数图片路径，强烈建议要输入，否则建立的label json会少掉图片宽高信息
@@ -184,7 +199,7 @@ class ToLabelmeJson:
         return data
 
     def get_shape(self, label, points, shape_type=None, dtype=None, group_id=None, **kwargs):
-        """最基本的添加形状功能
+        """ 最基本的添加形状功能
 
         :param shape_type: 会根据points的点数量，智能判断类型，默认一般是polygon
             其他需要自己指定的格式：line、circle
@@ -357,27 +372,27 @@ class LabelmeData(BasicLabelData):
     def __init__(self, root, data=None, *, prt=False, fltr='json', slt='json', extdata=None):
         """
         :param root: 文件根目录
-        :param data: {jsonfile: lmdata, ...}，其中 lmdata 为一个labelme文件格式的标准内容
+        :param data: {jsonfile: lmdict, ...}，其中 lmdict 为一个labelme文件格式的标准内容
             如果未传入data具体值，则根据目录里的情况自动初始化获得data的值
 
             210602周三16:26，为了工程等一些考虑，删除了 is_labelme_json_data 的检查
                 尽量通过 fltr、slt 的机制选出正确的 json 文件
         """
-        super().__init__(root, data, fltr=fltr, slt=slt, extdata=extdata)
+        super().__init__(root, data, prt=prt, fltr=fltr, slt=slt, extdata=extdata)
 
     def reduce(self):
         """ 移除imageData字段值 """
-        for _, lmdata in self.data:
-            lmdata['imageData'] = None
+        for _, lmdict in self.data:
+            lmdict['imageData'] = None
 
     def to_df(self, *, prt=True):
         """ 转成dataframe表格查看 """
 
         def read(x):
-            file, lmdata = x
-            if not lmdata['shapes']:
+            file, lmdict = x
+            if not lmdict['shapes']:
                 return
-            df = pd.DataFrame.from_records(lmdata['shapes'])
+            df = pd.DataFrame.from_records(lmdict['shapes'])
             df['filename'] = file.relpath(self.root)
             # 坐标转成整数，看起来比较精简点
             df['points'] = [np.array(v, dtype=int).tolist() for v in df['points']]
@@ -392,51 +407,49 @@ class LabelmeData(BasicLabelData):
 
         return shapes_df
 
-    def update_label(self):
-        """ 将shape['label'] 升级为字典类型
+    @classmethod
+    def plot(self, img, lmdict):
+        """ 将标注画成静态图 """
+        raise NotImplementedError
 
-        可以处理旧版不动产标注 content_class 等问题
+    @classmethod
+    def to_labelattr(cls, lmdict, *, points=False, inplace=False):
         """
 
-        def cvt(shape):
-            # 1 属性字典，至少先初始化一个label属性
-            labelattr = dict()
-            try:
-                data = json.loads(shape['label'])
-                if isinstance(data, dict):
-                    labelattr = data
-            except json.decoder.JSONDecodeError:
-                labelattr['label'] = shape['label']
+        :param points: 是否更新labelattr中的points、bbox等几何信息
+            并且在无任何几何信息的情况下，增设points
+        """
+        if not inplace:
+            lmdict = copy.deepcopy(lmdict)
 
+        for shape in lmdict['shapes']:
+            # 1 属性字典，至少先初始化一个label属性
+            labelattr = DictTool.json_loads(shape['label'], 'label')
             # 2 填充其他扩展属性值
             keys = set(shape.keys())
             stdkeys = set('label,points,group_id,shape_type,flags'.split(','))
             for k in (keys - stdkeys):
                 labelattr[k] = shape[k]
-                del shape[k]
+                del shape[k]  # 要删除原有的扩展字段值
 
-            # 3 写会shape
+            # 3 处理points等几何信息
+            if points:
+                if 'bbox' in labelattr:
+                    labelattr['bbox'] = ltrb2xywh(rect_bounds1d(shape['points']))
+                else:
+                    labelattr['points'] = shape['points']
+
+            # + 写回shape
             shape['label'] = json.dumps(labelattr, ensure_ascii=False)
+        return lmdict
 
-        for jsonfile, lmdata in self.data.items():
-            for shape in lmdata['shapes']:
-                cvt(shape)
+    def to_labelattrs(self, *, points=False):
+        """ 将shape['label'] 升级为字典类型
 
-    def update_label2(self):
-        """ 相比 update_label多了几何信息的处理
-        如果有会更新对应的seg、bbox、segmentation等几何位置信息
-        否则也会添加seg属性
+        可以处理旧版不动产标注 content_class 等问题
         """
-        self.update_label()
-
-        def cvt(shape):
-            labelattr = json.loads(shape['label'])
-
-            shape['label'] = json.dumps(labelattr, ensure_ascii=False)
-
-        for jsonfile, lmdata in self.data.items():
-            for shape in lmdata['shapes']:
-                cvt(shape)
+        for jsonfile, lmdict in self.data.items():
+            self.to_labelattr(lmdict, points=points, inplace=True)
 
     def to_cocogt(self, categories=None, *, outfile=None):
         """ 将labelme转成 coco gt 标注的格式
@@ -449,11 +462,6 @@ class LabelmeData(BasicLabelData):
             这种在coco转labelme时，会做一些特殊标记，方便后续转回coco
         3、 1, 2两种情况是可以连在一起，然后形成 labelme 和 coco 之间的多次互转的
 
-        to_cocogt只处理第一种情况，to_cocogt2用于处理第2、3种情况
-
-
-        对于第1种情况，直接全局重置一套image_id、box_id编号系统
-
         :param categories: 类别
             默认只设一个类别 {'id': 0, 'name': 'text', 'supercategory'}
             支持自定义，所有annotations的category_id
@@ -465,71 +473,78 @@ class LabelmeData(BasicLabelData):
         if not categories:
             categories = [{'id': 0, 'name': 'text', 'supercategory': ''}]
 
-        img_id, ann_id = 0, 0
-        images, annotations = [], []
+        # 1 第一轮遍历：结构处理 jsonfile, lmdict --> data（image, shapes）
+        img_id, ann_id, data = 0, 0, []
+        for jsonfile, lmdict in self.data.items():
+            # 1.0 升级为字典类型
+            lmdict = self.to_labelattr(lmdict, points=True)
+            for sp in lmdict['shapes']:  # label转成字典
+                sp['label'] = json.loads(sp['label'])
 
-        for jsonfile, lmdata in self.data.items():
-            img_id += 1
-            # TODO file_name 加上相对路径？
-            images.append(CocoGtData.gen_image(img_id, lmdata['imagePath'],
-                                               lmdata['imageHeight'], lmdata['imageWidth']))
-            for sp in lmdata['shapes']:
-                ann_id += 1
-                d = json.loads(sp['label'])
-                d['image_id'] = img_id
-                d['id'] = ann_id
-                d['seg'] = sp['points']
-                d.update(sp['label'])
-                # 如果没有框类别，会默认设置一个。 （强烈建议外部业务功能代码自行设置好category_id）
-                if 'category_id' not in d:
-                    d['category_id'] = categories[0]['id']
-                ann = CocoGtData.gen_annotation(**d)
-                annotations.append(ann)
-        return CocoGtData.gen_data(images, annotations, categories, outfile)
+            # 1.1 找shapes里的image
+            image = None
+            # 1.1.1 xltype='image'
+            for sp in filter(lambda x: x.get('xltype', None) == 'image', lmdict['shapes']):
+                image = DictTool.json_loads(sp['label'])
+                if not image:
+                    raise ValueError(sp['label'])
+                # TODO 删除 coco_eval 等字段？
+                del image['xltype']
+                break
+            # 1.1.2 shapes里没有标注则生成一个
+            if image is None:
+                # TODO file_name 加上相对路径？
+                image = CocoGtData.gen_image(-1, lmdict['imagePath'],
+                                             lmdict['imageHeight'], lmdict['imageWidth'])
+            img_id = max(img_id, image.get('id', -1))
 
-    def to_cocogt2(self, categories=None, *, outfile=None):
-        """ 之前就是用coco转成labelme，现在要转回coco的情景
-
-        执行该功能前一般都要跑一下 cvt2cocolike
-
-        包括：
-            新增一个 image 级别的标准框
-            将shape下扩展的所有字段属性attrs，集成存储到label字段中
-
-        xltype，用来标识一些特殊标注框：
-        """
-        if not categories:
-            categories = [{'id': 0, 'name': 'text', 'supercategory': ''}]
-
-        images, annotations = [], []
-
-        for jsonfile, lmdata in self.data.items():
-            for sp in lmdata['shapes']:
-                label = json.loads(sp['label'])
+            # 1.2 遍历shapes
+            shapes = []
+            for sp in lmdict['shapes']:
+                label = sp['label']
                 if 'xltype' not in label:
                     # 普通的标注框
-                    pass
+                    d = sp['label'].copy()
+                    DictTool.safe_remove(d, '')
+                    ann_id = max(ann_id, d.get('id', -1))
+                    shapes.append(d)
                 elif label['xltype'] == 'image':
-                    # image，图像级标注数据
+                    # image，图像级标注数据；之前已经处理了，这里可以跳过
                     pass
                 elif label['xltype'] == 'seg':
                     # seg，衍生的分割标注框，在转回coco时可以丢弃
                     pass
                 else:
                     raise ValueError
+            data.append([image, shapes])
 
-                ann_id += 1
-                d = json.loads(sp['label'])
-                d['image_id'] = img_id
-                d['id'] = ann_id
-                d['seg'] = sp['points']
-                d.update(sp['label'])
+        # 2 第二轮遍历：处理id等问题
+        images, annotations = [], []
+        for image, shapes in data:
+            # 2.1 image
+            if image.get('id', -1) == -1:
+                img_id += 1
+                image['id'] = img_id
+            images.append(image)
+
+            # 2.2 annotations
+            for sp in shapes:
+                sp['image_id'] = img_id
+                if sp.get('id', -1) == -1:
+                    ann_id += 1
+                    sp['id'] = ann_id
                 # 如果没有框类别，会默认设置一个。 （强烈建议外部业务功能代码自行设置好category_id）
-                if 'category_id' not in d:
-                    d['category_id'] = categories[0]['id']
-                ann = CocoGtData.gen_annotation(**d)
+                if 'category_id' not in sp:
+                    sp['category_id'] = categories[0]['id']
+                DictTool.safe_remove(sp, 'category_name')
+                ann = CocoGtData.gen_annotation(**sp)
                 annotations.append(ann)
-        return CocoGtData.gen_data(images, annotations, categories, outfile)
+
+        # 3 result
+        data = CocoGtData.gen_data(images, annotations, categories)
+        if outfile:
+            File(outfile).write(data)
+        return data
 
 
 __2_coco = """
@@ -578,10 +593,10 @@ class CocoGtData:
         # a = {'id': 0, 'area': 0, 'bbox': [0, 0, 0, 0],
         #       'category_id': 1, 'image_id': 0, 'iscrowd': 0, 'segmentation': []}
 
-        if 'seg' in a:  # seg是一个特殊参数，使用“一个”多边形来标注（注意区别segmentation是多个多边形）
+        if 'points' in a:  # points是一个特殊参数，使用“一个”多边形来标注（注意区别segmentation是多个多边形）
             if 'segmentation' not in a:
-                a['segmentation'] = [coords1d(a['seg'])]
-            del a['seg']
+                a['segmentation'] = [coords1d(a['points'])]
+            del a['points']
         if 'bbox' not in a:
             pts = []
             for seg in a['segmentation']:
@@ -787,7 +802,7 @@ class CocoGtData:
         cd = CocoData(gt_dict)
         not_finds = set()  # coco里有的图片，root里没有找到
         multimatch = dict()  # coco里的某张图片，在root找到多个匹配文件
-        for img, anns in cd.group_gt(reserve_empty=True):
+        for img, anns in tqdm(cd.group_gt(reserve_empty=True), disable=not prt):
             # 2.1 文件匹配
             imfiles = gs.find_files(img['file_name'])
             if not imfiles:  # 没有匹配图片的，不处理
@@ -800,14 +815,14 @@ class CocoGtData:
                 imfile = imfiles[0]
 
             # 2.2 数据内容转换
-            lmdata = LabelmeData.gen_data(imfile)
-            lmdata['shapes'].append(LabelmeData.gen_shape(json.dumps(img, ensure_ascii=False), [[-10, 0], [-5, 0]]))
+            lmdict = LabelmeData.gen_data(imfile)
+            lmdict['shapes'].append(LabelmeData.gen_shape(json.dumps(img, ensure_ascii=False), [[-10, 0], [-5, 0]]))
             for ann in anns:
                 label = json.dumps(ann, ensure_ascii=False)
                 points = xywh2ltrb(ann['bbox'])
                 shape = LabelmeData.gen_shape(label, points)
-                lmdata['shapes'].append(shape)
-            data.append([imfile.with_suffix('.json'), lmdata])
+                lmdict['shapes'].append(shape)
+            data.append([imfile.with_suffix('.json'), lmdict])
 
         return LabelmeData(root, data,
                            extdata={'categories': cd.gt_dict['categories'],
@@ -894,8 +909,6 @@ class CocoData(CocoGtData):
 
         适用于 sroie 检测格式
         """
-        from zipfile import ZipFile
-
         # 1 获取dt_list
         if min_score:
             dt_list = [b for b in self.dt_list if (b['score'] >= min_score)]

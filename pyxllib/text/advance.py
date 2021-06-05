@@ -17,8 +17,6 @@ import base64
 import bisect
 import collections
 
-from pyxllib.debug import *
-
 import subprocess
 
 try:

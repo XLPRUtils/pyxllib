@@ -16,7 +16,7 @@ from pyxllib.algo.geo_basic import *
 from pyxllib.algo.group import *
 
 from pyxllib.debug.xllog import *
-from pyxllib.debug.dprint import *
+from pyxllib.debug.basic import *
 from pyxllib.debug.bc import *
 from pyxllib.debug.browser import *
 from pyxllib.debug.showdir import *
@@ -26,6 +26,10 @@ from pyxllib.file.basic import *
 from pyxllib.file.file import *
 from pyxllib.file.dir import *
 
-from pyxllib.prog import *
-from pyxllib.text import *
-from pyxllib.time import *
+from pyxllib.prog.basic import *
+from pyxllib.prog.deprecatedlib import deprecated
+
+from pyxllib.text.basic import *
+
+from pyxllib.time.tictoc import *
+from pyxllib.time.datetime import *

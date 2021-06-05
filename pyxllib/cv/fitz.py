@@ -22,7 +22,7 @@ except ModuleNotFoundError:
 from pyxllib.cv.cvimg import imwrite
 from pyxllib.cv.imfile import zoomsvg
 from pyxllib.file import *
-from pyxllib.debug import dprint, browser
+from pyxllib.debug import basic, browser
 
 
 class FitzPdf:
@@ -122,9 +122,9 @@ class DemoFitz:
 
     def message(self):
         """查看pdf文档一些基础信息"""
-        dprint(fitz.version)  # fitz模块的版本
-        dprint(self.doc.pageCount)  # pdf页数
-        dprint(self.doc._getXrefLength())  # 文档的对象总数
+        basic(fitz.version)  # fitz模块的版本
+        basic(self.doc.pageCount)  # pdf页数
+        basic(self.doc._getXrefLength())  # 文档的对象总数
 
     def getToC(self):
         """获得书签目录"""
@@ -188,7 +188,7 @@ class DemoFitz:
 
         # 获得页面上的所有文本，还支持参数： html，dict，xml，xhtml，json
         text = page.getText('text')
-        dprint(text)
+        basic(text)
 
         # 获得页面上的所有文本（返回字典对象）
         textdict = page.getText('dict')
@@ -216,7 +216,7 @@ class DemoFitz:
         page = self.doc.loadPage(0)
         # page.insertText(fitz.Point(100, 200), 'test\ntest')
         file = File('a.pdf', Dir.TEMP).to_str()
-        dprint(file)
+        basic(file)
         self.doc.save(file, garbage=4)
         browser(file)
 

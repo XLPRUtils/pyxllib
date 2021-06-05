@@ -9,7 +9,7 @@
 import itertools
 import re
 
-from deprecated import deprecated
+from pyxllib.prog.deprecatedlib import deprecated
 
 
 def natural_sort_key(key):

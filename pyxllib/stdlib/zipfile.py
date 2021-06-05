@@ -1825,7 +1825,7 @@ class PyZipFile(ZipFile):
             return
         dir, name = os.path.split(pathname)
         if os.path.isdir(pathname):
-            initname = os.path.join(pathname, "../example/__init__.py")
+            initname = os.path.join(pathname, "../ex/__init__.py")
             if os.path.isfile(initname):
                 # This is a package directory, add it
                 if basename:
@@ -1845,7 +1845,7 @@ class PyZipFile(ZipFile):
                     path = os.path.join(pathname, filename)
                     root, ext = os.path.splitext(filename)
                     if os.path.isdir(path):
-                        if os.path.isfile(os.path.join(path, "../example/__init__.py")):
+                        if os.path.isfile(os.path.join(path, "../ex/__init__.py")):
                             # This is a package directory, add it
                             self.writepy(path, basename,
                                          filterfunc=filterfunc)  # Recursive call

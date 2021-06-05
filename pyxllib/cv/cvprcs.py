@@ -4,7 +4,7 @@
 # @Email  : 877362867@qq.com
 # @Date   : 2020/11/15 10:09
 
-from pyxllib.file import File
+from pyxllib.file.file import File
 from pyxllib.algo.geo import *
 
 import cv2

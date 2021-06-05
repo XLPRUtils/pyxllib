@@ -6,6 +6,7 @@
 
 import inspect
 import os
+import traceback
 
 from pyxllib.time.tictoc import TicToc
 from pyxllib.prog.basic import typename
@@ -225,4 +226,19 @@ def demo_dprint():
     with TicToc(dformat(fmt='[{depth:02}]{fullfilename}/{lineno}: {argmsg}')):
         for _ in range(10 ** 7):
             pass
-    # [04]D:\slns\pyxllib\pyxllib\debug\dprint.py/187:  0.173 秒.
+    # [04]D:\slns\pyxllib\pyxllib\debug\basic.py/187:  0.173 秒.
+
+
+def funcmsg(func):
+    """输出函数func所在的文件、函数名、函数起始行"""
+    # showdir(func)
+    if not hasattr(func, '__name__'):  # 没有__name__属性表示这很可能是一个装饰器去处理原函数了
+        if hasattr(func, 'func'):  # 我的装饰器常用func成员存储原函数对象
+            func = func.func
+        else:
+            return f'装饰器：{type(func)}，无法定位'
+    return f'函数名：{func.__name__}，来自文件：{func.__code__.co_filename}，所在行号={func.__code__.co_firstlineno}'
+
+
+def format_exception(e):
+    return ''.join(traceback.format_exception(etype=type(e), value=e, tb=e.__traceback__))

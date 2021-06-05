@@ -14,6 +14,7 @@ from pyxllib.text.basic import shorten
 from pyxllib.text.xlalign import listalign
 from pyxllib.algo.order import natural_sort
 from pyxllib.algo.group import ValuesStat
+from pyxllib.debug.xllog import get_xllog
 
 __tictoc = """
 基于 pytictoc 代码，做了些自定义扩展
@@ -89,14 +90,11 @@ class TicToc:
     def __enter__(self):
         """Start the timer when using TicToc in a context manager."""
         if self.title == '__main__':
-            from pyxllib.debug import get_xllog
             get_xllog().info(f'time.process_time(): {format_timespan(time.process_time())}.')
         self.start = timeit.default_timer()
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         """On exit, print time elapsed since entering context manager."""
-        from pyxllib.debug import get_xllog
-
         elapsed = self.tocvalue()
         xllog = get_xllog()
 
