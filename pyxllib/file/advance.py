@@ -13,10 +13,11 @@
 import pyxllib.stdlib.shutil as shutil
 import pyxllib.stdlib.zipfile as zipfile  # 重写了标准库的zipfile文件，cp437改为gbk，解决zip中文乱码问题
 from pyxllib.text.xml import *
-
 from pyxllib.file.file import *
 from pyxllib.file.dir import *
 from pyxllib.time.tictoc import *
+from pyxllib.debug.basic import dprint
+from pyxllib.debug.bc import bcompare
 
 # 需要使用的第三方软件
 # BCompare.exe， bcompare函数要用

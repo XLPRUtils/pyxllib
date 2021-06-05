@@ -4,18 +4,24 @@
 # @Email  : 877362867@qq.com
 # @Date   : 2021/06/03 23:21
 
-import io
-import os
-import math
-import queue
-import traceback
+
+""" 封装一些代码开发中常用的功能，工程组件 """
+
 from urllib.parse import urlparse
+import io
+import math
+import os
+import queue
+import time
+import json
+import sys
 
 from pyxllib.excel.index import int2excel_col_name
 
 
 def typename(c):
-    """简化输出的type类型
+    """ 简化输出的type类型
+
     >>> typename(123)
     'int'
     """
@@ -243,17 +249,6 @@ def gentuple(n, tag):
     return a
 
 
-def funcmsg(func):
-    """输出函数func所在的文件、函数名、函数起始行"""
-    # showdir(func)
-    if not hasattr(func, '__name__'):  # 没有__name__属性表示这很可能是一个装饰器去处理原函数了
-        if hasattr(func, 'func'):  # 我的装饰器常用func成员存储原函数对象
-            func = func.func
-        else:
-            return f'装饰器：{type(func)}，无法定位'
-    return f'函数名：{func.__name__}，来自文件：{func.__code__.co_filename}，所在行号={func.__code__.co_firstlineno}'
-
-
 def print2string(*args, **kwargs):
     """https://stackoverflow.com/questions/39823303/python3-print-to-string"""
     output = io.StringIO()
@@ -303,5 +298,98 @@ class EmptyPoolExecutor:
         pass
 
 
-def format_exception(e):
-    return ''.join(traceback.format_exception(etype=type(e), value=e, tb=e.__traceback__))
+class GenFunction:
+    """ 一般用来生成高阶函数的函数对象
+
+    这个名字可能还不是很精确，后面有想法再改
+    """
+
+    @classmethod
+    def ensure_func(cls, x, default):
+        """ 确保x是callable对象，否则用default初始化 """
+        if callable(x):
+            return x
+        else:
+            return default
+
+
+def xlwait(func, condition=bool, *, limit=None, interval=1):
+    """ 不断重复执行func，直到得到满足condition条件的期望值
+
+    :param condition: 退出等待的条件，默认为bool真值
+    :param limit: 重复执行的上限时间（单位 秒），默认一直等待
+    :param interval: 重复执行间隔 （单位 秒）
+
+    """
+    t = time.clock()
+    while True:
+        res = func()
+        if condition(res):
+            return res
+        elif limit and (time.clock() - t > limit):
+            return res  # 超时也返回目前得到的结果
+        time.sleep(interval)
+
+
+def first_nonnone(args, judge=None):
+    """ 返回第1个满足条件的值
+
+    :param args: 参数清单
+    :param judge: 判断器，默认返回第一个非None值，也可以自定义判定函数
+    """
+    judge = GenFunction.ensure_func(judge, lambda x: x is not None)
+    for x in args:
+        if judge(x):
+            return x
+
+
+class DictTool:
+    @classmethod
+    def json_loads(cls, label, default=None):
+        """ 尝试从一段字符串解析为字典
+
+        :param default: 如果不是字典时的处理策略
+            None，不作任何处理
+            str，将原label作为defualt这个键的值来存储
+        :return: s为非字典结构时返回空字典
+        """
+        labelattr = dict()
+        try:
+            data = json.loads(label)
+            if isinstance(data, dict):
+                labelattr = data
+        except json.decoder.JSONDecodeError:
+            if isinstance(default, str):
+                labelattr[default] = label
+        return labelattr
+
+    @classmethod
+    def or_(cls, *args):
+        """ 合并到新字典 """
+        res = {}
+        cls.oreq_(res, *args)
+        return res
+
+    @classmethod
+    def oreq_(cls, *args):
+        """ 合并到第1个字典 """
+        if sys.version_info.major == 3 and sys.version_info.minor >= 9:
+            a = args[0]
+            for b in range(1, len(args)):
+                a |= b
+        else:  # 旧版本py手动实现一个兼容功能
+            a = args[0]
+            for b in range(1, len(args)):
+                for k, v in b.items():
+                    if k not in a:
+                        a[k] = b
+
+    @classmethod
+    def safe_remove(cls, dict_, keys):
+        """ 删除指定键值（不存在的跳过，不报错） """
+        if isinstance(keys, str):
+            keys = (keys,)
+
+        for k in keys:
+            if k in dict_:
+                del dict_[k]

@@ -4,11 +4,12 @@
 # @Email  : 877362867@qq.com
 # @Date   : 2020/06/06
 
-from pandas.api.types import is_list_like
-
-from pyxllib.data.label import *
-
+from collections import defaultdict
+import json
+import os
 import subprocess
+import sys
+import time
 
 try:
     import pyautogui
@@ -23,6 +24,15 @@ except ModuleNotFoundError:
     import keyboard
 
 import pyscreeze  # NOQA pyautogui安装的时候会自动安装依赖的pyscreeze
+
+import numpy as np
+from pandas.api.types import is_list_like
+
+from pyxllib.time.tictoc import TicToc
+from pyxllib.file.dir import File, Dir
+from pyxllib.prog.basic import first_nonnone, xlwait
+from pyxllib.data.label import LabelmeData
+from pyxllib.cv.cvimg import imread, imwrite, get_sub_image, ltrb2xywh, pil2cv, xywh2ltrb, ComputeIou, shapely_polygon
 
 
 class AutoGuiLabelData:
@@ -40,13 +50,13 @@ class AutoGuiLabelData:
         self.imfiles = {}
 
         for file in self.root.select('**/*.json').subfiles():
-            lmdata = file.read()
-            imfile = file.with_name(lmdata['imagePath'])
+            lmdict = file.read()
+            imfile = file.with_name(lmdict['imagePath'])
             img = imread(imfile)
             loc = file.relpath(self.root).replace('\\', '/')[:-5]
             self.imfiles[loc] = imfile
 
-            for shape in lmdata['shapes']:
+            for shape in lmdict['shapes']:
                 attrs = self.parse_shape(shape, img)
                 self.data[loc][attrs['label']] = attrs
 
@@ -140,7 +150,7 @@ class AutoGuiLabelData:
     def write(self, loc):
         f = File(loc, self.root, suffix='.json')
         imfile = self.imfiles[loc]
-        lmdata = LabelmeData.gen_data(imfile)
+        lmdict = LabelmeData.gen_data(imfile)
         for label, ann in self.data[loc].items():
             a = ann.copy()
             if 'img' in a:
@@ -148,8 +158,8 @@ class AutoGuiLabelData:
             shape = LabelmeData.gen_shape(json.dumps(a, ensure_ascii=False),
                                           a['points'], a['shape_type'],
                                           group_id=a['group_id'], flags=a['flags'])
-            lmdata['shapes'].append(shape)
-        f.write(lmdata, indent=2)
+            lmdict['shapes'].append(shape)
+        f.write(lmdict, indent=2)
 
     def writes(self):
         for loc in self.data.keys():
@@ -165,24 +175,6 @@ class AutoGuiLabelData:
     def __setitem__(self, loclabel, value):
         loc, label = os.path.split(loclabel)
         self.data[loc][label] = value
-
-
-def xlwait(func, condition=bool, *, limit=None, interval=1):
-    """ 不断重复执行func，直到得到满足condition条件的期望值
-
-    :param condition: 退出等待的条件，默认为bool真值
-    :param limit: 重复执行的上限时间（单位 秒），默认一直等待
-    :param interval: 重复执行间隔 （单位 秒）
-
-    """
-    t = TicToc()
-    while True:
-        res = func()
-        if condition(res):
-            return res
-        elif limit and t.tocvalue() > limit:
-            return res  # 超时也返回目前得到的结果
-        time.sleep(interval)
 
 
 class NamedLocate(AutoGuiLabelData):
@@ -270,14 +262,14 @@ class NamedLocate(AutoGuiLabelData):
     def check_pixel(self, loclabel, *, tolerance=None):
         """ 判断对应位置上的像素值是否相同
         """
-        tolerance = tolerance if tolerance is not None else self.tolerance
+        tolerance = first_nonnone([tolerance, self.tolerance, 20])
         p1 = self[loclabel]['pixel']
         p2 = self.point2pixel(loclabel)
         return self.pixel_distance(p1, p2) < tolerance
 
     def check_img(self, loclabel, img=None, *, grayscale=None, confidence=None):
-        grayscale = grayscale if grayscale is not None else self.grayscale
-        confidence = confidence if confidence is not None else self.confidence
+        grayscale = first_nonnone([grayscale, self.grayscale, False])
+        confidence = first_nonnone([confidence, self.confidence, 0.95])
         if img is None:
             img = self[loclabel]['img']
         elif isinstance(img, str):
@@ -292,8 +284,8 @@ class NamedLocate(AutoGuiLabelData):
         # 1 配置参数
         if isinstance(img, str):
             img = self[img]['img']
-        grayscale = grayscale if grayscale is not None else self.grayscale
-        confidence = confidence if confidence is not None else self.confidence
+        grayscale = first_nonnone([grayscale, self.grayscale, False])
+        confidence = first_nonnone([confidence, self.confidence, 0.95])
         # 2 查找子图
         self.update_shot()
         boxes = pyautogui.locateAll(img, self.last_shot,

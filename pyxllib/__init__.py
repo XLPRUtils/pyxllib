@@ -16,7 +16,7 @@
 03、cv，计算机视觉
 04、data，特殊数据处理、可视化
 05、debug，调试
-06、example，测试代码片段
+06、ex，example的缩写，测试代码片段
 07、excel，电子表格
 08、file，文件处理
 09、gui，图形界面开发
@@ -27,10 +27,9 @@
 14、time，时间
 15、tool，工具
 
-模块整理计划
+TODO 模块整理计划
 1、0.0.x->0.1.x，把basic,debug,cv,util模式拆的更加精细，15个模块
-    暂时仍使用 from pyxllib.xx import * 的导入模式
-2、一个一个模块精简，尽量剥离对三方依赖小的功能出来
+2、一个一个模块精简，尽量剥离对三方依赖小的功能到basic、advance模块
 """
 
 VERSION = '0.1.2'
