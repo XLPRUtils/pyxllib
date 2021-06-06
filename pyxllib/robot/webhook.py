@@ -16,6 +16,7 @@ import requests
 
 class WeixinRobot:
     """ 企业微信 机器人 """
+
     def __init__(self, url):
         self.url = url
 

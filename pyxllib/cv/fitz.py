@@ -6,7 +6,10 @@
 
 import concurrent.futures
 import math
+import os
 import pprint
+import re
+import tempfile
 
 import cv2
 import numpy as np
@@ -19,10 +22,10 @@ except ModuleNotFoundError:
     subprocess.run(['pip3', 'install', 'PyMuPdf'])
     import fitz
 
-from pyxllib.cv.cvimg import imwrite
-from pyxllib.cv.imfile import zoomsvg
-from pyxllib.file import *
-from pyxllib.debug import basic, browser
+from pyxllib.file.specialist import File, Dir, writefile, filescopy, filesdel
+from pyxllib.debug.pupil import dprint
+from pyxllib.debug.specialist import browser
+from pyxllib.cv.specialist import imwrite, zoomsvg
 
 
 class FitzPdf:
@@ -122,9 +125,9 @@ class DemoFitz:
 
     def message(self):
         """查看pdf文档一些基础信息"""
-        basic(fitz.version)  # fitz模块的版本
-        basic(self.doc.pageCount)  # pdf页数
-        basic(self.doc._getXrefLength())  # 文档的对象总数
+        dprint(fitz.version)  # fitz模块的版本
+        dprint(self.doc.pageCount)  # pdf页数
+        dprint(self.doc._getXrefLength())  # 文档的对象总数
 
     def getToC(self):
         """获得书签目录"""
@@ -188,7 +191,7 @@ class DemoFitz:
 
         # 获得页面上的所有文本，还支持参数： html，dict，xml，xhtml，json
         text = page.getText('text')
-        basic(text)
+        dprint(text)
 
         # 获得页面上的所有文本（返回字典对象）
         textdict = page.getText('dict')
@@ -216,7 +219,7 @@ class DemoFitz:
         page = self.doc.loadPage(0)
         # page.insertText(fitz.Point(100, 200), 'test\ntest')
         file = File('a.pdf', Dir.TEMP).to_str()
-        basic(file)
+        dprint(file)
         self.doc.save(file, garbage=4)
         browser(file)
 

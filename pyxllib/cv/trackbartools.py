@@ -12,8 +12,11 @@ from pyxlib.cv.debugtools import *
 
 import math
 
-from pyxllib.time import TicToc
-from pyxllib.cv.cvimg import *
+import cv2
+import numpy as np
+
+from pyxllib.time.specialist import TicToc
+from pyxllib.cv.specialist import CvPlot, imread
 
 
 class TrackbarTool:

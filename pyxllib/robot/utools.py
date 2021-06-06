@@ -7,13 +7,18 @@
 """ 专门给utools的快捷命令扩展的一系列python工具库
 """
 
+import os
 import pathlib
 import pyperclip
+import re
 
 import ujson
 from humanfriendly import format_timespan
+import pandas as pd
 
-from pyxllib.debug import *
+from pyxllib.time.specialist import TicToc, Datetime
+from pyxllib.debug.specialist import browser
+from pyxllib.file.specialist import File, Dir
 
 
 def _print_df_result(df, outfmt='text'):

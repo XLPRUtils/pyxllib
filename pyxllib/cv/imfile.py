@@ -7,47 +7,11 @@
 
 from collections import defaultdict
 import concurrent.futures
-import io
 import os
 import re
-import requests
 import subprocess
 
-import numpy as np
-from PIL import Image
-
-from pyxllib.cv.cvimg import cv2pil, PilPrcs
-from pyxllib.file import File
-
-
-def get_img_content(in_):
-    """ 获取in_代表的图片的二进制数据
-
-    :param in_: 可以是本地文件，也可以是图片url地址，也可以是Image对象
-    """
-    from pyxllib.file import is_url, is_file
-
-    # 1 取不同来源的数据
-    if is_url(in_):
-        content = requests.get(in_).content
-        img = Image.open(io.BytesIO(content))
-    elif is_file(in_):
-        with open(in_, 'rb') as f:
-            content = f.read()
-        img = Image.open(in_)
-    elif isinstance(in_, Image.Image):
-        img = in_
-    elif isinstance(in_, np.ndarray):
-        img = cv2pil(in_)
-    else:
-        raise ValueError(f'{type(in_)}')
-
-    img = PilPrcs.rgba2rgb(img)  # 如果是RGBA类型，要把透明底变成白色
-    file = io.BytesIO()
-    img.save(file, 'JPEG')
-    content = file.getvalue()
-
-    return content
+from pyxllib.file.specialist import File
 
 
 def magick(infile, *, outfile=None, if_exists='error', transparent=None, trim=False, density=None, other_args=None):

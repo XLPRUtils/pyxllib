@@ -15,12 +15,7 @@ test：测试代码，注重分析功能稳定性
 perf：性能测试，注重分析代码的运行效率
 """
 
-import socket
-import tempfile
-
-from pyxllib.prog import *
-from pyxllib.time import *
-from pyxllib.debug import *
+from pyxllib.xl import *
 
 ____stdlib = """
 标准库相关
@@ -157,6 +152,60 @@ def demo_timer():
                 pass
             t.stop()
     # [04]timer.py/113:      总耗时: 0.096s	均值标准差: 0.019±0.002s	总数: 5	最小值: 0.018s	最大值: 0.023s
+
+
+def demo_dprint():
+    """这里演示dprint常用功能
+    """
+    # 1 查看程序是否运行到某个位置
+    dprint()
+    # [05]dprint.py/169:      意思：这是堆栈的第5层，所运行的位置是 dprint.py文件的第169行
+
+    # 2 查看变量、表达式的 '<类型>' 和 ':值'
+    a, b, s = 1, 2, 'ab'
+    dprint(a, b, a ^ b, s * 2)
+    # [05]dprint.py/174: a<int>=1    b<int>=2    a ^ b<int>=3    s*2<str>='abab'
+
+    # 3 异常警告
+    b = 0
+    if b:
+        c = a / b
+    else:
+        c = 0
+        dprint(a, b, c)  # b=0不能作为除数，c默认值暂按0处理
+    # [05]dprint.py/183: a<int>=1    b<int>=0    c<int>=0    # b=0不能作为除数，c默认值暂按0处理
+
+    # 4 如果想在其他地方使用dprint的格式内容，可以调底层dformat函数实现
+    with TicToc(dformat(fmt='[{depth:02}]{fullfilename}/{lineno}: {argmsg}')):
+        for _ in range(10 ** 7):
+            pass
+    # [04]D:\slns\pyxllib\pyxllib\debug\pupil.py/187:  0.173 秒.
+
+
+def _test_getfile_speed():
+    """
+    遍历D盘所有文件(205066个) 用时0.65秒
+    遍历D盘所有tex文件(7796个) 用时0.95秒
+    有筛选遍历D盘所有文件(193161个) 用时1.19秒
+    有筛选遍历D盘所有tex文件(4464个) 用时1.22秒
+        + EnsureContent： 3.18秒，用list存储所有文本要 310 MB 开销，转str拼接差不多也是这个值
+        + re.sub(r'\$.*?\$', r'', s)： 4.48秒
+    """
+    timer = Timer(start_now=True)
+    ls = list(getfiles(r'D:\\'))
+    timer.stop_and_report(f'遍历D盘所有文件({len(ls)}个)')
+
+    timer = Timer(start_now=True)
+    ls = list(getfiles(r'D:\\', '.tex'))
+    timer.stop_and_report(f'遍历D盘所有tex文件({len(ls)}个)')
+
+    timer = Timer(start_now=True)
+    ls = list(mygetfiles(r'D:\\'))
+    timer.stop_and_report(f'有筛选遍历D盘所有文件({len(ls)}个)')
+
+    timer = Timer(start_now=True)
+    ls = list(mygetfiles(r'D:\\', '.tex'))
+    timer.stop_and_report(f'有筛选遍历D盘所有tex文件({len(ls)}个)')
 
 
 ____perf = """
