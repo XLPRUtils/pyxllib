@@ -4,8 +4,8 @@
 # @Email  : 877362867@qq.com
 # @Date   : 2021/06/03 20:41
 
-from pyxllib.file.basic import *
-from pyxllib.file.advance import *
+import os
+import subprocess
 
 try:
     import paramiko
@@ -25,6 +25,12 @@ try:
 except ModuleNotFoundError:
     subprocess.run(['pip3', 'install', 'scp'])
     import scp
+
+import humanfriendly
+
+from pyxllib.file.newbie import linux_path_fmt
+from pyxllib.time.specialist.tictoc import TicToc
+from pyxllib.file.specialist import Dir, file_or_dir_size
 
 
 def createSSHClient(server, port, user, password):

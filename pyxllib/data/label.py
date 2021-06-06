@@ -12,18 +12,20 @@ import os
 import pathlib
 import random
 import ujson
+import copy
 
 from pyxllib.prog.deprecatedlib import deprecated
 import pandas as pd
+import numpy as np
 
-from pyxllib.algo.geo import *
-from pyxllib.algo.group import Groups
-from pyxllib.cv.cvimg import PilImg, Image
-from pyxllib.debug.xllog import get_xllog, Iterate
-from pyxllib.file.dir import Dir
-from pyxllib.file.file import File, PathGroups, get_encoding
-from pyxllib.prog.basic import DictTool
-from pyxllib.prog.advance import mtqdm
+from pyxllib.algo.pupil import Groups
+from pyxllib.prog.pupil import DictTool
+from pyxllib.debug.specialist import get_xllog, Iterate
+from pyxllib.file.specialist import File, Dir, PathGroups, get_encoding
+from pyxllib.prog.specialist import mtqdm
+from pyxllib.cv.specialist import PilImg, Image
+from pyxllib.algo.newbie import ltrb2xywh, xywh2ltrb
+from pyxllib.algo.geo import np_array, rect_bounds1d, coords1d, rect2polygon
 
 __0_basic = """
 """

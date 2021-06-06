@@ -5,7 +5,4 @@
 # @Date   : 2021/06/03 22:23
 
 from pyxllib.xl import *
-
-from pyxllib.cv.cvprcs import *
-from pyxllib.cv.pilprcs import *
-from pyxllib.cv.cvimg import *
+from pyxllib.cv.specialist import *

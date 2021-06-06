@@ -21,11 +21,12 @@ except ModuleNotFoundError:
         subprocess.run(['pip3', 'install', 'shapely'])
         import shapely
 
+import numpy as np
 from shapely.geometry import Polygon
 import cv2
 
+from pyxllib.algo.newbie import xywh2ltrb, ltrb2xywh
 from pyxllib.algo.intervals import Intervals
-from pyxllib.algo.geo_basic import *
 
 # import PIL.Image
 

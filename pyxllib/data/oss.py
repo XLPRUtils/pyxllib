@@ -16,7 +16,7 @@ except ModuleNotFoundError:
     subprocess.run(['pip3', 'install', 'oss2'])
     import oss2
 
-from pyxllib.file import File
+from pyxllib.file.specialist import File
 
 
 class OssBucket:

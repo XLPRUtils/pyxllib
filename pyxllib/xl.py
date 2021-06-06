@@ -10,26 +10,24 @@
 from pyxllib.stdlib import zipfile
 from pyxllib.stdlib import shutil
 
-from pyxllib.algo.order import *
-from pyxllib.algo.intervals import *
-from pyxllib.algo.geo_basic import *
-from pyxllib.algo.group import *
-
-from pyxllib.debug.xllog import *
-from pyxllib.debug.basic import *
-from pyxllib.debug.bc import *
-from pyxllib.debug.browser import *
-from pyxllib.debug.showdir import *
-from pyxllib.debug.type import *
-
-from pyxllib.file.basic import *
-from pyxllib.file.file import *
-from pyxllib.file.dir import *
-
-from pyxllib.prog.basic import *
+from pyxllib.prog.pupil import *
+from pyxllib.prog.specialist import *
 from pyxllib.prog.deprecatedlib import deprecated
 
-from pyxllib.text.basic import *
+from pyxllib.algo.newbie import *
+from pyxllib.algo.pupil import *
+from pyxllib.algo.specialist import *
 
-from pyxllib.time.tictoc import *
-from pyxllib.time.datetime import *
+from pyxllib.text.newbie import *
+from pyxllib.text.pupil import *
+from pyxllib.text.specialist import *
+
+from pyxllib.file.newbie import *
+from pyxllib.file.pupil import *
+from pyxllib.file.specialist import *
+
+from pyxllib.debug.newbie import *
+from pyxllib.debug.pupil import *
+from pyxllib.debug.specialist import *
+
+from pyxllib.time.specialist import *

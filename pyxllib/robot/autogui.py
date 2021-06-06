@@ -28,11 +28,13 @@ import pyscreeze  # NOQA pyautogui安装的时候会自动安装依赖的pyscree
 import numpy as np
 from pandas.api.types import is_list_like
 
-from pyxllib.time.tictoc import TicToc
-from pyxllib.file.dir import File, Dir
-from pyxllib.prog.basic import first_nonnone, xlwait
+from pyxllib.time.specialist import TicToc
+from pyxllib.file.specialist import File, Dir
+from pyxllib.prog.newbie import first_nonnone
+from pyxllib.prog.pupil import xlwait
+from pyxllib.cv.specialist import imread, imwrite, get_sub_image, pil2cv
+from pyxllib.algo.geo import ComputeIou, shapely_polygon, ltrb2xywh, xywh2ltrb
 from pyxllib.data.label import LabelmeData
-from pyxllib.cv.cvimg import imread, imwrite, get_sub_image, ltrb2xywh, pil2cv, xywh2ltrb, ComputeIou, shapely_polygon
 
 
 class AutoGuiLabelData:

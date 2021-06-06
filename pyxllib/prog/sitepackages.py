@@ -6,6 +6,9 @@
 
 
 r"""
+一个旧模块，用来把pyxllib自动配置到 site-package 的工具
+使用 python setup.py develop 策略后就不太需要了
+
 除了使用pip install pyxllib，
 还可以下载最新源代码，然后用该脚本将pyxllib配置到site-packages里，便于索引使用
 """
