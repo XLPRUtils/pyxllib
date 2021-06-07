@@ -10,6 +10,7 @@
 from pyxllib.stdlib import zipfile
 from pyxllib.stdlib import shutil
 
+from pyxllib.prog.newbie import *
 from pyxllib.prog.pupil import *
 from pyxllib.prog.specialist import *
 from pyxllib.prog.deprecatedlib import deprecated
@@ -31,3 +32,6 @@ from pyxllib.debug.pupil import *
 from pyxllib.debug.specialist import *
 
 from pyxllib.time.specialist import *
+
+from pyxllib.excel.newbie import *
+from pyxllib.excel.pupil import *
