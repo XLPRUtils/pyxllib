@@ -785,26 +785,23 @@ class CocoGtData:
             anno['id'] = i
         return anns
 
-    def to_labelme(self, root, gt_dict, *, prt=False):
+    def to_labelme(self, root, *, seg=False, prt=False):
         """
         :param root: 图片根目录
-        :param gt_dict: coco格式的字典
-            会将 ann json.dumps 为 str 存储为 label
-            因为image标记方式的原因，如果在root找到多个匹配，会取第一匹配项
         :return:
             extdata，存储了一些匹配异常信息
         """
-        root, data = Dir(root), []
+        root, data = Dir(root), {}
+        catid2name = {x['id']: x['name'] for x in self.gt_dict['categories']}
 
         # 1 准备工作，构建文件名索引字典
         files = root.select('**/*').subfiles()
         gs = PathGroups.groupby(files)
 
         # 2 遍历生成labelme数据
-        cd = CocoData(gt_dict)
         not_finds = set()  # coco里有的图片，root里没有找到
         multimatch = dict()  # coco里的某张图片，在root找到多个匹配文件
-        for img, anns in tqdm(cd.group_gt(reserve_empty=True), disable=not prt):
+        for img, anns in tqdm(self.group_gt(reserve_empty=True), disable=not prt):
             # 2.1 文件匹配
             imfiles = gs.find_files(img['file_name'])
             if not imfiles:  # 没有匹配图片的，不处理
@@ -818,16 +815,27 @@ class CocoGtData:
 
             # 2.2 数据内容转换
             lmdict = LabelmeData.gen_data(imfile)
+            img = DictTool.or_(img, {'xltype': 'image'})
             lmdict['shapes'].append(LabelmeData.gen_shape(json.dumps(img, ensure_ascii=False), [[-10, 0], [-5, 0]]))
             for ann in anns:
+                ann = DictTool.or_(ann, {'category_name': catid2name[ann['id']]})
                 label = json.dumps(ann, ensure_ascii=False)
-                points = xywh2ltrb(ann['bbox'])
-                shape = LabelmeData.gen_shape(label, points)
+                shape = LabelmeData.gen_shape(label, xywh2ltrb(ann['bbox']))
                 lmdict['shapes'].append(shape)
-            data.append([imfile.with_suffix('.json'), lmdict])
+
+                if seg:
+                    # 把分割也显示出来（用灰色）
+                    for x in ann['segmentation']:
+                        an = {'box_id': ann['id'], 'xltype': 'seg', 'shape_color': [191, 191, 191]}
+                        label = json.dumps(an, ensure_ascii=False)
+                        lmdict['shapes'].append(LabelmeData.gen_shape(label, x))
+
+            f = imfile.with_suffix('.json')
+
+            data[f.relpath(root)] = lmdict
 
         return LabelmeData(root, data,
-                           extdata={'categories': cd.gt_dict['categories'],
+                           extdata={'categories': self.gt_dict['categories'],
                                     'not_finds': not_finds,
                                     'multimatch': Groups(multimatch)})
 

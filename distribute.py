@@ -8,11 +8,10 @@
 自动发布pyxllib的脚本
 """
 
-import subprocess
-from pyxllib.xl.dir import *
+from pyxllib.xl import *
 
 # 1 每次发布版本，只要在这个文件改一次就行，会自动修改其他有需要用到的两个版本号位置
-VERSION = '0.0.79'
+VERSION = '0.1.5'
 
 
 def update_version(f):
@@ -23,7 +22,6 @@ def update_version(f):
 
 
 update_version('setup.py')
-update_version('pyxllib/utools.py')
 
 # 2 打包发布
 subprocess.run('python setup.py sdist')  # 本地生成的.gz可以检查上传的内容

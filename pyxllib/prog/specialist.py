@@ -6,6 +6,8 @@
 
 import concurrent.futures
 
+from tqdm import tqdm
+
 
 def mtqdm(func, iterable, *args, max_workers=1, **kwargs):
     """ 对tqdm的封装，增加了多线程的支持
@@ -22,7 +24,6 @@ def mtqdm(func, iterable, *args, max_workers=1, **kwargs):
 
     整体功能类似Iterate
     """
-    from tqdm import tqdm
 
     # 0 个人习惯参数
     kwargs['smoothing'] = kwargs.get('smoothing', 0)
