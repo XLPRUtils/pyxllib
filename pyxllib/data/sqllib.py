@@ -303,13 +303,3 @@ def adjust_repeat_data(li, suffix='+'):
         values.add(x)
 
     return res
-
-
-if __name__ == '__main__':
-    TicToc.process_time(f'{dformat()}启动准备共用时')
-    tictoc = TicToc(__file__)
-
-    # create_account_df()
-    # demo_sqlengine()
-
-    tictoc.toc()

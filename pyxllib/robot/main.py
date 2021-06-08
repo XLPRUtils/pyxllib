@@ -18,6 +18,7 @@ import sys
 import textwrap
 from os.path import join as pathjoin
 from collections import OrderedDict, Counter
+import base64
 
 from bs4 import BeautifulSoup
 

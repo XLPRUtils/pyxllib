@@ -32,7 +32,7 @@ from pyxllib.time.specialist import TicToc
 from pyxllib.file.specialist import File, Dir
 from pyxllib.prog.newbie import first_nonnone
 from pyxllib.prog.pupil import xlwait
-from pyxllib.cv.specialist import imread, imwrite, get_sub_image, pil2cv
+from pyxllib.cv.expert import imread, imwrite, get_sub_image, pil2cv
 from pyxllib.algo.geo import ComputeIou, shapely_polygon, ltrb2xywh, xywh2ltrb
 from pyxllib.data.label import LabelmeData
 

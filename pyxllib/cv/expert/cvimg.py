@@ -14,8 +14,8 @@ from PIL import Image
 
 from pyxllib.prog.pupil import is_url, is_file
 from pyxllib.file.specialist import File
-from pyxllib.cv.specialist.cvprcs import CvPrcs
-from pyxllib.cv.specialist.pilprcs import cv2pil, PilPrcs
+from pyxllib.cv.expert.cvprcs import CvPrcs
+from pyxllib.cv.expert.pilprcs import cv2pil, PilPrcs
 
 ____XxImg = """
 对CvPrcs、PilPrcs的类层级接口封装

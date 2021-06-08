@@ -111,12 +111,12 @@ def xlwait(func, condition=bool, *, limit=None, interval=1):
     :param interval: 重复执行间隔 （单位 秒）
 
     """
-    t = time.clock()
+    t = time.time()
     while True:
         res = func()
         if condition(res):
             return res
-        elif limit and (time.clock() - t > limit):
+        elif limit and (time.time() - t > limit):
             return res  # 超时也返回目前得到的结果
         time.sleep(interval)
 

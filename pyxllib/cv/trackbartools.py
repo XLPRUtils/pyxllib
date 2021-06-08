@@ -16,7 +16,7 @@ import cv2
 import numpy as np
 
 from pyxllib.time.specialist import TicToc
-from pyxllib.cv.specialist import CvPlot, imread
+from pyxllib.cv.expert import CvPlot, imread
 
 
 class TrackbarTool:

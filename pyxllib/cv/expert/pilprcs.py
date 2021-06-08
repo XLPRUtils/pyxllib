@@ -11,7 +11,7 @@ import PIL.ExifTags
 import numpy as np
 
 from pyxllib.file.specialist import File
-from pyxllib.cv.specialist.cvprcs import CvPrcsBase, is_pil_image, is_numpy_image, cv2pil
+from pyxllib.cv.expert.cvprcs import CvPrcsBase, is_pil_image, is_numpy_image, cv2pil
 
 
 class PilPrcsBase(CvPrcsBase):
