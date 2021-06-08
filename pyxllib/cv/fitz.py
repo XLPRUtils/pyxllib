@@ -25,7 +25,7 @@ except ModuleNotFoundError:
 from pyxllib.file.specialist import File, Dir, writefile, filescopy, filesdel
 from pyxllib.debug.pupil import dprint
 from pyxllib.debug.specialist import browser
-from pyxllib.cv.specialist import imwrite, zoomsvg
+from pyxllib.cv.expert import imwrite, zoomsvg
 
 
 class FitzPdf:

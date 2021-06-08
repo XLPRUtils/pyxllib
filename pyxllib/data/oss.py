@@ -25,6 +25,7 @@ class OssBucket:
 
     def upload(self, key, localfile, if_exists='delete', force=False):
         """ 如果云端已存在，默认会进行覆盖
+
         :param key: 上传后存储的文件名
         :param localfile: 本地文件
         :param if_exists:
@@ -49,6 +50,7 @@ class OssBucket:
 
     def check_exists(self, key):
         """ 检查一个文件在oss是否存在
+
         :param key:
         :return: 存在返回 GetObjectResult 对象，不存在返回False
         """
@@ -66,6 +68,7 @@ class OssBucket:
 
     def ObjectIterator(self, **kwargs):
         """ 遍历某个目录下的所有文件（含子目录里的文件）
+
         >> print(len(list(oss.ObjectIterator(prefix='histudy/tr/teacher/lateximage/'))))
         """
         return oss2.ObjectIterator(self.bucket, **kwargs)

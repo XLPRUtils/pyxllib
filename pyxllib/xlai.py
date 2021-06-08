@@ -5,5 +5,5 @@
 # @Date   : 2021/06/06 22:58
 
 from pyxllib.xl import *
-from pyxllib.cv.specialist import *
-
+from pyxllib.cv.expert import *
+from pyxllib.ai.torch import *

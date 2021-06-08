@@ -23,11 +23,12 @@ from pyxllib.prog.pupil import DictTool
 from pyxllib.debug.specialist import get_xllog, Iterate
 from pyxllib.file.specialist import File, Dir, PathGroups, get_encoding
 from pyxllib.prog.specialist import mtqdm
-from pyxllib.cv.specialist import PilImg, Image
+from pyxllib.cv.expert import PilImg, Image
 from pyxllib.algo.newbie import ltrb2xywh, xywh2ltrb
 from pyxllib.algo.geo import np_array, rect_bounds1d, coords1d, rect2polygon
 
 __0_basic = """
+这里可以写每个模块注释
 """
 
 

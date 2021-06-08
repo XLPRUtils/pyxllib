@@ -17,8 +17,8 @@ except ModuleNotFoundError:
     subprocess.run(['pip3', 'install', 'baidu-aip'])
     import aip
 
-from pyxllib.file.specialist.filelib import File
-from pyxllib.cv.imfile import get_img_content
+from pyxllib.file.specialist import File
+from pyxllib.cv.expert import get_img_content
 
 AIP_OCR_ACCOUNT_FILE = File(__file__).parent / 'aipocraccount.pkl'
 

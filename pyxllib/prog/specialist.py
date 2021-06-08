@@ -5,8 +5,13 @@
 # @Date   : 2021/06/06 11:16
 
 import concurrent.futures
+import os
+import re
+import subprocess
 
 from tqdm import tqdm
+
+from pyxllib.file.specialist import File, Dir
 
 
 def mtqdm(func, iterable, *args, max_workers=1, **kwargs):
@@ -54,3 +59,35 @@ def mtqdm(func, iterable, *args, max_workers=1, **kwargs):
                 raise error
 
         executor.shutdown()
+
+
+def distribute_package(root, version=None, repository=None, *, upload=True):
+    """ 发布包的工具函数
+
+    :param root: 项目的根目录，例如 'D:/slns/pyxllib'
+        根目录下有对应的 setup.py 等文件
+    :param repository: 比如我配置了 [xlpr]，就可以传入 'xlpr'
+    """
+    # 1 切换工作目录
+    os.chdir(str(root))
+
+    # 2 改版本号
+    if version:
+        f = File('setup.py', root)
+        s = re.sub(r"(version\s*=\s*)(['\"])(.+?)(\2)", fr'\1\g<2>{version}\4', f.read())
+        f.write(s)
+
+    # 3 打包
+    subprocess.run('python setup.py sdist')
+
+    # 4 上传
+    if upload:
+        # 上传
+        cmd = 'twine upload dist/*'
+        if repository:
+            cmd += f' -r {repository}'
+        subprocess.run(cmd)
+        # 删除打包生成的中间文件
+        Dir('dist').delete()
+        Dir('build').delete()
+        [d.delete() for d in Dir('.').select(r'*.egg-info').subdirs()]

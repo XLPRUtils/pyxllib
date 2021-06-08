@@ -6,4 +6,4 @@
 
 from pyxllib.xl import *
 from pyxllib.algo.geo import *
-from pyxllib.cv.specialist import *
+from pyxllib.cv.expert import *
