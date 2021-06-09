@@ -31,8 +31,420 @@ except ModuleNotFoundError:
 from xlcocotools.coco import COCO
 from xlcocotools.cocoeval import COCOeval
 
-from pyxllib.data.label import LABEL_COLORMAP7, ToLabelmeJson, CocoGtData, CocoData
+from pyxllib.stdlib.zipfile import ZipFile
+from pyxllib.data.labelme import LABEL_COLORMAP7, ToLabelmeJson, LabelmeData
 from pyxllib.data.icdar import IcdarEval
+
+
+class CocoGtData:
+    """ 类coco格式的json数据处理
+
+    不一定要跟coco gt结构完全相同，只要相似就行，
+        比如images、annotaions、categories都可以扩展自定义字段
+    """
+
+    def __init__(self, gt):
+        self.gt_dict = gt if isinstance(gt, dict) else File(gt).read()
+
+    @classmethod
+    def gen_image(cls, image_id, file_name, height, width, **kwargs):
+        """ 初始化一个图片标注，使用位置参数，复用的时候可以节省代码量 """
+        im = {'id': int(image_id), 'file_name': file_name,
+              'height': int(height), 'width': int(width)}
+        if kwargs:
+            im.update(kwargs)
+        return im
+
+    @classmethod
+    def gen_images(cls, imdir, start_idx=1):
+        """ 自动生成标准的images字段
+
+        :param imdir: 图片目录
+        :param start_idx: 图片起始下标
+        :return: list[dict(id, file_name, width, height)]
+        """
+        files = Dir(imdir).select(['*.jpg', '*.png']).subfiles()
+        images = []
+        for i, f in enumerate(files, start=start_idx):
+            w, h = Image.open(str(f)).size
+            images.append({'id': i, 'file_name': f.name, 'width': w, 'height': h})
+        return images
+
+    @classmethod
+    def points2segmentation(cls, pts):
+        """ labelme的points结构转segmentation分割结构
+        """
+        # 1 两个点要转4个点
+        if len(pts) == 2:
+            pts = rect2polygon(pts).tolist()
+        else:
+            pts = list(pts)
+
+        # 2 点集要封闭，末尾要加上第0个点
+        pts.append(pts[0])
+
+        # 多边形因为要画出所有的点，还要封闭，数据有点多，还是只存整数节省空间
+        pts = [round_int(v) for v in coords1d(pts)]
+
+        return pts
+
+    @classmethod
+    def gen_annotation(cls, **kwargs):
+        """ 智能地生成一个annotation字典
+
+        这个略微有点过度封装了
+        但没事，先放着，可以不拿出来用~~
+        """
+        a = kwargs.copy()
+
+        # a = {'id': 0, 'area': 0, 'bbox': [0, 0, 0, 0],
+        #       'category_id': 1, 'image_id': 0, 'iscrowd': 0, 'segmentation': []}
+
+        if 'points' in a:  # points是一个特殊参数，使用“一个”多边形来标注（注意区别segmentation是多个多边形）
+            if 'segmentation' not in a:
+                a['segmentation'] = [cls.points2segmentation(a['points'])]
+            del a['points']
+        if 'bbox' not in a:
+            pts = []
+            for seg in a['segmentation']:
+                pts += seg
+            a['bbox'] = ltrb2xywh(rect_bounds1d(pts))
+        if 'area' not in a:  # 自动计算面积
+            a['area'] = int(a['bbox'][2] * a['bbox'][3])
+        for k in ['id', 'image_id']:
+            if k not in a:
+                a[k] = 0
+        if 'category_id' not in a:
+            a['category_id'] = 1
+
+        return a
+
+    @classmethod
+    def gen_quad_annotations(cls, file, *, image_id, start_box_id, category_id=1, **kwargs):
+        """ 解析一张图片对应的txt标注文件
+
+        :param file: 标注文件，有多行标注
+            每行是x1,y1,x2,y2,x3,y3,x4,y4[,label] （label可以不存在）
+        :param image_id: 该图片id
+        :param start_box_id: box_id起始编号
+        :param category_id: 归属类别
+        """
+        lines = File(file).read()
+        box_id = start_box_id
+        annotations = []
+        for line in lines.splitlines():
+            vals = line.split(',', maxsplit=8)
+            if len(vals) < 2: continue
+            attrs = {'id': box_id, 'image_id': image_id, 'category_id': category_id}
+            if len(vals) == 9:
+                attrs['label'] = vals[8]
+            # print(vals)
+            seg = [int(v) for v in vals[:8]]
+            attrs['segmentation'] = [seg]
+            attrs['bbox'] = ltrb2xywh(rect_bounds1d(seg))
+            if kwargs:
+                attrs.update(kwargs)
+            annotations.append(cls.gen_annotation(**attrs))
+            box_id += 1
+        return annotations
+
+    @classmethod
+    def gen_categories(cls, cats):
+        if isinstance(cats, list):
+            # 如果输入是一个类别列表清单，则按1、2、3的顺序给其编号
+            return [{'id': i, 'name': x, 'supercategory': ''} for i, x in enumerate(cats, start=1)]
+        else:
+            raise TypeError
+
+        # TODO 扩展支持其他构造方法
+
+    @classmethod
+    def gen_gt_dict(cls, images, annotations, categories, outfile=None):
+        data = {'images': images, 'annotations': annotations, 'categories': categories}
+        if outfile is not None:
+            File(outfile).write(data)
+        return data
+
+    @classmethod
+    def is_gt_dict(cls, gt_dict):
+        if isinstance(gt_dict, (tuple, list)):
+            return False
+        has_keys = set('images annotations categories'.split())
+        return not (has_keys - gt_dict.keys())
+
+    def clear_gt_segmentation(self, *, inplace=False):
+        """ 有的coco json文件太大，如果只做普通的bbox检测任务，可以把segmentation的值删掉
+        """
+        gt_dict = self.gt_dict if inplace else copy.deepcopy(self.gt_dict)
+        for an in gt_dict['annotations']:
+            an['segmentation'] = []
+        return gt_dict
+
+    def get_catname_func(self):
+        id2name = {x['id']: x['name'] for x in self.gt_dict['categories']}
+
+        def warpper(cat_id, default=...):
+            """
+            :param cat_id:
+            :param default: 没匹配到的默认值
+                ... 不是默认值，而是代表匹配不到直接报错
+            :return:
+            """
+            if cat_id in id2name:
+                return id2name[cat_id]
+            else:
+                if default is ...:
+                    raise IndexError(f'{cat_id}')
+                else:
+                    return default
+
+        return warpper
+
+    def _group_base(self, group_anns, reserve_empty=False):
+        if reserve_empty:
+            for im in self.gt_dict['images']:
+                yield im, group_anns.get(im['id'], [])
+        else:
+            id2im = {im['id']: im for im in self.gt_dict['images']}
+            for k, v in group_anns.items():
+                yield id2im[k], v
+
+    def group_gt(self, *, reserve_empty=False):
+        """ 遍历gt的每一张图片的标注
+
+        这个是用字典的方式来实现分组，没用 df.groupby 的功能
+
+        :param reserve_empty: 是否保留空im对应的结果
+
+        :return: [(im, annos), ...] 每一组是im标注和对应的一组annos标注
+        """
+        group_anns = defaultdict(list)
+        [group_anns[an['image_id']].append(an) for an in self.gt_dict['annotations']]
+        return self._group_base(group_anns, reserve_empty)
+
+    def select_gt(self, ids, *, inplace=False):
+        """ 删除一些images标注（会删除对应的annotations），挑选数据，或者减小json大小
+
+        :param ids: int类型表示保留的图片id，str类型表示保留的图片名，可以混合使用
+            [341427, 'PMC4055390_00006.jpg', ...]
+        :return: 筛选出的新字典
+        """
+        gt_dict = self.gt_dict
+        # 1 ids 统一为int类型的id值
+        if not isinstance(ids, (list, tuple, set)):
+            ids = [ids]
+        map_name2id = {item['file_name']: item['id'] for item in gt_dict['images']}
+        ids = set([(map_name2id[x] if isinstance(x, str) else x) for x in ids])
+
+        # 2 简化images和annotations
+        dst = {'images': [x for x in gt_dict['images'] if (x['id'] in ids)],
+               'annotations': [x for x in gt_dict['annotations'] if (x['image_id'] in ids)],
+               'categories': gt_dict['categories']}
+        if inplace: self.gt_dict = dst
+        return dst
+
+    def random_select_gt(self, number=20, *, inplace=False):
+        """ 从gt中随机抽出number个数据 """
+        ids = [x['id'] for x in self.gt_dict['images']]
+        random.shuffle(ids)
+        gt_dict = self.select_gt(ids[:number])
+        if inplace: self.gt_dict = gt_dict
+        return gt_dict
+
+    def select_gt_by_imdir(self, imdir, *, inplace=False):
+        """ 基于imdir目录下的图片来过滤src_json """
+        # 1 对比下差异
+        json_images = set([x['file_name'] for x in self.gt_dict['images']])
+        dir_images = set(os.listdir(str(imdir)))
+
+        # df = SetCmper({'json_images': json_images, 'dir_images': dir_images}).intersection()
+        # print('json_images intersection dir_images:')
+        # print(df)
+
+        # 2 精简json
+        gt_dict = self.select_gt(json_images & dir_images)
+        if inplace: self.gt_dict = gt_dict
+        return gt_dict
+
+    def reset_image_id(self, start=1, *, inplace=False):
+        """ 按images顺序对图片重编号 """
+        gt_dict = self.gt_dict if inplace else copy.deepcopy(self.gt_dict)
+        # 1 重置 images 的 id
+        old2new = {}
+        for i, im in enumerate(gt_dict['images'], start=start):
+            old2new[im['id']] = i
+            im['id'] = i
+
+        # 2 重置 annotations 的 id
+        for anno in gt_dict['annotations']:
+            anno['image_id'] = old2new[anno['image_id']]
+
+        return gt_dict
+
+    def reset_box_id(self, start=1, *, inplace=False):
+        anns = self.gt_dict['annotations']
+        if not inplace:
+            anns = copy.deepcopy(anns)
+
+        for i, anno in enumerate(anns, start=start):
+            anno['id'] = i
+        return anns
+
+    def to_labelme(self, root, *, seg=False, prt=False):
+        """
+        :param root: 图片根目录
+        :return:
+            extdata，存储了一些匹配异常信息
+        """
+        root, data = Dir(root), {}
+        catid2name = {x['id']: x['name'] for x in self.gt_dict['categories']}
+
+        # 1 准备工作，构建文件名索引字典
+        files = root.select('**/*').subfiles()
+        gs = PathGroups.groupby(files)
+
+        # 2 遍历生成labelme数据
+        not_finds = set()  # coco里有的图片，root里没有找到
+        multimatch = dict()  # coco里的某张图片，在root找到多个匹配文件
+        for img, anns in tqdm(self.group_gt(reserve_empty=True), disable=not prt):
+            # 2.1 文件匹配
+            imfiles = gs.find_files(img['file_name'])
+            if not imfiles:  # 没有匹配图片的，不处理
+                not_finds.add(img['file_name'])
+                continue
+            elif len(imfiles) > 1:
+                multimatch[img['file_name']] = imfiles
+                imfile = imfiles[0]
+            else:
+                imfile = imfiles[0]
+
+            # 2.2 数据内容转换
+            lmdict = LabelmeData.gen_data(imfile)
+            img = DictTool.or_(img, {'xltype': 'image'})
+            lmdict['shapes'].append(LabelmeData.gen_shape(json.dumps(img, ensure_ascii=False), [[-10, 0], [-5, 0]]))
+            for ann in anns:
+                ann = DictTool.or_(ann, {'category_name': catid2name[ann['id']]})
+                label = json.dumps(ann, ensure_ascii=False)
+                shape = LabelmeData.gen_shape(label, xywh2ltrb(ann['bbox']))
+                lmdict['shapes'].append(shape)
+
+                if seg:
+                    # 把分割也显示出来（用灰色）
+                    for x in ann['segmentation']:
+                        an = {'box_id': ann['id'], 'xltype': 'seg', 'shape_color': [191, 191, 191]}
+                        label = json.dumps(an, ensure_ascii=False)
+                        lmdict['shapes'].append(LabelmeData.gen_shape(label, x))
+
+            f = imfile.with_suffix('.json')
+
+            data[f.relpath(root)] = lmdict
+
+        return LabelmeData(root, data,
+                           extdata={'categories': self.gt_dict['categories'],
+                                    'not_finds': not_finds,
+                                    'multimatch': Groups(multimatch)})
+
+
+class CocoData(CocoGtData):
+    """ 这个类可以封装一些需要gt和dt衔接的功能 """
+
+    def __init__(self, gt, dt=None, *, min_score=0):
+        """
+        :param gt: gt的dict或文件
+            gt是必须传入的，可以只传入gt
+            有些任务理论上可以只有dt，但把配套的gt传入，能做更多事
+        :param dt: dt的list或文件
+        :param min_score: CocoMatch这个系列的类，初始化增加min_score参数，支持直接滤除dt低置信度的框
+        """
+        super().__init__(gt)
+
+        def get_dt_list(dt, min_score=0):
+            # dt
+            default_dt = []
+            # default_dt = [{'image_id': self.gt_dict['images'][0]['id'],
+            #                'category_id': self.gt_dict['categories'][0]['id'],
+            #                'bbox': [0, 0, 1, 1],
+            #                'score': 1}]
+            # 这样直接填id有很大的风险，可能会报错。但是要正确填就需要gt的信息，传参麻烦~~
+            # default_dt = [{'image_id': 1, 'category_id': 1, 'bbox': [0, 0, 1, 1], 'score': 1}]
+
+            if not dt:
+                dt_list = default_dt
+            else:
+                dt_list = dt if isinstance(dt, (list, tuple)) else File(dt).read()
+                if min_score:
+                    dt_list = [b for b in dt_list if (b['score'] >= min_score)]
+                if not dt_list:
+                    dt_list = default_dt
+            return dt_list
+
+        self.dt_list = get_dt_list(dt, min_score)
+
+    @classmethod
+    def is_dt_list(cls, dt_list):
+        if not isinstance(dt_list, (tuple, list)):
+            return False
+        item = dt_list[0]
+        has_keys = set('score image_id category_id bbox'.split())
+        return not (has_keys - item.keys())
+
+    def select_dt(self, ids, *, inplace=False):
+        gt_dict, dt_list = self.gt_dict, self.dt_list
+        # 1 ids 统一为int类型的id值
+        if not isinstance(ids, (list, tuple, set)):
+            ids = [ids]
+        if gt_dict:
+            map_name2id = {item['file_name']: item['id'] for item in gt_dict['images']}
+            ids = [(map_name2id[x] if isinstance(x, str) else x) for x in ids]
+        ids = set(ids)
+
+        # 2 简化images
+        dst = [x for x in dt_list if (x['image_id'] in ids)]
+        if inplace: self.dt_list = dst
+        return dst
+
+    def group_dt(self, *, reserve_empty=False):
+        """ 对annos按image_id分组，如果有"""
+        group_anns = defaultdict(list)
+        [group_anns[an['image_id']].append(an) for an in self.dt_list]
+        return self._group_base(group_anns, reserve_empty)
+
+    def group_gt_dt(self, *, reserve_empty=False):
+        """ 获得一张图片上gt和dt的标注结果
+
+        [(im, gt_anns, dt_anns), ...]
+        """
+        raise NotImplementedError
+
+    def to_icdar_label_quad(self, outfile, *, min_score=0):
+        """ 将coco的dt结果转为icdar的标注格式
+
+        存成一个zip文件，zip里面每张图对应一个txt标注文件
+        每个txt文件用quad八个数值代表一个标注框
+
+        适用于 sroie 检测格式
+        """
+        # 1 获取dt_list
+        if min_score:
+            dt_list = [b for b in self.dt_list if (b['score'] >= min_score)]
+        else:
+            dt_list = self.dt_list
+
+        # 2 转df，按图片分组处理
+        df = pd.DataFrame.from_dict(dt_list)  # noqa from_dict可以传入List[Dict]
+        df = df.groupby('image_id')
+
+        # 3 建立一个zip文件
+        myzip = ZipFile(str(outfile), 'w')
+
+        # 4 遍历每一组数据，生成一个文件放到zip里面
+        id2name = {im['id']: pathlib.Path(im['file_name']).stem for im in self.gt_dict['images']}
+        for image_id, items in df:
+            label_file = id2name[image_id] + '.txt'
+            quads = [rect2polygon(xywh2ltrb(x), dtype=int).reshape(-1) for x in items['bbox']]
+            quads = [','.join(map(str, x)) for x in quads]
+            myzip.writestr(label_file, '\n'.join(quads))
+        myzip.close()
 
 
 class Coco2Labelme(ToLabelmeJson):
@@ -334,7 +746,7 @@ class CocoEval(CocoData):
         return df
 
 
-class _CocoParser(CocoEval):
+class CocoParser(CocoEval):
     def __init__(self, gt, dt=None, iou_type='bbox', *, min_score=0, printf=False):
         """ coco格式相关分析工具，dt不输入也行，当做没有任何识别结果处理~~
             相比CocoMatch比较轻量级，不会初始化太久，但提供了一些常用的基础功能
@@ -447,7 +859,7 @@ class _CocoParser(CocoEval):
             gt_anns.to_excel(writer, sheet_name='gt_anns', freeze_panes=(1, 0))
             self.dt_anns.to_excel(writer, sheet_name='dt_anns', freeze_panes=(1, 0))
 
-    def labelme_gt(self, imdir, dst_dir=None, *, segmentation=False, max_workers=4):
+    def to_labelme_gt(self, imdir, dst_dir=None, *, segmentation=False, max_workers=4):
         """ 在图片目录里生成图片的可视化json配置文件
 
         :param segmentation: 是否显示分割效果
@@ -483,7 +895,7 @@ class _CocoParser(CocoEval):
         mtqdm(func, list(gt_anns.groupby('image_id').__iter__()), 'create labelme gt jsons', max_workers=max_workers)
 
 
-class _CocoMatchBase:
+class CocoMatchBase:
     def __init__(self, match_df):
         """ match_df匹配表格相关算法
 
@@ -555,7 +967,7 @@ class _CocoMatchBase:
         return df
 
 
-class CocoMatch(_CocoParser, _CocoMatchBase):
+class CocoMatch(CocoParser, CocoMatchBase):
     def __init__(self, gt, dt=None, *, min_score=0, eval_im=True, printf=False):
         """ coco格式相关分析工具，dt不输入也行，当做没有任何识别结果处理~~
 
@@ -564,9 +976,9 @@ class CocoMatch(_CocoParser, _CocoMatchBase):
         """
         # 因为这里 CocoEval、_CocoMatchBase 都没有父级，不会出现初始化顺序混乱问题
         #   所以我直接指定类初始化顺序了，没用super
-        _CocoParser.__init__(self, gt, dt, min_score=min_score)
+        CocoParser.__init__(self, gt, dt, min_score=min_score)
         match_anns = self._get_match_anns_df(printf=printf)
-        _CocoMatchBase.__init__(self, match_anns)
+        CocoMatchBase.__init__(self, match_anns)
         self.images = self._get_match_images_df(eval_im=eval_im, printf=printf)
         self.categories = self._get_match_categories_df()
 
@@ -672,7 +1084,7 @@ class CocoMatch(_CocoParser, _CocoMatchBase):
                 images.loc[image_id, 'coco_score'] = self.eval([image_id])
 
             # 2.3 增加每张图片的多分类分数
-            m = _CocoMatchBase(df)
+            m = CocoMatchBase(df)
             images.loc[image_id, 'n_gt_box'] = m.n_gt_box()
             images.loc[image_id, 'n_dt_box'] = m.n_dt_box()
             images.loc[image_id, 'n_match0.5_box'] = m.n_match_box(0.5)
@@ -765,8 +1177,8 @@ class CocoMatch(_CocoParser, _CocoMatchBase):
                              'categories': self.categories,
                              'match_anns': self.match_anns})
 
-    def _labelme_match(self, match_func_name, imdir, dst_dir=None, *, segmentation=False, hide_match_dt=False,
-                       **kwargs):
+    def _to_labelme_match(self, match_func_name, imdir, dst_dir=None, *, segmentation=False, hide_match_dt=False,
+                          **kwargs):
         """ 可视化目标检测效果
 
         :param imdir: 默认会把结果存储到imdir
@@ -805,9 +1217,9 @@ class CocoMatch(_CocoParser, _CocoMatchBase):
         match_anns['gt_supercategory'] = [self.categories.loc[x, 'supercategory'] for x in match_anns['gt_category_id']]
         mtqdm(func, list(iter(match_anns.groupby('image_id'))), max_workers=8, desc='make labelme json:')
 
-    def labelme_match(self, imdir, dst_dir=None, *, segmentation=False, hide_match_dt=False):
-        self._labelme_match('anns_match', imdir, dst_dir, segmentation=segmentation, hide_match_dt=hide_match_dt)
+    def to_labelme_match(self, imdir, dst_dir=None, *, segmentation=False, hide_match_dt=False):
+        self._to_labelme_match('anns_match', imdir, dst_dir, segmentation=segmentation, hide_match_dt=hide_match_dt)
 
-    def labelme_match2(self, imdir, dst_dir=None, *, segmentation=False, hide_match_dt=False, colormap=LABEL_COLORMAP7):
-        self._labelme_match('anns_match2', imdir, dst_dir, segmentation=segmentation, hide_match_dt=hide_match_dt,
-                            colormap=colormap)
+    def to_labelme_match2(self, imdir, dst_dir=None, *, segmentation=False, hide_match_dt=False, colormap=LABEL_COLORMAP7):
+        self._to_labelme_match('anns_match2', imdir, dst_dir, segmentation=segmentation, hide_match_dt=hide_match_dt,
+                               colormap=colormap)

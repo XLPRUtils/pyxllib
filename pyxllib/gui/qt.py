@@ -19,6 +19,8 @@ from qtpy import QtGui
 from qtpy.QtWidgets import QFrame, QInputDialog, QApplication
 from PyQt5.QtCore import pyqtSignal
 
+from pyxllib.prog.newbie import CvtType
+
 here = osp.dirname(osp.abspath(__file__))
 
 
@@ -66,7 +68,8 @@ class XlLineEdit(QtWidgets.QLineEdit):
         if text:
             check()
 
-        self.setStyleSheet(self.styleSheet() + 'qproperty-cursorPosition: 0;')
+        # self.setStyleSheet(self.styleSheet() + 'qproperty-cursorPosition: 0;')
+        self.setStyleSheet(self.styleSheet())
 
 
 class XlComboBox(QtWidgets.QComboBox):
@@ -117,7 +120,8 @@ class XlComboBox(QtWidgets.QComboBox):
             self.setText(text)
 
         # 4 补充格式
-        self.setStyleSheet(self.styleSheet() + 'qproperty-cursorPosition: 0;')
+        # self.setStyleSheet(self.styleSheet() + 'qproperty-cursorPosition: 0;')
+        self.setStyleSheet(self.styleSheet())
 
     def setText(self, text):
         text = str(text)
@@ -169,7 +173,7 @@ def get_input_widget(items=None, cur_value=None, *, valcvt=None,
 
     # 1 封装类型检查功能
     if isinstance(valcvt, str):
-        cvtfunc = {'int': int, 'float': float, 'str': str}.get(valcvt, None)
+        cvtfunc = CvtType.factory(valcvt)
     else:
         cvtfunc = valcvt
 

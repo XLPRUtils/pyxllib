@@ -84,11 +84,11 @@ class IcdarEval:
         return res
 
     def icdar2013(self, params=None):
-        from pyxllib.data.icdar import evaluate_method, default_evaluation_params
+        from pyxllib.data.icdar.icdar2013 import evaluate_method, default_evaluation_params
         return self._eval(evaluate_method, default_evaluation_params, params)
 
     def deteval(self, params=None):
-        from pyxllib.data.icdar import evaluate_method, default_evaluation_params
+        from pyxllib.data.icdar.deteval import evaluate_method, default_evaluation_params
         return self._eval(evaluate_method, default_evaluation_params, params)
 
     def iou(self, params=None):

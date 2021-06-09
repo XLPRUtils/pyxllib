@@ -230,7 +230,7 @@ class Dir(PathBase):
 
         """
         from pyxllib.debug.specialist.xllog import Iterate
-        
+
         if ref_dir:
             ref_dir = Dir(ref_dir)
             paths1 = self.subpaths()
@@ -819,18 +819,3 @@ class PackFile:
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.clear_tempfolder()
-
-
-def download_file(url, fn=None, *, encoding=None, if_exists=None, ext=None, temp=False):
-    """类似writefile，只是源数据是从url里下载
-    :param url: 数据下载链接
-    :param fn: 保存位置，会从url智能提取文件名
-    :param if_exists: 详见writefile参数解释
-    :para temp: 将文件写到临时文件夹
-    :return:
-    """
-    if not fn: fn = url.split('/')[-1]
-    root = Dir.TEMP if temp else None
-    fn = File(fn, root, suffix=ext).write(requests.get(url).content,
-                                          encoding=encoding, if_exists=if_exists, etag=(not fn))
-    return fn.to_str()

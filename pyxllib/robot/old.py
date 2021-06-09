@@ -5,7 +5,8 @@
 # @Date   : 2018/07/12 09:32
 
 
-"""
+""" 一系列还未整理的旧代码
+
 任何模块代码的第一个字符串用来写文档注释
 
 因为util下的debuglib、textlib、filelib的功能拆分并不是特别精确，所以一般不对外开放接口
@@ -23,30 +24,8 @@ import base64
 from bs4 import BeautifulSoup
 
 
-def ________B_数据结构________():
-    pass
-
-
-def dict__sub__(d1, d2):
-    """在d1中删除d2存在Keys的方法"""
-    d = {}
-    for k in [k for k in d1 if k not in d2]:
-        d[k] = d1[k]
-    return d
-
-
 def ________C_文本处理________():
     pass
-
-
-def read_from_ubuntu(url):
-    """从paste.ubuntu.com获取数据"""
-    if isinstance(url, int):  # 允许输入一个数字ID来获取网页内容
-        url = 'https://paste.ubuntu.com/' + str(url) + '/'
-    r = requests.get(url)
-    soup = BeautifulSoup(r.text, 'lxml')
-    content = soup.find_all(name='div', attrs={'class': 'paste'})[2]
-    return content.get_text()
 
 
 def 从部门Confluence获取数据(url):

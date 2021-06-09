@@ -234,3 +234,49 @@ def first_nonnone(args, judge=None):
     for x in args:
         if judge(x):
             return x
+
+
+def round_int(x):
+    """ 先四舍五入，再取整 """
+    return int(round(x, 0))
+
+
+class CvtType:
+    """ 这些系列的转换函数，转换失败统一报错为ValueError
+
+    返回异常会比较好，否则返回None、False之类的，
+        有时候可能就是要转换的值呢，会有歧义
+    """
+
+    @classmethod
+    def str2list(cls, arg):
+        try:
+            res = eval(arg)
+        except SyntaxError:
+            raise ValueError
+
+        if not isinstance(res, list):
+            raise ValueError
+
+        return res
+
+    @classmethod
+    def str2dict(cls, arg):
+        try:
+            res = eval(arg)
+        except SyntaxError:
+            raise ValueError
+
+        if not isinstance(res, dict):
+            raise ValueError
+
+        return res
+
+    @classmethod
+    def factory(cls, name):
+        """ 从字符串名称，映射到对应的转换函数 """
+        return {'int': int,
+                'float': float,
+                'str': str,
+                'list': cls.str2list,
+                'dict': cls.str2dict}.get(name, None)
