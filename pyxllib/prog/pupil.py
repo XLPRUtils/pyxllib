@@ -143,18 +143,23 @@ class DictTool:
 
     @classmethod
     def or_(cls, *args):
-        """ 合并到新字典 """
+        """ 合并到新字典
+
+        :return: args[0] | args[1] | ... | args[-1].
+        """
         res = {}
-        cls.oreq_(res, *args)
+        cls.ior(res, *args)
         return res
 
     @classmethod
-    def oreq_(cls, *args):
-        """ 合并到第1个字典 """
+    def ior(cls, dict_, *args):
+        """ 合并到第1个字典
+
+        :return: dict_ |= (args[0] | args[1] | ... | args[-1]).
+        """
         if sys.version_info.major == 3 and sys.version_info.minor >= 9:
-            a = args[0]
-            for b in range(1, len(args)):
-                a |= b
+            for x in range(len(args)):
+                dict_ |= x
         else:  # 旧版本py手动实现一个兼容功能
             a = args[0]
             for b in range(1, len(args)):
@@ -163,10 +168,17 @@ class DictTool:
                         a[k] = b
 
     @classmethod
-    def safe_remove(cls, dict_, keys):
-        """ 删除指定键值（不存在的跳过，不报错） """
-        if isinstance(keys, str):
-            keys = (keys,)
+    def isub(cls, dict_, keys):
+        """ 删除指定键值（不存在的跳过，不报错）
+
+        inplace subtraction
+
+        keys可以输入另一个字典，也可以输入一个列表表示要删除的键值清单
+
+        :return: dict_ -= keys
+        """
+        if isinstance(keys, dict):
+            keys = keys.keys()
 
         for k in keys:
             if k in dict_:

@@ -6,3 +6,4 @@
 
 from pyxllib.file.specialist.filelib import *
 from pyxllib.file.specialist.dirlib import *
+from pyxllib.file.specialist.download import *

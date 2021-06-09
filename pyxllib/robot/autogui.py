@@ -152,7 +152,7 @@ class AutoGuiLabelData:
     def write(self, loc):
         f = File(loc, self.root, suffix='.json')
         imfile = self.imfiles[loc]
-        lmdict = LabelmeData.gen_data(imfile)
+        lmdict = LabelmeData.gen_gt_dict(imfile)
         for label, ann in self.data[loc].items():
             a = ann.copy()
             if 'img' in a:
@@ -225,7 +225,7 @@ class NamedLocate(AutoGuiLabelData):
         self.last_shot = self.screenshot(region)
         return self.last_shot
 
-    def point2pixel(self, point):
+    def point2pixel(self, point, haystack=None):
         """
 
         :param point: 支持输入 (x, y) 坐标，或者 loclabel
@@ -236,16 +236,20 @@ class NamedLocate(AutoGuiLabelData):
         """
         if isinstance(point, str):
             point = self[point]['center']
-        return tuple(self.last_shot[point[1], point[0]].tolist()[::-1])
+        if haystack is None:
+            haystack = self.update_shot()
+        return tuple(haystack[point[1], point[0]].tolist()[::-1])
 
-    def rect2img(self, ltrb):
+    def rect2img(self, ltrb, haystack=None):
         """
         :param ltrb: 可以输入坐标定位，也可以输入 loclabel 定位
         """
         if isinstance(ltrb, str):
             ltrb = self[ltrb]['ltrb']
         l, t, r, b = ltrb
-        return self.last_shot[t:b, l:r]
+        if haystack is None:
+            haystack = self.update_shot()
+        return haystack[t:b, l:r]
 
     @classmethod
     def pixel_distance(cls, pixel1, pixel2):
@@ -261,27 +265,27 @@ class NamedLocate(AutoGuiLabelData):
         cmp = np.array(abs(np.array(img1, dtype=int) - img2) > tolerance)
         return cmp.sum() / cmp.size
 
-    def check_pixel(self, loclabel, *, tolerance=None):
+    def check_pixel(self, loclabel, haystack=None, *, tolerance=None):
         """ 判断对应位置上的像素值是否相同
         """
         tolerance = first_nonnone([tolerance, self.tolerance, 20])
         p1 = self[loclabel]['pixel']
-        p2 = self.point2pixel(loclabel)
+        p2 = self.point2pixel(loclabel, haystack)
         return self.pixel_distance(p1, p2) < tolerance
 
-    def check_img(self, loclabel, img=None, *, grayscale=None, confidence=None):
+    def check_img(self, loclabel, needle=None, *, grayscale=None, confidence=None):
         grayscale = first_nonnone([grayscale, self.grayscale, False])
         confidence = first_nonnone([confidence, self.confidence, 0.95])
-        if img is None:
-            img = self[loclabel]['img']
-        elif isinstance(img, str):
-            img = self[img]['img']
-        boxes = pyautogui.locateAll(img, self.screenshot(loclabel),
+        if needle is None:
+            needle = self[loclabel]['img']
+        elif isinstance(needle, str):
+            needle = self[needle]['img']
+        boxes = pyautogui.locateAll(needle, self.screenshot(loclabel),
                                     grayscale=grayscale, confidence=confidence)
         boxes = [xywh2ltrb(box) for box in list(boxes)]
         return len(boxes)
 
-    def img2rects(self, img, *, grayscale=None, confidence=None):
+    def img2rects(self, img, haystack=None, *, grayscale=None, confidence=None):
         """ 根据预存的img数据，匹配出多个内容对应的所在的rect位置 """
         # 1 配置参数
         if isinstance(img, str):
@@ -289,31 +293,35 @@ class NamedLocate(AutoGuiLabelData):
         grayscale = first_nonnone([grayscale, self.grayscale, False])
         confidence = first_nonnone([confidence, self.confidence, 0.95])
         # 2 查找子图
-        self.update_shot()
-        boxes = pyautogui.locateAll(img, self.last_shot,
+        if haystack is None:
+            self.update_shot()
+            haystack = self.last_shot
+        boxes = pyautogui.locateAll(img, haystack,
                                     grayscale=grayscale,
                                     confidence=confidence)
         # 3 过滤掉重叠超过一半面积的框
         return ComputeIou.nms_ltrb([xywh2ltrb(box) for box in list(boxes)])
 
-    def img2rect(self, img, *, grayscale=None, confidence=None):
+    def img2rect(self, img, haystack=None, *, grayscale=None, confidence=None):
         """ img2rects的简化，只返回一个匹配框
         """
-        rects = self.img2rects(img, grayscale=grayscale, confidence=confidence)
+        rects = self.img2rects(img, haystack, grayscale=grayscale, confidence=confidence)
         return rects[0] if rects else None
 
-    def img2point(self, img, *, grayscale=None, confidence=None):
+    def img2point(self, img, haystack=None, *, grayscale=None, confidence=None):
         """ 将 img2rect 的结果统一转成点 """
-        res = self.img2rect(img, grayscale=grayscale, confidence=confidence)
+        res = self.img2rect(img, haystack, grayscale=grayscale, confidence=confidence)
         if res:
             return np.array(np.array(res).reshape(2, 2).mean(axis=0), dtype=int).tolist()
 
-    def img2img(self, img, *, grayscale=None, confidence=None):
+    def img2img(self, img, haystack=None, *, grayscale=None, confidence=None):
         """ 找到rect后，返回匹配的目标img图片内容 """
-        ltrb = self.img2rect(img, grayscale=grayscale, confidence=confidence)
+        ltrb = self.img2rect(img, haystack, grayscale=grayscale, confidence=confidence)
         if ltrb:
             l, t, r, b = ltrb
-            return self.last_shot[t:b, l:r]
+            if haystack is not None:
+                haystack = self.last_shot
+            return haystack[t:b, l:r]
 
     def click(self, point, *, back=False, wait_change=False):
         """

@@ -4,6 +4,10 @@
 # @Email  : 877362867@qq.com
 # @Date   : 2021/06/06 22:58
 
-from pyxllib.xl import *
-from pyxllib.cv.expert import *
+from pyxllib.cv import *
+
 from pyxllib.ai.torch import *
+
+from pyxllib.data.icdar import IcdarEval
+from pyxllib.data.labelme import *
+from pyxllib.data.coco import *

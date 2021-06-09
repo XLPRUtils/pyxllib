@@ -5,17 +5,17 @@
 # @Date   : 2021/06/04 09:14
 
 
-from pyxllib.xlcv import *
+from pyxllib.xlai import *
 
 
-def test_labeldata():
+def demo_labeldata():
     # os.chdir(r'D:\home\datasets\RealEstate2020\temp')
-    from pyxllib.data.label import LabelmeData
 
     ld = LabelmeData(r'D:\home\datasets\RealEstate2020\temp')
     # ld.to_labelattrs()
 
-    return ld
+    gt_dict = ld.to_coco_gt_dict()
+    pprint.pprint(gt_dict)
 
 
 @deprecated(reason='test', action='once')
@@ -41,10 +41,6 @@ def main():
 
 if __name__ == '__main__':
     with TicToc(__name__):
-        # ld = test_labeldata()
-        # cocogt = ld.to_cocogt()
-        # warnings.simplefilter(action, category)
-
-        main()
+        demo_labeldata()
 
         pass
