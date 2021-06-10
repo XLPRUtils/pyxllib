@@ -31,7 +31,5 @@ from pyxllib.debug.newbie import *
 from pyxllib.debug.pupil import *
 from pyxllib.debug.specialist import *
 
-from pyxllib.time.specialist import *
-
 from pyxllib.excel.newbie import *
-from pyxllib.excel.pupil import *
+from pyxllib.excel.specialist import *

@@ -29,7 +29,7 @@ except ModuleNotFoundError:
 import humanfriendly
 
 from pyxllib.file.newbie import linux_path_fmt
-from pyxllib.time.specialist.tictoc import TicToc
+from pyxllib.debug.specialist.tictoc import TicToc
 from pyxllib.file.specialist import Dir, file_or_dir_size
 
 

@@ -323,7 +323,7 @@ class CocoGtData:
             img = DictTool.or_(img, {'xltype': 'image'})
             lmdict['shapes'].append(LabelmeData.gen_shape(json.dumps(img, ensure_ascii=False), [[-10, 0], [-5, 0]]))
             for ann in anns:
-                ann = DictTool.or_(ann, {'category_name': catid2name[ann['id']]})
+                ann = DictTool.or_(ann, {'category_name': catid2name[ann['category_id']]})
                 label = json.dumps(ann, ensure_ascii=False)
                 shape = LabelmeData.gen_shape(label, xywh2ltrb(ann['bbox']))
                 lmdict['shapes'].append(shape)

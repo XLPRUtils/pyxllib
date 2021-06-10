@@ -21,8 +21,8 @@ from pyxllib.file.specialist import File, Dir, get_etag
 from pyxllib.prog.newbie import typename
 from pyxllib.prog.pupil import is_url, is_file
 from pyxllib.text.pupil import ensure_gbk
-from pyxllib.time.specialist.datetime import Datetime
-from pyxllib.time.specialist.tictoc import TicToc
+from pyxllib.debug.specialist.datetime import Datetime
+from pyxllib.debug.specialist.tictoc import TicToc
 
 
 def getasizeof(*objs, **opts):
