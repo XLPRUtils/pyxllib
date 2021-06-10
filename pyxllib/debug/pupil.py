@@ -5,6 +5,7 @@
 # @Date   : 2021/06/03 20:35
 
 from collections import Counter
+import datetime
 import inspect
 import os
 import pprint
@@ -237,3 +238,8 @@ class PrettifyStrDecorator:
     def __call__(self, *args, **kwargs):
         self.last_raw_res = self.func(*args, **kwargs)
         return prettifystr(self.last_raw_res)
+
+
+def timetag():
+    """ mysql支持的日期格式 """
+    return datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')

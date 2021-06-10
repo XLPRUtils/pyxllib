@@ -25,7 +25,7 @@ import yaml
 
 from pyxllib.algo.pupil import Groups
 from pyxllib.file.pupil import struct_unpack, gen_file_filter
-from pyxllib.time.specialist.datetime import Datetime
+from pyxllib.debug.specialist.datetime import Datetime
 from pyxllib.prog.pupil import is_url, is_file
 
 ____judge = """

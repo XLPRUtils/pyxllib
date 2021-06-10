@@ -130,6 +130,13 @@ class DictTool:
             None，不作任何处理
             str，将原label作为defualt这个键的值来存储
         :return: s为非字典结构时返回空字典
+
+        >>> DictTool.json_loads('123', 'label')
+        {'label': '123'}
+        >>> DictTool.json_loads('[123, 456]', 'label')
+        {'label': '[123, 456]'}
+        >>> DictTool.json_loads('{"a": 123}', 'label')
+        {'a': 123}
         """
         labelattr = dict()
         try:
@@ -137,8 +144,9 @@ class DictTool:
             if isinstance(data, dict):
                 labelattr = data
         except json.decoder.JSONDecodeError:
-            if isinstance(default, str):
-                labelattr[default] = label
+            pass
+        if not labelattr and isinstance(default, str):
+            labelattr[default] = label
         return labelattr
 
     @classmethod
@@ -158,14 +166,28 @@ class DictTool:
         :return: dict_ |= (args[0] | args[1] | ... | args[-1]).
         """
         if sys.version_info.major == 3 and sys.version_info.minor >= 9:
-            for x in range(len(args)):
+            for x in args:
                 dict_ |= x
         else:  # 旧版本py手动实现一个兼容功能
-            a = args[0]
-            for b in range(1, len(args)):
-                for k, v in b.items():
-                    if k not in a:
-                        a[k] = b
+            for x in args:
+                for k, v in x.items():
+                    if k not in dict_:
+                        dict_[k] = v
+
+    @classmethod
+    def sub(cls, dict_, keys):
+        """ 删除指定键值（不存在的跳过，不报错）
+
+        inplace subtraction
+
+        keys可以输入另一个字典，也可以输入一个列表表示要删除的键值清单
+
+        :return: dict_ -= keys
+        """
+        if isinstance(keys, dict):
+            keys = keys.keys()
+
+        return {k: v for k, v in dict_.items() if k not in keys}
 
     @classmethod
     def isub(cls, dict_, keys):

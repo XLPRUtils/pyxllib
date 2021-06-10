@@ -24,17 +24,18 @@ except ModuleNotFoundError:
     import keyboard
 
 import pyscreeze  # NOQA pyautogui安装的时候会自动安装依赖的pyscreeze
+import imagehash
 
 import numpy as np
 from pandas.api.types import is_list_like
 
 from pyxllib.time.specialist import TicToc
-from pyxllib.file.specialist import File, Dir
-from pyxllib.prog.newbie import first_nonnone
-from pyxllib.prog.pupil import xlwait
-from pyxllib.cv.expert import imread, imwrite, get_sub_image, pil2cv
+from pyxllib.file.specialist import File, Dir, get_etag
+from pyxllib.prog.newbie import first_nonnone, round_int
+from pyxllib.prog.pupil import xlwait, DictTool
+from pyxllib.cv.expert import imread, imwrite, get_sub_image, pil2cv, cv2pil
 from pyxllib.algo.geo import ComputeIou, shapely_polygon, ltrb2xywh, xywh2ltrb
-from pyxllib.data.label import LabelmeData
+from pyxllib.data.labelme import LabelmeData
 
 
 class AutoGuiLabelData:
@@ -66,17 +67,8 @@ class AutoGuiLabelData:
     def parse_shape(cls, shape, image=None):
         """ 解析一个shape的数据为dict字典 """
         # 1 解析原label为字典
-        label = shape['label']
-        attrs = shape.copy()
-        try:
-            data = json.loads(label)
-            if isinstance(data, dict):
-                attrs.update(data)
-        except json.decoder.JSONDecodeError:
-            pass
-        # 如果label是普通字符串，则labelattr强升为字典
-        if not attrs:
-            attrs['label'] = label
+        attrs = DictTool.json_loads(shape['label'], 'label')
+        attrs.update(DictTool.sub(shape, ['label']))
 
         # 2 中心点 center
         shape_type = shape['shape_type']
@@ -92,7 +84,7 @@ class AutoGuiLabelData:
         elif shape_type == 'circle':
             x, y = pts[0]
             r = ((x - pts[1][0]) ** 2 + (y - pts[1][1]) ** 2) ** 0.5
-            attrs['ltrb'] = [int(v) for v in [x - r, y - r, x + r, y + r]]
+            attrs['ltrb'] = [round_int(v) for v in [x - r, y - r, x + r, y + r]]
 
         # 4 图片数据 img, etag
         if image is not None and attrs['ltrb']:
@@ -152,7 +144,7 @@ class AutoGuiLabelData:
     def write(self, loc):
         f = File(loc, self.root, suffix='.json')
         imfile = self.imfiles[loc]
-        lmdict = LabelmeData.gen_gt_dict(imfile)
+        lmdict = LabelmeData.gen_data(imfile)
         for label, ann in self.data[loc].items():
             a = ann.copy()
             if 'img' in a:
@@ -280,10 +272,15 @@ class NamedLocate(AutoGuiLabelData):
             needle = self[loclabel]['img']
         elif isinstance(needle, str):
             needle = self[needle]['img']
-        boxes = pyautogui.locateAll(needle, self.screenshot(loclabel),
-                                    grayscale=grayscale, confidence=confidence)
-        boxes = [xywh2ltrb(box) for box in list(boxes)]
-        return len(boxes)
+        haystack = self.screenshot(loclabel)
+
+        if confidence >= 1:
+            return np.array_equal(needle, haystack)
+        else:
+            boxes = pyautogui.locateAll(needle, self.screenshot(loclabel),
+                                        grayscale=grayscale, confidence=confidence)
+            boxes = [xywh2ltrb(box) for box in list(boxes)]
+            return len(boxes)
 
     def img2rects(self, img, haystack=None, *, grayscale=None, confidence=None):
         """ 根据预存的img数据，匹配出多个内容对应的所在的rect位置 """

@@ -11,7 +11,6 @@ import os
 import pathlib
 import random
 import re
-import requests
 import shutil
 import tempfile
 
@@ -21,7 +20,7 @@ import humanfriendly
 import pyxllib.stdlib.zipfile as zipfile  # 重写了标准库的zipfile文件，cp437改为gbk，解决zip中文乱码问题
 from pyxllib.algo.pupil import natural_sort
 from pyxllib.text.pupil import strfind
-from pyxllib.time.specialist.datetime import Datetime
+from pyxllib.debug.specialist.datetime import Datetime
 from pyxllib.debug.pupil import dprint
 from pyxllib.file.specialist import get_etag, PathBase, File
 

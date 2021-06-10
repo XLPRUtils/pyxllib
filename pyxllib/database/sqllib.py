@@ -22,8 +22,6 @@ except ModuleNotFoundError:
 
 import pandas as pd
 
-from pyxllib.debug.pupil import dformat
-from pyxllib.time.specialist import TicToc
 from pyxllib.file.specialist import File
 
 SQL_LIB_ACCOUNT_FILE = File(__file__).parent / 'sqllibaccount.pkl'
