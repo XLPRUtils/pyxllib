@@ -11,8 +11,6 @@ import subprocess
 
 from tqdm import tqdm
 
-from pyxllib.file.specialist import File, Dir
-
 
 def mtqdm(func, iterable, *args, max_workers=1, **kwargs):
     """ 对tqdm的封装，增加了多线程的支持
@@ -68,6 +66,8 @@ def distribute_package(root, version=None, repository=None, *, upload=True):
         根目录下有对应的 setup.py 等文件
     :param repository: 比如我配置了 [xlpr]，就可以传入 'xlpr'
     """
+    from pyxllib.file.specialist import File, Dir
+
     # 1 切换工作目录
     os.chdir(str(root))
 

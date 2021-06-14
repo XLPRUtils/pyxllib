@@ -9,6 +9,8 @@ import re
 
 import arrow
 
+from humanfriendly import parse_date
+
 
 class Datetime(arrow.Arrow):
     r"""时间戳类
@@ -85,8 +87,8 @@ class Datetime(arrow.Arrow):
                          'local', fold=getattr(dt, 'fold', 0))
 
     @classmethod
-    def strptime(cls, data_strnig, format):
-        raise NotImplementedError
+    def strptime(cls, data_strnig, format=None):
+        return cls(*parse_date(data_strnig))
 
     @staticmethod
     def _datetime(argv):
@@ -171,7 +173,7 @@ class Datetime(arrow.Arrow):
     def __sub__(self, other):
         if isinstance(other, (int, float)):
             other = datetime.timedelta(other)
-        return Datetime(super().__sub__(other))
+        return super().__sub__(other)
 
     def shift(self, **kwargs):
         """shift 有点像游标卡尺，可以左右两边进行加减移位操作，加减的对象可以是年月日时分秒和星期。

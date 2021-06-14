@@ -4,9 +4,11 @@
 # @Email  : 877362867@qq.com
 # @Date   : 2021/06/06 11:16
 
+import copy
 import itertools
 
 import numpy as np
+import pandas as pd
 
 from pyxllib.prog.deprecatedlib import deprecated
 
@@ -153,3 +155,73 @@ def get_ndim(coords):
     # 注意 np.array(coords[:1])，只需要取第一个元素就可以判断出ndim
     coords = coords if isinstance(coords, np.ndarray) else np.array(coords[:1])
     return coords.ndim
+
+
+class SetCmper:
+    """ 集合两两比较 """
+
+    def __init__(self, data):
+        """
+        :param data: 字典结构
+            key: 类别名
+            value: 该类别含有的元素（非set类型会自动转set）
+        """
+        self.data = {}
+        for k, v in data.items():
+            if isinstance(v, set):
+                self.data[k] = copy.deepcopy(v)
+            else:
+                self.data[k] = set(v)
+
+    def summary(self, show_diff_item=False):
+        r""" 两两集合共有元素数量，因为相比 listitem 列出每个条目明细归属情况，这个算总结概要，所以叫 summary
+
+        :param show_diff_item: 显示详细的差异内容，显示 "行 减 列"的差值元素值
+        :return: df
+            df对角线存储的是每个集合自身大小，df第i行第j列是第i个集合减去第j个集合的剩余元素数
+
+        >>> s1 = {1, 2, 3, 4, 5, 6, 7, 8, 9}
+        >>> s2 = {1, 3, 5, 7, 8}
+        >>> s3 = {2, 3, 5, 8}
+        >>> df = SetCmper({'s1': s1, 's2': s2, 's3': s3}).summary()
+        >>> df
+            s1  s2  s3
+        s1   9   5   4
+        s2   5   5   3
+        s3   4   3   4
+        >>> df.loc['s1', 's2']
+        5
+        """
+        cats = list(self.data.keys())
+        data = self.data
+        n = len(cats)
+        rows = []
+        for i, c in enumerate(cats):
+            a = data[c]
+            row = [0] * n
+            for j, d in enumerate(cats):
+                if i == j:
+                    row[j] = len(a)
+                else:
+                    row[j] = len(a & data[d])
+                if show_diff_item:
+                    diff = a - data[d]
+                    if diff:
+                        row[j] = f'{row[j]} {diff}'
+            rows.append(row)
+        df = pd.DataFrame.from_records(rows, columns=cats)
+        df.index = cats
+        return df
+
+    def list_keys(self):
+        keys = set()
+        for k, v in self.data.items():
+            keys |= v
+
+        ls = []
+        for k in keys:
+            ls.append([(k in t) for t in self.data.values()])
+
+        df = pd.DataFrame.from_records(ls, columns=self.data.keys())
+        df.index = keys
+        return df

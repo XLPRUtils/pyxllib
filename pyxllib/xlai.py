@@ -4,7 +4,7 @@
 # @Email  : 877362867@qq.com
 # @Date   : 2021/06/06 22:58
 
-from pyxllib.cv import *
+from pyxllib.xlcv import *
 
 from pyxllib.ai.torch import *
 

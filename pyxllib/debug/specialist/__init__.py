@@ -8,3 +8,5 @@ from pyxllib.debug.specialist.common import *
 from pyxllib.debug.specialist.xllog import *
 from pyxllib.debug.specialist.browser import *
 from pyxllib.debug.specialist.bc import *
+from pyxllib.debug.specialist.tictoc import *
+from pyxllib.debug.specialist.datetime import *

@@ -66,7 +66,7 @@ class DataSync:
         tt.tic()
         local_path, remote_path = str(local_path), linux_path_fmt(remote_path)
         # 其实scp也支持同时同步多文件，但是目标位置没法灵活控制，所以我这里还是一个一个同步
-        self.client.exec_command(f'mkdir -p {os.path.dirname(remote_path)}')  # remote如果不存在父目录则建立
+        self.client_exec(f'mkdir -p {os.path.dirname(remote_path)}')  # remote如果不存在父目录则建立
         self.scp.put(local_path, remote_path, recursive=True)
         t = tt.tocvalue()
         speed = humanfriendly.format_size(file_or_dir_size(local_path) / t, binary=True)
@@ -84,9 +84,17 @@ class DataSync:
         speed = humanfriendly.format_size(file_or_dir_size(local_path) / t, binary=True)
         if prt: print(f'download {local_path}, ↓{speed}/s, {t:.2f}s')
 
-    def client_exec(self, cmd):
-        """ 执行远程服务器命令 """
-        stdin, stdout, stderr = self.client.exec_command(cmd)
+    def client_exec(self, command, bufsize=-1, timeout=None, get_pty=False, environment=None):
+        """ 在服务器执行命令
+
+        如果stderr出错，则抛出异常
+        否则返回运行结果的文本数据
+        """
+        stdin, stdout, stderr = self.client.exec_command(command, bufsize, timeout, get_pty, environment)
+        stderr = list(stderr)
+        if stderr:
+            print(''.join(stderr))
+            raise ValueError(f'服务器执行命令报错: {command}')
         return '\n'.join([f.strip() for f in list(stdout)])
 
     def remote_files(self, remote_dir):
@@ -95,9 +103,8 @@ class DataSync:
         这里要调用到事先在pyxllib.tool写好的listfiles工具
         """
         remote_dir = linux_path_fmt(remote_dir)
-        stdin, stdout, stderr = self.client.exec_command(f'python3 -m pyxllib.tool.listfiles "{remote_dir}"')
-        # TODO 这里报错应该要提示
-        return [f.strip() for f in list(stdout)]
+        stdout = self.client_exec(f'python3 -m pyxllib.tool.listfiles "{remote_dir}"')
+        return stdout.splitlines()
 
     def rput(self, local_dir, remote_dir):
         """ rput相比put多了个前缀r，表示递归处理，是扩展的的一个高级功能

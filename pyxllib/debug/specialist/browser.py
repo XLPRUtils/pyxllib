@@ -131,7 +131,11 @@ class Explorer:
 
 
 class Browser(Explorer):
-    """ 使用浏览器查看数据文件 """
+    """ 使用浏览器查看数据文件
+
+    标准库 webbrowser 也有一套类似的功能，那套主要用于url的查看，不支持文件
+    而我这个主要就是把各种数据转成文件来查看
+    """
 
     def __init__(self, app=None, shell=False):
         """
