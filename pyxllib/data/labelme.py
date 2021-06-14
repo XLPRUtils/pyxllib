@@ -15,7 +15,7 @@ import pandas as pd
 import numpy as np
 
 from pyxllib.prog.pupil import DictTool
-from pyxllib.debug.specialist import get_xllog, Iterate
+from pyxllib.debug.specialist import get_xllog, Iterate, dprint
 from pyxllib.file.specialist import File, Dir, PathGroups, get_encoding
 from pyxllib.prog.specialist import mtqdm
 from pyxllib.cv.expert import PilImg
@@ -30,7 +30,7 @@ __0_basic = """
 class BasicLabelData:
     """ 一张图一份标注文件的一些基本操作功能 """
 
-    def __init__(self, root, relpath2data=None, *, prt=False, fltr=None, slt=None, extdata=None):
+    def __init__(self, root, relpath2data=None, *, reads=True, prt=False, fltr=None, slt=None, extdata=None):
         """
         :param root: 数据所在根目录
         :param relpath2data: {relpath: data1, 'a/1.txt': data2, ...}
@@ -41,7 +41,7 @@ class BasicLabelData:
                 如果是json则直接保存json内存对象结构
                 如果是txt可能会进行一定的结构化解析存储
         :param extdata: 可以存储一些扩展信息内容
-        :param fltr: filter的缩写，PathGroups 的过滤规则
+        :param fltr: filter的缩写，PathGroups 的过滤规则。一般用来进行图片匹配。
             None，没有过滤规则，就算不存在slt格式的情况下，也会保留分组
             'json'等字符串规则, 使用 select_group_which_hassuffix，必须含有特定后缀的分组
             judge(k, v)，自定义函数规则
@@ -68,10 +68,16 @@ class BasicLabelData:
             gs = gs.select_group_which_hassuffix(fltr)
         elif callable(fltr):
             gs = gs.select_group(fltr)
+        self.pathgs = gs
 
-        for k in tqdm(gs.data.keys(), disable=not prt):
-            f = File(k, suffix=slt)
-            relpath2data[f.relpath(self.root)] = f.read()
+        # 3 读取数据
+        for stem, suffixs in tqdm(gs.data.items(), disable=not prt):
+            f = File(stem, suffix=slt)
+            if reads and f:
+                # dprint(f)  # 空json会报错：json.decoder.JSONDecodeError: Expecting value: line 1 column 1 (char 0)
+                relpath2data[f.relpath(self.root)] = f.read()
+            else:
+                relpath2data[f.relpath(self.root)] = None
 
         self.rp2data = relpath2data
 
@@ -300,6 +306,23 @@ class Quad2Labelme(ToLabelmeJson):
 
 
 class LabelmeData(BasicLabelData):
+    def __init__(self, root, relpath2data=None, *, reads=True, prt=False, fltr='json', slt='json', extdata=None):
+        """
+        :param root: 文件根目录
+        :param relpath2data: {jsonfile: lmdict, ...}，其中 lmdict 为一个labelme文件格式的标准内容
+            如果未传入data具体值，则根据目录里的情况自动初始化获得data的值
+
+            210602周三16:26，为了工程等一些考虑，删除了 is_labelme_json_data 的检查
+                尽量通过 fltr、slt 的机制选出正确的 json 文件
+        """
+        super().__init__(root, relpath2data, reads=reads, prt=prt, fltr=fltr, slt=slt, extdata=extdata)
+
+        # 已有的数据已经读取了，这里要补充空labelme标注
+        for stem, suffixs in tqdm(self.pathgs.data.items(), disable=not prt):
+            f = File(stem, suffix=slt)
+            if reads and not f:
+                self.rp2data[f.relpath(self.root)] = LabelmeData.gen_data(File(stem, suffix=suffixs[0]))
+
     @classmethod
     def gen_data(cls, imfile=None, **kwargs):
         """ 主要框架结构
@@ -367,17 +390,6 @@ class LabelmeData(BasicLabelData):
         del kw['label']
         del kw['points']
         return cls.gen_shape(label, points, **kw)
-
-    def __init__(self, root, relpath2data=None, *, prt=False, fltr='json', slt='json', extdata=None):
-        """
-        :param root: 文件根目录
-        :param relpath2data: {jsonfile: lmdict, ...}，其中 lmdict 为一个labelme文件格式的标准内容
-            如果未传入data具体值，则根据目录里的情况自动初始化获得data的值
-
-            210602周三16:26，为了工程等一些考虑，删除了 is_labelme_json_data 的检查
-                尽量通过 fltr、slt 的机制选出正确的 json 文件
-        """
-        super().__init__(root, relpath2data, prt=prt, fltr=fltr, slt=slt, extdata=extdata)
 
     def reduce(self):
         """ 移除imageData字段值 """
@@ -470,6 +482,7 @@ class LabelmeData(BasicLabelData):
         for jsonfile, lmdict in self.rp2data.items():
             # 1.0 升级为字典类型
             lmdict = self.update_labelattr(lmdict, points=True)
+
             for sp in lmdict['shapes']:  # label转成字典
                 sp['label'] = json.loads(sp['label'])
 

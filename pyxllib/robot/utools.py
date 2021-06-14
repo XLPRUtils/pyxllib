@@ -16,8 +16,7 @@ import ujson
 from humanfriendly import format_timespan
 import pandas as pd
 
-from pyxllib.time.specialist import TicToc, Datetime
-from pyxllib.debug.specialist import browser
+from pyxllib.debug.specialist import browser, TicToc, Datetime
 from pyxllib.file.specialist import File, Dir
 
 

@@ -5,9 +5,9 @@
 # @Date   : 2020/06/01 18:13
 
 import copy
-import pandas as pd
 
 from pyxllib.algo.pupil import intersection_split
+from pyxllib.algo.specialist import SetCmper
 from pyxllib.debug.pupil import dprint, prettifystr
 from pyxllib.debug.specialist.browser import Explorer
 from pyxllib.file.specialist import File, Dir, filesmatch
@@ -132,58 +132,6 @@ def modify_file(file, func, *, outfile=None, file_mode=None, debug=0):
             bcompare(infile, outfile)
 
     return isdiff
-
-
-class SetCmper:
-    """ 集合两两比较 """
-
-    def __init__(self, data):
-        """
-        :param data: 字典结构
-            key: 类别名
-            value: 该类别含有的元素（非set类型会自动转set）
-        """
-        self.data = copy.deepcopy(data)
-        for k, v in self.data.items():
-            if not isinstance(v, set):
-                self.data[k] = set(v)
-
-    def intersection(self):
-        r""" 两两集合共有元素数量
-
-        :return: df
-            df对角线存储的是每个集合自身大小，df第i行第j列是第i个集合减去第j个集合的剩余元素数
-
-        >>> s1 = {1, 2, 3, 4, 5, 6, 7, 8, 9}
-        >>> s2 = {1, 3, 5, 7, 8}
-        >>> s3 = {2, 3, 5, 8}
-        >>> df = SetCmper({'s1': s1, 's2': s2, 's3': s3}).intersection()
-        >>> df
-            s1  s2  s3
-        s1   9   5   4
-        s2   5   5   3
-        s3   4   3   4
-        >>> df.loc['s1', 's2']
-        5
-        """
-        cats = list(self.data.keys())
-        data = self.data
-        n = len(cats)
-        rows = []
-        for i, c in enumerate(cats):
-            a = data[c]
-            row = [0] * n
-            for j, d in enumerate(cats):
-                if i == j:
-                    row[j] = len(a)
-                elif j < i:
-                    row[j] = rows[j][i]
-                elif j > i:
-                    row[j] = len(a & data[d])
-            rows.append(row)
-        df = pd.DataFrame.from_records(rows, columns=cats)
-        df.index = cats
-        return df
 
 
 class PairContent:

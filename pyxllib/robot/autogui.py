@@ -29,7 +29,7 @@ import imagehash
 import numpy as np
 from pandas.api.types import is_list_like
 
-from pyxllib.time.specialist import TicToc
+from pyxllib.debug.specialist import TicToc
 from pyxllib.file.specialist import File, Dir, get_etag
 from pyxllib.prog.newbie import first_nonnone, round_int
 from pyxllib.prog.pupil import xlwait, DictTool
@@ -147,8 +147,7 @@ class AutoGuiLabelData:
         lmdict = LabelmeData.gen_data(imfile)
         for label, ann in self.data[loc].items():
             a = ann.copy()
-            if 'img' in a:
-                del a['img']
+            DictTool.isub(a, ['img'])
             shape = LabelmeData.gen_shape(json.dumps(a, ensure_ascii=False),
                                           a['points'], a['shape_type'],
                                           group_id=a['group_id'], flags=a['flags'])

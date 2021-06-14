@@ -458,7 +458,7 @@ class ComputeIou:
 
     @classmethod
     def polygon(cls, pts1, pts2):
-        inter_area = pts1.intersection(pts2).area
+        inter_area = pts1.summary(pts2).area
         union_area = pts1.area + pts2.area - inter_area
         return (inter_area / union_area) if union_area else 0
 

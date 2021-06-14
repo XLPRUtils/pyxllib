@@ -13,6 +13,8 @@
 文档：https://www.yuque.com/xlpr/pyxllib/home/edit
 """
 
-import importlib.metadata
+import sys
 
-version = importlib.metadata.version('pyxllib')
+if sys.version_info.major == 3 and sys.version_info.minor >= 8:
+    import importlib.metadata
+    version = importlib.metadata.version('pyxllib')

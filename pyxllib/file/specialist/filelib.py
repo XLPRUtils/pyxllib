@@ -47,7 +47,12 @@ ____qiniu = """
 
 def get_etag(arg):
     """七牛原有etag功能基础上做封装
+
     :param arg: 支持bytes二进制、文件、url地址
+
+    只跟文件内容有关，跟文件创建、修改日期没关系
+    如果读取文件后再处理etag，要尤其小心 '\r\n' 的问题！
+    文件里如果是\r\n，我的File.read会变成\n，所以按文件取etag和read的内容算etag会不一样。
     """
     if isinstance(arg, bytes):  # 二进制数据
         return qiniu.utils.etag_stream(io.BytesIO(arg))
@@ -76,6 +81,7 @@ def test_etag():
 
 def test_etag2():
     """ 字符串值和写到文件判断的etag，是一样的
+
     """
     s = 'code4101'
     print(get_etag(s))
@@ -171,7 +177,7 @@ def get_encoding(bstr, *, maxn=100):
     enc = chardet.detect(bstr[start_idx:start_idx + maxn])['encoding']
 
     # 2 转换为常见编码名
-    if enc in ('utf-8', 'ascii', 'ISO-8859-1', 'Windows-1252', 'Windows-1254', 'ISO-8859-9'):
+    if enc in ('utf-8', 'ascii', 'ISO-8859-1', 'Windows-1252', 'Windows-1254', 'ISO-8859-9', 'IBM866'):
         return 'utf8'
     elif enc in ('UTF-8-SIG',):
         return 'utf-8-sig'
