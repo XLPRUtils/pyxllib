@@ -95,7 +95,7 @@ class BasicLabelData:
         for k in tqdm(self.rp2data.keys(), f'读取{self.__class__.__name__}数据', disable=not prt):
             self.rp2data[k] = File(k, self.root).read(**kwargs)
 
-    def write(self, relpath):
+    def write(self, relpath, **kwargs):
         """
         :param relpath: 必须是斜杠表示的相对路径 'a/1.txt'、'b/2.json'
         """
@@ -105,17 +105,19 @@ class BasicLabelData:
             with open(str(file), 'rb') as f:
                 bstr = f.read()
             encoding = get_encoding(bstr)
-            file.write(data, encoding=encoding, if_exists='delete')
+            kwargs['encoding'] = encoding
+            kwargs['if_exists'] = 'delete'
+            file.write(data, **kwargs)
         else:  # 否则直接写入
-            file.write(data)
+            file.write(data, **kwargs)
 
-    def writes(self, *, max_workers=8, prt=False):
+    def writes(self, *, max_workers=8, prt=False, **kwargs):
         """ 重新写入每份标注文件
 
         可能是内存里修改了数据，需要重新覆盖
         也可能是从coco等其他格式初始化，转换而来的内存数据，需要生成对应的新标注文件
         """
-        mtqdm(self.write, self.rp2data.keys(), desc=f'{self.__class__.__name__}写入标注数据',
+        mtqdm(lambda x: self.write(x, **kwargs), self.rp2data.keys(), desc=f'{self.__class__.__name__}写入标注数据',
               max_workers=max_workers, disable=not prt)
 
 

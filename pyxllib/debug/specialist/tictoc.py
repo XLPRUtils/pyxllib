@@ -40,12 +40,13 @@ class TicToc:
     TicToc.elapsed   #t.end - t.start; i.e., time elapsed from t.start when t.toc() or t.tocvalue() was last called
     """
 
-    def __init__(self, title=''):
+    def __init__(self, title='', *, disable=False):
         """Create instance of TicToc class."""
         self.start = timeit.default_timer()
         self.end = float('nan')
         self.elapsed = float('nan')
         self.title = title
+        self.disable = disable
 
     def tic(self):
         """Start the timer."""
@@ -61,8 +62,9 @@ class TicToc:
         """
         self.end = timeit.default_timer()
         self.elapsed = self.end - self.start
-        # print(f'{self.title} {msg} {self.elapsed:.3f} 秒.')
-        print(f'{self.title} {msg} elapsed {format_timespan(self.elapsed)}.')
+        if not self.disable:
+            # print(f'{self.title} {msg} {self.elapsed:.3f} 秒.')
+            print(f'{self.title} {msg} elapsed {format_timespan(self.elapsed)}.')
         if restart:
             self.start = timeit.default_timer()
 
@@ -88,7 +90,7 @@ class TicToc:
         """Start the timer when using TicToc in a context manager."""
         from pyxllib.debug.specialist import get_xllog
 
-        if self.title == '__main__':
+        if self.title == '__main__' and not self.disable:
             get_xllog().info(f'time.process_time(): {format_timespan(time.process_time())}.')
         self.start = timeit.default_timer()
 
@@ -100,7 +102,8 @@ class TicToc:
         xllog = get_xllog()
 
         if exc_tb is None:
-            xllog.info(f'{self.title} finished in {format_timespan(elapsed)}.')
+            if not self.disable:
+                xllog.info(f'{self.title} finished in {format_timespan(elapsed)}.')
         else:
             xllog.info(f'{self.title} interrupt in {format_timespan(elapsed)},')
 

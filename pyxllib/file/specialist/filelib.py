@@ -25,7 +25,6 @@ import yaml
 
 from pyxllib.algo.pupil import Groups
 from pyxllib.file.pupil import struct_unpack, gen_file_filter
-from pyxllib.debug.specialist.datetime import Datetime
 from pyxllib.prog.pupil import is_url, is_file
 
 ____judge = """
@@ -383,21 +382,23 @@ class PathBase:
         return g.group(1) if g else ''
 
     @property
-    def mtime(self) -> Datetime:
+    def mtime(self):
         r""" 文件的最近修改时间
 
         >> Path(r"C:\pycode\code4101py").mtime
         2020-03-10 17:32:37
         """
+        from pyxllib.debug.specialist.datetime import Datetime
         return Datetime(os.stat(str(self)).st_mtime)
 
     @property
-    def ctime(self) -> Datetime:
+    def ctime(self):
         r""" 文件的创建时间
 
         >> Path(r"C:\pycode\code4101py").ctime
         2018-05-25 10:46:37
         """
+        from pyxllib.debug.specialist.datetime import Datetime
         # 注意：st_ctime是平台相关的值，在windows是创建时间，但在Unix是metadate最近修改时间
         return Datetime(os.stat(str(self)).st_ctime)
 
@@ -1123,6 +1124,7 @@ def genfilename(fd='.'):
         后面的6位记为数值d2，类似小时+分钟+秒的标签，但是在出现重名时，
         d2会一直自加1直到没有重名文件，所以秒上是可能会出现“99”之类的值的。
     """
+    from pyxllib.debug.specialist.datetime import Datetime
     # 1 获取前段标签
     s1 = Datetime().briefdateweek()  # '180827周一'
 

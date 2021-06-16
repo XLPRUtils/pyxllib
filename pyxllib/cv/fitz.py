@@ -10,6 +10,7 @@ import os
 import pprint
 import re
 import tempfile
+import pathlib
 
 import cv2
 import numpy as np
@@ -22,16 +23,18 @@ except ModuleNotFoundError:
     subprocess.run(['pip3', 'install', 'PyMuPdf'])
     import fitz
 
+from pyxllib.algo.pupil import get_number_width
 from pyxllib.file.specialist import File, Dir, writefile, filescopy, filesdel
 from pyxllib.debug.pupil import dprint
 from pyxllib.debug.specialist import browser
-from pyxllib.cv.expert import imwrite, zoomsvg
+from pyxllib.cv.expert import imwrite, cv2pil
+from pyxllib.cv.imfile import zoomsvg
 
 
 class FitzPdf:
     def __init__(self, file):
         self.src_file = File(file)
-        self.doc = fitz.open(file)
+        self.doc = fitz.open(str(file))
 
     def to_images(self, dst_dir=None, file_fmt='{filestem}_{number}.png', num_width=None, *,
                   scale=1, start=1, fmt_onepage=False):
@@ -61,21 +64,20 @@ class FitzPdf:
         Dir(dst_dir).ensure_dir()
 
         # 域宽
-        if num_width is None:
-            num_width = math.ceil(math.log10(n_page + 1))  # 根据总页数计算需要的对齐域宽
+        num_width = num_width or get_number_width(n_page)  # 根据总页数计算需要的对齐域宽
 
         # 2 导出图片
         if fmt_onepage or n_page != 1:  # 多页的处理规则
             for i in range(n_page):
-                im = FitzPdfPage(self.doc.loadPage(i)).get_cv_image(scale)
+                im = self.get_page(i).get_cv_image(scale)
                 number = ('{:0' + str(num_width) + 'd}').format(i + start)  # 前面的括号不要删，这样才是完整的一个字符串来使用format
                 imwrite(im, File(file_fmt.format(filestem=filestem, number=number), dst_dir))
         else:
-            im = FitzPdfPage(self.doc.loadPage[0]).get_cv_image(scale)
+            im = self.get_page(0).get_cv_image(scale)
             imwrite(im, File(srcfile.stem + os.path.splitext(file_fmt)[1], dst_dir))
 
     def get_page(self, number):
-        return self.doc.loadPage(number)
+        return FitzPdfPage(self.doc.loadPage(number))
 
 
 class FitzPdfPage:
@@ -102,7 +104,20 @@ class FitzPdfPage:
         return cv2.imdecode(arr, flags=1)
 
     def get_pil_image(self, scale=1):
-        raise NotImplementedError
+        # TODO 可以优化，直接从内存数据转pil，不用这样先转cv再转pil
+        return cv2pil(self.get_cv_image(scale))
+
+    def write_image(self, outfile, *, scale=1, if_exists=None):
+        """ 转成为文件 """
+        f = File(outfile)
+        suffix = f.suffix.lower()
+
+        if suffix == '.svg':
+            content = self.get_svg_image()
+            f.write(content, if_exists=if_exists)
+        else:
+            im = self.get_cv_image(scale)
+            imwrite(im, if_exists=if_exists)
 
     def get_text(self, fmt='text'):
         """
@@ -224,175 +239,171 @@ class DemoFitz:
         browser(file)
 
 
-def pdf2svg_oldversion(pdffile, target=None, *, trim=False):
-    """新版的，pymupdf生成的svg无法配合inkscape进行trim，所以这个旧版暂时还是要保留
+__backup = """
+下面这些代码先留着不要删，以后做旧代码兼容分析，升级的时候，需要参考
 
-    :param pdffile: 一份pdf文件
-    :param target: 目标目录
-        None：
-            如果只有一页，转换到对应目录下同名svg文件
-            如果有多页，转换到同名目录下多份svg文件
-    :param trim:
-        True: 去除边缘空白
-    :return:
+这里有些功能是编校还是不断使用的，但接口等需要重新优化
+"""
 
-    需要第三方工具：pdf2svg（用于文件格式转换），inkscape（用于svg编辑优化）
-        注意pdf2svg的参数不支持中文名，因为这个功能限制，搞得我这个函数实现好麻烦！
-        还要在临时文件夹建立文件，因为重名文件+多线程问题，还曾引发一个bug搞了一下午。
-        （这些软件都以绿色版形式整理在win3/imgtools里）
-
-    注意！！！ 这个版本的代码先不要删！先不要删！先不要删！包括pdf2svg.exe那个蠢货软件也先别删！
-        后续研究inkscape这个蠢货的-D参数在处理pymupdf生成的svg为什么没用的时候可以进行对比
-    """
-    import fitz
-    pages = fitz.open(pdffile).pageCount
-
-    basename = tempfile.mktemp()
-    f1 = basename + '.pdf'
-    filescopy(pdffile, f1)  # 复制到临时文件，防止中文名pdf2svg工具处理不了
-
-    if pages == 1:
-        if target is None: target = pdffile[:-3] + 'svg'
-        f2 = basename + '.svg'
-        # print(['pdf2svg.exe', f1, f2])
-        subprocess.run(['pdf2svg.exe', f1, f2])
-
-        if trim: subprocess.run(['inkscape.exe', '-f', f2, '-D', '-l', f2])
-        filescopy(f2, target)
-    else:
-        if target is None: target = pdffile[:-4] + '_svg\\'
-        executor = concurrent.futures.ThreadPoolExecutor()
-        File(basename + '/').ensure_parent()
-
-        def func(f1, f2, i):
-            subprocess.run(['pdf2svg.exe', f1, f2, str(i)])
-            if trim: subprocess.run(['inkscape.exe', '-f', f2, '-D', '-l', f2])
-            filescopy(f2, target + f'{i}.svg')
-
-        for i in range(1, pages + 1):
-            f2 = basename + f'\\{i}.svg'
-            executor.submit(func, f1, f2, i)
-        executor.shutdown()
-        filescopy(basename, target[:-1])
-        filesdel(basename + '/')
-
-    filesdel(f1)
-
-
-def pdf2imagebase(pdffile, target=None, scale=None, ext='.png'):
-    """
-    使用python的PyMuPdf模块，不需要额外插件
-    导出的图片从1开始编号
-    TODO 要加多线程？效率影响大吗？
-
-    :param pdffile: pdf原文件
-    :type target: 相对于原文件所在目录的目标目录名，也可以写文件名，表示重命名
-        None：
-            当该pdf只有1页时，才默认把图片转换到当前目录。
-            否则默认新建一个文件夹来存储图片。（目录名默认为文件名）
-    :param scale: 缩放尺寸
-        1：原尺寸
-        1.5：放大为原来的1.5倍
-    :param ext: 导出的图片格式
-    :return: 返回生成的图片列表
-    """
-
-    import fitz
-    # 1 基本参数计算
-    pdf = fitz.open(pdffile)
-    num_pages = pdf.pageCount
-
-    # 大于1页的时候，默认新建一个文件夹来存储图片
-    if target is None:
-        if num_pages > 1:
-            target = File(pdffile).stem + '/'
-        else:
-            target = File(pdffile).dirname + '/'
-
-    newfile = File(target, pdffile.parent).to_str()
-    if newfile.endswith('.pdf'): newfile = os.path.splitext(newfile)[0] + ext
-    File(newfile).ensure_parent()
-
-    # 2 图像数据的获取
-    def get_svg_image(n):
-        page = pdf.loadPage(n)
-        txt = page.getSVGimage()
-        if scale: txt = zoomsvg(txt, scale)
-        return txt
-
-    def get_png_image(n):
-        """获得第n页的图片数据"""
-        page = pdf.loadPage(n)
-        if scale:
-            pix = page.getPixmap(fitz.Matrix(scale, scale))  # 长宽放大到scale倍
-        else:
-            pix = page.getPixmap()
-        return pix.getPNGData()
-
-    # 3 分析导出的图片文件名
-    files = []
-    if num_pages == 1:
-        image = get_svg_image(0) if ext == '.svg' else get_png_image(0)
-        files.append(newfile)
-        File(newfile).write(image, if_exists='delete')
-    else:  # 有多页
-        number_width = math.ceil(math.log10(num_pages + 1))  # 根据总页数计算需要的对齐域宽
-        stem, ext = os.path.splitext(newfile)
-        for i in range(num_pages):
-            image = get_svg_image(i) if ext == '.svg' else get_png_image(i)
-            name = ('-{:0' + str(number_width) + 'd}').format(i + 1)  # 前面的括号不要删，这样才是完整的一个字符串来使用format
-            files.append(stem + name + ext)
-            File(stem + name + ext).write(image, if_exists='delete')
-    return files
+# def pdf2svg_oldversion(pdffile, target=None, *, trim=False):
+#     """新版的，pymupdf生成的svg无法配合inkscape进行trim，所以这个旧版暂时还是要保留
+#
+#     :param pdffile: 一份pdf文件
+#     :param target: 目标目录
+#         None：
+#             如果只有一页，转换到对应目录下同名svg文件
+#             如果有多页，转换到同名目录下多份svg文件
+#     :param trim:
+#         True: 去除边缘空白
+#     :return:
+#
+#     需要第三方工具：pdf2svg（用于文件格式转换），inkscape（用于svg编辑优化）
+#         注意pdf2svg的参数不支持中文名，因为这个功能限制，搞得我这个函数实现好麻烦！
+#         还要在临时文件夹建立文件，因为重名文件+多线程问题，还曾引发一个bug搞了一下午。
+#         （这些软件都以绿色版形式整理在win3/imgtools里）
+#
+#     注意！！！ 这个版本的代码先不要删！先不要删！先不要删！包括pdf2svg.exe那个蠢货软件也先别删！
+#         后续研究inkscape这个蠢货的-D参数在处理pymupdf生成的svg为什么没用的时候可以进行对比
+#     """
+#     import fitz
+#     pages = fitz.open(pdffile).pageCount
+#
+#     basename = tempfile.mktemp()
+#     f1 = basename + '.pdf'
+#     filescopy(pdffile, f1)  # 复制到临时文件，防止中文名pdf2svg工具处理不了
+#
+#     if pages == 1:
+#         if target is None: target = pdffile[:-3] + 'svg'
+#         f2 = basename + '.svg'
+#         # print(['pdf2svg.exe', f1, f2])
+#         subprocess.run(['pdf2svg.exe', f1, f2])
+#
+#         if trim: subprocess.run(['inkscape.exe', '-f', f2, '-D', '-l', f2])
+#         filescopy(f2, target)
+#     else:
+#         if target is None: target = pdffile[:-4] + '_svg\\'
+#         executor = concurrent.futures.ThreadPoolExecutor()
+#         File(basename + '/').ensure_parent()
+#
+#         def func(f1, f2, i):
+#             subprocess.run(['pdf2svg.exe', f1, f2, str(i)])
+#             if trim: subprocess.run(['inkscape.exe', '-f', f2, '-D', '-l', f2])
+#             filescopy(f2, target + f'{i}.svg')
+#
+#         for i in range(1, pages + 1):
+#             f2 = basename + f'\\{i}.svg'
+#             executor.submit(func, f1, f2, i)
+#         executor.shutdown()
+#         filescopy(basename, target[:-1])
+#         filesdel(basename + '/')
+#
+#     filesdel(f1)
 
 
-def pdf2png(pdffile, target=None, scale=None):
-    """
-    :param pdffile: pdf路径
-    :param target: 目标位置
-    :param scale: 缩放比例
-    :return: list，生成的png图片清单
+# def pdf2imagebase(pdffile, target=None, *, ext, scale=None, if_exists=None):
+#     """
+#     使用python的PyMuPdf模块，不需要额外插件
+#     导出的图片从1开始编号
+#     TODO 要加多线程？效率影响大吗？
+#
+#     :param pdffile: pdf原文件
+#     :type target: 相对于原文件所在目录的目标目录名，也可以写文件名，表示重命名
+#         None：
+#             当该pdf只有1页时，才默认把图片转换到当前目录。
+#             否则默认新建一个文件夹来存储图片。（目录名默认为文件名）
+#     :param scale: 缩放尺寸
+#         1：原尺寸
+#         1.5：放大为原来的1.5倍
+#     :param ext: 导出的图片格式
+#     :return: 返回生成的图片列表
+#     """
+#
+#     import fitz
+#     # 1 基本参数计算
+#     pdffile = File(pdffile)
+#     pdf = fitz.open(pdffile)
+#     num_pages = pdf.pageCount
+#
+#     # 大于1页的时候，默认新建一个文件夹来存储图片
+#     if target is None:
+#         if num_pages > 1:
+#             target = File(pdffile).stem + '/'
+#         else:
+#             target = File(pdffile).dirname + '/'
+#
+#     newfile = str(pathlib.Path(pdffile.parent / target))
+#     if newfile.endswith('.pdf'):
+#         newfile = os.path.splitext(newfile)[0] + ext
+#     Dir(os.path.dirname(newfile)).ensure_parent()
+#
+#     # 2 分析导出的图片文件名
+#     files = []
+#     if num_pages == 1:
+#         FitzPdfPage(pdf.loadPage(0)).write_image(newfile, if_exists=if_exists)
+#         files.append(newfile)
+#     else:  # 有多页
+#         number_width = get_number_width(num_pages)  # 根据总页数计算需要的对齐域宽
+#         stem, ext = os.path.splitext(newfile)
+#         for i in range(num_pages):
+#             name = ('-{:0' + str(number_width) + 'd}').format(i + 1)  # 前面的括号不要删，这样才是完整的一个字符串来使用format
+#             file = stem + name + ext
+#             files.append(file)
+#             FitzPdfPage(pdf.loadPage(i)).write_image(file, if_exists=if_exists)
+#     return files
 
-    # 可以不写target，默认处理：如果单张png则在同目录，多张则会建个同名目录存储
-    >> pdf2png(r'D:\slns+\immovables\immovables_data\test\X\A0001.pdf')
 
-    # 指定存放位置：
-    >> pdf2png(r'D:\slns+\immovables\immovables_data\test\X\A0001.pdf', r'D:\slns+\immovables\immovables_data\test\X')
-
-    """
-    return pdf2imagebase(pdffile, target=target, scale=scale, ext='.png')
-
-
-def pdf2svg(pdffile, target=None, scale=None, trim=False):
-    """
-    :param pdffile: 见pdf2imagebase
-    :param target: 见pdf2imagebase
-    :param scale: 见pdf2imagebase
-    :param trim: 如果使用裁剪功能，会调用pdf-crop-margins第三方工具
-        https://pypi.org/project/pdfCropMargins/
-    :return:
-    """
-    if trim:  # 先对pdf文件进行裁剪再转换
-        pdf = File(pdffile)
-        newfile = File('origin.pdf', pdf.parent).to_str()
-        pdf.copy(newfile)
-        # subprocess.run(['pdf-crop-margins.exe', '-p', '0', newfile, '-o', pdffile], stderr=subprocess.PIPE) # 本少： 会裁过头！
-        # 本少： 对于上下边处的 [] 分数等，会裁过头，先按百分比 -p 0 不留边，再按绝对点数收缩/扩张 -a -1  负数为扩张，单位为bp
-        # 本少被自己坑了，RamDisk 与 pdf-crop-margins.exe 配合，只能取 SCSI 硬盘，如果 Direct-IO 就不行，还不报错，还以为是泽少写的代码连报错都不会
-        subprocess.run(['pdf-crop-margins.exe', '-p', '0', '-a', '-1', newfile, '-o', pdffile],
-                       stderr=subprocess.PIPE)
-    # TODO 有时丢图
-    pdf2imagebase(pdffile, target=target, scale=scale, ext='.svg')
+# def pdf2png(pdffile, target=None, scale=None):
+#     """
+#     :param pdffile: pdf路径
+#     :param target: 目标位置
+#     :param scale: 缩放比例
+#     :return: list，生成的png图片清单
+#
+#     # 可以不写target，默认处理：如果单张png则在同目录，多张则会建个同名目录存储
+#     >> pdf2png(r'D:\slns+\immovables\immovables_data\test\X\A0001.pdf')
+#
+#     # 指定存放位置：
+#     >> pdf2png(r'D:\slns+\immovables\immovables_data\test\X\A0001.pdf', r'D:\slns+\immovables\immovables_data\test\X')
+#
+#     """
+#     return pdf2imagebase(pdffile, target=target, scale=scale, ext='.png')
 
 
-def pdfs2pngs(src, scale=None, pinterval=None):
-    """ 将目录下所有pdf转png
+# def pdf2jpg(pdffile, target=None, scale=None):
+#     return pdf2imagebase(pdffile, target=target, scale=scale, ext='.jpg')
+#
 
-    :param src: 原pdf数据路径
-    :param scale: 转图片时缩放比例，例如2表示长宽放大至2被
-    :param pinterval: 每隔多少个pdf输出处理进度
-        默认None，不输出
-    """
-    from functools import partial
-    func = partial(pdf2png, scale=scale)
-    Dir(src).select('**/*.pdf').procpaths(func, pinterval=pinterval)
+
+# def pdf2svg(pdffile, target=None, scale=None, trim=False):
+#     """
+#     :param pdffile: 见pdf2imagebase
+#     :param target: 见pdf2imagebase
+#     :param scale: 见pdf2imagebase
+#     :param trim: 如果使用裁剪功能，会调用pdf-crop-margins第三方工具
+#         https://pypi.org/project/pdfCropMargins/
+#     :return:
+#     """
+#     if trim:  # 先对pdf文件进行裁剪再转换
+#         pdf = File(pdffile)
+#         newfile = File('origin.pdf', pdf.parent).to_str()
+#         pdf.copy(newfile)
+#         # subprocess.run(['pdf-crop-margins.exe', '-p', '0', newfile, '-o', pdffile], stderr=subprocess.PIPE) # 本少： 会裁过头！
+#         # 本少： 对于上下边处的 [] 分数等，会裁过头，先按百分比 -p 0 不留边，再按绝对点数收缩/扩张 -a -1  负数为扩张，单位为bp
+#         # 本少被自己坑了，RamDisk 与 pdf-crop-margins.exe 配合，只能取 SCSI 硬盘，如果 Direct-IO 就不行，还不报错，还以为是泽少写的代码连报错都不会
+#         subprocess.run(['pdf-crop-margins.exe', '-p', '0', '-a', '-1', newfile, '-o', pdffile],
+#                        stderr=subprocess.PIPE)
+#     # TODO 有时丢图
+#     pdf2imagebase(pdffile, target=target, scale=scale, ext='.svg')
+
+
+# def pdfs2pngs(src, scale=None, pinterval=None):
+#     """ 将目录下所有pdf转png
+#
+#     :param src: 原pdf数据路径
+#     :param scale: 转图片时缩放比例，例如2表示长宽放大至2被
+#     :param pinterval: 每隔多少个pdf输出处理进度
+#         默认None，不输出
+#     """
+#     from functools import partial
+#     func = partial(pdf2png, scale=scale)
+#     Dir(src).select('**/*.pdf').procpaths(func, pinterval=pinterval)
