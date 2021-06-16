@@ -280,3 +280,8 @@ class CvtType:
                 'str': str,
                 'list': cls.str2list,
                 'dict': cls.str2dict}.get(name, None)
+
+
+def mod_minabs(x, m):
+    a = x % m
+    return a if a < m / 2 else a - m

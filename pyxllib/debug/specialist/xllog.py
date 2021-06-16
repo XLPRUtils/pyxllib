@@ -13,7 +13,6 @@ import sys
 from pyxllib.text.pupil import shorten
 from pyxllib.prog.pupil import EmptyPoolExecutor
 from pyxllib.debug.pupil import format_exception
-from pyxllib.file.specialist import File
 
 XLLOG_CONF_FILE = 'xllog.yaml'
 
@@ -39,6 +38,7 @@ def get_xllog(*, log_file=None):
     elif os.path.isfile(XLLOG_CONF_FILE):
         # 2 若不存在，尝试在默认位置是否有自定义配置文件，读取配置文件来创建
         import logging.config
+        from pyxllib.file.specialist import File
         data = File(XLLOG_CONF_FILE).read()
         if isinstance(data, dict):
             # 推荐使用yaml的字典结构，格式更简洁清晰

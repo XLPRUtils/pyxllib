@@ -254,3 +254,20 @@ def matchpairs(xs, ys, cmp_func, least_score=sys.float_info.epsilon, *,
             y_used.add(j)
 
     return pairs
+
+
+def get_number_width(n):
+    """ 判断数值n的长度
+
+    >>> get_number_width(0)
+    Traceback (most recent call last):
+    AssertionError
+    >>> get_number_width(9)
+    1
+    >>> get_number_width(10)
+    2
+    >>> get_number_width(97)
+    2
+    """
+    assert n > 0
+    return math.ceil(math.log10(n + 1))
