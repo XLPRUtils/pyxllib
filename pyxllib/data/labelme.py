@@ -33,7 +33,7 @@ class BasicLabelData:
     def __init__(self, root, relpath2data=None, *, reads=True, prt=False, fltr=None, slt=None, extdata=None):
         """
         :param root: 数据所在根目录
-        :param relpath2data: {relpath: data1, 'a/1.txt': data2, ...}
+        :param dict[str, readed_data] relpath2data: {relpath: data1, 'a/1.txt': data2, ...}
             如果未传入data具体值，则根据目录里的情况自动初始化获得data的值
 
             relpath是对应的File标注文件的相对路径字符串
