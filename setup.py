@@ -21,6 +21,7 @@ xlai = """
 visdom
 xlcocotools
 """
+# fvcore
 
 setup(
     name='pyxllib',  # pip 安装时用的名字

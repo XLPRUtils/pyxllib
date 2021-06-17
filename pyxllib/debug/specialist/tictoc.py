@@ -192,10 +192,10 @@ def perftest(title, stmt="pass", repeat=1, number=1, globals=None, res_width=Non
     data = []
     res = ''
     for i in range(repeat):
-        start = time.clock()
+        start = time.time()
         for j in range(number):
             res = func()
-        data.append(time.clock() - start)
+        data.append(time.time() - start)
 
     # 3 报告格式
     if res_width is None:

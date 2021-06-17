@@ -37,6 +37,6 @@ def test_labeldata():
 
 if __name__ == '__main__':
     with TicToc(__name__):
-        test_labeldata()
+        # test_labeldata()
 
         pass
