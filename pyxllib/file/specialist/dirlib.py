@@ -22,6 +22,7 @@ from pyxllib.algo.pupil import natural_sort
 from pyxllib.text.pupil import strfind
 from pyxllib.debug.pupil import dprint
 from pyxllib.file.specialist import get_etag, PathBase, File
+from pyxllib.prog.newbie import first_nonnone
 
 ____dir = """
 支持文件或文件夹的对比复制删除等操作的函数：filescmp、filesdel、filescopy
@@ -47,7 +48,7 @@ class Dir(PathBase):
 
     # 一、基本目录类功能
 
-    def __init__(self, path=None, root=None, *, subs=None):
+    def __init__(self, path=None, root=None, *, subs=None, check=True):
         """根目录、工作目录
 
         >> Dir()  # 以当前文件夹作为root
@@ -58,21 +59,27 @@ class Dir(PathBase):
         """
 
         self._path = None
+        self.subs = subs or []  # 初始默认没有选中任何文件（夹）
+
         # 1 快速初始化
         if root is None:
             if isinstance(path, Dir):
                 self._path = path._path
+                # 注意用Dir A 初始化 Dir B，并不会把A的subs传递给B
+                return
             elif isinstance(path, pathlib.Path):
                 self._path = path
+
         # 2 普通初始化
         if self._path is None:
             self._path = self.abspath(path, root)
-        if not self._path:
-            raise ValueError(f'无效路径 {self._path}')
-        elif self._path.is_file():
-            raise ValueError(f'不能用文件初始化一个Dir对象 {self._path}')
 
-        self.subs = subs or []  # 初始默认没有选中任何文件（夹）
+        # 3 检查
+        if check:
+            if not self._path:
+                raise ValueError(f'无效路径 {self._path}')
+            elif self._path.is_file():
+                raise ValueError(f'不能用文件初始化一个Dir对象 {self._path}')
 
     @classmethod
     def safe_init(cls, path, root=None, *, subs=None):
@@ -239,7 +246,8 @@ class Dir(PathBase):
                           min_mtime=min_mtime, max_mtime=max_mtime)
         if nsort:
             subs = natural_sort(subs)
-        return list(map(lambda x: File(x, self._path), subs))
+        for x in subs:
+            yield File(self._path / x, check=False)
 
     def select_dirs(self, patter, nsort=True,
                     ignore_backup=False, ignore_special=False,
@@ -252,7 +260,8 @@ class Dir(PathBase):
                           min_mtime=min_mtime, max_mtime=max_mtime)
         if nsort:
             subs = natural_sort(subs)
-        return list(map(lambda x: Dir(x, self._path), subs))
+        for x in subs:
+            yield Dir(self._path / x, check=False)
 
     def select_paths(self, patter, nsort=True,
                      ignore_backup=False, ignore_special=False,
@@ -265,7 +274,8 @@ class Dir(PathBase):
                           min_mtime=min_mtime, max_mtime=max_mtime)
         if nsort:
             subs = natural_sort(subs)
-        return list(map(lambda x: self._path / x, subs))
+        for x in subs:
+            yield self._path / x
 
     def procpaths(self, func, start=None, end=None, ref_dir=None, pinterval=None, max_workers=1, interrupt=True):
         """ 对选中的文件迭代处理
@@ -399,7 +409,8 @@ def filescmp(f1, f2, shallow=True):
 def filesfilter(files, *, root=os.curdir, type_=None,
                 ignore_backup=False, ignore_special=False,
                 min_size=None, max_size=None,
-                min_ctime=None, max_ctime=None, min_mtime=None, max_mtime=None):
+                min_ctime=None, max_ctime=None,
+                min_mtime=None, max_mtime=None):
     """
     :param files: 类list对象
     :param type_:
@@ -425,21 +436,24 @@ def filesfilter(files, *, root=os.curdir, type_=None,
         elif type_ == 'dir' and not os.path.isdir(f):
             return False
 
-        msg = os.stat(f)
-        if min_size is not None or max_size is not None:
-            size = File(f).size
-            if min_size is not None and size < min_size: return False
-            if max_size is not None and size > max_size: return False
+        # 尽量避免调用 os.stat，判断是否有自定义大小、时间规则，没有可以跳过这部分
+        check_arg = first_nonnone([min_size, max_size, min_ctime, max_ctime, min_mtime, max_mtime])
+        if check_arg is not None:
+            msg = os.stat(f)
+            if first_nonnone([min_size, max_size]) is not None:
+                size = File(f).size
+                if min_size is not None and size < min_size: return False
+                if max_size is not None and size > max_size: return False
 
-        if min_ctime or max_ctime:
-            file_ctime = msg.st_ctime
-            if min_ctime and Datetime(file_ctime) < min_ctime: return False
-            if max_ctime and Datetime(file_ctime) > max_ctime: return False
+            if min_ctime or max_ctime:
+                file_ctime = msg.st_ctime
+                if min_ctime and Datetime(file_ctime) < min_ctime: return False
+                if max_ctime and Datetime(file_ctime) > max_ctime: return False
 
-        if min_mtime or max_mtime:
-            file_mtime = msg.st_mtime
-            if min_mtime and Datetime(file_mtime) < min_mtime: return False
-            if max_mtime and Datetime(file_mtime) > max_mtime: return False
+            if min_mtime or max_mtime:
+                file_mtime = msg.st_mtime
+                if min_mtime and Datetime(file_mtime) < min_mtime: return False
+                if max_mtime and Datetime(file_mtime) > max_mtime: return False
 
         if ignore_special:
             parts = File(f).parts
