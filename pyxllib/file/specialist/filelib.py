@@ -207,7 +207,7 @@ class PathBase:
     __slots__ = ('_path',)
 
     @classmethod
-    def abspath(cls, path=None, root=None, *, suffix=None) -> pathlib.Path:
+    def abspath(cls, path=None, root=None, *, suffix=None, resolve=True) -> pathlib.Path:
         r""" 根据各种不同的组合参数信息，推导出具体的路径位置
 
         :param path: 主要的参数，如果后面的参数有矛盾，以path为最高参考标准
@@ -271,7 +271,10 @@ class PathBase:
             elif li[1] == '':
                 path = li[0] + '.' + suffix
 
-        return pathlib.Path(path).resolve()
+        if resolve:
+            return pathlib.Path(path).resolve()
+        else:
+            return pathlib.Path(path)
 
     def __bool__(self):
         r""" 判断文件、文件夹是否存在
@@ -535,14 +538,21 @@ class File(PathBase):
 
     # 一、基础功能
 
-    def __init__(self, path, root=None, *, suffix=None):
+    def __init__(self, path, root=None, *, suffix=None, check=True):
         r""" 初始化参数含义详见 PathBase.abspath 函数解释
+
+        :param path: 只传入一个File、pathlib.Path对象，可以提高初始化速度，不会进行多余的解析判断
+            如果要安全保守一点，可以传入str类型的path
+        :param root: 父目录
+        :param check: 在某些特殊场合、内部开发中，可以确保传参一定不会出错，在上游已经有了严谨的检查
+            此时可以设置check=False，提高初始化速度
 
         注意！如果使用了符号链接（软链接），则路径是会解析转向实际位置的！例如
         >> File('D:/pycode/code4101py')
         File('D:/slns/pycode/code4101py')
         """
         self._path = None
+
         # 1 快速初始化
         if root is None and suffix is None:
             if isinstance(path, File):
@@ -550,13 +560,17 @@ class File(PathBase):
                 return  # 直接完成初始化过程
             elif isinstance(path, pathlib.Path):
                 self._path = path
+
         # 2 普通初始化
         if self._path is None:
             self._path = self.abspath(path, root, suffix=suffix)
-        if not self._path:
-            raise ValueError(f'无效路径 {self._path}')
-        elif self._path.is_dir():
-            raise ValueError(f'不能用目录初始化一个File对象 {self._path}')
+
+        # 3 检查
+        if check:
+            if not self._path:
+                raise ValueError(f'无效路径 {self._path}')
+            elif self._path.is_dir():
+                raise ValueError(f'不能用目录初始化一个File对象 {self._path}')
 
     @classmethod
     def safe_init(cls, path, root=None, *, suffix=None):
