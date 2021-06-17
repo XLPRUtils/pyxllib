@@ -182,11 +182,28 @@ class Dir(PathBase):
         """ 返回所有subs的File对象 （过滤掉文件对象） """
         return list(map(Dir, filter(lambda p: not p.is_file(), self.subpaths())))
 
-    def select(self, patter, nsort=True, **kwargs):
+    def select(self, patter, nsort=True, type_=None,
+               ignore_backup=False, ignore_special=False,
+               min_size=None, max_size=None,
+               min_ctime=None, max_ctime=None, min_mtime=None, max_mtime=None,
+               **kwargs):
         r""" 增加选中文件，从filesmatch衍生而来，参数含义见 filesfilter
 
-        :param nsort: 是否使用自然排序，关闭可以加速
+        :param bool nsort: 是否使用自然排序，关闭可以加速
+        :param str type_:
+            None，所有文件
+            'file'，只匹配文件
+            'dir', 只匹配目录
+        :param bool ignore_backup: 如果设为False，会过滤掉自定义的备份文件格式，不获取备份类文件
+        :param bool ignore_special: 自动过滤掉 '.git'、'$RECYCLE.BIN' 目录下文件
+        :param int min_size: 文件大小过滤，单位Byte
+        :param int max_size: ~
+        :param str min_ctime: 创建时间的过滤，格式'2019-09-01'或'2019-09-01 00:00'
+        :param str max_ctime: ~
+        :param str min_mtime: 修改时间的过滤
+        :param str max_mtime: ~
         :param kwargs: see filesfilter
+        :seealso: filesfilter
 
         注意select和exclude的增减操作是不断叠加的，而不是每次重置！
         如果需要重置，应该重新定义一个Folder类
@@ -201,10 +218,54 @@ class Dir(PathBase):
 
         >> Dir(r'C:/pycode/code4101py').select('*.py', min_mtime=Datetime(2020, 3, 1))  # 修改时间在3月1日以上的
         """
-        subs = filesmatch(patter, root=str(self), **kwargs)
+        subs = filesmatch(patter, root=str(self), type_=type_,
+                          ignore_backup=ignore_backup, ignore_special=ignore_special,
+                          min_size=min_size, max_size=max_size,
+                          min_ctime=min_ctime, max_ctime=max_ctime, min_mtime=min_mtime, max_mtime=max_mtime,
+                          **kwargs)
         subs = self.subs + subs
         if nsort: subs = natural_sort(subs)
         return Dir(self._path, subs=subs)
+
+    def select_files(self, patter, nsort=True,
+                     ignore_backup=False, ignore_special=False,
+                     min_size=None, max_size=None,
+                     min_ctime=None, max_ctime=None, min_mtime=None, max_mtime=None):
+        """ TODO 这系列的功能可以优化加速，在没有复杂规则的情况下，可以尽量用源生的py检索方式实现 """
+        subs = filesmatch(patter, root=str(self), type_='file',
+                          ignore_backup=ignore_backup, ignore_special=ignore_special,
+                          min_size=min_size, max_size=max_size,
+                          min_ctime=min_ctime, max_ctime=max_ctime,
+                          min_mtime=min_mtime, max_mtime=max_mtime)
+        if nsort:
+            subs = natural_sort(subs)
+        return list(map(lambda x: File(x, self._path), subs))
+
+    def select_dirs(self, patter, nsort=True,
+                    ignore_backup=False, ignore_special=False,
+                    min_size=None, max_size=None,
+                    min_ctime=None, max_ctime=None, min_mtime=None, max_mtime=None):
+        subs = filesmatch(patter, root=str(self), type_='dir',
+                          ignore_backup=ignore_backup, ignore_special=ignore_special,
+                          min_size=min_size, max_size=max_size,
+                          min_ctime=min_ctime, max_ctime=max_ctime,
+                          min_mtime=min_mtime, max_mtime=max_mtime)
+        if nsort:
+            subs = natural_sort(subs)
+        return list(map(lambda x: Dir(x, self._path), subs))
+
+    def select_paths(self, patter, nsort=True,
+                     ignore_backup=False, ignore_special=False,
+                     min_size=None, max_size=None,
+                     min_ctime=None, max_ctime=None, min_mtime=None, max_mtime=None):
+        subs = filesmatch(patter, root=str(self),
+                          ignore_backup=ignore_backup, ignore_special=ignore_special,
+                          min_size=min_size, max_size=max_size,
+                          min_ctime=min_ctime, max_ctime=max_ctime,
+                          min_mtime=min_mtime, max_mtime=max_mtime)
+        if nsort:
+            subs = natural_sort(subs)
+        return list(map(lambda x: self._path / x, subs))
 
     def procpaths(self, func, start=None, end=None, ref_dir=None, pinterval=None, max_workers=1, interrupt=True):
         """ 对选中的文件迭代处理
