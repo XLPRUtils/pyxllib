@@ -4,262 +4,106 @@
 # @Email  : 877362867@qq.com
 # @Date   : 2020/11/15 10:16
 
-"""几何、数学运算"""
+""" 几何、数学运算
 
-import copy
-import re
-import subprocess
-
-try:
-    import shapely
-except ModuleNotFoundError:
-    try:
-        subprocess.run(['conda', 'install', 'shapely'])
-        import shapely
-    except FileNotFoundError:
-        # 这个库用pip安装是不够的，正常要用conda，有些dll才会自动配置上
-        subprocess.run(['pip3', 'install', 'shapely'])
-        import shapely
-
-import numpy as np
-from shapely.geometry import Polygon
-import cv2
-
-from pyxllib.algo.newbie import xywh2ltrb, ltrb2xywh
-from pyxllib.algo.intervals import Intervals
-
-# import PIL.Image
-
-____ensure_type = """
-数组方面的类型转换，相关类型有
-
-list (tuple)  1d, 2d
-np.ndarray    1d, 2d
-Polygon
-
-这里封装的目的，是尽量减少不必要的数据重复拷贝，需要做些底层的特定判断优化
+specialist级别
 """
 
+import copy
 
-def np_array(x, dtype=None, shape=None):
-    """确保数据是np.ndarray结构，如果不是则做一个转换
+import numpy as np
+import cv2
 
-    如果x已经是np.ndarray，尽量减小数据的拷贝，提高效率
-
-    :param dtype: 还可以顺便指定数据类型，可以修改值的存储类型
-
-    TODO 增加一些字符串初始化方法，例如类似matlab这样的 [1 2 3 4]。虽然从性能角度不推荐，但是工程化应该提供尽可能完善全面的功能。
-    """
-    if isinstance(x, np.ndarray):
-        if x.dtype == np.dtype(dtype):
-            y = x
-        else:
-            y = np.array(x, dtype=dtype)
-    elif isinstance(x, Polygon):
-        y = np.array(x.exterior.coords, dtype=dtype)
-    else:
-        y = np.array(x, dtype=dtype)
-
-    if shape:
-        y = y.reshape(shape)
-
-    return y
-
-
-def to_list(x, dtype=None, shape=None):
-    """
-    :param x:
-    :param shape: 输入格式如：-1, (-1, ), (-1, 2)
-    :return: list、tuple嵌套结构
-    """
-    if isinstance(x, (list, tuple)):
-        # 1 尽量不要用这两个参数，否则一定会使用到np矩阵作为中转
-        if dtype or shape:
-            y = np_array(x, dtype, shape)
-        else:
-            y = x
-    else:
-        y = np_array(x, dtype, shape).tolist()
-    return y
-
-
-def rect2polygon(src, dtype=None):
-    """ 矩形转成四边形结构来表达存储
-    （输入左上、右下两个顶点坐标）
-
-    >>> rect2polygon([[0, 0], [10, 20]])
-    array([[ 0,  0],
-           [10,  0],
-           [10, 20],
-           [ 0, 20]])
-    >>> rect2polygon(np.array([0, 0, 10, 20]))
-    array([[ 0,  0],
-           [10,  0],
-           [10, 20],
-           [ 0, 20]])
-    """
-    x1, y1, x2, y2 = np_array(src).reshape(-1)
-    dst = np.array([[x1, y1], [x2, y1], [x2, y2], [x1, y2]], dtype=dtype)
-    return dst
-
-
-def shapely_polygon(x):
-    """ 转成shapely的Polygon对象
-
-    :param x: 支持多种格式，详见代码
-    :return: Polygon
-
-    >>> print(shapely_polygon([[0, 0], [10, 20]]))  # list
-    POLYGON ((0 0, 10 0, 10 20, 0 20, 0 0))
-    >>> print(shapely_polygon({'shape_type': 'polygon', 'points': [[0, 0], [10, 0], [10, 20], [0, 20]]}))  # labelme shape
-    POLYGON ((0 0, 10 0, 10 20, 0 20, 0 0))
-    >>> print(shapely_polygon('107,247,2358,209,2358,297,107,335'))  # 字符串格式
-    POLYGON ((107 247, 2358 209, 2358 297, 107 335, 107 247))
-    >>> print(shapely_polygon('107 247.5, 2358 209.2, 2358 297, 107.5 335'))  # 字符串格式
-    POLYGON ((107 247.5, 2358 209.2, 2358 297, 107.5 335, 107 247.5))
-    """
-    from shapely.geometry import Polygon
-
-    if isinstance(x, Polygon):
-        return x
-    elif isinstance(x, dict) and 'points' in x:
-        if x['shape_type'] in ('rectangle', 'polygon'):
-            # 目前这种情况一般是输入了labelme的shape格式
-            return shapely_polygon(x['points'])
-        else:
-            raise ValueError('无法转成多边形的类型')
-    elif isinstance(x, str):
-        coords = re.findall(r'[\d\.]+', x)
-        return shapely_polygon(coords)
-    else:
-        x = np_array(x, shape=(-1, 2))
-        if x.shape[0] == 2:
-            x = rect2polygon(x)
-            x = np.array(x)
-        if x.shape[0] >= 3:
-            return Polygon(x)
-        else:
-            raise ValueError
-
-
-def ensure_array_type(src_data, target_type):
-    """ 参考 target 的数据结构，重设src的结构
-
-    目前支持的数据结构
-        np.ndarray
-        list
-        shapely polygon
-
-    :param src_data: 原数据
-    :param target_type: 正常是指定一个type类型
-    :return: 重置结构后的src数据
-
-    >>> ensure_array_type([1, 2, 3, 4], type([[1, 1], [2, 2]]))
-    [1, 2, 3, 4]
-    >>> ensure_array_type([1, 2, 3, 4], type(np.array([[1, 1], [2, 2]])))
-    array([1, 2, 3, 4])
-    >>> ensure_array_type([1, 2, 3, 4], np.ndarray)
-    array([1, 2, 3, 4])
-    >>> ensure_array_type(np.array([[1, 2], [3, 4]]), type([10, 20, 30, 40]))
-    [[1, 2], [3, 4]]
-    >>> ensure_array_type(np.array([]), type([10, 20, 30, 40]))
-    []
-    """
-    # 根据不同的目标数据类型，进行格式转换
-    if target_type == np.ndarray:
-        return np_array(src_data)
-    elif target_type in (list, tuple):
-        return np_array(src_data).tolist()
-    elif target_type == Polygon:
-        return shapely_polygon(src_data)
-    else:
-        raise TypeError(f'未知目标类型 {target_type}')
-
+from pyxllib.algo.intervals import Intervals
 
 ____base = """
 
 """
 
 
-def coords1d(coords, dtype=None):
-    """ 转成一维点数据
+def xywh2ltrb(p):
+    return [p[0], p[1], p[0] + p[2], p[1] + p[3]]
 
-    [(x1, y1), (x2, y2), ...] --> [x1, y1, x2, y2, ...]
-    会尽量遵循原始的array、list等结构返回
 
-    >>> coords1d([(1, 2), (3, 4)])
+def ltrb2xywh(p):
+    return [p[0], p[1], p[2] - p[0], p[3] - p[1]]
+
+
+def rect2polygon(src_pts):
+    """ 矩形对角线两个点，转成四边形四个点的模式来表达
+    （输入左上、右下两个顶点坐标）
+
+    :param list|np.ndarray src_pts: size 2*2
+    :rtype: list
+
+    >>> rect2polygon([[0, 0], [10, 20]])
+    [[0, 0], [10, 0], [10, 20], [0, 20]]
+    >>> rect2polygon(np.array([[0, 0], [10, 20]]))
+    [[0, 0], [10, 0], [10, 20], [0, 20]]
+    >>> rect2polygon([[10, 0], [0, 20]])
+    [[0, 0], [10, 0], [10, 20], [0, 20]]
+    """
+    [[x1, y1], [x2, y2]] = src_pts
+    dst_pts = [[x1, y1], [x2, y1], [x2, y2], [x1, y2]]
+    dst_pts = resort_quad_points(dst_pts)
+    return dst_pts
+
+
+def reshape_coords(coords, m, dtype=None):
+    """ 重置坐标点的维度
+
+    :param list coords: 这个函数主要还是封装了对list情况的处理
+        其实np.ndarray结构也行，但这种情况直接用np接口操作就行，不需要引用该函数
+    :rtype: list
+
+    # 转成 n*1 的矩阵
+
+    >>> reshape_coords([(1, 2), (3, 4)], 1)
     [1, 2, 3, 4]
-    >>> coords1d(np.array([[1, 2], [3, 4]]))
-    array([1, 2, 3, 4])
-    >>> coords1d([1, 2, 3, 4])
+    >>> reshape_coords(np.array([[1, 2], [3, 4]]), 1)
+    [1, 2, 3, 4]
+    >>> reshape_coords([1, 2, 3, 4], 1)
     [1, 2, 3, 4]
 
-    >>> coords1d([[1.5, 2], [3.5, 4]])
+    >>> reshape_coords([[1.5, 2], [3.5, 4]], 1)
     [1.5, 2.0, 3.5, 4.0]
-    >>> coords1d([1, 2, [3, 4], [5, 6, 7]])  # 这种情况，[3,4]、[5,6,7]都是一个整体
+
+    # 这种情况，[3,4]、[5,6,7]都是一个整体
+    # VisibleDeprecationWarning
+    >>> reshape_coords([1, 2, [3, 4], [5, 6, 7]], 1)
     [1, 2, [3, 4], [5, 6, 7]]
-    >>> coords1d([[[1, 2, 3], [4, 5, 6]], [[7, 8, 9], [10, 11, 12]]])
+
+    >>> reshape_coords([[[1, 2, 3], [4, 5, 6]], [[7, 8, 9], [10, 11, 12]]], 1)
     [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
-    """
 
-    if isinstance(coords, (list, tuple)):
-        return np_array(coords, dtype=dtype).reshape(-1).tolist()
-    elif isinstance(coords, np.ndarray):
-        return np_array(coords, dtype=dtype).reshape(-1)
-    else:
-        raise TypeError(f'未知类型 {coords}')
+    # 变成 n*2 的矩阵
 
-
-def coords2d(coords, m=2, dtype=None):
-    """ 一维的点数据转成二维点数据
-
-    :param m: 转成行列结构后，每列元素数，默认2个
-
-    [x1, y1, x2, y2, ...] --> [(x1, y1), (x2, y2), ...]
-    会尽量遵循原始的array、list等结构返回
-
-    >>> coords2d([1, 2, 3, 4])
+    >>> reshape_coords([1, 2, 3, 4], 2)
     [[1, 2], [3, 4]]
-    >>> coords2d(np.array([1, 2, 3, 4]))
-    array([[1, 2],
-           [3, 4]])
-    >>> coords2d([[1, 2], [3, 4]])
+    >>> reshape_coords(np.array([1, 2, 3, 4]), 2)
     [[1, 2], [3, 4]]
-
-    >>> coords2d([1.5, 2, 3.5, 4])
+    >>> reshape_coords([[1, 2], [3, 4]], 2)
+    [[1, 2], [3, 4]]
+    >>> reshape_coords([1.5, 2, 3.5, 4], 2)
     [[1.5, 2.0], [3.5, 4.0]]
-    >>> coords2d([1.5, 2, 3.5, 4], dtype=int)  # 数据类型转换
+    >>> reshape_coords([1.5, 2, 3.5, 4], 2, dtype=int)  # 数据类型转换
     [[1, 2], [3, 4]]
     """
-    if isinstance(coords, (list, tuple)):
-        return np_array(coords, dtype=dtype).reshape((-1, m)).tolist()
-    elif isinstance(coords, np.ndarray):
-        return np_array(coords, dtype=dtype).reshape((-1, m))
+    if m == 1:
+        return np.array(coords, dtype=dtype).reshape(-1).tolist()
     else:
-        raise TypeError(f'未知类型 {coords}')
+        return np.array(coords, dtype=dtype).reshape((-1, m)).tolist()
 
 
-def rect_bounds1d(coords, dtype=int):
+def rect_bounds(coords):
     """ 多边形的最大外接矩形
 
-    :param coords: 任意多边形的一维值[x1, y1, x2, y2, ...]，或者二维结构[(x1, y1), (x2, y2), ...]
-    :param dtype: 默认存储的数值类型
+    :param coords: 支持list、np等类型，支持1d、2d两种维度表达方式
     :return: rect的两个点坐标，同时也是 [left, top, right, bottom]
     """
-    pts = coords1d(coords)
+    pts = np.array(coords).reshape(-1)
     p = [min(pts[::2]), min(pts[1::2]), max(pts[::2]), max(pts[1::2])]
-    return [dtype(v) for v in p]
-
-
-def rect_bounds(coords, dtype=int):
-    """ 多边形的最大外接矩形
-
-    :param coords: 任意多边形的一维值[x1, y1, x2, y2, ...]，或者二维结构[(x1, y1), (x2, y2), ...]
-    :param dtype: 默认存储的数值类型
-    :return: rect的两个点坐标
-    """
-    x1, y1, x2, y2 = rect_bounds1d(coords, dtype=dtype)
-    return [[x1, y1], [x2, y2]]
+    return [v for v in p]
 
 
 def resort_quad_points(src_pts):
@@ -267,18 +111,28 @@ def resort_quad_points(src_pts):
 
     算法：先确保pt1、pt2在上面，然后再确保pt1在pt2左边
 
+    :param list|tuple|np.ndarray src_pts: 点集
+    :rtype: list|np.ndarray
+
     >>> pts = [[100, 50], [200, 0], [100, 0], [0, 50]]
     >>> resort_quad_points(pts)
     [[100, 0], [200, 0], [100, 50], [0, 50]]
     >>> pts  # 原来的点不会被修改
     [[100, 50], [200, 0], [100, 0], [0, 50]]
+
+    >>> pts = np.array([[100, 50], [200, 0], [100, 0], [0, 50]])
+    >>> resort_quad_points(pts)
+    array([[100,   0],
+           [200,   0],
+           [100,   0],
+           [  0,  50]])
+    >>> pts  # 原来的点不会被修改
+    array([[100,  50],
+           [200,   0],
+           [100,   0],
+           [  0,  50]])
     """
-    # numpy的交换会有问题！必须要转为list结构
-    src_type = type(src_pts)
-    pts = to_list(src_pts)
-    if src_type == list:
-        # list的时候比较特别，要拷贝、不能引用数据
-        pts = copy.copy(pts)
+    pts = copy.copy(src_pts)
     if pts[0][1] > pts[2][1]:
         pts[0], pts[2] = pts[2], pts[0]
     if pts[1][1] > pts[3][1]:
@@ -286,7 +140,7 @@ def resort_quad_points(src_pts):
     if pts[0][0] > pts[1][0]:
         pts[0], pts[1] = pts[1], pts[0]
         pts[2], pts[3] = pts[3], pts[2]
-    return ensure_array_type(pts, src_type)
+    return pts
 
 
 ____warp_perspective = """
@@ -296,18 +150,16 @@ https://www.yuque.com/xlpr/pyxllib/warpperspective
 """
 
 
-def warp_points(pts, warp_mat, reserve_struct=False):
+def warp_points(pts, warp_mat):
     """ 透视等点集坐标转换
 
-    :param pts: 支持list、tuple、np.ndarray等结构，支持1d、2d的维度
+    :param list|tuple|np.ndarray pts: 支持1d、2d的维度
         其实这个坐标变换就是一个简单的矩阵乘法，只是pts的数据结构往往比较特殊，
         并不是一个n*3的矩阵结构，所以需要进行一些简单的格式转换
         例如 [x1, y1, x2, y2, x3, y3] --> [[x1, x2, x3], [y1, y2, y3], [1, 1, 1]]
-    :param warp_mat: 变换矩阵，一般是个3*3的矩阵，但是只输入2*3的矩阵也行，因为第3行并用不到（点集只要取前两个维度X'Y'的结果值）
+    :param list|tuple|np.ndarray warp_mat: 变换矩阵，一般是个3*3的矩阵，但是只输入2*3的矩阵也行，因为第3行并用不到（点集只要取前两个维度X'Y'的结果值）
         TODO 不过这里我有个点也没想明白，如果不用第3行，本质上不是又变回仿射变换了，如何达到透视变换效果？第三维的深度信息能完全舍弃？
-    :param reserve_struct: TODO 是否保留原来pts的结构返回，默认True
-        关掉该功能可以提高性能，此时返回结果统一为 n*2 的np矩阵
-    :return: 会遵循原始的 pts 数据类型、维度结构返回
+    :rtype: np.ndarray
 
     >>> warp_mat = [[0, 1, 0], [1, 0, 0], [0, 0, 1]]  # 对换x、y
     >>> warp_points([[1, 2], [11, 22]], warp_mat)  # 处理两个点
@@ -327,19 +179,14 @@ def warp_points(pts, warp_mat, reserve_struct=False):
     array([[  2,   1],
            [ 22,  11],
            [222, 111]])
-    >>> warp_points([1, 2, 11, 22], warp_mat, reserve_struct=False)  # 也可以用一维的结构来输入点集
+    >>> warp_points([1, 2, 11, 22], warp_mat)  # 也可以用一维的结构来输入点集
     array([[ 2,  1],
            [22, 11]])
-
-    # >>> warp_points([1, 2, 11, 22], warp_mat, reserve_struct=True)  # 也可以用一维的结构来输入点集
-    # [2, 1, 22, 11]
     """
-    pts1 = np_array(pts).reshape(-1, 2).T
+    pts1 = np.array(pts).reshape(-1, 2).T
     pts1 = np.concatenate([pts1, [[1] * pts1.shape[1]]], axis=0)
     pts2 = np.dot(warp_mat[:2], pts1)
     pts2 = pts2.T
-    if reserve_struct:
-        raise NotImplementedError
     return pts2
 
 
@@ -348,7 +195,7 @@ def get_warp_mat(src, dst):
 
     :param src: 原点集，支持多种格式输入
     :param dst: 变换后的点集
-    :return: np.ndarray，3*3的变换矩阵
+    :return np.ndarray: 3*3的变换矩阵
     """
 
     def cvt_data(pts):
@@ -384,7 +231,7 @@ def quad_warp_wh(pts, method='average'):
     """
     # 1 计算四边长
     from math import hypot
-    pts = coords2d(pts)
+    # pts = ReshapeCoords.list_2d(pts)
     lens = [0] * 4
     for i in range(4):
         pt1, pt2 = pts[i], pts[(i + 1) % 4]
@@ -410,16 +257,13 @@ def warp_quad_pts(pts, method='average'):
 
     :param pts: 不规则四边形的四个点坐标
     :param method: 计算矩形宽、高的算法
-    :return: 规则矩形的四个点坐标
+    :return: 返回时，仍然用四个点的坐标表达，规则矩形的四个点坐标
 
     >>> warp_quad_pts([[89, 424], [931, 424], [399, 290], [621, 290]])
-    array([[  0,   0],
-           [532,   0],
-           [532, 549],
-           [  0, 549]])
+    [[0, 0], [532, 0], [532, 549], [0, 549]]
     """
     w, h = quad_warp_wh(pts, method)
-    return rect2polygon([0, 0, w, h])
+    return rect2polygon([[0, 0], [w, h]])
 
 
 ____polygon = """
@@ -458,7 +302,7 @@ class ComputeIou:
 
     @classmethod
     def polygon(cls, pts1, pts2):
-        inter_area = pts1.summary(pts2).area
+        inter_area = pts1.intersection(pts2).area
         union_area = pts1.area + pts2.area - inter_area
         return (inter_area / union_area) if union_area else 0
 
@@ -469,7 +313,8 @@ class ComputeIou:
         >>> ComputeIou.polygon2([[0, 0], [10, 10]], [[5, 5], [15, 15]])
         0.14285714285714285
         """
-        polygon1, polygon2 = shapely_polygon(pts1), shapely_polygon(pts2)
+        from pyxllib.algo.shapely_ import ShapelyPolygon
+        polygon1, polygon2 = ShapelyPolygon.gen(pts1), ShapelyPolygon.gen(pts2)
         return cls.polygon(polygon1, polygon2)
 
     @classmethod
@@ -518,7 +363,8 @@ class ComputeIou:
         return cls.nms_ltrb(boxes, iou, key=func, index=index)
 
     @classmethod
-    def nms_polygon(cls, boxes, iou=0.5, *, key=shapely_polygon, index=False):
+    def nms_polygon(cls, boxes, iou=0.5, *, key=None, index=False):
+        # ShapelyPolygon.gen
         return cls.nms_basic(boxes, cls.polygon, iou, key=key, index=index)
 
 
@@ -529,7 +375,7 @@ ____other = """
 def divide_quadrangle(coords, r1=0.5, r2=None):
     """ 切分一个四边形为两个四边形
 
-    :param coords: 1*8的坐标，或者4*2的坐标
+    :param coords: 4*2的坐标
     :param r1: 第一个切分比例，0.5相当于中点（即第一个四边形右边位置）
     :param r2: 第二个切分比例，即第二个四边形左边位置
     :return: 返回切割后所有的四边形
@@ -550,7 +396,7 @@ def divide_quadrangle(coords, r1=0.5, r2=None):
         return int(x), int(y)
 
     # 2 优化参数值
-    coords = coords2d(coords)
+    # coords = ReshapeCoords.list_2d(coords)
     if not r2: r2 = 1 - r1
 
     # 3 计算切分后的四边形坐标

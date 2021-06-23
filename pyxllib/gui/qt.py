@@ -148,7 +148,7 @@ class XlComboBox(QtWidgets.QComboBox):
 
 def get_input_widget(items=None, cur_value=None, *, valcvt=None,
                      n_widget=1, enabled=True,
-                     text_changed=None):
+                     correct_changed=None):
     """ 根据items参数情况，智能判断生成对应的windet
 
     :param items:
@@ -163,7 +163,7 @@ def get_input_widget(items=None, cur_value=None, *, valcvt=None,
     :param valcvt: 数值类型转换函数，非法时返回ValueError  （未实装）
         很多输入框是传入文本，有时需要转为int、float、list等类型
         支持输入常见类型转换的字符串名称，比如int、float
-    :param text_changed: 文本改变时的回调函数
+    :param correct_changed: 文本改变时的回调函数
     :param n_widget: 配合items为嵌套数组使用，需要指定嵌套层数
         此时cur_value、cvt、enabled、text_changed等系列值可以传入n_widget长度的list
     :param enabled: 是否可编辑
@@ -188,8 +188,8 @@ def get_input_widget(items=None, cur_value=None, *, valcvt=None,
         raise ValueError(f'{type(items)}')
 
     # 3 通用配置
-    if callable(text_changed):
-        w.correctChanged.connect(text_changed)
+    if callable(correct_changed):
+        w.correctChanged.connect(correct_changed)
     if not enabled:
         w.setEnabled(enabled)
 

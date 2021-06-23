@@ -674,7 +674,7 @@ def 缩放目录下所有png图片(folder, rate=120):
     旧函数名：缩放目录下所有png图片
     """
     fd = Dir(folder)
-    for f in fd.select('*.png').subfiles():
+    for f in fd.select_files('*.png'):
         try:
             im = Image.open(str(f))
             if 'dpi' in im.info:
@@ -699,7 +699,7 @@ def 缩放目录下所有png图片2(folder, scale=1.0):
     旧函数名：缩放目录下所有png图片2
     """
     fd = Dir(folder)
-    for f in fd.select('*.png').subfiles():
+    for f in fd.select_files('*.png'):
         im = Image.open(str(f))
         s = list(im.size)
         s[0] = int(s[0] * scale)
@@ -714,7 +714,7 @@ def 查看目录下png图片信息(folder):
     """
     fd = Dir(folder)
     ls = list()
-    for f in fd.select('*.png').subfiles():
+    for f in fd.select_files('*.png'):
         im = Image.open(str(f))
         d0, d1 = im.info['dpi'] if 'dpi' in im.info else ('', '')
         # 处理eps格式

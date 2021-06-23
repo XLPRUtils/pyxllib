@@ -67,7 +67,7 @@ class IcdarEval:
             # 输入是目录，则按照数字编号大小顺序依次读数数据
             d = Dir(label)
             res = dict()
-            for f in d.select('*.txt').subfiles():
+            for f in d.select_files('*.txt'):
                 k = re.search(r'\d+', f.stem).group()
                 res[k] = f.read(mode='b')
             return res

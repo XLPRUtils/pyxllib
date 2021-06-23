@@ -85,7 +85,8 @@ class NvmDevice:
 
     def get_most_free_gpu_device(self):
         gpu_id = self.get_most_free_gpu_id()
-        return torch.device(f'cuda:{gpu_id}')
+        if gpu_id is not None:
+            return torch.device(f'cuda:{gpu_id}')
 
     def get_free_gpu_ids(self, minimum_free_byte=10 * 1024 ** 3):
         """ 获取多个有剩余空间的gpu id
@@ -516,7 +517,8 @@ class Trainer:
                     self.log.info(info)
 
 
-def get_classification_func(model, *, state_file=None, transform=None, pred_func=None):
+def gen_classification_func(model, *, state_file=None, transform=None, pred_func=None,
+                            device=None):
     """ 工厂函数，生成一个分类器函数
 
     用这个函数做过渡的一个重要目的，也是避免重复加载模型
@@ -524,12 +526,12 @@ def get_classification_func(model, *, state_file=None, transform=None, pred_func
     :param model: 模型结构
     :param state_file: 存储参数的文件
     :param transform: 每一个输入样本的预处理函数
-    :param pred_func: model结果的参数的后处理
+    :param pred_func: model 结果的参数的后处理
     :return: 返回的函数结构见下述 cls_func
     """
     if state_file: model.load_state_dict(torch.load(str(state_file), map_location=get_device()))
     model.train(False)
-    device = get_device()
+    device = device or get_device()
     model.to(device)
 
     def cls_func(raw_in):
@@ -538,11 +540,11 @@ def get_classification_func(model, *, state_file=None, transform=None, pred_func
             im，一张图片路径、np.ndarray、PIL图片
             [im1, im2, ...]，多张图片清单
         :return: 输入如果只有一张图片，则返回一个结果
-            否则会存在list，返回一个batch的多个结果
+            否则会存在list，返回多个结果
         """
-        if transform: dataset = InputDataset(raw_in, transform)
+        dataset = InputDataset(raw_in, transform)
         # TODO batch_size根据device空间大小自适应设置
-        xs = torch.utils.data.DataLoader(dataset, batch_size=8, num_workers=8)
+        xs = torch.utils.data.DataLoader(dataset, batch_size=8)
         res = None
         for x in xs:
             # 每个batch可能很大，所以每个batch依次放到cuda，而不是一次性全放入

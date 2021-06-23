@@ -153,6 +153,9 @@ class DictTool:
     def or_(cls, *args):
         """ 合并到新字典
 
+        左边字典有的key，优先取左边，右边不会覆盖。
+        如果要覆盖效果，直接用 d1.update(d2)功能即可。
+
         :return: args[0] | args[1] | ... | args[-1].
         """
         res = {}

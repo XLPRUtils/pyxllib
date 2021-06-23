@@ -5,7 +5,7 @@
 # @Date   : 2020/11/15 10:09
 
 from pyxllib.file.specialist import File
-from pyxllib.algo.geo import np_array, rect_bounds1d, warp_points, coords2d, quad_warp_wh, get_warp_mat, rect2polygon
+from pyxllib.algo.geo import rect_bounds, warp_points, reshape_coords, quad_warp_wh, get_warp_mat, rect2polygon
 
 from PIL import Image
 import cv2
@@ -111,7 +111,7 @@ __other_func = """
 def pil2cv(im):
     """ pil图片转np图片 """
     x = im
-    y = np_array(x)
+    y = np.array(x)
     y = cv2.cvtColor(y, cv2.COLOR_BGR2RGB) if y.size else None
     return y
 
@@ -165,7 +165,7 @@ class CvPlot:
         """ 在src图像上画系列线段
         """
         # 1 判断 lines 参数内容
-        lines = np_array(lines).reshape(-1, 4)
+        lines = np.array(lines).reshape(-1, 4)
         if not lines.size:
             return src
 
@@ -189,7 +189,7 @@ class CvPlot:
         :param center: 是否画出圆心
         """
         # 1 圆 参数
-        circles = np_array(circles, dtype=int).reshape(-1, 3)
+        circles = np.array(circles, dtype=int).reshape(-1, 3)
         if not circles.size:
             return src
 
@@ -210,7 +210,7 @@ class _CvPrcsBase:
     _show_win_num = 0
 
     @classmethod
-    def read(cls, file, flags=1, **kwargs):
+    def read(cls, file, flags=None, **kwargs):
         """
         :param file: 支持非文件路径参数，会做类型转换
             因为这个接口的灵活性，要判断file参数类型等，速度会慢一点点
@@ -344,7 +344,7 @@ class CvPrcs(CvPrcsBase):
         from math import sqrt
 
         # 1 得到3*3的变换矩阵
-        warp_mat = np_array(warp_mat)
+        warp_mat = np.array(warp_mat)
         if warp_mat.shape[0] == 2:
             warp_mat = np.concatenate([warp_mat, [[0, 0, 1]]], axis=0)
 
@@ -357,7 +357,7 @@ class CvPrcs(CvPrcsBase):
             l, t, r, b = [-w1 + x, -h1 + y, w1 + x, h1 + y]
             pts1 = np.array([[l, t], [r, t], [r, b], [l, b]])
             # 2.2 变换后角点位置产生的外接矩形
-            left, top, right, bottom = rect_bounds1d(warp_points(pts1, warp_mat))
+            left, top, right, bottom = rect_bounds(warp_points(pts1, warp_mat))
             # 2.3 增加平移变换确保左上角在原点
             warp_mat = np.dot([[1, 0, -left], [0, 1, -top], [0, 0, 1]], warp_mat)
             # 2.4 控制面积变化率
@@ -477,7 +477,7 @@ class CvPrcs(CvPrcsBase):
             new_pts 新的变换后的点坐标
         """
         # 1 计算需要pad的宽度
-        x1, y1, x2, y2 = rect_bounds1d(pts)
+        x1, y1, x2, y2 = rect_bounds(pts)
         h, w = src_im.shape[:2]
         pad = [-y1, y2 - h, -x1, x2 - w]  # 各个维度要补充的宽度
         pad = [max(0, v) for v in pad]  # 负数宽度不用补充，改为0
@@ -509,7 +509,7 @@ class CvPrcs(CvPrcsBase):
             文件、np.ndarray --> np.ndarray
             PIL.Image --> PIL.Image
         """
-        dst, pts = cls._get_subrect_image(cls.read(src_im), coords2d(pts), fill)
+        dst, pts = cls._get_subrect_image(cls.read(src_im), reshape_coords(pts, 2), fill)
         if len(pts) == 4 and warp_quad:
             w, h = quad_warp_wh(pts, method=warp_quad)
             warp_mat = get_warp_mat(pts, rect2polygon([0, 0, w, h]))

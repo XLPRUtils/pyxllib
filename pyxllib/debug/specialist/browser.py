@@ -243,7 +243,7 @@ def browser_jsons_kv(fd, files='**/*.json', encoding=None, max_items=10, max_val
     """
     kvc = KeyValuesCounter()
     d = Dir(fd)
-    for p in d.select(files).subfiles():
+    for p in d.select_files(files):
         # print(p)
         data = p.read(encoding=encoding, mode='.json')
         kvc.add(data, max_value_length=max_value_length)
