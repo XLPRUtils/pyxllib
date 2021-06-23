@@ -70,7 +70,8 @@ class DataSync:
         self.scp.put(local_path, remote_path, recursive=True)
         t = tt.tocvalue()
         speed = humanfriendly.format_size(file_or_dir_size(local_path) / t, binary=True)
-        if prt: print(f'upload to {remote_path}, ↑{speed}/s, {t:.2f}s')
+        if prt:
+            print(f'upload to {remote_path}, ↑{speed}/s, {t:.2f}s')
 
     def get(self, local_path, remote_path, *, prt=True):
         """ 将服务器的remote_path下载到本地的local_path """

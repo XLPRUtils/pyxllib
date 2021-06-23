@@ -25,7 +25,7 @@ import yaml
 
 from pyxllib.algo.pupil import Groups
 from pyxllib.file.pupil import struct_unpack, gen_file_filter
-from pyxllib.prog.pupil import is_url, is_file
+from pyxllib.prog.pupil import is_url, is_file, DictTool
 
 ____judge = """
 """
@@ -670,8 +670,9 @@ class File(PathBase):
     def absdst(self, dst):
         """ 在copy、move等中，给了个"模糊"的目标位置dst，智能推导出实际file、dir绝对路径
         """
+        from pyxllib.file.specialist.dirlib import Dir
         dst_ = self.abspath(dst)
-        if (isinstance(dst, str) and dst[-1] in ('\\', '/')) or dst_.is_dir():
+        if isinstance(dst, Dir) or (isinstance(dst, str) and dst[-1] in ('\\', '/')) or dst_.is_dir():
             dst_ = File(self.name, dst_)
         else:
             dst_ = File(dst_)
@@ -783,8 +784,7 @@ class File(PathBase):
                     pickle.dump(ob, f)
             elif mode == '.json':
                 with open(name, 'w', encoding=encoding) as f:
-                    if 'ensure_ascii' not in kwargs:
-                        kwargs['ensure_ascii'] = False
+                    DictTool.ior(kwargs, {'ensure_ascii': False})
                     ujson.dump(ob, f, **kwargs)
             elif mode == '.yaml':
                 with open(name, 'w', encoding=encoding) as f:

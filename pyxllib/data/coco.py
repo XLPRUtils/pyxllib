@@ -32,7 +32,7 @@ from xlcocotools.coco import COCO
 from xlcocotools.cocoeval import COCOeval
 
 from pyxllib.stdlib.zipfile import ZipFile
-from pyxllib.data.labelme import LABEL_COLORMAP7, ToLabelmeJson, LabelmeData
+from pyxllib.data.labelme import LABEL_COLORMAP7, ToLabelmeJson, LabelmeDataset
 from pyxllib.data.icdar import IcdarEval
 
 
@@ -63,7 +63,7 @@ class CocoGtData:
         :param start_idx: 图片起始下标
         :return: list[dict(id, file_name, width, height)]
         """
-        files = Dir(imdir).select(['*.jpg', '*.png']).subfiles()
+        files = Dir(imdir).select_files(['*.jpg', '*.png'])
         images = []
         for i, f in enumerate(files, start=start_idx):
             w, h = Image.open(str(f)).size
@@ -84,7 +84,7 @@ class CocoGtData:
         pts.append(pts[0])
 
         # 多边形因为要画出所有的点，还要封闭，数据有点多，还是只存整数节省空间
-        pts = [round_int(v) for v in coords1d(pts)]
+        pts = [round_int(v) for v in reshape_coords(pts, 1)]
 
         return pts
 
@@ -300,8 +300,7 @@ class CocoGtData:
         catid2name = {x['id']: x['name'] for x in self.gt_dict['categories']}
 
         # 1 准备工作，构建文件名索引字典
-        files = root.select('**/*').subfiles()
-        gs = PathGroups.groupby(files)
+        gs = PathGroups.groupby(root.select_files('**/*'))
 
         # 2 遍历生成labelme数据
         not_finds = set()  # coco里有的图片，root里没有找到
@@ -319,13 +318,13 @@ class CocoGtData:
                 imfile = imfiles[0]
 
             # 2.2 数据内容转换
-            lmdict = LabelmeData.gen_data(imfile)
+            lmdict = LabelmeDataset.gen_data(imfile)
             img = DictTool.or_(img, {'xltype': 'image'})
-            lmdict['shapes'].append(LabelmeData.gen_shape(json.dumps(img, ensure_ascii=False), [[-10, 0], [-5, 0]]))
+            lmdict['shapes'].append(LabelmeDataset.gen_shape(json.dumps(img, ensure_ascii=False), [[-10, 0], [-5, 0]]))
             for ann in anns:
                 ann = DictTool.or_(ann, {'category_name': catid2name[ann['category_id']]})
                 label = json.dumps(ann, ensure_ascii=False)
-                shape = LabelmeData.gen_shape(label, xywh2ltrb(ann['bbox']))
+                shape = LabelmeDataset.gen_shape(label, xywh2ltrb(ann['bbox']))
                 lmdict['shapes'].append(shape)
 
                 if seg:
@@ -333,14 +332,14 @@ class CocoGtData:
                     for x in ann['segmentation']:
                         an = {'box_id': ann['id'], 'xltype': 'seg', 'shape_color': [191, 191, 191]}
                         label = json.dumps(an, ensure_ascii=False)
-                        lmdict['shapes'].append(LabelmeData.gen_shape(label, x))
+                        lmdict['shapes'].append(LabelmeDataset.gen_shape(label, x))
 
             f = imfile.with_suffix('.json')
 
             data[f.relpath(root)] = lmdict
 
-        return LabelmeData(root, data,
-                           extdata={'categories': self.gt_dict['categories'],
+        return LabelmeDataset(root, data,
+                              extdata={'categories': self.gt_dict['categories'],
                                     'not_finds': not_finds,
                                     'multimatch': Groups(multimatch)})
 
@@ -1032,13 +1031,13 @@ class CocoMatch(CocoParser, CocoMatchBase):
             pairs = []
             if n and m:
                 # 任意多边形相交面积算法速度太慢
-                # gt_bboxes = [shapely_polygon(b) for b in gt_group_df['gt_ltrb']]  # noqa 已经用if做了判断过滤
-                # dt_bboxes = [shapely_polygon(b) for b in dt_group_df['dt_ltrb']]  # noqa
+                # gt_bboxes = [ShapelyPolygon.gen(b) for b in gt_group_df['gt_ltrb']]  # noqa 已经用if做了判断过滤
+                # dt_bboxes = [ShapelyPolygon.gen(b) for b in dt_group_df['dt_ltrb']]  # noqa
                 # pairs = matchpairs(gt_bboxes, dt_bboxes, ComputeIou.polygon2, index=True)
 
                 # 改成ltrb的相交面积算法会快一点
-                # gt_bboxes = [shapely_polygon(b) for b in gt_group_df['gt_ltrb']]  # noqa 已经用if做了判断过滤
-                # dt_bboxes = [shapely_polygon(b) for b in dt_group_df['dt_ltrb']]  # noqa
+                # gt_bboxes = [ShapelyPolygon.gen(b) for b in gt_group_df['gt_ltrb']]  # noqa 已经用if做了判断过滤
+                # dt_bboxes = [ShapelyPolygon.gen(b) for b in dt_group_df['dt_ltrb']]  # noqa
                 pairs = matchpairs(gt_group_df['gt_ltrb'].to_list(), dt_group_df['dt_ltrb'].to_list(),
                                    ComputeIou.ltrb, index=True)
 

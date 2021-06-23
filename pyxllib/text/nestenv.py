@@ -9,7 +9,7 @@ import re
 
 from pyxllib.text.newbie import bracket_match2
 from pyxllib.text.pupil import grp_bracket, strfind
-from pyxllib.algo.pupil import Intervals, ReMatch
+from pyxllib.algo.intervals import Intervals, ReMatch
 from pyxllib.text.specialist import BRACE5
 
 
@@ -315,7 +315,7 @@ class __NestEnvBase:
             res = Intervals(func(t))
             if invert: res = res.invert(len(t))
             li.extend(res + left)
-        return NestEnv(self.s, Intervals(li))
+        return type(self)(self.s, Intervals(li))
 
 
 class NestEnv(__NestEnvBase):
@@ -1052,3 +1052,14 @@ def substrfunc(s, head, tail, *, func1=lambda x: x, func2=lambda x: x):
     """
     intervals = substr_intervals(s, head, tail)
     return intervals.replace(s, func1, out_repl=func2)
+
+
+class PycodeNestEnv(NestEnv):
+    def import_(self):
+        """ 开头的import部分
+
+        理论上要分三大块，每一块按顺序排序
+        但这可能不太好实现~~ 估计会先写个简单的基础版本
+        """
+        # TODO 捕捉连续的以'from ', 'import '开头的行
+        pass

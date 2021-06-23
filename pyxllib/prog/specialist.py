@@ -90,4 +90,6 @@ def distribute_package(root, version=None, repository=None, *, upload=True):
         # 删除打包生成的中间文件
         Dir('dist').delete()
         Dir('build').delete()
-        [d.delete() for d in Dir('.').select(r'*.egg-info').subdirs()]
+
+        # 这个不能删，不然importlib会读取不到模块的版本号
+        # [d.delete() for d in Dir('.').select_dirs(r'*.egg-info')]

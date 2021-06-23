@@ -19,15 +19,14 @@ from pyxllib.debug.specialist import get_xllog, Iterate, dprint
 from pyxllib.file.specialist import File, Dir, PathGroups, get_encoding
 from pyxllib.prog.specialist import mtqdm
 from pyxllib.cv.expert import PilImg
-from pyxllib.algo.newbie import ltrb2xywh
-from pyxllib.algo.geo import np_array, rect_bounds1d
+from pyxllib.algo.geo import ltrb2xywh, rect_bounds, warp_points, resort_quad_points, rect2polygon, get_warp_mat
 
 __0_basic = """
 这里可以写每个模块注释
 """
 
 
-class BasicLabelData:
+class BasicLabelDataset:
     """ 一张图一份标注文件的一些基本操作功能 """
 
     def __init__(self, root, relpath2data=None, *, reads=True, prt=False, fltr=None, slt=None, extdata=None):
@@ -63,7 +62,7 @@ class BasicLabelData:
 
         # 2 如果没有默认data数据，以及传入slt参数，则需要使用默认文件关联方式读取标注
         relpath2data = {}
-        gs = PathGroups.groupby(Dir(root).select('**/*').subfiles())
+        gs = PathGroups.groupby(Dir(root).select_files('**/*'))
         if isinstance(fltr, str):
             gs = gs.select_group_which_hassuffix(fltr)
         elif callable(fltr):
@@ -71,7 +70,7 @@ class BasicLabelData:
         self.pathgs = gs
 
         # 3 读取数据
-        for stem, suffixs in tqdm(gs.data.items(), disable=not prt):
+        for stem, suffixs in tqdm(gs.data.items(), f'{self.__class__.__name__}读取数据', disable=not prt):
             f = File(stem, suffix=slt)
             if reads and f:
                 # dprint(f)  # 空json会报错：json.decoder.JSONDecodeError: Expecting value: line 1 column 1 (char 0)
@@ -214,7 +213,7 @@ class ToLabelmeJson:
         :param group_id: 本来是用来分组的，但其值会以括号的形式添加在label后面，可以在可视化中做一些特殊操作
         """
         # 1 优化点集数据格式
-        points = np_array(points, dtype).reshape(-1, 2).tolist()
+        points = np.array(points, dtype=dtype).reshape(-1, 2).tolist()
         # 2 判断形状类型
         if shape_type is None:
             m = len(points)
@@ -279,7 +278,7 @@ class ToLabelmeJson:
         :param labeldir: 标注数据路径，默认跟imdir同目录
         :return:
         """
-        ims = Dir(imdir).select(['*.jpg', '*.png']).subfiles()
+        ims = Dir(imdir).select_files(['*.jpg', '*.png'])
         if not labeldir: labeldir = imdir
         txts = [File(f.stem, labeldir, suffix=label_file_suffix) for f in ims]
         cls.main_pair(ims, txts)
@@ -307,23 +306,11 @@ class Quad2Labelme(ToLabelmeJson):
             self.add_shape(label, pts)
 
 
-class LabelmeData(BasicLabelData):
-    def __init__(self, root, relpath2data=None, *, reads=True, prt=False, fltr='json', slt='json', extdata=None):
-        """
-        :param root: 文件根目录
-        :param relpath2data: {jsonfile: lmdict, ...}，其中 lmdict 为一个labelme文件格式的标准内容
-            如果未传入data具体值，则根据目录里的情况自动初始化获得data的值
+class LabelmeDict:
+    """ Labelme格式的字典数据
 
-            210602周三16:26，为了工程等一些考虑，删除了 is_labelme_json_data 的检查
-                尽量通过 fltr、slt 的机制选出正确的 json 文件
-        """
-        super().__init__(root, relpath2data, reads=reads, prt=prt, fltr=fltr, slt=slt, extdata=extdata)
-
-        # 已有的数据已经读取了，这里要补充空labelme标注
-        for stem, suffixs in tqdm(self.pathgs.data.items(), disable=not prt):
-            f = File(stem, suffix=slt)
-            if reads and not f:
-                self.rp2data[f.relpath(self.root)] = LabelmeData.gen_data(File(stem, suffix=suffixs[0]))
+    这里的成员函数基本都是原地操作
+    """
 
     @classmethod
     def gen_data(cls, imfile=None, **kwargs):
@@ -362,7 +349,7 @@ class LabelmeData(BasicLabelData):
         :param group_id: 本来是用来分组的，但其值会以括号的形式添加在label后面，可以在可视化中做一些特殊操作
         """
         # 1 优化点集数据格式
-        points = np_array(points, dtype).reshape(-1, 2).tolist()
+        points = np.array(points, dtype=dtype).reshape(-1, 2).tolist()
         # 2 判断形状类型
         if shape_type is None:
             m = len(points)
@@ -393,13 +380,48 @@ class LabelmeData(BasicLabelData):
         del kw['points']
         return cls.gen_shape(label, points, **kw)
 
-    def reduce(self):
-        """ 移除imageData字段值 """
-        for _, lmdict in self.rp2data:
-            lmdict['imageData'] = None
+    @classmethod
+    def reduce(cls, lmdict, *, inplace=True):
+        if not inplace:
+            lmdict = copy.deepcopy(lmdict)
+
+        lmdict['imageData'] = None
+        return lmdict
 
     @classmethod
-    def update_labelattr(cls, lmdict, *, points=False, inplace=False):
+    def flip_points(cls, lmdict, direction, *, inplace=True):
+        """
+        :param direction: points的翻转方向
+            1表示顺时针转90度，2表示顺时针转180度...
+            -1表示逆时针转90度，...
+        :return:
+        """
+        if not inplace:
+            lmdict = copy.deepcopy(lmdict)
+
+        w, h = lmdict['imageWidth'], lmdict['imageHeight']
+        pts = [[[0, 0], [w, 0], [w, h], [0, h]],
+               [[h, 0], [h, w], [0, w], [0, 0]],
+               [[w, h], [0, h], [0, 0], [w, 0]],
+               [[0, w], [0, 0], [h, 0], [h, w]]]
+        warp_mat = get_warp_mat(pts[0], pts[direction % 4])
+
+        if direction % 2:
+            lmdict['imageWidth'], lmdict['imageHeight'] = lmdict['imageHeight'], lmdict['imageWidth']
+        shapes = lmdict['shapes']
+        for i, shape in enumerate(shapes):
+            pts = [warp_points(x, warp_mat)[0].tolist() for x in shape['points']]
+            if shape['shape_type'] == 'rectangle':
+                pts = resort_quad_points(rect2polygon(pts))
+                shape['points'] = [pts[0], pts[2]]
+            elif shape['shape_type'] == 'polygon' and len(pts) == 4:
+                shape['points'] = resort_quad_points(pts)
+            else:  # 其他形状暂不处理，也不报错
+                pass
+        return lmdict
+
+    @classmethod
+    def update_labelattr(cls, lmdict, *, points=False, inplace=True):
         """
 
         :param points: 是否更新labelattr中的points、bbox等几何信息
@@ -421,7 +443,7 @@ class LabelmeData(BasicLabelData):
             # 3 处理points等几何信息
             if points:
                 if 'bbox' in labelattr:
-                    labelattr['bbox'] = ltrb2xywh(rect_bounds1d(shape['points']))
+                    labelattr['bbox'] = ltrb2xywh(rect_bounds(shape['points']))
                 else:
                     labelattr['points'] = shape['points']
 
@@ -429,13 +451,37 @@ class LabelmeData(BasicLabelData):
             shape['label'] = json.dumps(labelattr, ensure_ascii=False)
         return lmdict
 
+
+class LabelmeDataset(BasicLabelDataset):
+    def __init__(self, root, relpath2data=None, *, reads=True, prt=False, fltr='json', slt='json', extdata=None):
+        """
+        :param root: 文件根目录
+        :param relpath2data: {jsonfile: lmdict, ...}，其中 lmdict 为一个labelme文件格式的标准内容
+            如果未传入data具体值，则根据目录里的情况自动初始化获得data的值
+
+            210602周三16:26，为了工程等一些考虑，删除了 is_labelme_json_data 的检查
+                尽量通过 fltr、slt 的机制选出正确的 json 文件
+        """
+        super().__init__(root, relpath2data, reads=reads, prt=prt, fltr=fltr, slt=slt, extdata=extdata)
+
+        # 已有的数据已经读取了，这里要补充空labelme标注
+        for stem, suffixs in tqdm(self.pathgs.data.items(), f'{self.__class__.__name__}优化数据', disable=not prt):
+            f = File(stem, suffix=slt)
+            if reads and not f:
+                self.rp2data[f.relpath(self.root)] = LabelmeDict.gen_data(File(stem, suffix=suffixs[0]))
+
+    def reduces(self):
+        """ 移除imageData字段值 """
+        for _, lmdict in self.rp2data:
+            LabelmeDict.reduce(lmdict)
+
     def update_labelattrs(self, *, points=False):
         """ 将shape['label'] 升级为字典类型
 
         可以处理旧版不动产标注 content_class 等问题
         """
         for jsonfile, lmdict in self.rp2data.items():
-            self.update_labelattr(lmdict, points=points, inplace=True)
+            LabelmeDict.update_labelattr(lmdict, points=points)
 
     def to_excel(self, savepath):
         """ 转成dataframe表格查看
@@ -483,7 +529,7 @@ class LabelmeData(BasicLabelData):
         img_id, ann_id, data = 0, 0, []
         for jsonfile, lmdict in self.rp2data.items():
             # 1.0 升级为字典类型
-            lmdict = self.update_labelattr(lmdict, points=True)
+            lmdict = LabelmeDict.update_labelattr(lmdict, points=True)
 
             for sp in lmdict['shapes']:  # label转成字典
                 sp['label'] = json.loads(sp['label'])

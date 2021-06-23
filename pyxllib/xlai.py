@@ -11,3 +11,4 @@ from pyxllib.ai.torch import *
 from pyxllib.data.icdar import IcdarEval
 from pyxllib.data.labelme import *
 from pyxllib.data.coco import *
+from pyxllib.data.specialist import *

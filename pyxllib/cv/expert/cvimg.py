@@ -8,6 +8,7 @@ import PIL
 import cv2
 import io
 import requests
+from functools import partial
 
 import numpy as np
 from PIL import Image
@@ -31,7 +32,7 @@ class CvImg:
     imtype = np.ndarray
     __slots__ = ('im',)
 
-    def __init__(self, im, flags=1, **kwargs):
+    def __init__(self, im, flags=None, **kwargs):
         if isinstance(im, type(self)):
             im = im.im
         else:
@@ -66,7 +67,7 @@ ____alias = """
 有些功能是为了兼容旧版代码，可以逐步取消别名
 """
 
-imread = CvPrcs.read
+imread = partial(CvPrcs.read, flags=1)
 imwrite = CvPrcs.write
 imshow = CvPrcs.show
 
