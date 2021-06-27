@@ -464,7 +464,7 @@ class Trainer:
         if accuracy > self.max_val_accuracy:
             self.log.debug('*' + info)
             if save_model:
-                self.save_model_state(save_model, if_exists='delete')
+                self.save_model_state(save_model, if_exists='replace')
             self.max_val_accuracy = accuracy
         else:
             self.log.info(info)

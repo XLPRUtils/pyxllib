@@ -638,8 +638,8 @@ def 自动制作网页标题的导航栏(html_content, title='temphtml'):
 
     refs.append('</body>\n</html>')
 
-    f1 = File(title + '_导航', Dir.TEMP, suffix='.html').write('\n'.join(refs), if_exists='delete')
-    f2 = f2.write(html_content, if_exists='delete')
+    f1 = File(title + '_导航', Dir.TEMP, suffix='.html').write('\n'.join(refs), if_exists='replace')
+    f2 = f2.write(html_content, if_exists='replace')
 
     # 2 生成首页 f0
     main_content = f"""<html>
@@ -648,5 +648,5 @@ def 自动制作网页标题的导航栏(html_content, title='temphtml'):
 	<frame src="{f2}" name="showframe">
 </frameset></html>"""
 
-    f0 = File(title, Dir.TEMP, suffix='.html').write(main_content, if_exists='delete')
+    f0 = File(title, Dir.TEMP, suffix='.html').write(main_content, if_exists='replace')
     return f0

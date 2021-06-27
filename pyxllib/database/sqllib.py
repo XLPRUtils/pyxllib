@@ -142,7 +142,7 @@ class SqlEngine:
         """将df写入con数据库的table_name表格
 
         190731周三18:51，TODO
-        可以先用：df.to_sql('formula_stat', HistudySQL('dev', 'tr_develop').con, if_exists='delete')
+        可以先用：df.to_sql('formula_stat', HistudySQL('dev', 'tr_develop').con, if_exists='replace')
         191017周四10:21，目前这函数改来改去，都还没严格测试呢~~
 
         这个函数开发要参考：DataFrame.to_sql()

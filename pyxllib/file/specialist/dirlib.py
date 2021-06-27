@@ -670,7 +670,7 @@ def filescopy(src, dst, *, if_exists=None, treeroot=None, **kwargs):
         对src中匹配到的所有文件，都会去掉treeroot的父目录前缀
             然后将剩下文件的所有相对路径结构，拷贝到dst目录下
         示例：将a目录下所有png图片原结构拷贝到b目录下
-            filescopy('a/**/*.png', 'b/', if_exists='delete', treeroot='a')
+            filescopy('a/**/*.png', 'b/', if_exists='replace', treeroot='a')
         友情提示：treeroot要跟src使用同样的相对或绝对路径值，否则可能出现意外错误
 
         >> filescopy('filesmatch/**/*.png', 'filesmatch+/', treeroot='filesmatch')
@@ -688,7 +688,7 @@ def filescopy(src, dst, *, if_exists=None, treeroot=None, **kwargs):
 def filesmove(src, dst, *, if_exists=None, treeroot=None, **kwargs):
     r"""与filescopy高度相同，见filescopy文档
 
-    >> filesmove('a.xslx', 'A.xlsx', if_exists='delete')  # 等价于 os.rename('a.xlsx', 'A.xlsx')
+    >> filesmove('a.xslx', 'A.xlsx', if_exists='replace')  # 等价于 os.rename('a.xlsx', 'A.xlsx')
     """
     return _files_copy_move_base(src, dst, shutil.move, shutil.move,
                                  if_exists=if_exists, treeroot=treeroot, **kwargs)
@@ -743,7 +743,7 @@ def merge_dir(src, dst, if_exists='skip'):
     Dir(src).select('**/*', type_='dir', max_size=0).select('**/*', type_='file').procpaths(func, ref_dir=dst)
 
 
-def extract_files(src, dst, pattern, if_exists='delete'):
+def extract_files(src, dst, pattern, if_exists='replace'):
     """ 提取满足pattern模式的文件
     """
     d1, d2 = Dir(src), Dir(dst)

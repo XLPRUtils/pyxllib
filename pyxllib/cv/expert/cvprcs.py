@@ -249,7 +249,7 @@ class _CvPrcsBase:
         return im
 
     @classmethod
-    def write(cls, im, file, if_exists='delete', **kwargs):
+    def write(cls, im, file, if_exists='replace', **kwargs):
         if not isinstance(file, File):
             file = File(file)
         data = cv2.imencode(ext=file.suffix, img=im)[1]

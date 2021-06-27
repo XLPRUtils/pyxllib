@@ -185,10 +185,10 @@ class Browser(Explorer):
             else:
                 content = ''
             # TODO 把标题栏改成蓝色~~
-            content += arg.to_html(**(to_html_args or {}))
+            content += arg_.to_html(**(to_html_args or {}))
             if file is None:
                 file = File(..., Dir.TEMP, suffix='.html').write(content)
-                file = file.rename(get_etag(str(file)) + '.html', if_exists='delete')
+                file = file.rename(get_etag(str(file)) + '.html', if_exists='replace')
             else:
                 file = File(file).write(content)
         elif getattr(arg, 'render', None):  # pyecharts 等表格对象，可以用render生成html表格显示
@@ -202,7 +202,7 @@ class Browser(Explorer):
         else:  # 不在预设格式里的数据，转成普通的txt查看
             if file is None:
                 file = File(..., Dir.TEMP, suffix='.txt').write(arg)
-                file = file.rename(get_etag(str(file)) + file.suffix, if_exists='delete')
+                file = file.rename(get_etag(str(file)) + file.suffix, if_exists='replace')
             else:
                 file = File(file).write(arg)
         return file
@@ -248,7 +248,7 @@ def browser_jsons_kv(fd, files='**/*.json', encoding=None, max_items=10, max_val
         data = p.read(encoding=encoding, mode='.json')
         kvc.add(data, max_value_length=max_value_length)
     p = File(r'demo_keyvaluescounter.html', Dir.TEMP)
-    p.write(kvc.to_html_table(max_items=max_items), if_exists='delete')
+    p.write(kvc.to_html_table(max_items=max_items), if_exists='replace')
     browser(p.to_str())
 
 
@@ -442,8 +442,13 @@ def showdir(c, *, to_html=None, printf=True):
     # 4 使用chrome.exe浏览或输出到控制台
     #   这里底层可以封装一个chrome函数来调用，但是这个chrome需要依赖太多功能，故这里暂时手动简单调用
     if to_html:
-        filename = File(object_name, Dir.TEMP, suffix='.html'). \
-            write(ensure_gbk(res), if_exists='delete').to_str()
+        if isinstance(to_html, str):
+            # 如果是字符串，则认为是指定了输出文件的路径
+            f = File(to_html, suffix='.html')
+        else:
+            f = File(object_name, Dir.TEMP, suffix='.html')
+
+        filename = f.write(ensure_gbk(res), if_exists='replace').to_str()
         browser(filename)
     else:  # linux环境直接输出表格
         print(res)
