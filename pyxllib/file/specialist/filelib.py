@@ -86,7 +86,7 @@ def test_etag2():
     print(get_etag(s))
     # FkAD2McB6ugxTiniE8ebhlNHdHh9
 
-    f = File('1.tex', tempfile.gettempdir()).write(s, if_exists='delete').to_str()
+    f = File('1.tex', tempfile.gettempdir()).write(s, if_exists='replace').to_str()
     print(get_etag(f))
     # FkAD2McB6ugxTiniE8ebhlNHdHh9
 
@@ -426,7 +426,10 @@ class PathBase:
         :param if_exists:
             None: 不做任何处理，直接运行，依赖于功能本身是否有覆盖写入机制
             'error': 如果要替换的目标文件已经存在，则报错
-            'delete': 把存在的文件先删除
+            'replace': 把存在的文件先删除
+                本来是叫'delete'更准确的，但是考虑用户理解，
+                    一般都是用在文件替换场合，叫成'delete'会非常怪异，带来不必要的困扰、误解
+                所以还是决定叫'replace'
             'skip': 不执行后续功能
             'backup': 先做备份  （对原文件先做一个备份）
         """
@@ -436,7 +439,7 @@ class PathBase:
                 return need_run
             elif if_exists == 'error':
                 raise FileExistsError(f'目标文件已存在： {self}')
-            elif if_exists == 'delete':
+            elif if_exists == 'replace':
                 self.delete()
             elif if_exists == 'skip':
                 need_run = False
@@ -455,7 +458,7 @@ class PathBase:
     def absdst(self, dst):
         raise NotImplementedError
 
-    def backup(self, tail=None, if_exists='delete', move=False):
+    def backup(self, tail=None, if_exists='replace', move=False):
         r""" 对文件末尾添加时间戳备份，也可以使用自定义标记tail
 
         :param tail: 自定义添加后缀
@@ -1013,7 +1016,7 @@ class UsedRecords:
     def save(self):
         """保存记录文件"""
         File(self.dirname + '/').ensure_parent()
-        File(self.fullname).write('\n'.join(self.ls), if_exists='delete')
+        File(self.fullname).write('\n'.join(self.ls), if_exists='replace')
 
     def add(self, s):
         """新增一个使用方法

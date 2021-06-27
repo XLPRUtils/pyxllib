@@ -148,7 +148,7 @@ def reduce_labelme_jsonfile(jsonpath):
 
     if is_labelme_json_data(data) and data['imageData']:
         data['imageData'] = None
-        File(p).write(data, encoding=encoding, if_exists='delete')
+        File(p).write(data, encoding=encoding, if_exists='replace')
 
 
 class ToLabelmeJson:
@@ -249,7 +249,7 @@ class ToLabelmeJson:
     def add_shape2(self, **kwargs):
         self.data['shapes'].append(self.get_shape2(**kwargs))
 
-    def write(self, dst=None, if_exists='delete'):
+    def write(self, dst=None, if_exists='replace'):
         """
         :param dst: 往dst目标路径存入json文件，默认名称在self.imgpath同目录的同名json文件
         :return: 写入后的文件路径

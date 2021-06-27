@@ -34,8 +34,9 @@ from pyxllib.file.specialist import File, Dir, get_etag
 from pyxllib.prog.newbie import first_nonnone, round_int
 from pyxllib.prog.pupil import xlwait, DictTool
 from pyxllib.cv.expert import imread, imwrite, get_sub_image, pil2cv, cv2pil
-from pyxllib.algo.geo import ComputeIou, ShapelyPolygon, ltrb2xywh, xywh2ltrb
-from pyxllib.data.labelme import LabelmeDataset
+from pyxllib.algo.geo import ComputeIou, ltrb2xywh, xywh2ltrb
+from pyxllib.algo.shapely_ import ShapelyPolygon
+from pyxllib.data.labelme import LabelmeDict
 
 
 class AutoGuiLabelData:
@@ -117,7 +118,7 @@ class AutoGuiLabelData:
         if loc not in self.data or not self.data[loc]:
             imfile = imwrite(img, File(loc, self.root, suffix='.jpg'))
             self.imfiles[loc] = imfile
-            shape = LabelmeDataset.gen_shape(label, [[0, 0], [w, h]])
+            shape = LabelmeDict.gen_shape(label, [[0, 0], [w, h]])
             self.data[loc][label] = self.parse_shape(shape)
         # 2 不存在的标签，则在最后一行新建一张图
         elif label not in self.data[loc]:
@@ -127,7 +128,7 @@ class AutoGuiLabelData:
             # 拼接，并重新存储为图片
             image = np.concatenate([image, img])
             imwrite(image, self.imfiles[loc])
-            shape = LabelmeDataset.gen_shape(label, [[0, height], [width, height + h]])
+            shape = LabelmeDict.gen_shape(label, [[0, height], [width, height + h]])
             self.data[loc][label] = self.parse_shape(shape)
         # 3 已有的图，则进行替换
         elif if_exists == 'update':
@@ -144,11 +145,11 @@ class AutoGuiLabelData:
     def write(self, loc):
         f = File(loc, self.root, suffix='.json')
         imfile = self.imfiles[loc]
-        lmdict = LabelmeDataset.gen_data(imfile)
+        lmdict = LabelmeDict.gen_data(imfile)
         for label, ann in self.data[loc].items():
             a = ann.copy()
             DictTool.isub(a, ['img'])
-            shape = LabelmeDataset.gen_shape(json.dumps(a, ensure_ascii=False),
+            shape = LabelmeDict.gen_shape(json.dumps(a, ensure_ascii=False),
                                              a['points'], a['shape_type'],
                                              group_id=a['group_id'], flags=a['flags'])
             lmdict['shapes'].append(shape)

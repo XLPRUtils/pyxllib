@@ -148,12 +148,12 @@ def zoomsvg(file, scale=1):
 
     if os.path.isfile(file):
         s = re.sub(r'<svg .+?>', func, File(file).read(), flags=re.DOTALL)
-        File(file).write(s, if_exists='delete')
+        File(file).write(s, if_exists='replace')
     elif os.path.isdir(file):
         for f in os.listdir(file):
             if not f.endswith('.svg'): continue
             f = os.path.join(file, f)
             s = re.sub(r'<svg\s+.+?>', func, File(f).read(), flags=re.DOTALL)
-            File(file).write(s, if_exists='delete')
+            File(file).write(s, if_exists='replace')
     elif isinstance(file, str) and '<svg ' in file:  # 输入svg的代码文本
         return re.sub(r'<svg .+?>', func, file, flags=re.DOTALL)

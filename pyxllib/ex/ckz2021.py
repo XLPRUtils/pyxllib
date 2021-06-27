@@ -46,6 +46,7 @@ def test_tqdm():
 
 class ArithmeticPerf(PerfTest):
     """ 可能数值比较小，这个实验不太明显吧
+
     >> ArithmeticPerf().perf(number=10000, repeat=100)
     add 用时(秒) 总和: 1.266	均值标准差: 0.127±0.019	总数: 10	最小值: 0.094	最大值: 0.167 运行结果：121
     div 用时(秒) 总和: 1.281	均值标准差: 0.128±0.017	总数: 10	最小值: 0.097	最大值: 0.150 运行结果：1.75
@@ -66,8 +67,49 @@ class ArithmeticPerf(PerfTest):
         return 77 / 44
 
 
+class CallPerf(PerfTest):
+    """ 奕本纠结嵌套太多产生的效率问题
+
+    >> CallPerf().perf(number=100000, repeat=100)
+    func1 用时(秒) 总和: 7.947	均值标准差: 0.079±0.019	总数: 100	最小值: 0.063	最大值: 0.172 运行结果：bc
+    func2 用时(秒) 总和: 12.581	均值标准差: 0.126±0.038	总数: 100	最小值: 0.093	最大值: 0.268 运行结果：bc
+    """
+
+    def perf_func1(self):
+        def a():
+            def b():
+                def c():
+                    return 'abc'.replace('a', '')
+
+                return c()
+
+            return b()
+
+        return a()
+
+    def perf_func2(self):
+        return re.sub(r'a', '', 'abc')
+
+
+def 文件结构(dirpath, depth=0):
+    from humanfriendly import format_size
+
+    d = Dir(dirpath)
+    print('\t' * depth + f'☐{d.name}, {format_size(d.size, binary=True)}')
+    for dd in d.select_dirs('*'):
+        # 不处理的一些目录
+        if dd.name in ('__pycache__',):
+            continue
+        文件结构(dd, depth + 1)
+    for f in d.select_files('*'):
+        print('\t' * (depth + 1) + f'{f.name}, {format_size(f.size, binary=True)}')
+
+
 if __name__ == '__main__':
     with TicToc(__name__):
         # test_labeldata()
+
+        # 文件结构(r'C:\ProgramData\Anaconda3\Lib\site-packages\iopath')
+        # 文件结构(r'D:\slns\detectron2\detectron2')
 
         pass

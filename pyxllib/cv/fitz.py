@@ -177,13 +177,13 @@ class DemoFitz:
             toc[i][1] = m.group(1) + m.group(2) + '，' + str(pages)
             newtoc.append(toc[i])
         self.doc.setToC(newtoc)
-        file = writefile(b'', 'a.pdf', if_exists='delete')
+        file = writefile(b'', 'a.pdf', if_exists='replace')
         self.doc.save(file, garbage=4)
 
     def rearrange_pages(self):
         """重新布局页面"""
         self.doc.select([0, 0, 1])  # 第1页展示两次后，再跟第2页
-        file = writefile(b'', 'a.pdf', root=Dir.TEMP, if_exists='delete')
+        file = writefile(b'', 'a.pdf', root=Dir.TEMP, if_exists='replace')
         self.doc.save(file, garbage=4)  # 注意要设置garbage，否则文档并没有实际删除内容压缩文件大小
         browser(file)
 
