@@ -380,6 +380,8 @@ def showdir(c, *, to_html=None, printf=True):
         设为False则不输出
     """
     # 1 输出类表头
+    from humanfriendly import format_size
+
     res = []
     object_name = func_input_message(2)['argnames'][0]
     if to_html is None:
@@ -387,7 +389,8 @@ def showdir(c, *, to_html=None, printf=True):
     newline = '<br/>' if to_html else '\n'
 
     t = f'==== 对象名称：{object_name}，类继承关系：{inspect.getmro(type(c))}，' \
-        + f'内存消耗：{sys.getsizeof(c)}（递归子类总大小：{getasizeof(c)}）Byte ===='
+        + f'内存消耗：{format_size(sys.getsizeof(c), binary=True)}'\
+        + f'（递归子类总大小：{format_size(getasizeof(c), binary=True)}） ===='
 
     if to_html:
         res.append('<p>')
