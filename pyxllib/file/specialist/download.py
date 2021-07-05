@@ -115,13 +115,14 @@ def download(
     return fpath
 
 
-def ensure_localfile(localfile, from_url, *, if_exists=None):
+def ensure_localfile(localfile, from_url, *, if_exists=None, progress=True):
     """ 判断本地文件 localfile 是否存在，如果不存在，自动从指定的 from_url 下载下来
 
     TODO 增加 md5校验、自动解压 等功能
 
     :param if_exists: 参数含义见 file.exist_preprcs
         使用 'replace' 可以强制下载重置文件
+    :param progress: 是否显示下载进度
 
     >> ensure_localfile(File('ufo.csv'), r'https://gitee.com/code4101/TestData/raw/master/ufo.csv')
     """
@@ -129,5 +130,5 @@ def ensure_localfile(localfile, from_url, *, if_exists=None):
 
     if file.exist_preprcs(if_exists):
         dirname, name = os.path.split(path)
-        download(from_url, dirname, filename=name)
+        download(from_url, dirname, filename=name, progress=progress)
     return localfile
