@@ -517,6 +517,7 @@ class Trainer:
                     self.log.info(info)
 
 
+@deprecated(reason='推荐使用XlPredictor实现')
 def gen_classification_func(model, *, state_file=None, transform=None, pred_func=None,
                             device=None):
     """ 工厂函数，生成一个分类器函数
@@ -555,3 +556,81 @@ def gen_classification_func(model, *, state_file=None, transform=None, pred_func
         return res
 
     return cls_func
+
+
+class XlPredictor:
+    """ 生成一个类似函数用法的推断功能类
+
+    这是一个通用的生成器，不同的业务可以继承开发，进一步设计细则
+
+    这里默认写的结构是兼容detectron2框架的分类模型，即model.forward：
+        输入：list，第1个是batch_x，第2个是batch_y
+        输出：training是logits，eval是（batch）y_hat
+    """
+
+    def __init__(self, model, state_file, device=None, *, batch_size=1):
+        """
+        :param model: 基于d2框架的模型结构
+        :param state_file: 存储权重的文件
+            一般写某个本地文件路径
+            也可以写url地址，会下载存储到临时目录中
+        :param batch_size: 支持每次最多几个样本一起推断
+            TODO batch_size根据device空间大小自适应设置
+        """
+        self.device = device or get_device()
+
+        if is_url(state_file):
+            state_file = download(state_file, Dir.TEMP / 'xlpr')
+        state = torch.load(str(state_file), map_location=self.device)
+        if 'model' in state:
+            state = state['model']
+
+        model = model.to(device)
+        model.load_state_dict(state)
+        self.model = model
+        self.model.train(False)
+
+        self.batch_size = batch_size
+
+        self.transform = self.build_transform()
+        self.target_transform = self.build_target_transform()
+
+    @classmethod
+    def build_transform(cls):
+        """ 单个数据的转换规则，进入模型前的读取、格式转换
+
+        为了效率性能，建议比较特殊的不同初始化策略，可以额外定义函数接口，例如：def from_paths()
+        """
+        return None
+
+    @classmethod
+    def build_target_transform(cls):
+        """ 单个结果的转换的规则，模型预测完的结果，到最终结果的转换方式
+
+        一些简单的情况直接返回y即可，但还有些复杂的任务可能要增加后处理
+        """
+        return None
+
+    def __call__(self, raw_in, *, batch_size=None):
+        """
+        :param raw_in: 输入可以是路径、np.ndarray、PIL图片等，都为转为batch结构的tensor
+            im，一张图片路径、np.ndarray、PIL图片
+            [im1, im2, ...]，多张图片清单
+        :param batch_size: 具体运行中可以重新指定batch_size
+        :return: 输入如果只有一张图片，则返回一个结果
+            否则会存在list，返回多个结果
+        """
+        dataset = InputDataset(raw_in, self.transform)
+        batch_size = first_nonnone([batch_size, self.batch_size])
+        loader = torch.utils.data.DataLoader(dataset, batch_size=batch_size)
+        res = []
+        for batch_x in loader:
+            batch_y = self.model([batch_x, None])
+            if self.target_transform:
+                batch_y = [self.target_transform(y) for y in batch_y]
+            res += batch_y.tolist()  # 一般运行完的都是tensor对象
+
+        if len(res) == 1:
+            return res[0]
+        else:
+            return res

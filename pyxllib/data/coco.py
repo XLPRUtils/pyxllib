@@ -32,7 +32,7 @@ from xlcocotools.coco import COCO
 from xlcocotools.cocoeval import COCOeval
 
 from pyxllib.stdlib.zipfile import ZipFile
-from pyxllib.data.labelme import LABEL_COLORMAP7, ToLabelmeJson, LabelmeDataset
+from pyxllib.data.labelme import LABEL_COLORMAP7, ToLabelmeJson, LabelmeDataset, LabelmeDict
 from pyxllib.data.icdar import IcdarEval
 
 
@@ -320,11 +320,11 @@ class CocoGtData:
             # 2.2 数据内容转换
             lmdict = LabelmeDataset.gen_data(imfile)
             img = DictTool.or_(img, {'xltype': 'image'})
-            lmdict['shapes'].append(LabelmeDataset.gen_shape(json.dumps(img, ensure_ascii=False), [[-10, 0], [-5, 0]]))
+            lmdict['shapes'].append(LabelmeDict.gen_shape(json.dumps(img, ensure_ascii=False), [[-10, 0], [-5, 0]]))
             for ann in anns:
                 ann = DictTool.or_(ann, {'category_name': catid2name[ann['category_id']]})
                 label = json.dumps(ann, ensure_ascii=False)
-                shape = LabelmeDataset.gen_shape(label, xywh2ltrb(ann['bbox']))
+                shape = LabelmeDict.gen_shape(label, xywh2ltrb(ann['bbox']))
                 lmdict['shapes'].append(shape)
 
                 if seg:
@@ -332,7 +332,7 @@ class CocoGtData:
                     for x in ann['segmentation']:
                         an = {'box_id': ann['id'], 'xltype': 'seg', 'shape_color': [191, 191, 191]}
                         label = json.dumps(an, ensure_ascii=False)
-                        lmdict['shapes'].append(LabelmeDataset.gen_shape(label, x))
+                        lmdict['shapes'].append(LabelmeDict.gen_shape(label, x))
 
             f = imfile.with_suffix('.json')
 
@@ -340,8 +340,8 @@ class CocoGtData:
 
         return LabelmeDataset(root, data,
                               extdata={'categories': self.gt_dict['categories'],
-                                    'not_finds': not_finds,
-                                    'multimatch': Groups(multimatch)})
+                                       'not_finds': not_finds,
+                                       'multimatch': Groups(multimatch)})
 
 
 class CocoData(CocoGtData):
@@ -1219,6 +1219,7 @@ class CocoMatch(CocoParser, CocoMatchBase):
     def to_labelme_match(self, imdir, dst_dir=None, *, segmentation=False, hide_match_dt=False):
         self._to_labelme_match('anns_match', imdir, dst_dir, segmentation=segmentation, hide_match_dt=hide_match_dt)
 
-    def to_labelme_match2(self, imdir, dst_dir=None, *, segmentation=False, hide_match_dt=False, colormap=LABEL_COLORMAP7):
+    def to_labelme_match2(self, imdir, dst_dir=None, *, segmentation=False, hide_match_dt=False,
+                          colormap=LABEL_COLORMAP7):
         self._to_labelme_match('anns_match2', imdir, dst_dir, segmentation=segmentation, hide_match_dt=hide_match_dt,
                                colormap=colormap)
