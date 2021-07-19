@@ -236,11 +236,7 @@ class Visdom(visdom.Visdom, metaclass=SingletonForEveryInitArgs):
     def _refine_opts(self, opts=None, *, title=None, legend=None, **kwargs):
         if opts is None:
             opts = {}
-        if title and 'title' not in opts: opts['title'] = title
-        if legend and 'legend' not in opts: opts['legend'] = legend
-        for k, v in kwargs.items():
-            if k not in opts:
-                opts[k] = v
+        DictTool.ior(opts, {'title': title, 'legend': legend}, kwargs)
         return opts
 
     def loss_line(self, loss_values, epoch, win='loss', *, title=None, update=None):
@@ -634,3 +630,73 @@ class XlPredictor:
             return res[0]
         else:
             return res
+
+
+def setup_seed(seed):
+    """ 完整的需要设置的随机数种子
+
+    不过个人实验有时候也不一定有用~~
+    还是有可能各种干扰因素导致模型无法复现
+    """
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+    np.random.seed(seed)
+    random.seed(seed)
+    torch.backends.cudnn.benchmark = False
+    torch.backends.cudnn.deterministic = True
+
+
+def classifier_eval(model, loader, *, crosstab=True):
+    model.eval()
+
+    # 1 推理
+    with torch.no_grad():
+        gt, pred = [], []
+        for batched_inputs in tqdm(loader, 'eval'):
+            y_hat = model(batched_inputs)
+            gt += batched_inputs[1].tolist()
+            pred += y_hat.tolist()
+
+    # 2 计算指标
+    df = pd.DataFrame.from_dict({'gt': gt, 'pred': pred})
+    if crosstab:
+        print('各类别出现次数（行坐标ground truth，列坐标pred）：')
+        print(pd.crosstab(df['gt'], df['pred']))
+
+    correct = sum(df['gt'] == df['pred'])
+    total = len(df)
+    print(f'正确率: {correct} / {total} ≈ {correct / total:.2%}')
+
+
+class TrainingSampler:
+    """ 摘自detectron2，用来做无限循环的抽样
+    我这里的功能做了简化，只能支持单卡训练，原版可以支持多卡训练
+
+    In training, we only care about the "infinite stream" of training data.
+    So this sampler produces an infinite stream of indices and
+    all workers cooperate to correctly shuffle the indices and sample different indices.
+
+    The samplers in each worker effectively produces `indices[worker_id::num_workers]`
+    where `indices` is an infinite stream of indices consisting of
+    `shuffle(range(size)) + shuffle(range(size)) + ...` (if shuffle is True)
+    or `range(size) + range(size) + ...` (if shuffle is False)
+    """
+
+    def __init__(self, size: int, shuffle: bool = True):
+        """
+        Args:
+            size (int): the total number of data of the underlying dataset to sample from
+            shuffle (bool): whether to shuffle the indices or not
+        """
+        self._size = size
+        assert size > 0
+        self._shuffle = shuffle
+
+    def __iter__(self):
+        g = torch.Generator()
+        while True:
+            if self._shuffle:
+                yield from torch.randperm(self._size, generator=g).tolist()
+            else:
+                yield from torch.arange(self._size).tolist()
