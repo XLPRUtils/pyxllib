@@ -34,6 +34,7 @@ from xlcocotools.cocoeval import COCOeval
 from pyxllib.stdlib.zipfile import ZipFile
 from pyxllib.data.labelme import LABEL_COLORMAP7, ToLabelmeJson, LabelmeDataset, LabelmeDict
 from pyxllib.data.icdar import IcdarEval
+from pyxllib.algo.geo import rect_bounds
 
 
 class CocoGtData:
@@ -108,7 +109,7 @@ class CocoGtData:
             pts = []
             for seg in a['segmentation']:
                 pts += seg
-            a['bbox'] = ltrb2xywh(rect_bounds1d(pts))
+            a['bbox'] = ltrb2xywh(rect_bounds(pts))
         if 'area' not in a:  # 自动计算面积
             a['area'] = int(a['bbox'][2] * a['bbox'][3])
         for k in ['id', 'image_id']:
@@ -141,7 +142,7 @@ class CocoGtData:
             # print(vals)
             seg = [int(v) for v in vals[:8]]
             attrs['segmentation'] = [seg]
-            attrs['bbox'] = ltrb2xywh(rect_bounds1d(seg))
+            attrs['bbox'] = ltrb2xywh(rect_bounds(seg))
             if kwargs:
                 attrs.update(kwargs)
             annotations.append(cls.gen_annotation(**attrs))
