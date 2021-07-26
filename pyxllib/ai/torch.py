@@ -27,6 +27,8 @@ except ModuleNotFoundError:
 
 __base = """
 """
+for i, x in enumerate(range(5)):
+    pass
 
 
 class NvmDevice:
@@ -127,7 +129,7 @@ class TinyDataset(torch.utils.data.Dataset):
 
 
 class InputDataset(torch.utils.data.Dataset):
-    def __init__(self, raw_in, transform=None):
+    def __init__(self, raw_in, transform=None, *, y_placeholder=...):
         """ 将非list、tuple数据转为list，并生成一个dataset类的万用类
         :param raw_in:
         """
@@ -136,6 +138,7 @@ class InputDataset(torch.utils.data.Dataset):
 
         self.data = raw_in
         self.transform = transform
+        self.y_placeholder = y_placeholder
 
     def __len__(self):
         return len(self.data)
@@ -144,7 +147,11 @@ class InputDataset(torch.utils.data.Dataset):
         x = self.data[idx]
         if self.transform:
             x = self.transform(x)
-        return x
+
+        if self.y_placeholder is not ...:
+            return x, self.y_placeholder
+        else:
+            return x
 
 
 __model = """
@@ -155,30 +162,38 @@ class LeNet5(nn.Module):
     """ https://towardsdatascience.com/implementing-yann-lecuns-lenet-5-in-pytorch-5e05a0911320 """
 
     def __init__(self, n_classes):
-        super(LeNet5, self).__init__()
+        super().__init__()
 
         self.feature_extractor = nn.Sequential(
-            nn.Conv2d(in_channels=1, out_channels=6, kernel_size=5, stride=1),
+            nn.Conv2d(1, 6, kernel_size=5, stride=1),
             nn.Tanh(),
             nn.AvgPool2d(kernel_size=2),
-            nn.Conv2d(in_channels=6, out_channels=16, kernel_size=5, stride=1),
+            nn.Conv2d(6, 16, kernel_size=5, stride=1),
             nn.Tanh(),
             nn.AvgPool2d(kernel_size=2),
-            nn.Conv2d(in_channels=16, out_channels=120, kernel_size=5, stride=1),
+            nn.Conv2d(16, 120, kernel_size=5, stride=1),
             nn.Tanh()
         )
 
         self.classifier = nn.Sequential(
-            nn.Linear(in_features=120, out_features=84),
+            nn.Linear(120, 84),
             nn.Tanh(),
-            nn.Linear(in_features=84, out_features=n_classes),
+            nn.Linear(84, n_classes),
         )
 
-    def forward(self, x):
+    def forward(self, batched_inputs):
+        device = next(self.parameters()).device
+
+        x = batched_inputs[0].to(device)
         x = self.feature_extractor(x)
         x = torch.flatten(x, 1)
         logits = self.classifier(x)
-        return logits
+
+        if self.training:
+            y = batched_inputs[1].to(device)
+            return nn.functional.cross_entropy(logits, y)
+        else:
+            return logits.argmax(dim=1)
 
 
 __visdom = """
@@ -564,29 +579,38 @@ class XlPredictor:
         输出：training是logits，eval是（batch）y_hat
     """
 
-    def __init__(self, model, state_file, device=None, *, batch_size=1):
+    def __init__(self, model, state_file=None, device=None, *, batch_size=1, y_placeholder=...):
         """
         :param model: 基于d2框架的模型结构
         :param state_file: 存储权重的文件
             一般写某个本地文件路径
             也可以写url地址，会下载存储到临时目录中
+            可以不传入文件，直接给到初始化好权重的model，该模式常用语训练阶段的model
         :param batch_size: 支持每次最多几个样本一起推断
+            具体运作细节参见 XlPredictor.inputs2loader的解释
             TODO batch_size根据device空间大小自适应设置
+        :param y_placeholder: 参见XlPredictor.inputs2loader的解释
         """
-        self.device = device or get_device()
+        # 默认使用model所在的device
+        if device is None:
+            self.device = next(model.parameters()).device
+        else:
+            self.device = device
 
-        if is_url(state_file):
-            state_file = download(state_file, Dir.TEMP / 'xlpr')
-        state = torch.load(str(state_file), map_location=self.device)
-        if 'model' in state:
-            state = state['model']
+        if state_file is not None:
+            if is_url(state_file):
+                state_file = download(state_file, Dir.TEMP / 'xlpr')
+            state = torch.load(str(state_file), map_location=self.device)
+            if 'model' in state:
+                state = state['model']
+            model = model.to(device)
+            model.load_state_dict(state)
 
-        model = model.to(device)
-        model.load_state_dict(state)
         self.model = model
         self.model.train(False)
 
         self.batch_size = batch_size
+        self.y_placeholder = y_placeholder
 
         self.transform = self.build_transform()
         self.target_transform = self.build_target_transform()
@@ -607,29 +631,98 @@ class XlPredictor:
         """
         return None
 
-    def __call__(self, raw_in, *, batch_size=None):
-        """
-        :param raw_in: 输入可以是路径、np.ndarray、PIL图片等，都为转为batch结构的tensor
-            im，一张图片路径、np.ndarray、PIL图片
-            [im1, im2, ...]，多张图片清单
-        :param batch_size: 具体运行中可以重新指定batch_size
-        :return: 输入如果只有一张图片，则返回一个结果
-            否则会存在list，返回多个结果
-        """
-        dataset = InputDataset(raw_in, self.transform)
-        batch_size = first_nonnone([batch_size, self.batch_size])
-        loader = torch.utils.data.DataLoader(dataset, batch_size=batch_size)
-        res = []
-        for batch_x in loader:
-            batch_y = self.model([batch_x, None])
-            if self.target_transform:
-                batch_y = [self.target_transform(y) for y in batch_y]
-            res += batch_y.tolist()  # 一般运行完的都是tensor对象
+    def inputs2loader(self, raw_in, *, batch_size=None, y_placeholder=..., sampler=None):
+        """ 将各种类列表数据，转成torch.utils.data.DataLoader类型
 
-        if len(res) == 1:
-            return res[0]
+        :param raw_in: 各种类列表数据格式，或者单个数据，都为转为batch结构的tensor
+            torch.util.data.DataLoader
+                此时XlPredictor自定义参数全部无效：transform、batch_size、y_placeholder，sampler
+                因为这些在loader里都有配置了
+            torch.util.data.Dataset
+                此时可以定制扩展的参数有：batch_size，sampler
+            [data1, data2, ...]，列表表示批量处理多个数据
+                此时所有配置参数均可用：transform、batch_size、y_placeholder, sampler
+                通常是图片文件路径清单
+                    XlPredictor原生并没有扩展图片读取功能，但可以通过transform增加CvPrcs.read来支持
+            single_data，单个数据
+                通常是单个图片文件路径，注意transfrom要增加CvPrcs.read或PilPrcs.read来支持路径读取
+                注意：有时候单个数据就是list格式，此时需要麻烦点，再套一层list避免歧义
+        :param batch_size: 支持每次最多几个样本一起推断
+            TODO batch_size根据device空间大小自适应设置
+        :param y_placeholder: 常见的model.forward，是只输入batch_x就行，这时候就默认值处理机制就行
+            但我从d2框架模仿的写法，forward需要补一个y的真实值，输入是[batch_x, batch_y]
+            实际预测数据可能没有y，此时需要填充一个batch_y=None来对齐，即设置y_placeholder=None
+            或者y_placeholder=0，则所有的y用0作为占位符填充
+            不过用None、0、False这些填充都很诡异，容易误导开发者，建议需要设置的时候使用-1
+
+            如果读者写的model.forward前传机制不同，本来batch_inputs就只输入x没有y，则这里不用设置y_placeholder参数
+        :param sampler: 有时候只是要简单抽样部分数据测试下，可以设置该参数
+            比如random.sample(range(10), 5)：可以从前10个数据中，无放回随机抽取5个数据
+        """
+        if isinstance(raw_in, torch.utils.data.DataLoader):
+            loader = raw_in
         else:
-            return res
+            if not isinstance(raw_in, torch.utils.data.Dataset):
+                y_placeholder = first_nonnone([y_placeholder, self.y_placeholder], lambda x: x is not ...)
+                dataset = InputDataset(raw_in, self.transform, y_placeholder=y_placeholder)
+            else:
+                if not isinstance(raw_in, (list, tuple)):
+                    raw_in = [raw_in]
+                dataset = raw_in
+            batch_size = first_nonnone([batch_size, self.batch_size])
+            loader = torch.utils.data.DataLoader(dataset, batch_size=batch_size, sampler=sampler)
+
+        return loader
+
+    def infer(self, loader, *, progress=False, return_gt=True):
+        """ 前向传播
+
+        改功能是__call__的子部分，常在train、eval阶段单独调用
+        因为eval阶段，已经有预设好的train_loader、val_loader，不需要使用inputs2loader智能生成一个loader
+
+        :param torch.utils.data.DataLoader loader: 标准的DataLoader类型，每次能获取[batch_x, batch_y]
+        :param progress: 有时候数据量比较大，可能会需要看推断进度条
+        :param return_gt: 注意跟__call__的不同，这里默认是True，__call__默认是False
+            前者常用于评价阶段，后者常用于部署阶段，应用场景不同，常见配置有区别
+        :return:
+            return_gt=True（默认）：[(y1, y_hat1), (y2, y_hat2), ...]
+            return_gt=False：[y_hat1, y_hat2, ...]
+        """
+        preds = []
+        with torch.no_grad():
+            for batched_inputs in tqdm(loader, 'eval batch', disable=not progress):
+                # 有的模型forward里没有处理input的device问题，则需要在这里使用self.device设置
+                batch_y = self.model(batched_inputs).tolist()
+                if self.target_transform:
+                    batch_y = [self.target_transform(y) for y in batch_y]
+                if return_gt:
+                    gt = batched_inputs[1].tolist()
+                    preds += list(zip(*[gt, batch_y]))
+                else:
+                    preds += batch_y
+        return preds
+
+    def __call__(self, raw_in, *, batch_size=None, y_placeholder=...,
+                 progress=False, return_gt=False):
+        """ 前传推断结果
+
+        :param batch_size: 具体运行中可以重新指定batch_size
+        :param return_gt: 使用该功能，必须确保每次loader都含有[x,y]，可能是raw_in自带，也可以用y_placeholder设置默认值
+            单样本：y, y_hat
+            多样本：[(y1, y_hat1), (y2, y_hat2), ...]
+        :return:
+            单样本：y_hat
+            多样表：[y_hat1, y_hat2, ...]
+
+        根据不同model结构特殊性
+        """
+        loader = self.inputs2loader(raw_in, batch_size=batch_size, y_placeholder=y_placeholder)
+        preds = self.infer(loader, progress=progress, return_gt=return_gt)
+        # 返回结果，单样本的时候作简化
+        if len(preds) == 1 and not isinstance(raw_in, (list, tuple, set)):
+            return preds[0]
+        else:
+            return preds
 
 
 def setup_seed(seed):
@@ -645,28 +738,6 @@ def setup_seed(seed):
     random.seed(seed)
     torch.backends.cudnn.benchmark = False
     torch.backends.cudnn.deterministic = True
-
-
-def classifier_eval(model, loader, *, crosstab=True):
-    model.eval()
-
-    # 1 推理
-    with torch.no_grad():
-        gt, pred = [], []
-        for batched_inputs in tqdm(loader, 'eval'):
-            y_hat = model(batched_inputs)
-            gt += batched_inputs[1].tolist()
-            pred += y_hat.tolist()
-
-    # 2 计算指标
-    df = pd.DataFrame.from_dict({'gt': gt, 'pred': pred})
-    if crosstab:
-        print('各类别出现次数（行坐标ground truth，列坐标pred）：')
-        print(pd.crosstab(df['gt'], df['pred']))
-
-    correct = sum(df['gt'] == df['pred'])
-    total = len(df)
-    print(f'正确率: {correct} / {total} ≈ {correct / total:.2%}')
 
 
 class TrainingSampler:
@@ -700,3 +771,51 @@ class TrainingSampler:
                 yield from torch.randperm(self._size, generator=g).tolist()
             else:
                 yield from torch.arange(self._size).tolist()
+
+
+class ClsEvaluater:
+    """
+    TODO 还有top1、top5等机制的分类指标
+    """
+
+    def __init__(self, preds, *, names=None):
+        """
+        :param list|tuple preds: 一个列表 [(y1, y_hat1), (y2, y_hat2), ...]
+            每个元素还是一个长度2的列表，常见格式是[[0, 0], [1,2], ...]
+                第一个值是gt的类别y，第二个值是程序预测的类别y_hat
+        :param names: 可以将id映射到对应的明文名称
+            list，跟id对应名称names[id]
+            dict，使用key映射规则
+        """
+        self.gt, self.pred = list(zip(*preds))  # 这里内部的实现算法很多都是分解开的
+        self.total = len(preds)
+        self.names = names
+
+    def n_correct(self):
+        """ 类别正确数量 """
+        return sum([y == y_hat for y, y_hat in self.preds])
+
+    def accuracy(self):
+        """ 整体的正确率精度（等价于f1_score的micro） """
+        return round(self.n_correct() / self.total, 4)
+
+    def crosstab(self):
+        """ 各类别具体情况交叉表 """
+        # TODO 用names转明文？
+        df = pd.DataFrame.from_dict({'gt': self.gt, 'pred': self.pred})
+        return pd.crosstab(df['gt'], df['pred'])
+
+    def f1_score(self, average='weighted'):
+        """ 多分类任务是用F1分值 https://zhuanlan.zhihu.com/p/64315175
+
+        :param average:
+            weighted：每一类都算出f1，然后（按样本数）加权平均
+            macro：每一类都算出f1，然后求平均值（样本不均衡下，有的类就算只出现1次，也会造成极大的影响）
+            micro：按二分类形式直接计算全样本的f1，等价于accuracy
+            all：我自己扩展的格式，会返回三种结果的字典值
+        """
+        from sklearn.metrics import f1_score
+        if average == 'all':
+            return {f'f1_{k}': self.f1_score(k) for k in ('weighted', 'macro', 'micro')}
+        else:
+            return round(f1_score(self.gt, self.pred, average=average), 4)
