@@ -319,7 +319,7 @@ class CocoGtData:
                 imfile = imfiles[0]
 
             # 2.2 数据内容转换
-            lmdict = LabelmeDataset.gen_data(imfile)
+            lmdict = LabelmeDict.gen_data(imfile)
             img = DictTool.or_(img, {'xltype': 'image'})
             lmdict['shapes'].append(LabelmeDict.gen_shape(json.dumps(img, ensure_ascii=False), [[-10, 0], [-5, 0]]))
             for ann in anns:

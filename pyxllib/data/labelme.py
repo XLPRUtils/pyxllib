@@ -56,6 +56,7 @@ class BasicLabelDataset:
         # 1 基础操作
         root = Dir(root)
         self.root, self.rp2data, self.extdata = root, relpath2data or {}, extdata or {}
+        self.pathgs = None
 
         if relpath2data is not None or slt is None:
             return
@@ -105,7 +106,7 @@ class BasicLabelDataset:
                 bstr = f.read()
             encoding = get_encoding(bstr)
             kwargs['encoding'] = encoding
-            kwargs['if_exists'] = 'delete'
+            kwargs['if_exists'] = 'replace'
             file.write(data, **kwargs)
         else:  # 否则直接写入
             file.write(data, **kwargs)
@@ -465,10 +466,11 @@ class LabelmeDataset(BasicLabelDataset):
         super().__init__(root, relpath2data, reads=reads, prt=prt, fltr=fltr, slt=slt, extdata=extdata)
 
         # 已有的数据已经读取了，这里要补充空labelme标注
-        for stem, suffixs in tqdm(self.pathgs.data.items(), f'{self.__class__.__name__}优化数据', disable=not prt):
-            f = File(stem, suffix=slt)
-            if reads and not f:
-                self.rp2data[f.relpath(self.root)] = LabelmeDict.gen_data(File(stem, suffix=suffixs[0]))
+        if self.pathgs:
+            for stem, suffixs in tqdm(self.pathgs.data.items(), f'{self.__class__.__name__}优化数据', disable=not prt):
+                f = File(stem, suffix=slt)
+                if reads and not f:
+                    self.rp2data[f.relpath(self.root)] = LabelmeDict.gen_data(File(stem, suffix=suffixs[0]))
 
     def reduces(self):
         """ 移除imageData字段值 """
