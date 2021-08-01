@@ -18,13 +18,6 @@ from torchvision import transforms
 import torch.utils.data
 from torchvision.datasets import VisionDataset
 
-# 可视化工具
-try:
-    import visdom
-except ModuleNotFoundError:
-    subprocess.run(['pip3', 'install', 'visdom'])
-    import visdom
-
 __base = """
 """
 for i, x in enumerate(range(5)):
@@ -196,89 +189,6 @@ class LeNet5(nn.Module):
             return logits.argmax(dim=1)
 
 
-__visdom = """
-"""
-
-
-class Visdom(visdom.Visdom, metaclass=SingletonForEveryInitArgs):
-    """
-
-    visdom文档： https://www.yuque.com/code4101/pytorch/visdom
-    """
-
-    def __init__(
-            self,
-            server='http://localhost',
-            endpoint='events',
-            port=8097,
-            base_url='/',
-            ipv6=True,
-            http_proxy_host=None,
-            http_proxy_port=None,
-            env='main',
-            send=True,
-            raise_exceptions=None,
-            use_incoming_socket=True,
-            log_to_filename=None):
-        self.is_connection = is_url_connect(f'{server}:{port}')
-
-        if self.is_connection:
-            super().__init__(server, endpoint, port, base_url, ipv6,
-                             http_proxy_host, http_proxy_port, env, send,
-                             raise_exceptions, use_incoming_socket, log_to_filename)
-        else:
-            get_xllog().info('visdom server not support')
-
-        self.plot_windows = set()
-
-    def __bool__(self):
-        return self.is_connection
-
-    def one_batch_images(self, imgs, targets, title='one_batch_image', *, nrow=8, padding=2):
-        self.images(imgs, nrow=nrow, padding=padding,
-                    win=title, opts={'title': title, 'caption': str(targets)})
-
-    def _check_plot_win(self, win, update=None):
-        # 记录窗口是否为本次执行程序时第一次初始化，并且据此推导update是首次None，还是复用append
-        if update is None:
-            if win in self.plot_windows:
-                update = 'append'
-            else:
-                update = None
-        self.plot_windows.add(win)
-        return update
-
-    def _refine_opts(self, opts=None, *, title=None, legend=None, **kwargs):
-        if opts is None:
-            opts = {}
-        DictTool.ior(opts, {'title': title, 'legend': legend}, kwargs)
-        return opts
-
-    def loss_line(self, loss_values, epoch, win='loss', *, title=None, update=None):
-        """ 损失函数曲线
-
-        横坐标是epoch
-        """
-        # 1 记录窗口是否为本次执行程序时第一次初始化
-        if title is None: title = win
-        update = self._check_plot_win(win, update)
-
-        # 2 画线
-        xs = np.linspace(epoch - 1, epoch, num=len(loss_values) + 1)
-        self.line(loss_values, xs[1:], win=win, opts={'title': title, 'xlabel': 'epoch'},
-                  update=update)
-
-    def plot_line(self, y, x, win, *, opts=None,
-                  title=None, legend=None, update=None):
-        # 1 记录窗口是否为本次执行程序时第一次初始化
-        if title is None: title = win
-        update = self._check_plot_win(win, update)
-
-        # 2 画线
-        self.line(y, x, win=win, update=update,
-                  opts=self._refine_opts(opts, title=title, legend=legend, xlabel='epoch'))
-
-
 __train = """
 """
 
@@ -398,6 +308,8 @@ class Trainer:
         TODO 增加一些自定义格式参数
         TODO 不能使用\n、\r\n、<br/>实现文本换行，有时间可以研究下，结合nrow、图片宽度，自动推算，怎么美化展示效果
         """
+        from visdom import Visdom
+
         viz = Visdom()
         if not viz: return
 
@@ -494,11 +406,12 @@ class Trainer:
         TODO 看到其他框架，包括智财的框架，对保存的模型文件，都有更规范的一套命名方案，有空要去学一下
         :return:
         """
+        from visdom import Visdom
 
         # 1 配置参数
         tag = self.model.__class__.__name__
         epoch_time_tag = f'elapsed_time' if log_interval == 1 else f'{log_interval}*epoch_time'
-        viz = Visdom()
+        viz = Visdom()  # 其实这里不是用原生的Visdom，而是我封装过的，但是我封装的那个也没太大作用意义，删掉了
 
         # 2 加载之前的模型继续训练
         if start_epoch:
@@ -631,7 +544,7 @@ class XlPredictor:
         """
         return None
 
-    def inputs2loader(self, raw_in, *, batch_size=None, y_placeholder=..., sampler=None):
+    def inputs2loader(self, raw_in, *, batch_size=None, y_placeholder=..., sampler=None, **kwargs):
         """ 将各种类列表数据，转成torch.utils.data.DataLoader类型
 
         :param raw_in: 各种类列表数据格式，或者单个数据，都为转为batch结构的tensor
@@ -670,11 +583,11 @@ class XlPredictor:
                     raw_in = [raw_in]
                 dataset = raw_in
             batch_size = first_nonnone([batch_size, self.batch_size])
-            loader = torch.utils.data.DataLoader(dataset, batch_size=batch_size, sampler=sampler)
+            loader = torch.utils.data.DataLoader(dataset, batch_size=batch_size, sampler=sampler, **kwargs)
 
         return loader
 
-    def infer(self, loader, *, progress=False, return_gt=True):
+    def forward(self, loader, *, progress=False, return_gt=True):
         """ 前向传播
 
         改功能是__call__的子部分，常在train、eval阶段单独调用
@@ -717,7 +630,7 @@ class XlPredictor:
         根据不同model结构特殊性
         """
         loader = self.inputs2loader(raw_in, batch_size=batch_size, y_placeholder=y_placeholder)
-        preds = self.infer(loader, progress=progress, return_gt=return_gt)
+        preds = self.forward(loader, progress=progress, return_gt=return_gt)
         # 返回结果，单样本的时候作简化
         if len(preds) == 1 and not isinstance(raw_in, (list, tuple, set)):
             return preds[0]
@@ -793,7 +706,7 @@ class ClsEvaluater:
 
     def n_correct(self):
         """ 类别正确数量 """
-        return sum([y == y_hat for y, y_hat in self.preds])
+        return sum([y == y_hat for y, y_hat in zip(self.gt, self.pred)])
 
     def accuracy(self):
         """ 整体的正确率精度（等价于f1_score的micro） """

@@ -271,3 +271,15 @@ def latexstrip(s):
 
 def add_quote(s):
     return f'"{s}"'
+
+
+def fold_dict(d, m=5):
+    """ 将字典折叠为更紧凑的排版格式
+
+    :param d: 一个字典对象
+    :param m: 按照每行放m个元素重排
+    :return: 重排后的字典内容
+    """
+    vals = [f"'{k}': {v}" for k, v in d.items()]
+    line = [', '.join(vals[i:i + 5]) for i in range(0, len(vals), m)]
+    return '{' + ',\n'.join(line) + '}'
