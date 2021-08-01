@@ -149,12 +149,12 @@ class Browser(Explorer):
         if app is None:
             # 智能判断环境变量，选择存在的浏览器，我的偏好 msedge > chrome
             paths = os.environ['PATH']
-            msedge_dir = r'C:\Program Files (x86)\Microsoft\Edge\Application'
             chrome_dir = r'C:\Program Files\Google\Chrome\Application'
-            if msedge_dir in paths:
-                app = 'msedge'
-            elif chrome_dir in paths:
+            msedge_dir = r'C:\Program Files (x86)\Microsoft\Edge\Application'
+            if chrome_dir in paths:
                 app = 'chrome'
+            elif msedge_dir in paths:
+                app = 'msedge'
             else:
                 app = 'explorer'
         super().__init__(app, shell)
@@ -389,7 +389,7 @@ def showdir(c, *, to_html=None, printf=True):
     newline = '<br/>' if to_html else '\n'
 
     t = f'==== 对象名称：{object_name}，类继承关系：{inspect.getmro(type(c))}，' \
-        + f'内存消耗：{format_size(sys.getsizeof(c), binary=True)}'\
+        + f'内存消耗：{format_size(sys.getsizeof(c), binary=True)}' \
         + f'（递归子类总大小：{format_size(getasizeof(c), binary=True)}） ===='
 
     if to_html:

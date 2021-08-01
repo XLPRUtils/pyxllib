@@ -23,7 +23,7 @@ class PilPrcsBase(CvPrcsBase):
             im = file
         elif is_numpy_image(file):
             im = cv2pil(file)
-        elif File(file):
+        elif File.safe_init(file):
             im = Image.open(str(file), **kwargs)
         else:
             raise TypeError(f'类型错误或文件不存在：{type(file)} {file}')

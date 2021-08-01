@@ -234,6 +234,7 @@ def first_nonnone(args, judge=None):
     for x in args:
         if judge(x):
             return x
+    return args[-1]  # 全部都不满足，返回最后一个值
 
 
 def round_int(x):
