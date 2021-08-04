@@ -10,6 +10,7 @@ import itertools
 import numpy as np
 import pandas as pd
 
+from pyxllib.prog.pupil import DictTool
 from pyxllib.prog.deprecatedlib import deprecated
 
 
@@ -157,71 +158,83 @@ def get_ndim(coords):
     return coords.ndim
 
 
-class SetCmper:
-    """ 集合两两比较 """
+class DictCmper:
+    """ 字典结构比较工具
 
-    def __init__(self, data):
+    集合是字典的特殊情况，也支持集合间的对比
+    """
+
+    def __init__(self, dicts):
         """
-        :param data: 字典结构
-            key: 类别名
-            value: 该类别含有的元素（非set类型会自动转set）
+        :param Dict[str, Dict|set] dicts: Dicts[dictname, dict_]
+            如果是set，会升级为dict，value默认为1
         """
-        self.data = {}
-        for k, v in data.items():
+        self.dicts = {}
+        for k, v in dicts.items():
             if isinstance(v, set):
-                self.data[k] = copy.deepcopy(v)
+                self.dicts[k] = {k: 1 for k in v}
             else:
-                self.data[k] = set(v)
+                self.dicts[k] = v
 
-    def summary(self, show_diff_item=False):
-        r""" 两两集合共有元素数量，因为相比 listitem 列出每个条目明细归属情况，这个算总结概要，所以叫 summary
+    def details(self):
+        """ 返回详细的分析表
 
-        :param show_diff_item: 显示详细的差异内容，显示 "行 减 列"的差值元素值
+        按行罗列所有键，按列罗列所有字典，中间显示各字典键值
+        可以把结果保存到excel，然后详细筛选分析
+
+        >>> dc = DictCmper({'d1': {'a': 1, 'b': 2}, 'd2': {'b': 3, 'e': 5}, 'd3': {'d': 4}})
+        >>> dc.details()
+            d1   d2   d3
+        a  1.0  NaN  NaN
+        b  2.0  3.0  NaN
+        e  NaN  5.0  NaN
+        d  NaN  NaN  4.0
+        """
+        # 1 获得所有键
+        #   集合无法保存元素顺序，所以用合并字典来代替
+        #   还有个三方库orderedset，不想安装。就这样简便解决就好。
+        keys = DictTool.or_(*self.dicts.values()).keys()
+
+        # 2 取出所有字典值
+        ls = []
+        for k in keys:
+            ls.append([(d[k] if k in d else np.nan) for d in self.dicts.values()])
+
+        # 3 转为df表格
+        df = pd.DataFrame.from_records(ls, columns=self.dicts.keys())
+        df.index = keys
+        return df
+
+    def pair_summary(self, func=lambda x, y: len(x.keys() & y.keys())):
+        r""" 两两对比表
+
+        :param func: 默认是计算两个字典共有的键数量
         :return: df
             df对角线存储的是每个集合自身大小，df第i行第j列是第i个集合减去第j个集合的剩余元素数
 
         >>> s1 = {1, 2, 3, 4, 5, 6, 7, 8, 9}
         >>> s2 = {1, 3, 5, 7, 8}
         >>> s3 = {2, 3, 5, 8}
-        >>> df = SetCmper({'s1': s1, 's2': s2, 's3': s3}).summary()
-        >>> df
+        >>> dc = DictCmper({'s1': s1, 's2': s2, 's3': s3})
+        >>> dc.pair_summary()
             s1  s2  s3
         s1   9   5   4
         s2   5   5   3
         s3   4   3   4
-        >>> df.loc['s1', 's2']
-        5
+        >>> dc.pair_summary(lambda x, y: len(x.keys() - y.keys()))
+            s1  s2  s3
+        s1   0   4   5
+        s2   0   0   2
+        s3   0   1   0
         """
-        cats = list(self.data.keys())
-        data = self.data
-        n = len(cats)
+        dictnames = list(self.dicts.keys())
+        n = len(dictnames)
         rows = []
-        for i, c in enumerate(cats):
-            a = data[c]
+        for i, name1 in enumerate(dictnames):
             row = [0] * n
-            for j, d in enumerate(cats):
-                if i == j:
-                    row[j] = len(a)
-                else:
-                    row[j] = len(a & data[d])
-                if show_diff_item:
-                    diff = a - data[d]
-                    if diff:
-                        row[j] = f'{row[j]} {diff}'
+            for j, name2 in enumerate(dictnames):
+                row[j] = func(self.dicts[name1], self.dicts[name2])
             rows.append(row)
-        df = pd.DataFrame.from_records(rows, columns=cats)
-        df.index = cats
-        return df
-
-    def list_keys(self):
-        keys = set()
-        for k, v in self.data.items():
-            keys |= v
-
-        ls = []
-        for k in keys:
-            ls.append([(k in t) for t in self.data.values()])
-
-        df = pd.DataFrame.from_records(ls, columns=self.data.keys())
-        df.index = keys
+        df = pd.DataFrame.from_records(rows, columns=dictnames)
+        df.index = dictnames
         return df
