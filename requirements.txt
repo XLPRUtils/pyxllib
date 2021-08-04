@@ -9,6 +9,7 @@ tqdm
 ujson
 Deprecated
 pyperclip
+envariable
 
 pympler
 lxml

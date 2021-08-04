@@ -221,7 +221,8 @@ class PerfTest:
         """
 
         :param number: 有些代码运算过快，可以多次运行迭代为一个单元
-        :param number: 对单元重复执行次数，最后会计算平均值、标准差
+        :param repeat: 对单元重复执行次数，最后会计算平均值、标准差
+            关于number和repeat的区别：number张纸量repeat次；如果是纸箱这么厚的纸，number可以不设，默认是1
         """
         # 1 找到所有perf_为前缀，且callable的函数方法
         funcnames = []
