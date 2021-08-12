@@ -11,7 +11,7 @@ import PIL.ExifTags
 import numpy as np
 
 from pyxllib.file.specialist import File
-from pyxllib.cv.expert.cvprcs import CvPrcsBase, is_pil_image, is_numpy_image, cv2pil
+from pyxllib.cv.expert.cvprcs import CvPrcsBase, is_pil_image, is_numpy_image, cv2pil, pil2cv
 
 
 class PilPrcsBase(CvPrcsBase):
@@ -28,6 +28,20 @@ class PilPrcsBase(CvPrcsBase):
         else:
             raise TypeError(f'类型错误或文件不存在：{type(file)} {file}')
         return cls.cvt_channel(im, flags)
+
+    @classmethod
+    def read_from_buffer(cls, buffer, flags=None, *, b64decode=False):
+        """ 先用opencv实现，以后可以再研究PIL.Image.frombuffer是否有更快处理策略 """
+        return cv2pil(CvPrcsBase.read_from_buffer(buffer, flags, b64decode=b64decode))
+
+    @classmethod
+    def read_from_url(cls, url, flags=None, *, b64decode=False):
+        return cv2pil(CvPrcsBase.read_from_url(url, flags, b64decode=b64decode))
+
+    @classmethod
+    def to_buffer(cls, im, ext='.jpg', *, b64encode=False):
+        # 主要是偷懒，不想重写一遍，就直接去调用cv版本的实现了
+        return CvPrcsBase.to_buffer(pil2cv(im), ext, b64encode=b64encode)
 
     @classmethod
     def cvt_channel(cls, im, flags=None):
@@ -146,6 +160,7 @@ class PilPrcs(PilPrcsBase):
     @classmethod
     def reduce_filesize(cls, im, filesize=None, suffix='jpeg'):
         """ 按照保存后的文件大小来压缩im
+
         :param filesize: 单位Bytes
             可以用 300*1024 来表示 300KB
             可以不输入，默认读取后按原尺寸返回，这样看似没变化，其实图片一读一写，是会对手机拍照的很多大图进行压缩的

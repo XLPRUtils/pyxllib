@@ -4,17 +4,21 @@
 # @Email  : 877362867@qq.com
 # @Date   : 2020/11/15 10:09
 
-from pyxllib.file.specialist import File
-from pyxllib.algo.geo import rect_bounds, warp_points, reshape_coords, quad_warp_wh, get_warp_mat, rect2polygon
+import base64
 
 from PIL import Image
 import cv2
 import numpy as np
+import requests
 
 try:
     import accimage
 except ImportError:
     accimage = None
+
+from pyxllib.file.specialist import File
+from pyxllib.algo.geo import rect_bounds, warp_points, reshape_coords, quad_warp_wh, get_warp_mat, rect2polygon
+from pyxllib.prog.newbie import round_int
 
 __functional = """
 torchvision.transforms搬过来的功能
@@ -52,6 +56,10 @@ def cv2pil(pic, mode=None):
     Returns:
         PIL Image: Image converted to PIL Image.
     """
+    # 需要先做个通道转换。这里的cvt是比较万精油的，支持pic是灰度图、RGBA等多种场景情况。
+    pic = cv2.cvtColor(pic, cv2.COLOR_BGR2RGB)
+
+    # 以下是原版实现代码
     if pic.ndim not in {2, 3}:
         raise ValueError('pic should be 2/3 dimensional. Got {} dimensions.'.format(pic.ndim))
     if pic.ndim == 2:
@@ -224,12 +232,41 @@ class _CvPrcsBase:
             im = file
         elif File.safe_init(file):
             # https://www.yuque.com/xlpr/pyxllib/imread
-            im = cv2.imdecode(np.fromfile(str(file), dtype=np.uint8), flags)
+            # + np.frombuffer
+            im = cv2.imdecode(np.fromfile(str(file), dtype=np.uint8), -1 if flags is None else flags)
         elif is_pil_image(file):
             im = pil2cv(file)
         else:
             raise TypeError(f'类型错误或文件不存在：{type(file)} {file}')
         return cls.cvt_channel(im, flags)
+
+    @classmethod
+    def read_from_buffer(cls, buffer, flags=None, *, b64decode=False):
+        """ 从二进制流读取图片
+        这个二进制流指，图片以png、jpg等某种格式存储为文件时，其对应的文件编码
+
+        :param b64decode: 是否需要先进行base64解码
+        """
+        if b64decode:
+            buffer = base64.b64decode(buffer)
+        buffer = np.frombuffer(buffer, dtype=np.uint8)
+        im = cv2.imdecode(buffer, -1 if flags is None else flags)
+        return cls.cvt_channel(im, flags)
+
+    @classmethod
+    def read_from_url(cls, url, flags=None, *, b64decode=False):
+        """ 从url直接获取图片到内存中
+        """
+        content = requests.get(url).content
+        return cls.read_from_buffer(content, flags, b64decode=b64decode)
+
+    @classmethod
+    def to_buffer(cls, im, ext='.jpg', *, b64encode=False):
+        flag, buffer = cv2.imencode(ext, im)
+        buffer = bytes(buffer)
+        if b64encode:
+            buffer = base64.b64encode(buffer)
+        return buffer
 
     @classmethod
     def cvt_channel(cls, im, flags=None):
@@ -477,7 +514,7 @@ class CvPrcs(CvPrcsBase):
             new_pts 新的变换后的点坐标
         """
         # 1 计算需要pad的宽度
-        x1, y1, x2, y2 = rect_bounds(pts)
+        x1, y1, x2, y2 = [round_int(v) for v in rect_bounds(pts)]
         h, w = src_im.shape[:2]
         pad = [-y1, y2 - h, -x1, x2 - w]  # 各个维度要补充的宽度
         pad = [max(0, v) for v in pad]  # 负数宽度不用补充，改为0
