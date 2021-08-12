@@ -67,7 +67,7 @@ ____alias = """
 有些功能是为了兼容旧版代码，可以逐步取消别名
 """
 
-imread = partial(CvPrcs.read, flags=1)
+imread = CvPrcs.read
 imwrite = CvPrcs.write
 imshow = CvPrcs.show
 
@@ -108,32 +108,3 @@ def debug_images(dir_, func, *, save=None, show=False):
             key = cv2.waitKey()
             if key == '0x1B':  # ESC 键
                 break
-
-
-def get_img_content(in_):
-    """ 获取in_代表的图片的二进制数据
-
-    :param in_: 可以是本地文件，也可以是图片url地址，也可以是Image对象
-    """
-
-    # 1 取不同来源的数据
-    if is_url(in_):
-        content = requests.get(in_).content
-        img = Image.open(io.BytesIO(content))
-    elif is_file(in_):
-        with open(in_, 'rb') as f:
-            content = f.read()
-        img = Image.open(in_)
-    elif isinstance(in_, Image.Image):
-        img = in_
-    elif isinstance(in_, np.ndarray):
-        img = cv2pil(in_)
-    else:
-        raise ValueError(f'{type(in_)}')
-
-    img = PilPrcs.rgba2rgb(img)  # 如果是RGBA类型，要把透明底变成白色
-    file = io.BytesIO()
-    img.save(file, 'JPEG')
-    content = file.getvalue()
-
-    return content

@@ -107,6 +107,17 @@ class UtoolsBase:
                                        columns=['key', 'content'])
         _print_df_result(df, self.outfmt)
 
+    def bcompare(self):
+        """ 可以通过subinput设置文件后缀类型 """
+        from pyxllib.debug.specialist import bcompare
+
+        suffix = self.cmds.get('subinput', None)
+        f1 = File('left', Dir.TEMP, suffix=suffix)
+        f2 = File('right', Dir.TEMP, suffix=suffix)
+        f1.write('')
+        f2.write(self.cmds['ClipText'])
+        bcompare(f1, f2, wait=False)
+
 
 class UtoolsRegex(UtoolsBase):
     def __init__(self, cmds, *, outfmt='text'):

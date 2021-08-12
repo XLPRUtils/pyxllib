@@ -115,8 +115,9 @@ class XlOsEnv:
     """
 
     @classmethod
-    def get(cls, name, decoding=False):
-        """
+    def get(cls, name, *, decoding=False):
+        """ 获取环境变量值
+
         :param name: 环境变量名
         :param decoding: 是否需要先进行base64解码
         :return:
@@ -137,7 +138,8 @@ class XlOsEnv:
 
     @classmethod
     def set(cls, name, value, encoding=False):
-        """
+        """ 临时改变环境变量
+
         :param name: 环境变量名
         :param value: 要存储的值
         :param encoding: 是否将内容转成base64后，再存储环境变量
@@ -179,5 +181,6 @@ class XlOsEnv:
 
     @classmethod
     def unset(cls, name):
+        """ 删除 """
         from envariable import unsetenv
         unsetenv(name)

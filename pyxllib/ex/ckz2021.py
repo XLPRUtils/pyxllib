@@ -113,3 +113,5 @@ if __name__ == '__main__':
         # 文件结构(r'D:\slns\detectron2\detectron2')
 
         pass
+
+        import six
