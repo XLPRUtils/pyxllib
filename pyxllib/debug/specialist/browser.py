@@ -20,7 +20,7 @@ from pyxllib.debug.specialist.common import TypeConvert, NestedDict, KeyValuesCo
 from pyxllib.file.specialist import File, Dir, get_etag
 from pyxllib.prog.newbie import typename
 from pyxllib.prog.pupil import is_url, is_file
-from pyxllib.text.pupil import ensure_gbk
+from pyxllib.text.pupil import ensure_gbk, shorten
 from pyxllib.debug.specialist.datetime import Datetime
 from pyxllib.debug.specialist.tictoc import TicToc
 
@@ -364,7 +364,7 @@ def getmembers(object, predicate=None):
     return results
 
 
-def showdir(c, *, to_html=None, printf=True):
+def showdir(c, *, to_html=None, printf=True, width=200):
     """查看类信息
     会罗列出类c的所有成员方法、成员变量，并生成一个html文
 
@@ -378,6 +378,7 @@ def showdir(c, *, to_html=None, printf=True):
     :param printf:
         默认是True，会输出到浏览器或控制条
         设为False则不输出
+    :param width: 属性列显示值的上限字符数
     """
     # 1 输出类表头
     from humanfriendly import format_size
@@ -431,7 +432,8 @@ def showdir(c, *, to_html=None, printf=True):
                 text = str(v)
             except:
                 text = '取不到str值'
-            v = typename(attr) + '，' + text
+
+            v = typename(attr) + '，' + shorten(text, width=width)
         ls.append([k, v])
     df = pd.DataFrame.from_records(ls, columns=['成员变量', '描述'])
     res.append(df2str(df) + newline)

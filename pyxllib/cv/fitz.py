@@ -47,10 +47,11 @@ class FitzPdf:
         :param num_width: 生成的每一页文件编号，使用的数字前导0域宽
             默认根据pdf总页数来设置对应所用域宽
             0表示不设域宽
-        :param scale: 对每页图片进行缩放
-        :param start: 起始页码
+        :param scale: 对每页图片进行缩放，一般推荐都要设成2，导出的图片才清晰
+        :param start: 起始页码，一般建议从1开始比较符合常识直觉
         :param fmt_onepage: 当pdf就只有一页的时候，是否还对导出的图片编号
             默认只有一页的时候，进行优化，不增设后缀格式
+        :return: 返回转换完的图片名称清单
 
         注：如果要导出单张图，可以用 FitzPdfPage.get_cv_image
         """
@@ -68,13 +69,16 @@ class FitzPdf:
 
         # 2 导出图片
         if fmt_onepage or n_page != 1:  # 多页的处理规则
+            res = []
             for i in range(n_page):
                 im = self.get_page(i).get_cv_image(scale)
                 number = ('{:0' + str(num_width) + 'd}').format(i + start)  # 前面的括号不要删，这样才是完整的一个字符串来使用format
-                imwrite(im, File(file_fmt.format(filestem=filestem, number=number), dst_dir))
+                f = imwrite(im, File(file_fmt.format(filestem=filestem, number=number), dst_dir))
+                res.append(f)
+            return res
         else:
             im = self.get_page(0).get_cv_image(scale)
-            imwrite(im, File(srcfile.stem + os.path.splitext(file_fmt)[1], dst_dir))
+            return [imwrite(im, File(srcfile.stem + os.path.splitext(file_fmt)[1], dst_dir))]
 
     def get_page(self, number):
         return FitzPdfPage(self.doc.loadPage(number))
@@ -122,6 +126,10 @@ class FitzPdfPage:
     def get_text(self, fmt='text'):
         """
         :param fmt: 存储格式，可以获得整页的纯文本，也可以获得dict结构存储的内容
+            返回dict的时候，如果有图片数据，其实也会返回的
+
+            https://pymupdf.readthedocs.io/en/latest/tutorial.html#extracting-text-and-images
+                text、blocks、words、html、dict、rawdict、xhtml、xml
         """
         return self.page.getText(fmt)
 

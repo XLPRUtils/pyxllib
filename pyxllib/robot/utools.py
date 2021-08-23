@@ -12,12 +12,12 @@ import pathlib
 import pyperclip
 import re
 
-import ujson
 from humanfriendly import format_timespan
 import pandas as pd
+import ujson
 
-from pyxllib.debug.specialist import browser, TicToc, Datetime
 from pyxllib.file.specialist import File, Dir
+from pyxllib.debug.specialist import browser, TicToc, Datetime
 
 
 def _print_df_result(df, outfmt='text'):
@@ -112,22 +112,15 @@ class UtoolsBase:
         from pyxllib.debug.specialist import bcompare
 
         suffix = self.cmds.get('subinput', None)
-        f1 = File('left', Dir.TEMP, suffix=suffix)
-        f2 = File('right', Dir.TEMP, suffix=suffix)
-        f1.write('')
+        try:
+            f1 = File('left', Dir.TEMP, suffix=suffix)
+            f2 = File('right', Dir.TEMP, suffix=suffix)
+        except OSError:  # 忽略错误的扩展名
+            f1 = File('left', Dir.TEMP)
+            f2 = File('right', Dir.TEMP)
+        f1.write(suffix)
         f2.write(self.cmds['ClipText'])
         bcompare(f1, f2, wait=False)
-
-
-class UtoolsRegex(UtoolsBase):
-    def __init__(self, cmds, *, outfmt='text'):
-        super().__init__(cmds, outfmt=outfmt)
-
-    def coderegex(self):
-        tt = TicToc()
-        text = self.cmds['ClipText']
-        eval(self.cmds['subinput'])
-        print(f'finished in {format_timespan(tt.tocvalue())}.')
 
 
 class UtoolsFile(UtoolsBase):
@@ -214,6 +207,8 @@ class UtoolsFile(UtoolsBase):
 
 
 def clipboard_paste(func):
+    """ 将函数运行完的文本结果复制到剪切板 """
+
     def wrapper(*args, **kwargs):
         import pyautogui
         s = func(*args, **kwargs)
@@ -267,6 +262,21 @@ class UtoolsText(UtoolsBase):
             # pyautogui.write('210503周一')  # 这个也没用
             pyautogui.hotkey('ctrl', 'v')
             pyautogui.press('down')
+
+
+class UtoolsRegex(UtoolsBase):
+    def __init__(self, cmds, *, outfmt='text'):
+        super().__init__(cmds, outfmt=outfmt)
+
+    def coderegex(self):
+        tt = TicToc()
+        text = self.cmds['ClipText']
+        eval(self.cmds['subinput'])
+        print(f'finished in {format_timespan(tt.tocvalue())}.')
+
+    @clipboard_paste
+    def refine_text(self, func):
+        return func(self.cmds['ClipText'])
 
 
 if __name__ == '__main__':

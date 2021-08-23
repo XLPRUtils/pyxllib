@@ -247,7 +247,7 @@ class ReMatch(Interval):
         """
         if getattr(regs, 'regs', None):
             # 从一个类match对象来初始化
-            m = pos
+            m = regs
             self.pos = getattr(m, 'pos', None)
             self.endpos = getattr(m, 'endpos', None)
             self.lastindex = getattr(m, 'lastindex', None)
@@ -449,11 +449,11 @@ class Intervals:
 
         for inter in self.merge_intersect_interval(adjacent=adjacent):
             # 匹配范围外的文本处理
-            if inter.start() >= idx:
+            if inter.start() > idx:
                 res.append(func2(idx, inter.start()))
-                idx = inter.end()
             # 匹配范围内的处理
             res.append(func1(inter.regs))
+            idx = inter.end()
         if idx < len(s): res.append(func2(idx, len(s)))
         return ''.join(res)
 
@@ -463,7 +463,7 @@ class Intervals:
         :param arg1: 可以输入一个自定义函数
         :param arg2: 可以配合arg1使用，功能同str.replace(arg1, arg2)
         :param adjacent: 替换的时候，为了避免混乱出错，是先要合并重叠的区间集的
-            这里有个adjacent参数，True表示临接的区间会合并，反之则不会合并临接区间
+            这里有个adjacent参数，True表示邻接的区间会合并，反之则不会合并临接区间
 
         >>> s = '0123456789'
         >>> inters = Intervals([(2, 5), (7, 8)])

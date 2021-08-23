@@ -85,7 +85,7 @@ class __NestEnvBase:
         r""" 在现有区间上，判断是否有被其他区间包含，有则进行延展
         可以输入head、tail配对规则，也可以输入现成的区间
 
-        >>> ne = NestEnv(r'aa$cc\ce{a}dd$bb\ce{d}h$h$')
+        >>> ne = LatexNestEnv(r'aa$cc\ce{a}dd$bb\ce{d}h$h$')
         >>> ne.latexcmd1(r'ce').expand(ne.formula()).strings()
         ['$cc\\ce{a}dd$', '\\ce{d}']
 
@@ -103,7 +103,7 @@ class __NestEnvBase:
     def filter(self, func):
         r""" 传入一个自定义函数func，会将每个区间的s传入，只保留func(s)为True的区间
 
-        >>> NestEnv('aa$bbb$ccc$d$eee$fff$g').formula().filter(lambda s: len(s) > 4).strings()
+        >>> LatexNestEnv('aa$bbb$ccc$d$eee$fff$g').formula().filter(lambda s: len(s) > 4).strings()
         ['$bbb$', '$fff$']
         """
         li = list(filter(lambda x: func(self.s[x.start():x.end()]), self.intervals))
@@ -157,7 +157,7 @@ class __NestEnvBase:
 
     def __repr__(self):
         """不在定位范围内的非换行字符，全部替换为空格"""
-        t = self.intervals.replace(self.s, lambda s: s, lambda s: re.sub(r'[^\n]', ' ', s))
+        t = self.intervals.replace(self.s, lambda s: s, out_repl=lambda s: re.sub(r'[^\n]', ' ', s))
         return t
 
     def __bool__(self):
