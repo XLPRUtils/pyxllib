@@ -29,14 +29,7 @@ def 去除py交互标记(s):
 
 
 def import重排序(s):
-    from pyxllib.text.nestenv import NestEnv
-
-    def locate(s):
-        """ 定位所有的from、import，默认每个import是分开的 """
-        ne = NestEnv(s)
-        ne2 = ne.search(r'^(import|from)\s.+\n?', flags=re.MULTILINE) \
-              + ne.search(r'^from\s.+\([^\)]+\)[ \t]*\n?', flags=re.MULTILINE)
-        return ne2
+    from pyxllib.text.nestenv import PycodeNestEnv
 
     def cmp(line):
         """ 将任意一句import映射为一个可比较的list对象
@@ -53,15 +46,16 @@ def import重排序(s):
         for i, x in enumerate('newbie pupil specialist expert'.split()):
             name = name.replace('.' + x, f'{i:02}')
 
-        return [name, line.startswith('import')]
+        # 忽略大小写
+        return [name.lower(), line.startswith('import')]
 
     def sort_part(m):
-        parts = locate(m.group()).strings()
+        parts = PycodeNestEnv(m.group()).imports().strings()
         parts = [p.rstrip() + '\n' for p in parts]
         parts.sort(key=cmp)
         return ''.join(parts)
 
-    res = locate(s).sub(sort_part, adjacent=True)  # 需要邻接，分块处理
+    res = PycodeNestEnv(s).imports().sub(sort_part, adjacent=True)  # 需要邻接，分块处理
     return res
 
 

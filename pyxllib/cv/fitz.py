@@ -11,23 +11,23 @@ import pprint
 import re
 import tempfile
 import pathlib
+import copy
+import subprocess
 
 import cv2
 import numpy as np
 
-import subprocess
-
 try:
     import fitz
 except ModuleNotFoundError:
-    subprocess.run(['pip3', 'install', 'PyMuPdf'])
+    subprocess.run(['pip3', 'install', 'PyMuPdf>=1.18.17'])
     import fitz
 
 from pyxllib.algo.pupil import get_number_width
 from pyxllib.file.specialist import File, Dir, writefile, filescopy, filesdel
 from pyxllib.debug.pupil import dprint
 from pyxllib.debug.specialist import browser
-from pyxllib.cv.expert import imwrite, cv2pil
+from pyxllib.cv.expert import imwrite, cv2pil, CvPrcs, PilPrcs
 from pyxllib.cv.imfile import zoomsvg
 
 
@@ -57,7 +57,7 @@ class FitzPdf:
         """
         # 1 基本参数计算
         srcfile, doc = self.src_file, self.doc
-        filestem, n_page = srcfile.stem, doc.pageCount
+        filestem, n_page = srcfile.stem, doc.page_count
 
         # 自动推导目标目录
         if dst_dir is None:
@@ -71,22 +71,23 @@ class FitzPdf:
         if fmt_onepage or n_page != 1:  # 多页的处理规则
             res = []
             for i in range(n_page):
-                im = self.get_page(i).get_cv_image(scale)
+                im = self.load_page(i).get_cv_image(scale)
                 number = ('{:0' + str(num_width) + 'd}').format(i + start)  # 前面的括号不要删，这样才是完整的一个字符串来使用format
                 f = imwrite(im, File(file_fmt.format(filestem=filestem, number=number), dst_dir))
                 res.append(f)
             return res
         else:
-            im = self.get_page(0).get_cv_image(scale)
+            im = self.load_page(0).get_cv_image(scale)
             return [imwrite(im, File(srcfile.stem + os.path.splitext(file_fmt)[1], dst_dir))]
 
-    def get_page(self, number):
-        return FitzPdfPage(self.doc.loadPage(number))
+    def load_page(self, number):
+        return FitzPdfPage(self.doc, number)
 
 
 class FitzPdfPage:
-    def __init__(self, page):
-        self.page = page
+    def __init__(self, doc, page_number):
+        self.doc = doc  # 必须要存一个父节点，否则因为指针弱引用等，会产生bug
+        self.page = self.doc.load_page(page_number)
 
     def get_svg_image(self, scale=1):
         # svg 是一段表述性文本
@@ -98,18 +99,17 @@ class FitzPdfPage:
     def _get_png_data(self, scale=1):
         # TODO 增加透明通道？
         if scale != 1:
-            pix = self.page.getPixmap(fitz.Matrix(scale, scale))  # 长宽放大到scale倍
+            pix = self.page.get_pixmap(fitz.Matrix(scale, scale))  # 长宽放大到scale倍
         else:
-            pix = self.page.getPixmap()
+            pix = self.page.get_pixmap()
         return pix.getPNGData()
 
     def get_cv_image(self, scale=1):
-        arr = np.fromstring(self._get_png_data(scale), dtype=np.uint8)
-        return cv2.imdecode(arr, flags=1)
+        return CvPrcs.read_from_buffer(self._get_png_data(scale), flags=1)
 
     def get_pil_image(self, scale=1):
         # TODO 可以优化，直接从内存数据转pil，不用这样先转cv再转pil
-        return cv2pil(self.get_cv_image(scale))
+        return PilPrcs.read_from_buffer(self._get_png_data(scale), flags=1)
 
     def write_image(self, outfile, *, scale=1, if_exists=None):
         """ 转成为文件 """

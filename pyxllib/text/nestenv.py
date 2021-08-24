@@ -1055,11 +1055,10 @@ def substrfunc(s, head, tail, *, func1=lambda x: x, func2=lambda x: x):
 
 
 class PycodeNestEnv(NestEnv):
-    def import_(self):
-        """ 开头的import部分
-
-        理论上要分三大块，每一块按顺序排序
-        但这可能不太好实现~~ 估计会先写个简单的基础版本
-        """
-        # TODO 捕捉连续的以'from ', 'import '开头的行
-        pass
+    def imports(self):
+        """ 定位所有的from、import，默认每个import是分开的 """
+        # 捕捉连续的以'from ', 'import '开头的行
+        ne = NestEnv(self.s)
+        ne2 = ne.search(r'^(import|from)\s.+\n?', flags=re.MULTILINE) \
+              + ne.search(r'^from\s.+\([^\)]+\)[ \t]*\n?', flags=re.MULTILINE)
+        return type(self)(ne2.s, ne2.intervals)
