@@ -13,6 +13,7 @@ import torch.utils.data
 
 import torchvision
 from torchvision import transforms
+from easydict import EasyDict
 
 # 把pytorch等常用的导入写了
 import torch.utils.data
@@ -732,3 +733,84 @@ class ClsEvaluater:
             return {f'f1_{k}': self.f1_score(k) for k in ('weighted', 'macro', 'micro')}
         else:
             return round(f1_score(self.gt, self.pred, average=average), 4)
+
+
+class ZcPredictor:
+    """ 智财ocrwork框架的封装接口
+
+    这个本来是特用功能，不应该放这里的，反正也没啥不可公开的技术细节，为了使用方便就放这了
+    """
+
+    def __init__(self, config_file, *, gpu=None, batch_size=None, opts=None):
+        """
+        :param config_file: 支持输入配置文件路径，或者字符串格式的配置参数值
+        :param gpu: 默认可以不设，会挑选当前最大剩余的一张卡
+            注意配置文件中也有gpu参数，在该接口模式下会被弃用
+        :param batch_size: 每次能同时识别的最大图片数
+            注意config_file里也有batch_size，不过那是训练用的参数，跟这没必然联系，部署最好额外设置batch_size
+            该参数可以不设，默认每次传入多少张图，就同时多少张进行批处理
+        :param opts: 除了配置文件的参数，可以自设字典，覆盖更新配置参数值，常用的参数有
+        """
+        # 1 配置参数
+        if isinstance(config_file, str) and config_file[-5:].lower() == '.yaml':
+            deploy_path = os.environ.get('OCRWORK_DEPLOY', '.')  # 支持在环境变量自定义：部署所用的配置、模型所在目录
+            config_file = os.path.join(deploy_path, config_file)
+            f = open(config_file, "r")
+        elif isinstance(config_file, str):
+            f = io.StringIO(config_file)
+        else:
+            raise TypeError
+        prepare_args = EasyDict(list(yaml.load_all(f, Loader=yaml.FullLoader))[0])
+        f.close()
+
+        # 2 特殊配置参数
+        opts = opts or {}
+        if gpu is not None:
+            opts['gpu'] = str(gpu)
+        if 'gpu' not in opts:
+            # gpu没设置的时候，默认找一个空闲最大的显卡
+            opts['gpu'] = NvmDevice().get_most_free_gpu_id()
+        if 'gpu' in opts:  # 智财的配置好像必须要写字符串
+            opts['gpu'] = str(opts['gpu'])
+        prepare_args.update(opts)
+
+        # 3 初始化各组件
+        self.prepare_args = prepare_args
+        self.batch_size = batch_size
+        self.transform = lambda x: CvPrcs.read(x, 1)  # 默认统一转cv2的图片格式
+        # self.transform = lambda x: PilPrcs.read(x, 1)  # 也可以使用pil图片格式
+
+    def forward(self, imgs):
+        raise NotImplemented('子类必须实现forward方法')
+
+    def __call__(self, raw_in, *, batch_size=None, progress=False):
+        """ 智财的框架，dataloader默认不需要对齐，重置collate_fn
+        （其实不是不需要对齐，而是其augument组件会处理）
+
+        :return: 以多个结果为例
+            preds结果是list
+            pred = preds[0]
+                pred也是list，是第0张图的所有检测框，比如一共8个
+                    每个框是 4*2 的numpy矩阵（整数）
+        """
+        # 1 判断长度
+        if not getattr(raw_in, '__len__', None):
+            imgs = [raw_in]
+        else:
+            imgs = raw_in
+        n = len(imgs)
+        batch_size = first_nonnone([batch_size, self.batch_size, n])
+
+        # 2 一段一段处理
+        preds = []
+        t = tqdm(desc='forward', total=n, disable=not progress)
+        for i in range(0, n, batch_size):
+            inputs = imgs[i:i + batch_size]
+            preds += self.forward([self.transform(img) for img in inputs])
+            t.update(len(inputs))
+
+        # 3 返回结果，单样本的时候作简化
+        if len(preds) == 1 and not getattr(raw_in, '__len__', None):
+            return preds[0]
+        else:
+            return preds
