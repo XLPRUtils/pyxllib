@@ -2,13 +2,17 @@
 # -*- coding: utf-8 -*-
 # @Author : 陈坤泽
 # @Email  : 877362867@qq.com
-# @Date   : 2020/11/15 10:09
+# @Date   : 2021/08/25 15:57
 
 import base64
+import io
+from functools import partial
 
-from PIL import Image
 import cv2
 import numpy as np
+from PIL import Image
+from PIL import Image
+import PIL.ExifTags
 import requests
 
 try:
@@ -16,14 +20,11 @@ try:
 except ImportError:
     accimage = None
 
-from pyxllib.file.specialist import File
+from pyxllib.prog.newbie import round_int, RunOnlyOnce
 from pyxllib.algo.geo import rect_bounds, warp_points, reshape_coords, quad_warp_wh, get_warp_mat, rect2polygon
-from pyxllib.prog.newbie import round_int
+from pyxllib.file.specialist import File
 
 __functional = """
-torchvision.transforms搬过来的功能
-
-这个库太大了，底层又依赖tensor，
 """
 
 
@@ -43,7 +44,9 @@ def is_numpy_image(im):
 
 
 def cv2pil(pic, mode=None):
-    """Convert a tensor or an ndarray to PIL Image. （删除了tensor的转换功能）
+    """ 我也不懂torch里这个实现为啥这么复杂，先直接哪来用，没深究细节
+
+    Convert a tensor or an ndarray to PIL Image. （删除了tensor的转换功能）
 
     See :class:`~torchvision.transforms.ToPILImage` for more details.
 
@@ -112,10 +115,6 @@ def cv2pil(pic, mode=None):
     return Image.fromarray(npim, mode=mode)
 
 
-__other_func = """
-"""
-
-
 def pil2cv(im):
     """ pil图片转np图片 """
     x = im
@@ -124,97 +123,37 @@ def pil2cv(im):
     return y
 
 
-__opencv = """
-opencv-python文档： https://opencv-python-tutroals.readthedocs.io/en/latest/
-pillow文档： https://pillow.readthedocs.io/en/stable/reference/
-
-
-TODO 201115周日20:18
-1、很多功能是新写的，可能有bug，多用多优化~~
-2、画图功能
-    ① CvPlot有待整合进Cvim
-    ② Pilim增加对应的画图功能
-    ③ 整合、统一接口形式、名称
-3、旧的仿射变换等功能
-    ① 需要整合进Cvim
-    ② Pilim需要对应的实现
-    ③ 整合，统一接口
+__prcs = """
 """
 
 
-class CvPlot:
-    @classmethod
-    def get_plot_color(cls, src):
-        """ 获得比较适合的作画颜色
+class __Prcs:
+    """ 共有组件 """
 
-        TODO 可以根据背景色智能推导画线用的颜色，目前是固定红色
+    @classmethod
+    def size(cls, *args, **kwargs):
+        raise NotImplementedError
+
+    @classmethod
+    def resize(cls, *args, **kwargs):
+        raise NotImplementedError
+
+    @classmethod
+    def reduce_area(cls, im, area):
+        """ 根据面积上限缩小图片
+
+        即图片面积超过area时，按照等比例缩小到面积为area的图片
         """
-        if src.ndim == 3:
-            return 0, 0, 255
-        elif src.ndim == 2:
-            return 255  # 灰度图，默认先填白色
-
-    @classmethod
-    def get_plot_args(cls, src, color=None):
-        # 1 作图颜色
-        if not color:
-            color = cls.get_plot_color(src)
-
-        # 2 画布
-        if len(color) >= 3 and src.ndim <= 2:
-            dst = cv2.cvtColor(src, cv2.COLOR_GRAY2BGR)
-        else:
-            dst = np.array(src)
-
-        return dst, color
-
-    @classmethod
-    def lines(cls, src, lines, color=None, thickness=1, line_type=cv2.LINE_AA, shift=None):
-        """ 在src图像上画系列线段
-        """
-        # 1 判断 lines 参数内容
-        lines = np.array(lines).reshape(-1, 4)
-        if not lines.size:
-            return src
-
-        # 2 参数
-        dst, color = cls.get_plot_args(src, color)
-
-        # 3 画线
-        if lines.any():
-            for line in lines:
-                x1, y1, x2, y2 = line
-                cv2.line(dst, (x1, y1), (x2, y2), color, thickness, line_type)
-        return dst
-
-    @classmethod
-    def circles(cls, src, circles, color=None, thickness=1, center=False):
-        """ 在图片上画圆形
-
-        :param src: 要作画的图
-        :param circles: 要画的圆形参数 (x, y, 半径 r)
-        :param color: 画笔颜色
-        :param center: 是否画出圆心
-        """
-        # 1 圆 参数
-        circles = np.array(circles, dtype=int).reshape(-1, 3)
-        if not circles.size:
-            return src
-
-        # 2 参数
-        dst, color = cls.get_plot_args(src, color)
-
-        # 3 作画
-        for x in circles:
-            cv2.circle(dst, (x[0], x[1]), x[2], color, thickness)
-            if center:
-                cv2.circle(dst, (x[0], x[1]), 2, color, thickness)
-
-        return dst
+        h, w = cls.size(im)
+        s = h * w
+        if s > area:
+            r = (area / s) ** 0.5
+            size = int(r * h), int(r * w)
+            im = cls.resize(im, size)
+        return im
 
 
-class _CvPrcsBase:
-    """ opencv和pil中，虽然实现方式不同，但彼此都有自己一套实现的功能 """
+class CvPrcs(__Prcs):
     _show_win_num = 0
 
     @classmethod
@@ -297,6 +236,8 @@ class _CvPrcsBase:
         """ 图片尺寸，统一返回(height, width)，不含通道 """
         return im.shape[:2]
 
+    imsize = size
+
     @classmethod
     def resize(cls, im, size, **kwargs):
         """
@@ -332,30 +273,6 @@ class _CvPrcsBase:
             winname = f'test{n}'
         cv2.namedWindow(winname, flags)
         cv2.imshow(winname, im)
-
-
-class CvPrcsBase(_CvPrcsBase):
-    """ 同时适用于opencv和pil的算法 """
-
-    @classmethod
-    def reduce_area(cls, im, area):
-        """ 根据面积上限缩小图片
-
-        即图片面积超过area时，按照等比例缩小到面积为area的图片
-        """
-        h, w = cls.size(im)
-        s = h * w
-        if s > area:
-            r = (area / s) ** 0.5
-            size = int(r * h), int(r * w)
-            im = cls.resize(im, size)
-        else:
-            im = cls
-        return im
-
-
-class CvPrcs(CvPrcsBase):
-    """ opencv当前独有的功能 """
 
     @classmethod
     def warp(cls, im, warp_mat, dsize=None, *, view_rate=False, max_zoom=1, reserve_struct=False):
@@ -552,3 +469,425 @@ class CvPrcs(CvPrcsBase):
             warp_mat = get_warp_mat(pts, rect2polygon([0, 0, w, h]))
             dst = cls.warp(dst, warp_mat, (w, h))
         return dst
+
+    @classmethod
+    def get_plot_color(cls, src):
+        """ 获得比较适合的作画颜色
+
+        TODO 可以根据背景色智能推导画线用的颜色，目前是固定红色
+        """
+        if src.ndim == 3:
+            return 0, 0, 255
+        elif src.ndim == 2:
+            return 255  # 灰度图，默认先填白色
+
+    @classmethod
+    def get_plot_args(cls, src, color=None):
+        # 1 作图颜色
+        if not color:
+            color = cls.get_plot_color(src)
+
+        # 2 画布
+        if len(color) >= 3 and src.ndim <= 2:
+            dst = cv2.cvtColor(src, cv2.COLOR_GRAY2BGR)
+        else:
+            dst = np.array(src)
+
+        return dst, color
+
+    @classmethod
+    def lines(cls, src, lines, color=None, thickness=1, line_type=cv2.LINE_AA, shift=None):
+        """ 在src图像上画系列线段
+        """
+        # 1 判断 lines 参数内容
+        lines = np.array(lines).reshape(-1, 4)
+        if not lines.size:
+            return src
+
+        # 2 参数
+        dst, color = cls.get_plot_args(src, color)
+
+        # 3 画线
+        if lines.any():
+            for line in lines:
+                x1, y1, x2, y2 = line
+                cv2.line(dst, (x1, y1), (x2, y2), color, thickness, line_type)
+        return dst
+
+    @classmethod
+    def circles(cls, src, circles, color=None, thickness=1, center=False):
+        """ 在图片上画圆形
+
+        :param src: 要作画的图
+        :param circles: 要画的圆形参数 (x, y, 半径 r)
+        :param color: 画笔颜色
+        :param center: 是否画出圆心
+        """
+        # 1 圆 参数
+        circles = np.array(circles, dtype=int).reshape(-1, 3)
+        if not circles.size:
+            return src
+
+        # 2 参数
+        dst, color = cls.get_plot_args(src, color)
+
+        # 3 作画
+        for x in circles:
+            cv2.circle(dst, (x[0], x[1]), x[2], color, thickness)
+            if center:
+                cv2.circle(dst, (x[0], x[1]), 2, color, thickness)
+
+        return dst
+
+
+class PilPrcs(__Prcs):
+    @classmethod
+    def read(cls, file, flags=None, **kwargs):
+        if is_pil_image(file):
+            im = file
+        elif is_numpy_image(file):
+            im = cv2pil(file)
+        elif File.safe_init(file):
+            im = Image.open(str(file), **kwargs)
+        else:
+            raise TypeError(f'类型错误或文件不存在：{type(file)} {file}')
+        return cls.cvt_channel(im, flags)
+
+    @classmethod
+    def read_from_buffer(cls, buffer, flags=None, *, b64decode=False):
+        """ 先用opencv实现，以后可以再研究PIL.Image.frombuffer是否有更快处理策略 """
+        return cv2pil(CvPrcs.read_from_buffer(buffer, flags, b64decode=b64decode))
+
+    @classmethod
+    def read_from_url(cls, url, flags=None, *, b64decode=False):
+        return cv2pil(CvPrcs.read_from_url(url, flags, b64decode=b64decode))
+
+    @classmethod
+    def to_buffer(cls, im, ext='.jpg', *, b64encode=False):
+        # 主要是偷懒，不想重写一遍，就直接去调用cv版本的实现了
+        return CvPrcs.to_buffer(pil2cv(im), ext, b64encode=b64encode)
+
+    @classmethod
+    def cvt_channel(cls, im, flags=None):
+        if flags is None: return im
+        n_c = cls.n_channels(im)
+        if flags == 0 and n_c > 1:
+            im = im.convert('L')
+        elif flags == 1 and n_c != 3:
+            im = im.convert('RGB')
+        return im
+
+    @classmethod
+    def write(cls, im, path, if_exists=None, **kwargs):
+        p = File(path)
+        if p.exist_preprcs(if_exists):
+            p.ensure_parent()
+            im.save(str(p), **kwargs)
+
+    @classmethod
+    def resize(cls, im, size, **kwargs):
+        """
+
+        :param kwargs:
+            resample=3，插值算法；有PIL.Image.NEAREST, ~BOX, ~BILINEAR, ~HAMMING, ~BICUBIC, ~LANCZOS等
+                默认是 PIL.Image.BICUBIC；如果mode是"1"或"P"模式，则总是 PIL.Image.NEAREST
+
+        >>> im = PilPrcs.read(np.zeros([100, 200], dtype='uint8'), 0)
+        >>> im.size
+        (100, 200)
+        >>> im2 = im.reduce_area(50*50, **kwargs)
+        >>> im2.size
+        (35, 70)
+        """
+        # 注意pil图像尺寸接口都是[w,h]，跟标准的[h,w]相反
+        return im.resize(size[::-1])
+
+    @classmethod
+    def size(cls, im):
+        w, h = im.size
+        return h, w
+
+    imsize = size
+
+    @classmethod
+    def n_channels(cls, im):
+        """ 通道数 """
+        return len(im.getbands())
+
+    @classmethod
+    def show(cls, im, title=None, command=None):
+        return cls.show(im, title, command)
+
+    @classmethod
+    def random_direction(cls, im):
+        """ 假设原图片是未旋转的状态0
+
+        顺时针转90度是label=1，顺时针转180度是label2 ...
+        """
+        label = np.random.randint(4)
+        if label == 1:
+            # PIL的旋转角度，是指逆时针角度；但是我这里编号是顺时针
+            im = im.transpose(PIL.Image.ROTATE_270)
+        elif label == 2:
+            im = im.transpose(PIL.Image.ROTATE_180)
+        elif label == 3:
+            im = im.transpose(PIL.Image.ROTATE_90)
+        return im, label
+
+    @classmethod
+    def reset_orientation(cls, im):
+        """Image.open读取图片时，是手机严格正放时拍到的图片效果，
+        但手机拍照时是会记录旋转位置的，即可以判断是物理空间中，实际朝上、朝下的方向，
+        从而识别出正拍（代号1），顺时针旋转90度拍摄（代号8），顺时针180度拍摄（代号3）,顺时针270度拍摄（代号6）。
+        windows上的图片查阅软件能识别方向代号后正确摆放；
+        为了让python处理图片的时候能增加这个属性的考虑，这个函数能修正识别角度返回新的图片。
+
+        旧函数名：图像实际视图
+        """
+        exif_data = im._getexif()
+        if exif_data:
+            exif = {
+                PIL.ExifTags.TAGS[k]: v
+                for k, v in exif_data.items()
+                if k in PIL.ExifTags.TAGS
+            }
+            orient = exif['Orientation']
+            if orient == 8:
+                im = im.transpose(PIL.Image.ROTATE_90)
+            elif orient == 3:
+                im = im.transpose(PIL.Image.ROTATE_180)
+            elif orient == 6:
+                im = im.transpose(PIL.Image.ROTATE_270)
+        return im
+
+    @classmethod
+    def get_exif(cls, im):
+        """ 旧函数名：查看图片的Exif信息 """
+        exif_data = im._getexif()
+        if exif_data:
+            exif = {PIL.ExifTags.TAGS[k]: v for k, v in exif_data.items() if k in PIL.ExifTags.TAGS}
+        else:
+            exif = None
+        return exif
+
+    @classmethod
+    def rgba2rgb(cls, im):
+        if im.mode in ('RGBA', 'P'):
+            # 判断图片mode模式，如果是RGBA或P等可能有透明底，则和一个白底图片合成去除透明底
+            background = Image.new('RGBA', im.size, (255, 255, 255))
+            # composite是合成的意思。将右图的alpha替换为左图内容
+            im = Image.alpha_composite(background, im.convert('RGBA')).convert('RGB')
+        return im
+
+    @classmethod
+    def reduce_filesize(cls, im, filesize=None, suffix='jpeg'):
+        """ 按照保存后的文件大小来压缩im
+
+        :param filesize: 单位Bytes
+            可以用 300*1024 来表示 300KB
+            可以不输入，默认读取后按原尺寸返回，这样看似没变化，其实图片一读一写，是会对手机拍照的很多大图进行压缩的
+        :param suffix: 使用的图片类型
+
+        >> reduce_filesize(im, 300*1024, 'jpg')
+        """
+        # 1 工具
+        # save接口不支持jpg参数
+        if suffix == 'jpg':
+            suffix = 'jpeg'
+
+        def get_file_size(im):
+            file = io.BytesIO()
+            im.save(file, suffix)
+            return len(file.getvalue())
+
+        # 2 然后开始循环处理
+        while filesize:
+            r = get_file_size(im) / filesize
+            if r <= 1:
+                break
+
+            # 假设图片面积和文件大小成正比，如果r=4，表示长宽要各减小至1/(r**0.5)才能到目标文件大小
+            rate = min(1 / (r ** 0.5), 0.95)  # 并且限制每轮至少要缩小至95%，避免可能会迭代太多轮
+            im = im.resize((int(im.size[0] * rate), int(im.size[1] * rate)))
+        return im
+
+
+____XxImg = """
+对CvPrcs、PilPrcs的类层级接口封装
+
+这里使用了较高级的实现方法
+好处：从而每次开发只需要在CvPrcs和PilPrcs写一遍
+坏处：没有代码接口提示...
+
+CvImg、PilImg是旧写法，已经不推荐使用
+但是先留着，不然删掉还有好多代码要调整
+"""
+
+
+class CvImg:
+    """
+    np.ndarray是可以继承的
+    """
+    prcs = CvPrcs
+    imtype = np.ndarray
+    __slots__ = ('im',)
+
+    def __init__(self, im, flags=None, **kwargs):
+        if isinstance(im, type(self)):
+            im = im.im
+        else:
+            im = self.prcs.read(im, flags, **kwargs)
+        self.im = im
+
+    def __getattr__(self, item):
+        def warp_func(*args, **kwargs):
+            res = getattr(self.prcs, item)(self.im, *args, **kwargs)
+            if isinstance(res, self.imtype):  # 返回是原始图片格式，打包后返回
+                return type(self)(res)
+            else:  # 不在预期类型内，返回原值
+                return res
+
+        return warp_func
+
+
+class PilImg(CvImg):
+    """ 不推荐使用该类，建议直接用嵌入功能
+
+    注意这样继承实现虽然简单，但如果是CvPrcs有，但PilPrcs没有的功能，运行是会报错的
+    """
+    prcs = PilPrcs
+    imtype = PIL.Image.Image
+
+
+class CvImage(np.ndarray):
+    def __new__(cls, input_array, info=None):
+        """ 从np.ndarray继承的固定写法
+        https://numpy.org/doc/stable/user/basics.subclassing.html
+
+        该类使用中完全等价np.ndarray，但额外增加了CvPrcs中的功能
+        """
+        # Input array is an already formed ndarray instance
+        # We first cast to be our class type
+        obj = np.asarray(input_array).view(cls)
+        # add the new attribute to the created instance
+        obj.info = info
+        # Finally, we must return the newly created object:
+        return obj
+
+    def __array_finalize__(self, obj):
+        # see InfoArray.__array_finalize__ for comments
+        if obj is None: return
+        self.info = getattr(obj, 'info', None)
+
+    @classmethod
+    def read(cls, file, flags=None, **kwargs):
+        return cls(CvPrcs.read(file, flags, **kwargs))
+
+    @classmethod
+    def read_from_buffer(cls, buffer, flags=None, *, b64decode=False):
+        return cls(CvPrcs.read_from_buffer(buffer, flags, b64decode=b64decode))
+
+    @classmethod
+    def read_from_url(cls, url, flags=None, *, b64decode=False):
+        return cls(CvPrcs.read_from_url(url, flags, b64decode=b64decode))
+
+    @property
+    def imsize(self):
+        return CvPrcs.imsize(self)
+
+    @property
+    def n_channels(self):
+        return CvPrcs.n_channels(self)
+
+    def __getattr__(self, item):
+        """ 注意，同名方法，比如size，会优先使用np.ndarray的版本
+        所以为了区分度，CvPrcs有imsize来代表CvPrcs的size版本
+        """
+
+        def warp_func(*args, **kwargs):
+            res = getattr(CvPrcs, item)(self, *args, **kwargs)
+            if isinstance(res, np.ndarray):  # 返回是原始图片格式，打包后返回
+                return type(self)(res)  # 自定义方法必须自己再转成CvImage格式，否则会变成np.ndarray
+            elif isinstance(res, tuple):  # 如果是tuple类型，则里面的np.ndarray类型也要处理
+                res2 = []
+                for x in res:
+                    if isinstance(x, np.ndarray):
+                        res2.append(type(self)(x))
+                    else:
+                        res2.append(x)
+                return tuple(res2)
+
+        return warp_func
+
+
+@RunOnlyOnce
+def pilprcs_embedded_in_pilimage():
+    """ pil跟cv不太一样，不需要继承写个PilImage
+    因为pil支持对底层的Image类嵌入方法，这样使用会更方便直接，不用引入新类
+
+    该函数默认不会自动执行，因为存在工程化风险，需要手动明确执行
+    但在xlcv中，则会自动执行
+
+    注意这个在运行中是不可逆的，绑定了就关不掉了~~ """
+    # TODO 不知道有没有更简洁的绑定方法，目前这种写法太麻烦
+    PIL.Image.Image.to_buffer = lambda im, *args, **kwargs: PilPrcs.to_buffer(im, *args, **kwargs)
+    PIL.Image.Image.cvt_channel = lambda im, *args, **kwargs: PilPrcs.cvt_channel(im, *args, **kwargs)
+    PIL.Image.Image.write = lambda im, *args, **kwargs: PilPrcs.write(im, *args, **kwargs)
+    PIL.Image.Image.imsize = property(lambda im: PilPrcs.imsize(im))
+    PIL.Image.Image.n_channels = property(lambda im: PilPrcs.n_channels(im))
+    PIL.Image.Image.random_direction = lambda im, *args, **kwargs: PilPrcs.random_direction(im, *args, **kwargs)
+    PIL.Image.Image.reset_orientation = lambda im, *args, **kwargs: PilPrcs.reset_orientation(im, *args, **kwargs)
+    PIL.Image.Image.rgba2rgb = lambda im, *args, **kwargs: PilPrcs.rgba2rgb(im, *args, **kwargs)
+    PIL.Image.Image.reduce_filesize = lambda im, *args, **kwargs: PilPrcs.reduce_filesize(im, *args, **kwargs)
+
+
+____alias = """
+对CvPrcs中一些常用功能的名称简化
+
+有些功能是为了兼容旧版代码，可以逐步取消别名
+
+np.ndarray因为无法嵌入功能，所以可以把CvPrcs常用的功能，写成外部名
+PIL因为可以嵌入，直接用相关类处理就好，问题不大
+"""
+
+imread = CvPrcs.read
+imwrite = CvPrcs.write
+imshow = CvPrcs.show
+
+warp_image = CvPrcs.warp
+get_background_color = CvPrcs.bg_color
+pad_image = CvPrcs.pad
+get_sub_image = CvPrcs.get_sub
+
+____other = """
+"""
+
+
+def debug_images(dir_, func, *, save=None, show=False):
+    """
+    :param dir_: 选中的文件清单
+    :param func: 对每张图片执行的功能，函数应该只有一个图片路径参数  new_img = func(img)
+        当韩式有个参数时，可以用lambda函数技巧： lambda im: func(im, arg1=..., arg2=...)
+    :param save: 如果输入一个目录，会将debug结果图存储到对应的目录里
+    :param show: 如果该参数为True，则每处理一张会imshow显示处理效果
+        此时弹出的窗口里，每按任意键则显示下一张，按ESC退出
+    :return:
+
+    TODO 显示原图、处理后图的对比效果
+    TODO 支持同时显示多张图处理效果
+    """
+    if save:
+        save = File(save)
+
+    for f in dir_.subfiles():
+        im1 = imread(f)
+        im2 = func(im1)
+
+        if save:
+            imwrite(im2, File(save / f.name, dir_))
+
+        if show:
+            imshow(im2)
+            key = cv2.waitKey()
+            if key == '0x1B':  # ESC 键
+                break
