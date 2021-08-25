@@ -31,7 +31,10 @@ from pyxllib.cv.expert import imwrite, cv2pil, CvPrcs, PilPrcs
 from pyxllib.cv.imfile import zoomsvg
 
 
-class FitzPdf:
+class FitzDoc:
+    """ 原名叫FitzPdf，但不一定是处理pdf，也可能是其他文档，所以改名 FitzDoc
+    """
+
     def __init__(self, file):
         self.src_file = File(file)
         self.doc = fitz.open(str(file))
@@ -80,37 +83,40 @@ class FitzPdf:
             im = self.load_page(0).get_cv_image(scale)
             return [imwrite(im, File(srcfile.stem + os.path.splitext(file_fmt)[1], dst_dir))]
 
-    def load_page(self, number):
-        return FitzPdfPage(self.doc, number)
+    def __getattr__(self, item):
+        return getattr(self.doc, item)
 
 
-class FitzPdfPage:
-    def __init__(self, doc, page_number):
-        self.doc = doc  # 必须要存一个父节点，否则因为指针弱引用等，会产生bug
-        self.page = self.doc.load_page(page_number)
+class FitzPageExtend:
+    """ 对fitz.fitz.Page的扩展成员方法 """
 
+    @staticmethod
     def get_svg_image(self, scale=1):
         # svg 是一段表述性文本
-        txt = self.page.getSVGimage()
+        txt = self.getSVGimage()
         if scale != 1:
             txt = zoomsvg(txt, scale)
         return txt
 
+    @staticmethod
     def _get_png_data(self, scale=1):
         # TODO 增加透明通道？
         if scale != 1:
-            pix = self.page.get_pixmap(fitz.Matrix(scale, scale))  # 长宽放大到scale倍
+            pix = self.get_pixmap(fitz.Matrix(scale, scale))  # 长宽放大到scale倍
         else:
-            pix = self.page.get_pixmap()
+            pix = self.get_pixmap()
         return pix.getPNGData()
 
+    @staticmethod
     def get_cv_image(self, scale=1):
         return CvPrcs.read_from_buffer(self._get_png_data(scale), flags=1)
 
+    @staticmethod
     def get_pil_image(self, scale=1):
         # TODO 可以优化，直接从内存数据转pil，不用这样先转cv再转pil
         return PilPrcs.read_from_buffer(self._get_png_data(scale), flags=1)
 
+    @staticmethod
     def write_image(self, outfile, *, scale=1, if_exists=None):
         """ 转成为文件 """
         f = File(outfile)
@@ -123,15 +129,19 @@ class FitzPdfPage:
             im = self.get_cv_image(scale)
             imwrite(im, if_exists=if_exists)
 
-    def get_text(self, fmt='text'):
-        """
-        :param fmt: 存储格式，可以获得整页的纯文本，也可以获得dict结构存储的内容
-            返回dict的时候，如果有图片数据，其实也会返回的
+    # @staticmethod
+    # def test(cls, x):
+    #     """ 如果要扩展类方法的示例写法 """
+    #     print(cls)
+    #     print(x)
 
-            https://pymupdf.readthedocs.io/en/latest/tutorial.html#extracting-text-and-images
-                text、blocks、words、html、dict、rawdict、xhtml、xml
-        """
-        return self.page.getText(fmt)
+
+fitz.fitz.Page.get_svg_image = FitzPageExtend.get_svg_image
+fitz.fitz.Page._get_png_data = FitzPageExtend._get_png_data
+fitz.fitz.Page.get_cv_image = FitzPageExtend.get_cv_image
+fitz.fitz.Page.get_pil_image = FitzPageExtend.get_pil_image
+fitz.fitz.Page.write_image = FitzPageExtend.write_image
+# fitz.fitz.Page.test = classmethod(FitzPageExtend.test)
 
 
 class DemoFitz:
