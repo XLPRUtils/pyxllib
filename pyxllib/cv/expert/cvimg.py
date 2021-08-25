@@ -40,9 +40,6 @@ class CvImg:
         self.im = im
 
     def __getattr__(self, item):
-        if item == 'im':
-            return self.im
-
         def warp_func(*args, **kwargs):
             res = getattr(self.prcs, item)(self.im, *args, **kwargs)
             if isinstance(res, self.imtype):  # 返回是原始图片格式，打包后返回

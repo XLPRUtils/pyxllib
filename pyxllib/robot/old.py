@@ -97,9 +97,7 @@ class CWord:
 
     def __getattr__(self, item):
         """ 智能获取成员 """
-        if item in self.__dict__:
-            return self.__dict__[item]
-        elif self.doc:
+        if self.doc:
             return getattr(self.doc, item)
         else:
             return None
@@ -646,9 +644,7 @@ class LengthFormatter:
         return '{:.2f}mm'.format(self.__dict__['mm'])
 
     def __getattr__(self, key):
-        if key == 'mm':
-            return self.__dict__['mm']
-        elif key in self.ratio.keys():
+        if key in self.ratio.keys():
             return self.__dict__['mm'] / self.ratio[key]
         else:
             raise ValueError(f'不存在的长度单位类型：{key}')
