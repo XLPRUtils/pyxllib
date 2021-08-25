@@ -7,3 +7,5 @@
 from pyxllib.xl import *
 from pyxllib.algo.geo import *
 from pyxllib.cv.expert import *
+
+pilprcs_embedded_in_pilimage()
