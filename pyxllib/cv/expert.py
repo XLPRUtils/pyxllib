@@ -6,13 +6,12 @@
 
 import base64
 import io
-from functools import partial
 
 import cv2
 import numpy as np
 from PIL import Image
-from PIL import Image
 import PIL.ExifTags
+import PIL.Image
 import requests
 
 try:
@@ -127,37 +126,11 @@ __prcs = """
 """
 
 
-class __Prcs:
-    """ 共有组件 """
-
-    @classmethod
-    def size(cls, *args, **kwargs):
-        raise NotImplementedError
-
-    @classmethod
-    def resize(cls, *args, **kwargs):
-        raise NotImplementedError
-
-    @classmethod
-    def reduce_area(cls, im, area):
-        """ 根据面积上限缩小图片
-
-        即图片面积超过area时，按照等比例缩小到面积为area的图片
-        """
-        h, w = cls.size(im)
-        s = h * w
-        if s > area:
-            r = (area / s) ** 0.5
-            size = int(r * h), int(r * w)
-            im = cls.resize(im, size)
-        return im
-
-
-class CvPrcs(__Prcs):
+class CvPrcs:
     _show_win_num = 0
 
-    @classmethod
-    def read(cls, file, flags=None, **kwargs):
+    @staticmethod
+    def read(file, flags=None, **kwargs):
         """
         :param file: 支持非文件路径参数，会做类型转换
             因为这个接口的灵活性，要判断file参数类型等，速度会慢一点点
@@ -177,10 +150,10 @@ class CvPrcs(__Prcs):
             im = pil2cv(file)
         else:
             raise TypeError(f'类型错误或文件不存在：{type(file)} {file}')
-        return cls.cvt_channel(im, flags)
+        return CvPrcs.cvt_channel(im, flags)
 
-    @classmethod
-    def read_from_buffer(cls, buffer, flags=None, *, b64decode=False):
+    @staticmethod
+    def read_from_buffer(buffer, flags=None, *, b64decode=False):
         """ 从二进制流读取图片
         这个二进制流指，图片以png、jpg等某种格式存储为文件时，其对应的文件编码
 
@@ -190,28 +163,28 @@ class CvPrcs(__Prcs):
             buffer = base64.b64decode(buffer)
         buffer = np.frombuffer(buffer, dtype=np.uint8)
         im = cv2.imdecode(buffer, -1 if flags is None else flags)
-        return cls.cvt_channel(im, flags)
+        return CvPrcs.cvt_channel(im, flags)
 
-    @classmethod
-    def read_from_url(cls, url, flags=None, *, b64decode=False):
+    @staticmethod
+    def read_from_url(url, flags=None, *, b64decode=False):
         """ 从url直接获取图片到内存中
         """
         content = requests.get(url).content
-        return cls.read_from_buffer(content, flags, b64decode=b64decode)
+        return CvPrcs.read_from_buffer(content, flags, b64decode=b64decode)
 
-    @classmethod
-    def to_buffer(cls, im, ext='.jpg', *, b64encode=False):
+    @staticmethod
+    def to_buffer(im, ext='.jpg', *, b64encode=False):
         flag, buffer = cv2.imencode(ext, im)
         buffer = bytes(buffer)
         if b64encode:
             buffer = base64.b64encode(buffer)
         return buffer
 
-    @classmethod
-    def cvt_channel(cls, im, flags=None):
+    @staticmethod
+    def cvt_channel(im, flags=None):
         """ 确保图片目前是flags指示的通道情况 """
         if flags is None: return im
-        n_c = cls.n_channels(im)
+        n_c = CvPrcs.n_channels(im)
         if flags == 0 and n_c > 1:
             if n_c == 3:
                 im = cv2.cvtColor(im, cv2.COLOR_BGR2GRAY)
@@ -224,41 +197,53 @@ class CvPrcs(__Prcs):
                 im = cv2.cvtColor(im, cv2.COLOR_BGRA2BGR)
         return im
 
-    @classmethod
-    def write(cls, im, file, if_exists='replace', **kwargs):
+    @staticmethod
+    def write(im, file, if_exists='replace'):
         if not isinstance(file, File):
             file = File(file)
         data = cv2.imencode(ext=file.suffix, img=im)[1]
         return file.write(data.tobytes(), if_exists=if_exists)
 
-    @classmethod
-    def size(cls, im):
+    @staticmethod
+    def imsize(im):
         """ 图片尺寸，统一返回(height, width)，不含通道 """
         return im.shape[:2]
 
-    imsize = size
+    @staticmethod
+    def reduce_area(im, area):
+        """ 根据面积上限缩小图片
 
-    @classmethod
-    def resize(cls, im, size, **kwargs):
+        即图片面积超过area时，按照等比例缩小到面积为area的图片
         """
-        :param size: (h, w)
+        h, w = CvPrcs.imsize(im)
+        s = h * w
+        if s > area:
+            r = (area / s) ** 0.5
+            size = int(r * h), int(r * w)
+            im = CvPrcs.resize(im, size)
+        return im
+
+    @staticmethod
+    def resize2(im, dsize, **kwargs):
+        """
+        :param dsize: (h, w)
         :param kwargs:
             interpolation=cv2.INTER_CUBIC
         """
         # if 'interpolation' not in kwargs:
         #     kwargs['interpolation'] = cv2.INTER_CUBIC
-        return cv2.resize(im, size[::-1], **kwargs)
+        return cv2.resize(im, dsize[::-1], **kwargs)
 
-    @classmethod
-    def n_channels(cls, im):
+    @staticmethod
+    def n_channels(im):
         """ 通道数 """
         if im.ndim == 3:
             return im.shape[2]
         else:
             return 1
 
-    @classmethod
-    def show(cls, im, winname=None, flags=1):
+    @staticmethod
+    def imshow2(im, winname=None, flags=1):
         """ 展示窗口
 
         :param winname: 未输入时，则按test1、test2依次生成窗口
@@ -269,13 +254,13 @@ class CvPrcs(__Prcs):
         :return:
         """
         if winname is None:
-            n = cls._show_win_num + 1
+            n = CvPrcs._show_win_num + 1
             winname = f'test{n}'
         cv2.namedWindow(winname, flags)
         cv2.imshow(winname, im)
 
-    @classmethod
-    def warp(cls, im, warp_mat, dsize=None, *, view_rate=False, max_zoom=1, reserve_struct=False):
+    @staticmethod
+    def warp(im, warp_mat, dsize=None, *, view_rate=False, max_zoom=1, reserve_struct=False):
         """ 对图像进行透视变换
 
         :param im: np.ndarray的图像数据
@@ -333,8 +318,8 @@ class CvPrcs(__Prcs):
         # 4 返回值
         return dst
 
-    @classmethod
-    def bg_color(cls, src_im, edge_size=5, binary_img=None):
+    @staticmethod
+    def bg_color(src_im, edge_size=5, binary_img=None):
         """ 智能判断图片背景色
 
         对全图二值化后，考虑最外一层宽度为edge_size的环中，0、1分布最多的作为背景色
@@ -373,8 +358,8 @@ class CvPrcs(__Prcs):
         colors = colors0 if len(colors0) > len(colors1) else colors1
         return np.mean(np.array(colors), axis=0, dtype='int').tolist()
 
-    @classmethod
-    def pad(cls, im, pad_size, constant_values=0, mode='constant', **kwargs):
+    @staticmethod
+    def pad(im, pad_size, constant_values=0, mode='constant', **kwargs):
         r""" 拓宽图片上下左右尺寸
 
         基于np.pad，定制、简化了针对图片类型数据的操作
@@ -423,8 +408,8 @@ class CvPrcs(__Prcs):
 
         return dst
 
-    @classmethod
-    def _get_subrect_image(cls, src_im, pts, fill=0):
+    @staticmethod
+    def _get_subrect_image(src_im, pts, fill=0):
         """
         :return:
             dst_img 按外接四边形截取的子图
@@ -437,13 +422,13 @@ class CvPrcs(__Prcs):
         pad = [max(0, v) for v in pad]  # 负数宽度不用补充，改为0
 
         # 2 pad并定位rect局部图
-        tmp_img = cls.pad(src_im, pad, fill) if max(pad) > 0 else src_im
+        tmp_img = CvPrcs.pad(src_im, pad, fill) if max(pad) > 0 else src_im
         dst_img = tmp_img[y1 + pad[0]:y2, x1 + pad[2]:x2]  # 这里越界不会报错，只是越界的那个维度shape为0
         new_pts = [(pt[0] - x1, pt[1] - y1) for pt in pts]
         return dst_img, new_pts
 
-    @classmethod
-    def get_sub(cls, src_im, pts, *, fill=0, warp_quad=False):
+    @staticmethod
+    def get_sub(src_im, pts, *, fill=0, warp_quad=False):
         """ 从src_im取一个子图
 
         :param src_im: 原图
@@ -463,15 +448,15 @@ class CvPrcs(__Prcs):
             文件、np.ndarray --> np.ndarray
             PIL.Image --> PIL.Image
         """
-        dst, pts = cls._get_subrect_image(cls.read(src_im), reshape_coords(pts, 2), fill)
+        dst, pts = CvPrcs._get_subrect_image(CvPrcs.read(src_im), reshape_coords(pts, 2), fill)
         if len(pts) == 4 and warp_quad:
             w, h = quad_warp_wh(pts, method=warp_quad)
             warp_mat = get_warp_mat(pts, rect2polygon([0, 0, w, h]))
-            dst = cls.warp(dst, warp_mat, (w, h))
+            dst = CvPrcs.warp(dst, warp_mat, (w, h))
         return dst
 
-    @classmethod
-    def get_plot_color(cls, src):
+    @staticmethod
+    def get_plot_color(src):
         """ 获得比较适合的作画颜色
 
         TODO 可以根据背景色智能推导画线用的颜色，目前是固定红色
@@ -481,11 +466,11 @@ class CvPrcs(__Prcs):
         elif src.ndim == 2:
             return 255  # 灰度图，默认先填白色
 
-    @classmethod
-    def get_plot_args(cls, src, color=None):
+    @staticmethod
+    def get_plot_args(src, color=None):
         # 1 作图颜色
         if not color:
-            color = cls.get_plot_color(src)
+            color = CvPrcs.get_plot_color(src)
 
         # 2 画布
         if len(color) >= 3 and src.ndim <= 2:
@@ -495,8 +480,8 @@ class CvPrcs(__Prcs):
 
         return dst, color
 
-    @classmethod
-    def lines(cls, src, lines, color=None, thickness=1, line_type=cv2.LINE_AA, shift=None):
+    @staticmethod
+    def lines(src, lines, color=None, thickness=1, line_type=cv2.LINE_AA, shift=None):
         """ 在src图像上画系列线段
         """
         # 1 判断 lines 参数内容
@@ -505,7 +490,7 @@ class CvPrcs(__Prcs):
             return src
 
         # 2 参数
-        dst, color = cls.get_plot_args(src, color)
+        dst, color = CvPrcs.get_plot_args(src, color)
 
         # 3 画线
         if lines.any():
@@ -514,8 +499,8 @@ class CvPrcs(__Prcs):
                 cv2.line(dst, (x1, y1), (x2, y2), color, thickness, line_type)
         return dst
 
-    @classmethod
-    def circles(cls, src, circles, color=None, thickness=1, center=False):
+    @staticmethod
+    def circles(src, circles, color=None, thickness=1, center=False):
         """ 在图片上画圆形
 
         :param src: 要作画的图
@@ -529,7 +514,7 @@ class CvPrcs(__Prcs):
             return src
 
         # 2 参数
-        dst, color = cls.get_plot_args(src, color)
+        dst, color = CvPrcs.get_plot_args(src, color)
 
         # 3 作画
         for x in circles:
@@ -540,9 +525,9 @@ class CvPrcs(__Prcs):
         return dst
 
 
-class PilPrcs(__Prcs):
-    @classmethod
-    def read(cls, file, flags=None, **kwargs):
+class PilPrcs:
+    @staticmethod
+    def read(file, flags=None, **kwargs):
         if is_pil_image(file):
             im = file
         elif is_numpy_image(file):
@@ -551,41 +536,63 @@ class PilPrcs(__Prcs):
             im = Image.open(str(file), **kwargs)
         else:
             raise TypeError(f'类型错误或文件不存在：{type(file)} {file}')
-        return cls.cvt_channel(im, flags)
+        return PilPrcs.cvt_channel(im, flags)
 
-    @classmethod
-    def read_from_buffer(cls, buffer, flags=None, *, b64decode=False):
+    @staticmethod
+    def read_from_buffer(buffer, flags=None, *, b64decode=False):
         """ 先用opencv实现，以后可以再研究PIL.Image.frombuffer是否有更快处理策略 """
-        return cv2pil(CvPrcs.read_from_buffer(buffer, flags, b64decode=b64decode))
+        if b64decode:
+            buffer = base64.b64decode(buffer)
+        im = Image.open(io.BytesIO(buffer))
+        return PilPrcs.cvt_channel(im, flags)
 
-    @classmethod
-    def read_from_url(cls, url, flags=None, *, b64decode=False):
-        return cv2pil(CvPrcs.read_from_url(url, flags, b64decode=b64decode))
+    @staticmethod
+    def read_from_url(url, flags=None, *, b64decode=False):
+        content = requests.get(url).content
+        return PilPrcs.read_from_buffer(content, flags, b64decode=b64decode)
 
-    @classmethod
-    def to_buffer(cls, im, ext='.jpg', *, b64encode=False):
+    @staticmethod
+    def to_buffer(im, ext='.jpg', *, b64encode=False):
         # 主要是偷懒，不想重写一遍，就直接去调用cv版本的实现了
         return CvPrcs.to_buffer(pil2cv(im), ext, b64encode=b64encode)
 
-    @classmethod
-    def cvt_channel(cls, im, flags=None):
+    @staticmethod
+    def cvt_channel(im, flags=None):
         if flags is None: return im
-        n_c = cls.n_channels(im)
+        n_c = PilPrcs.n_channels(im)
         if flags == 0 and n_c > 1:
             im = im.convert('L')
         elif flags == 1 and n_c != 3:
             im = im.convert('RGB')
         return im
 
-    @classmethod
-    def write(cls, im, path, if_exists=None, **kwargs):
+    @staticmethod
+    def write(im, path, if_exists=None, **kwargs):
         p = File(path)
         if p.exist_preprcs(if_exists):
             p.ensure_parent()
             im.save(str(p), **kwargs)
 
-    @classmethod
-    def resize(cls, im, size, **kwargs):
+    @staticmethod
+    def imsize(im):
+        return im.size[::-1]
+
+    @staticmethod
+    def reduce_area(im, area):
+        """ 根据面积上限缩小图片
+
+        即图片面积超过area时，按照等比例缩小到面积为area的图片
+        """
+        h, w = PilPrcs.imsize(im)
+        s = h * w
+        if s > area:
+            r = (area / s) ** 0.5
+            size = int(r * h), int(r * w)
+            im = PilPrcs.resize2(im, size)
+        return im
+
+    @staticmethod
+    def resize2(im, size, **kwargs):
         """
 
         :param kwargs:
@@ -602,24 +609,13 @@ class PilPrcs(__Prcs):
         # 注意pil图像尺寸接口都是[w,h]，跟标准的[h,w]相反
         return im.resize(size[::-1])
 
-    @classmethod
-    def size(cls, im):
-        w, h = im.size
-        return h, w
-
-    imsize = size
-
-    @classmethod
-    def n_channels(cls, im):
+    @staticmethod
+    def n_channels(im):
         """ 通道数 """
         return len(im.getbands())
 
-    @classmethod
-    def show(cls, im, title=None, command=None):
-        return cls.show(im, title, command)
-
-    @classmethod
-    def random_direction(cls, im):
+    @staticmethod
+    def random_direction(im):
         """ 假设原图片是未旋转的状态0
 
         顺时针转90度是label=1，顺时针转180度是label2 ...
@@ -634,8 +630,8 @@ class PilPrcs(__Prcs):
             im = im.transpose(PIL.Image.ROTATE_90)
         return im, label
 
-    @classmethod
-    def reset_orientation(cls, im):
+    @staticmethod
+    def reset_orientation(im):
         """Image.open读取图片时，是手机严格正放时拍到的图片效果，
         但手机拍照时是会记录旋转位置的，即可以判断是物理空间中，实际朝上、朝下的方向，
         从而识别出正拍（代号1），顺时针旋转90度拍摄（代号8），顺时针180度拍摄（代号3）,顺时针270度拍摄（代号6）。
@@ -660,8 +656,8 @@ class PilPrcs(__Prcs):
                 im = im.transpose(PIL.Image.ROTATE_270)
         return im
 
-    @classmethod
-    def get_exif(cls, im):
+    @staticmethod
+    def get_exif(im):
         """ 旧函数名：查看图片的Exif信息 """
         exif_data = im._getexif()
         if exif_data:
@@ -670,8 +666,8 @@ class PilPrcs(__Prcs):
             exif = None
         return exif
 
-    @classmethod
-    def rgba2rgb(cls, im):
+    @staticmethod
+    def rgba2rgb(im):
         if im.mode in ('RGBA', 'P'):
             # 判断图片mode模式，如果是RGBA或P等可能有透明底，则和一个白底图片合成去除透明底
             background = Image.new('RGBA', im.size, (255, 255, 255))
@@ -679,8 +675,8 @@ class PilPrcs(__Prcs):
             im = Image.alpha_composite(background, im.convert('RGBA')).convert('RGB')
         return im
 
-    @classmethod
-    def reduce_filesize(cls, im, filesize=None, suffix='jpeg'):
+    @staticmethod
+    def reduce_filesize(im, filesize=None, suffix='jpeg'):
         """ 按照保存后的文件大小来压缩im
 
         :param filesize: 单位Bytes
@@ -709,6 +705,17 @@ class PilPrcs(__Prcs):
             # 假设图片面积和文件大小成正比，如果r=4，表示长宽要各减小至1/(r**0.5)才能到目标文件大小
             rate = min(1 / (r ** 0.5), 0.95)  # 并且限制每轮至少要缩小至95%，避免可能会迭代太多轮
             im = im.resize((int(im.size[0] * rate), int(im.size[1] * rate)))
+        return im
+
+    @staticmethod
+    def trim(im, border=(255, 255, 255)):
+        """ 默认裁剪掉白色边缘，可以配合 get_backgroup_color 裁剪掉背景色 """
+        from PIL import Image, ImageChops
+        bg = Image.new(im.mode, im.size, border)
+        diff = ImageChops.difference(im, bg)
+        bbox = diff.getbbox()
+        if bbox:
+            im = im.crop(bbox)
         return im
 
 
@@ -779,18 +786,6 @@ class CvImage(np.ndarray):
         if obj is None: return
         self.info = getattr(obj, 'info', None)
 
-    @classmethod
-    def read(cls, file, flags=None, **kwargs):
-        return cls(CvPrcs.read(file, flags, **kwargs))
-
-    @classmethod
-    def read_from_buffer(cls, buffer, flags=None, *, b64decode=False):
-        return cls(CvPrcs.read_from_buffer(buffer, flags, b64decode=b64decode))
-
-    @classmethod
-    def read_from_url(cls, url, flags=None, *, b64decode=False):
-        return cls(CvPrcs.read_from_url(url, flags, b64decode=b64decode))
-
     @property
     def imsize(self):
         return CvPrcs.imsize(self)
@@ -805,7 +800,10 @@ class CvImage(np.ndarray):
         """
 
         def warp_func(*args, **kwargs):
-            res = getattr(CvPrcs, item)(self, *args, **kwargs)
+            func = getattr(cv2, item, getattr(CvPrcs, item, None))  # 先在cv2找方法，再在CvPrcs找方法
+            if func is None:
+                raise ValueError(f'不存在的方法名 {item}')
+            res = func(self, *args, **kwargs)
             if isinstance(res, np.ndarray):  # 返回是原始图片格式，打包后返回
                 return type(self)(res)  # 自定义方法必须自己再转成CvImage格式，否则会变成np.ndarray
             elif isinstance(res, tuple):  # 如果是tuple类型，则里面的np.ndarray类型也要处理
@@ -816,29 +814,45 @@ class CvImage(np.ndarray):
                     else:
                         res2.append(x)
                 return tuple(res2)
+            return res
 
         return warp_func
 
 
 @RunOnlyOnce
+def cvprcs_embedded_in_cv2():
+    """ 把CvPrcs的功能嵌入到cv2中
+
+    虽然这样不太工程化，但在使用的时候会直观的多
+    首先用户能明确是cv2，对np.ndarray处理的功能，减少学习使用CvPrcs的别扭
+    """
+    import cv2
+
+    # 对于cv2，所有方法都绑定到cv2模块下
+    names = {x for x in dir(CvPrcs) if (x[:2] != '__' or x[-2:] != '__')}  # 过滤掉object自带的标准成员
+    for name in names:
+        setattr(cv2, name, getattr(CvPrcs, name))
+
+
+@RunOnlyOnce
 def pilprcs_embedded_in_pilimage():
-    """ pil跟cv不太一样，不需要继承写个PilImage
-    因为pil支持对底层的Image类嵌入方法，这样使用会更方便直接，不用引入新类
+    import PIL.Image
 
-    该函数默认不会自动执行，因为存在工程化风险，需要手动明确执行
-    但在xlcv中，则会自动执行
+    # 1 绑定到模块下的方法
+    pil_names = set('read read_from_buffer read_from_url'.split())
+    for name in pil_names:
+        setattr(PIL.Image, name, getattr(PilPrcs, name))
 
-    注意这个在运行中是不可逆的，绑定了就关不掉了~~ """
-    # TODO 不知道有没有更简洁的绑定方法，目前这种写法太麻烦
-    PIL.Image.Image.to_buffer = lambda im, *args, **kwargs: PilPrcs.to_buffer(im, *args, **kwargs)
-    PIL.Image.Image.cvt_channel = lambda im, *args, **kwargs: PilPrcs.cvt_channel(im, *args, **kwargs)
-    PIL.Image.Image.write = lambda im, *args, **kwargs: PilPrcs.write(im, *args, **kwargs)
-    PIL.Image.Image.imsize = property(lambda im: PilPrcs.imsize(im))
-    PIL.Image.Image.n_channels = property(lambda im: PilPrcs.n_channels(im))
-    PIL.Image.Image.random_direction = lambda im, *args, **kwargs: PilPrcs.random_direction(im, *args, **kwargs)
-    PIL.Image.Image.reset_orientation = lambda im, *args, **kwargs: PilPrcs.reset_orientation(im, *args, **kwargs)
-    PIL.Image.Image.rgba2rgb = lambda im, *args, **kwargs: PilPrcs.rgba2rgb(im, *args, **kwargs)
-    PIL.Image.Image.reduce_filesize = lambda im, *args, **kwargs: PilPrcs.reduce_filesize(im, *args, **kwargs)
+    # 2 绑定到PIL.Image.Image下的方法
+    # 2.1 属性类
+    attrs_names = set('imsize n_channels'.split())
+    for name in attrs_names:
+        setattr(PIL.Image.Image, name, property(getattr(PilPrcs, name)))
+
+    # 2.2 其他均为方法类
+    all_names = {x for x in dir(PilPrcs) if (x[:2] != '__' or x[-2:] != '__')}
+    for name in (all_names - pil_names - attrs_names):
+        setattr(PIL.Image.Image, name, getattr(PilPrcs, name))
 
 
 ____alias = """
@@ -852,7 +866,7 @@ PIL因为可以嵌入，直接用相关类处理就好，问题不大
 
 imread = CvPrcs.read
 imwrite = CvPrcs.write
-imshow = CvPrcs.show
+imshow = CvPrcs.imshow2
 
 warp_image = CvPrcs.warp
 get_background_color = CvPrcs.bg_color

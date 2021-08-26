@@ -8,4 +8,5 @@ from pyxllib.xl import *
 from pyxllib.algo.geo import *
 from pyxllib.cv.expert import *
 
+cvprcs_embedded_in_cv2()
 pilprcs_embedded_in_pilimage()
