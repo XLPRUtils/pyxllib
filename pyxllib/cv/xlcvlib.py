@@ -15,7 +15,6 @@ import requests
 from pyxllib.prog.newbie import round_int, RunOnlyOnce
 from pyxllib.algo.geo import rect_bounds, warp_points, reshape_coords, quad_warp_wh, get_warp_mat, rect2polygon
 from pyxllib.file.specialist import File
-from pyxllib.cv.xlpillib import xlpil
 
 _show_win_num = 0
 
@@ -36,6 +35,8 @@ class xlcv:
             0，将图像转成单通道灰度图像后读取
             1，将图像转换成3通道BGR彩色图像
         """
+        from pyxllib.cv.xlpillib import xlpil
+
         if xlcv.is_cv2_image(file):
             im = file
         elif File.safe_init(file):

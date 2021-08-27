@@ -136,6 +136,29 @@ class FitzPageExtend:
             默认只显示blocks
             例如 (0, 0, 1, 0)，表示只显示spans的标注
         :param scale: 是否需要对坐标按比例放大 （pdf经常放大两倍提取图片，则这里标注也要对应放大两倍）
+
+        【字典属性解释】
+
+        lines:
+            wmode: 好像都是0，不知道啥东西
+            dir: [1, 0]，可能是文本方向吧
+        spans:
+            size: 字号
+            flags: 格式标记
+                1，superscript，上标
+                2，italic，斜体
+                4，serifed，有衬线。如果没开，对立面就是"sans"，无衬线。
+                8，monospaced，等距。对立面proportional，均衡。
+                16，bold，加粗
+            font：字体名称（直接用字符串赋值）
+            color：颜色
+            ascender：？
+            descender：？
+            origin：所在方格右上角坐标
+            text/chars: dict模式有text内容，rawdict有chars详细信息。我扩展的版本，rawdict也会有text属性。
+        char:
+            origin: 差不多是其所在方格的右上角坐标，同一行文本，其top位置是会对齐的
+            c: 字符内容
         """
         from pyxllib.data.labelme import LabelmeDict
 
@@ -157,7 +180,7 @@ class FitzPageExtend:
             DictTool.isub(msgdict, drop_keys)
             bbox = [round_int(v * scale) for v in refdict['bbox']]
             if 'origin' in msgdict:
-                msgdict['origin'] = [round(v, 2) for v in msgdict['origin']]
+                msgdict['origin'] = [round_int(v) for v in msgdict['origin']]
             sp = LabelmeDict.gen_shape(json.dumps(msgdict), bbox)
             shapes.append(sp)
 
@@ -172,8 +195,10 @@ class FitzPageExtend:
                     for span in line['spans']:
                         span['size'] = round_int(span['size'])
                         span['origin'] = [round_int(v) for v in span['origin']]
+                        if 'text' not in span and 'chars' in span:
+                            span['text'] = ''.join([x['c'] for x in span['chars']])
                         if views[2]:
-                            add_shape('span', span, {'n_chars': len(span['text'])}, ['bbox'])
+                            add_shape('span', span, {'n_chars': len(span.get('text', ''))}, ['bbox', 'chars'])
                         if views[3] and 'chars' in span:  # 最后层算法不太一样，这样写可以加速
                             for char in span['chars']:
                                 add_shape('char', char, {}, ['bbox'])
@@ -187,7 +212,7 @@ class FitzPageExtend:
 
 def check_names_fitzpageextend():
     exist_names = {'fitz.fitz.Page': set(dir(fitz.fitz.Page))}
-    names = {x for x in dir(xlcv) if x[:2] != '__'}
+    names = {x for x in dir(FitzPageExtend) if x[:2] != '__'}
 
     for name, k in itertools.product(names, exist_names):
         if name in exist_names[k]:
