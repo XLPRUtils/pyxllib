@@ -44,6 +44,11 @@ def natural_sort(ls, only_use_digits=False):
     return sorted(ls, key=func)
 
 
+def argsort(seq):
+    # http://stackoverflow.com/questions/3071415/efficient-method-to-calculate-the-rank-vector-of-a-list-in-python
+    return sorted(range(len(seq)), key=seq.__getitem__)
+
+
 def make_index_function(li, *, start=0, nan=None):
     """ 返回一个函数，输入值，返回对应下标，找不到时返回 not_found
 
