@@ -8,5 +8,9 @@ from pyxllib.xl import *
 from pyxllib.algo.geo import *
 from pyxllib.cv.expert import *
 
-cvprcs_embedded_in_cv2()
-pilprcs_embedded_in_pilimage()
+# 把自定义的一些功能嵌入到PIL.Image.Image类中。
+# 因为pyxllib.xlcv设计初衷本就是为了便捷而牺牲工程性。
+# 如果这步没有给您“惊喜”而是“惊吓”，
+# 可以使用 from pyxllib.cv.expert import * 代替 from pyxllib.xlcv import *。
+# 然后显式使用 xlpil.imsize(im) 来代替 im.imsize 等用法。
+pil_binding_xlpil()

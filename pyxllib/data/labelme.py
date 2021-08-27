@@ -11,14 +11,13 @@ import ujson
 import copy
 
 from pyxllib.prog.deprecatedlib import deprecated
-import pandas as pd
 import numpy as np
 
 from pyxllib.prog.pupil import DictTool
 from pyxllib.debug.specialist import get_xllog, Iterate, dprint
 from pyxllib.file.specialist import File, Dir, PathGroups, get_encoding
 from pyxllib.prog.specialist import mtqdm
-from pyxllib.cv.expert import PilImg
+from pyxllib.cv.expert import xlpil
 from pyxllib.algo.geo import ltrb2xywh, rect_bounds, warp_points, resort_quad_points, rect2polygon, get_warp_mat
 
 __0_basic = """
@@ -173,7 +172,7 @@ class ToLabelmeJson:
         # 读取图片数据，在一些转换规则比较复杂，有可能要用到原图数据
         if self.imgpath:
             # 一般都只需要获得尺寸，用pil读取即可，速度更快，不需要读取图片rgb数据
-            self.img = PilImg(self.imgpath)
+            self.img = xlpil.read(self.imgpath)
         else:
             self.img = None
         self.data = self.get_data_base()  # 存储json的字典数据
@@ -193,7 +192,7 @@ class ToLabelmeJson:
         # 1 默认属性，和图片名、尺寸
         if self.imgpath:
             name = self.imgpath.name
-            height, width = self.img.size()
+            height, width = self.img.height, self.img.width
         # 2 构建结构框架
         data = {'version': '4.5.6',
                 'flags': {},
@@ -322,8 +321,8 @@ class LabelmeDict:
         if imfile:
             file = File(imfile)
             name = file.name
-            img = PilImg(str(file))
-            height, width = img.size()
+            img = xlpil.read(file)
+            height, width = img.height, img.width
         else:
             name, height, width = '', 0, 0
 
