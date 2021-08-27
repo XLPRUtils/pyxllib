@@ -4,11 +4,12 @@
 # @Email  : 877362867@qq.com
 # @Date   : 2020/06/02 16:06
 
+import itertools
+import json
 import os
 import pprint
 import re
 import subprocess
-import json
 
 try:
     import fitz
@@ -22,7 +23,7 @@ from pyxllib.algo.pupil import get_number_width
 from pyxllib.file.specialist import File, Dir, writefile
 from pyxllib.debug.pupil import dprint
 from pyxllib.debug.specialist import browser
-from pyxllib.cv.expert import xlcv, xlpil, check_exist_method_name
+from pyxllib.cv.expert import xlcv, xlpil
 
 
 class FitzDoc:
@@ -184,16 +185,25 @@ class FitzPageExtend:
         return shapes
 
 
-@RunOnlyOnce
-def fitzpage_binding_extend():
+def check_names_fitzpageextend():
     exist_names = {'fitz.fitz.Page': set(dir(fitz.fitz.Page))}
-    all_names = {x for x in dir(FitzPageExtend) if (x[:2] != '__' or x[-2:] != '__')}
-    for name in all_names:
-        check_exist_method_name(exist_names, name)
+    names = {x for x in dir(xlcv) if x[:2] != '__'}
+
+    for name, k in itertools.product(names, exist_names):
+        if name in exist_names[k]:
+            print(f'警告！同名冲突！ {k}.{name}')
+
+    return names
+
+
+@RunOnlyOnce
+def binding_fitzpage_extend():
+    names = check_names_fitzpageextend()
+    for name in names:
         setattr(fitz.fitz.Page, name, getattr(FitzPageExtend, name))
 
 
-fitzpage_binding_extend()
+binding_fitzpage_extend()
 
 
 class DemoFitz:
