@@ -143,6 +143,29 @@ def resort_quad_points(src_pts):
     return pts
 
 
+def ltrb_border(ltrb, border, size=None):
+    """ 给原来的ltrb定位扩展border像素
+
+    Args:
+        ltrb:
+        border: 可以一个数字，表示统一添加的像素值
+            也可以四个数字，表示每个维度分别加的像素值
+        size:
+            原图的 (width, height)，防止越界
+            可以不填，默认不考虑越界问题
+    Returns: 新的ltrb坐标
+    """
+    if isinstance(border, int):
+        border = [border] * 4
+
+    l = max(0, ltrb[0] - border[0])
+    t = max(0, ltrb[1] - border[1])
+    r = min(size[0], ltrb[2] + border[2])
+    b = min(size[1], ltrb[3] + border[3])
+
+    return [l, t, r, b]
+
+
 ____warp_perspective = """
 仿射、透视变换相关功能
 

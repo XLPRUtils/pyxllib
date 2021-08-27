@@ -4,18 +4,11 @@
 # @Email  : 877362867@qq.com
 # @Date   : 2020/06/02 16:06
 
-import concurrent.futures
-import math
 import os
 import pprint
 import re
-import tempfile
-import pathlib
-import copy
 import subprocess
-
-import cv2
-import numpy as np
+import json
 
 try:
     import fitz
@@ -23,12 +16,13 @@ except ModuleNotFoundError:
     subprocess.run(['pip3', 'install', 'PyMuPdf>=1.18.17'])
     import fitz
 
+from pyxllib.prog.newbie import round_int, RunOnlyOnce
+from pyxllib.prog.pupil import DictTool
 from pyxllib.algo.pupil import get_number_width
-from pyxllib.file.specialist import File, Dir, writefile, filescopy, filesdel
+from pyxllib.file.specialist import File, Dir, writefile
 from pyxllib.debug.pupil import dprint
 from pyxllib.debug.specialist import browser
-from pyxllib.cv.expert import imwrite, cv2pil, CvPrcs, PilPrcs
-from pyxllib.cv.imfile import zoomsvg
+from pyxllib.cv.expert import xlcv, xlpil, check_exist_method_name
 
 
 class FitzDoc:
@@ -76,12 +70,12 @@ class FitzDoc:
             for i in range(n_page):
                 im = self.load_page(i).get_cv_image(scale)
                 number = ('{:0' + str(num_width) + 'd}').format(i + start)  # 前面的括号不要删，这样才是完整的一个字符串来使用format
-                f = imwrite(im, File(file_fmt.format(filestem=filestem, number=number), dst_dir))
+                f = xlcv.write(im, File(file_fmt.format(filestem=filestem, number=number), dst_dir))
                 res.append(f)
             return res
         else:
             im = self.load_page(0).get_cv_image(scale)
-            return [imwrite(im, File(srcfile.stem + os.path.splitext(file_fmt)[1], dst_dir))]
+            return [xlcv.write(im, File(srcfile.stem + os.path.splitext(file_fmt)[1], dst_dir))]
 
     def __getattr__(self, item):
         return getattr(self.doc, item)
@@ -91,30 +85,31 @@ class FitzPageExtend:
     """ 对fitz.fitz.Page的扩展成员方法 """
 
     @staticmethod
-    def get_svg_image(self, scale=1):
+    def get_svg_image2(self, scale=1):
         # svg 是一段表述性文本
-        txt = self.getSVGimage()
         if scale != 1:
-            txt = zoomsvg(txt, scale)
+            txt = self.get_svg_image(matrix=fitz.Matrix(scale, scale))
+        else:
+            txt = self.get_svg_image()
         return txt
 
     @staticmethod
     def _get_png_data(self, scale=1):
         # TODO 增加透明通道？
         if scale != 1:
-            pix = self.get_pixmap(fitz.Matrix(scale, scale))  # 长宽放大到scale倍
+            pix = self.get_pixmap(matrix=fitz.Matrix(scale, scale))  # 长宽放大到scale倍
         else:
             pix = self.get_pixmap()
         return pix.getPNGData()
 
     @staticmethod
     def get_cv_image(self, scale=1):
-        return CvPrcs.read_from_buffer(self._get_png_data(scale), flags=1)
+        return xlcv.read_from_buffer(self._get_png_data(scale), flags=1)
 
     @staticmethod
     def get_pil_image(self, scale=1):
         # TODO 可以优化，直接从内存数据转pil，不用这样先转cv再转pil
-        return PilPrcs.read_from_buffer(self._get_png_data(scale), flags=1)
+        return xlpil.read_from_buffer(self._get_png_data(scale), flags=1)
 
     @staticmethod
     def write_image(self, outfile, *, scale=1, if_exists=None):
@@ -127,21 +122,78 @@ class FitzPageExtend:
             f.write(content, if_exists=if_exists)
         else:
             im = self.get_cv_image(scale)
-            imwrite(im, if_exists=if_exists)
+            xlcv.write(im, if_exists=if_exists)
 
-    # @staticmethod
-    # def test(cls, x):
-    #     """ 如果要扩展类方法的示例写法 """
-    #     print(cls)
-    #     print(x)
+    @staticmethod
+    def get_labelme_shapes(self, opt='dict', *, views=1, scale=1):
+        """ 得到labelme版本的shapes标注信息
+
+        :param opt: get_text的参数，默认使用无字符集标注的精简的dict
+            也可以使用rawdict，带有字符集标注的数据
+        :param views: 若非list或者长度不足4，会补足
+            各位标记依次代表是否显示对应细粒度的标注：blocks、lines、spans、chars
+            默认只显示blocks
+            例如 (0, 0, 1, 0)，表示只显示spans的标注
+        :param scale: 是否需要对坐标按比例放大 （pdf经常放大两倍提取图片，则这里标注也要对应放大两倍）
+        """
+        from pyxllib.data.labelme import LabelmeDict
+
+        # 1 参数配置
+        if isinstance(views, int):
+            views = [views]
+        if len(views) < 4:
+            views += [0] * (4 - len(views))
+
+        shapes = []
+        page_dict = self.get_text(opt)
+
+        # 2 辅助函数
+        def add_shape(name, refdict, add_keys, drop_keys=('bbox',)):
+            """ 生成一个标注框 """
+            msgdict = {'category_name': name}
+            msgdict.update(add_keys)
+            DictTool.ior(msgdict, refdict)
+            DictTool.isub(msgdict, drop_keys)
+            bbox = [round_int(v * scale) for v in refdict['bbox']]
+            if 'origin' in msgdict:
+                msgdict['origin'] = [round(v, 2) for v in msgdict['origin']]
+            sp = LabelmeDict.gen_shape(json.dumps(msgdict), bbox)
+            shapes.append(sp)
+
+        # 3 遍历获取标注数据
+        for block in page_dict['blocks']:
+            if block['type'] == 0:  # 普通的文本行
+                if views[0]:
+                    add_shape('text_block', block, {'n_lines': len(block['lines'])}, ['bbox', 'lines'])
+                for line in block['lines']:
+                    if views[1]:
+                        add_shape('line', line, {'n_spans': len(line['spans'])}, ['bbox', 'spans'])
+                    for span in line['spans']:
+                        span['size'] = round_int(span['size'])
+                        span['origin'] = [round_int(v) for v in span['origin']]
+                        if views[2]:
+                            add_shape('span', span, {'n_chars': len(span['text'])}, ['bbox'])
+                        if views[3] and 'chars' in span:  # 最后层算法不太一样，这样写可以加速
+                            for char in span['chars']:
+                                add_shape('char', char, {}, ['bbox'])
+            elif block['type'] == 1:  # 应该是图片
+                add_shape('image', block, {'image_filesize': len(block['image'])}, ['bbox', 'image'])
+            else:
+                raise ValueError
+
+        return shapes
 
 
-fitz.fitz.Page.get_svg_image = FitzPageExtend.get_svg_image
-fitz.fitz.Page._get_png_data = FitzPageExtend._get_png_data
-fitz.fitz.Page.get_cv_image = FitzPageExtend.get_cv_image
-fitz.fitz.Page.get_pil_image = FitzPageExtend.get_pil_image
-fitz.fitz.Page.write_image = FitzPageExtend.write_image
-# fitz.fitz.Page.test = classmethod(FitzPageExtend.test)
+@RunOnlyOnce
+def fitzpage_binding_extend():
+    exist_names = {'fitz.fitz.Page': set(dir(fitz.fitz.Page))}
+    all_names = {x for x in dir(FitzPageExtend) if (x[:2] != '__' or x[-2:] != '__')}
+    for name in all_names:
+        check_exist_method_name(exist_names, name)
+        setattr(fitz.fitz.Page, name, getattr(FitzPageExtend, name))
+
+
+fitzpage_binding_extend()
 
 
 class DemoFitz:
