@@ -17,13 +17,14 @@ except ModuleNotFoundError:
     subprocess.run(['pip3', 'install', 'PyMuPdf>=1.18.17'])
     import fitz
 
-from pyxllib.prog.newbie import round_int, RunOnlyOnce
+from pyxllib.prog.newbie import round_int, RunOnlyOnce, decode_bitflags
 from pyxllib.prog.pupil import DictTool
 from pyxllib.algo.pupil import get_number_width
 from pyxllib.file.specialist import File, Dir, writefile
 from pyxllib.debug.pupil import dprint
 from pyxllib.debug.specialist import browser
 from pyxllib.cv.expert import xlcv, xlpil
+from pyxllib.data.labelme import LabelmeDict
 
 
 class FitzDoc:
@@ -34,8 +35,8 @@ class FitzDoc:
         self.src_file = File(file)
         self.doc = fitz.open(str(file))
 
-    def to_images(self, dst_dir=None, file_fmt='{filestem}_{number}.png', num_width=None, *,
-                  scale=1, start=1, fmt_onepage=False):
+    def write_images(self, dst_dir=None, file_fmt='{filestem}_{number}.png', num_width=None, *,
+                     scale=1, start=1, fmt_onepage=False):
         """ 将pdf转为若干页图片
 
         :param dst_dir: 目标目录
@@ -77,6 +78,14 @@ class FitzDoc:
         else:
             im = self.load_page(0).get_cv_image(scale)
             return [xlcv.write(im, File(srcfile.stem + os.path.splitext(file_fmt)[1], dst_dir))]
+
+    def write_labelmes(self, imfiles, opt='dict', *, views=(0, 0, 1, 0), scale=1, indent=None):
+        """ 生成图片对应的标注，常跟to_images配合使用 """
+        for i, imfile in enumerate(imfiles):
+            page = self.load_page(i)
+            lmdict = LabelmeDict.gen_data(imfile)
+            lmdict['shapes'] = page.get_labelme_shapes(opt, views=views, scale=scale)
+            imfile.with_suffix('.json').write(lmdict, indent=indent)
 
     def __getattr__(self, item):
         return getattr(self.doc, item)
@@ -138,7 +147,9 @@ class FitzPageExtend:
         :param scale: 是否需要对坐标按比例放大 （pdf经常放大两倍提取图片，则这里标注也要对应放大两倍）
 
         【字典属性解释】
-
+        blocks:
+            number: int, 区块编号
+            type: 0表示文本行，1表示图片
         lines:
             wmode: 好像都是0，不知道啥东西
             dir: [1, 0]，可能是文本方向吧
@@ -179,8 +190,17 @@ class FitzPageExtend:
             DictTool.ior(msgdict, refdict)
             DictTool.isub(msgdict, drop_keys)
             bbox = [round_int(v * scale) for v in refdict['bbox']]
+
+            if 'size' in msgdict:
+                msgdict['size'] = round(msgdict['size'], 1)
+            if 'color' in msgdict:
+                # 把color映射为直观的(r, g, b)
+                # 这个pdf解析器获取的color，不一定精确等于原值，可能会有偏差，小一个像素
+                v = msgdict['color']
+                msgdict['color'] = (v // 256 // 256, (v // 256) % 256, v % 256)
             if 'origin' in msgdict:
                 msgdict['origin'] = [round_int(v) for v in msgdict['origin']]
+
             sp = LabelmeDict.gen_shape(json.dumps(msgdict), bbox)
             shapes.append(sp)
 
@@ -193,8 +213,6 @@ class FitzPageExtend:
                     if views[1]:
                         add_shape('line', line, {'n_spans': len(line['spans'])}, ['bbox', 'spans'])
                     for span in line['spans']:
-                        span['size'] = round_int(span['size'])
-                        span['origin'] = [round_int(v) for v in span['origin']]
                         if 'text' not in span and 'chars' in span:
                             span['text'] = ''.join([x['c'] for x in span['chars']])
                         if views[2]:
@@ -208,6 +226,14 @@ class FitzPageExtend:
                 raise ValueError
 
         return shapes
+
+    @staticmethod
+    def parse_flags(cls, n):
+        """ 解析spans的flags参数明文含义 """
+        flags = decode_bitflags(n, ('superscript', 'italic', 'serifed', 'monospaced', 'bold'))
+        flags['sans'] = not flags['serifed']
+        flags['proportional'] = not flags['monospaced']
+        return flags
 
 
 def check_names_fitzpageextend():
@@ -224,7 +250,12 @@ def check_names_fitzpageextend():
 @RunOnlyOnce
 def binding_fitzpage_extend():
     names = check_names_fitzpageextend()
-    for name in names:
+    cls_names = {'parse_flags'}
+
+    for name in cls_names:
+        setattr(fitz.fitz.Page, name, classmethod(getattr(FitzPageExtend, name)))
+
+    for name in (names - cls_names):
         setattr(fitz.fitz.Page, name, getattr(FitzPageExtend, name))
 
 

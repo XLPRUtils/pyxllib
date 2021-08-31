@@ -788,7 +788,7 @@ class File(PathBase):
             elif mode == '.json':
                 with open(name, 'w', encoding=encoding) as f:
                     DictTool.ior(kwargs, {'ensure_ascii': False})
-                    ujson.dump(ob, f, **kwargs)
+                    json.dump(ob, f, **kwargs)
             elif mode == '.yaml':
                 with open(name, 'w', encoding=encoding) as f:
                     yaml.dump(ob, f)
