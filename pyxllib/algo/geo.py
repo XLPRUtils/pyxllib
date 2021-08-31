@@ -101,7 +101,7 @@ def rect_bounds(coords):
     :param coords: 支持list、np等类型，支持1d、2d两种维度表达方式
     :return: rect的两个点坐标，同时也是 [left, top, right, bottom]
     """
-    pts = np.array(coords).reshape(-1).tolist()
+    pts = np.array(coords).reshape(-1).tolist()  # tolist不能删，不然int类型就变了。比如int64不能json.dump
     p = [min(pts[::2]), min(pts[1::2]), max(pts[::2]), max(pts[1::2])]
     return [v for v in p]
 

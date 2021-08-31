@@ -301,3 +301,25 @@ class classproperty(property):
 
     def __delete__(self, obj):
         super(classproperty, self).__delete__(type(obj))
+
+
+def decode_bitflags(n, flags, return_type=dict):
+    """ 解析一个位标记的功能
+    :param int n: 一个整数标记
+    :param list|tuple flags: 一个对应明文数组
+        flags[0]对应2**0的明文，flags[1]对应2**1的明文，以此类推
+    :param type return_type: 返回的数据类型
+        默认dict，记录所有key的bool结果
+        可以设set，只返回真的标记结果
+
+    >>> decode_bitflags(18, ('superscript', 'italic', 'serifed', 'monospaced', 'bold'))
+    {'superscript': 2, 'italic': 0, 'serifed': 0, 'monospaced': 16, 'bold': 0}
+    >>> decode_bitflags(18, ('superscript', 'italic', 'serifed', 'monospaced', 'bold'), set)
+    {'superscript', 'monospaced'}
+    """
+    if return_type == dict:
+        return {x: n & (2 << i) for i, x in enumerate(flags)}
+    elif return_type == set:
+        return {x for i, x in enumerate(flags) if (n & (2 << i))}
+    else:
+        raise ValueError
