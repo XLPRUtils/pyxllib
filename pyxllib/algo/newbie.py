@@ -4,6 +4,8 @@
 # @Email  : 877362867@qq.com
 # @Date   : 2021/06/06 10:51
 
+from pyxllib.prog.newbie import round_int
+
 
 def vector_compare(x, y):
     """
@@ -44,3 +46,26 @@ def vector_compare(x, y):
         return '>'
     else:
         return '?'
+
+
+def round_unit(x, unit):
+    """ 按特定单位量对x取倍率
+
+    round_int偏向于工程代码简化，round_unit偏向算法，功能不太一样，所以分组不同
+
+    Args:
+        x: 原值
+        unit: 单位量
+
+    Returns: 新值，是unit的整数倍
+
+    >>> round_unit(1.2, 0.5)
+    1.0
+    >>> round_unit(1.6, 0.5)
+    1.5
+    >>> round_unit(7, 5)
+    5
+    >>> round_unit(13, 5)
+    15
+    """
+    return round_int(x / unit) * unit
