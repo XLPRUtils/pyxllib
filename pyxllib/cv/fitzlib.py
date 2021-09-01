@@ -19,6 +19,7 @@ except ModuleNotFoundError:
 
 from pyxllib.prog.newbie import round_int, RunOnlyOnce, decode_bitflags
 from pyxllib.prog.pupil import DictTool
+from pyxllib.algo.newbie import round_unit
 from pyxllib.algo.pupil import get_number_width
 from pyxllib.file.specialist import File, Dir, writefile
 from pyxllib.debug.pupil import dprint
@@ -192,7 +193,8 @@ class FitzPageExtend:
             bbox = [round_int(v * scale) for v in refdict['bbox']]
 
             if 'size' in msgdict:
-                msgdict['size'] = round(msgdict['size'], 1)
+                x = round_unit(msgdict['size'], 0.5)
+                msgdict['size'] = round_int(x) if (x * 10) % 10 < 1 else x  # 没有小数的时候，优先展示为11，而不是11.0
             if 'color' in msgdict:
                 # 把color映射为直观的(r, g, b)
                 # 这个pdf解析器获取的color，不一定精确等于原值，可能会有偏差，小一个像素
