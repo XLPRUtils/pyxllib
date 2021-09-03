@@ -177,7 +177,11 @@ class xlcv:
 
     @staticmethod
     def cvt_channel(im, flags=None):
-        """ 确保图片目前是flags指示的通道情况 """
+        """ 确保图片目前是flags指示的通道情况
+
+        1. 通道互转功能适用于RGBA情况
+        2. RGBA转RGB默认是黑底填充。如果需要白底填充，可以使用xlpil.rgba2rgb等专门的特殊处理策略。
+        """
         if flags is None: return im
         n_c = xlcv.n_channels(im)
         if flags == 0 and n_c > 1:
