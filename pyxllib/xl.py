@@ -30,6 +30,3 @@ from pyxllib.file.specialist import *
 from pyxllib.debug.newbie import *
 from pyxllib.debug.pupil import *
 from pyxllib.debug.specialist import *
-
-from pyxllib.excel.newbie import *
-from pyxllib.excel.specialist import *

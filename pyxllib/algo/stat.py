@@ -4,6 +4,11 @@
 # @Email  : 877362867@qq.com
 # @Date   : 2021/06/03 23:04
 
+""" 统计方面的功能
+
+主要是pandas、表格运算
+"""
+
 from collections import defaultdict
 import pandas as pd
 

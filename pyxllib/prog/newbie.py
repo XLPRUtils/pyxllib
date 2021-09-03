@@ -4,8 +4,6 @@
 # @Email  : 877362867@qq.com
 # @Date   : 2021/06/06 10:51
 
-from pyxllib.excel.newbie import int2excel_col_name
-
 
 def typename(c):
     """ 简化输出的type类型
@@ -161,34 +159,6 @@ def swap_rowcol(a, *, ensure_arr=False, default_value=''):
         a = ensure_array(a, default_value)
     # 这是非常有教学意义的行列互换实现代码
     return list(map(list, zip(*a)))
-
-
-def gentuple(n, tag):
-    """ 有点类似range函数，但生成的数列更加灵活
-
-    :param n:
-        数组长度
-    :param tag:
-        int类型，从指定数字开始编号
-            0，从0开始编号
-            1，从1开始编号
-        'A'，用Excel的形式编号
-        tuple，按枚举值循环显示
-            ('A', 'B')：循环使用A、B编号
-
-    >>> gentuple(4, 'A')
-    ('A', 'B', 'C', 'D')
-    """
-    a = [''] * n
-    if isinstance(tag, int):
-        for i in range(n):
-            a[i] = i + tag
-    elif tag == 'A':
-        a = tuple(map(lambda x: int2excel_col_name(x + 1), range(n)))
-    elif isinstance(tag, (list, tuple)):
-        k = len(tag)
-        a = tuple(map(lambda x: tag[x % k], range(n)))
-    return a
 
 
 class GrowingList(list):
