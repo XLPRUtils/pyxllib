@@ -69,3 +69,63 @@ def round_unit(x, unit):
     15
     """
     return round_int(x / unit) * unit
+
+
+def int2excel_col_name(d):
+    """
+    >>> int2excel_col_name(1)
+    'A'
+    >>> int2excel_col_name(28)
+    'AB'
+    >>> int2excel_col_name(100)
+    'CV'
+    """
+    s = []
+    while d:
+        t = (d - 1) % 26
+        s.append(chr(65 + t))
+        d = (d - 1) // 26
+    return ''.join(reversed(s))
+
+
+def excel_col_name2int(s):
+    """
+    >>> excel_col_name2int('A')
+    1
+    >>> excel_col_name2int('AA')
+    27
+    >>> excel_col_name2int('AB')
+    28
+    """
+    d = 0
+    for ch in s:
+        d = d * 26 + (ord(ch) - 64)
+    return d
+
+
+def gentuple(n, tag):
+    """ 有点类似range函数，但生成的数列更加灵活
+
+    :param n:
+        数组长度
+    :param tag:
+        int类型，从指定数字开始编号
+            0，从0开始编号
+            1，从1开始编号
+        'A'，用Excel的形式编号
+        tuple，按枚举值循环显示
+            ('A', 'B')：循环使用A、B编号
+
+    >>> gentuple(4, 'A')
+    ('A', 'B', 'C', 'D')
+    """
+    a = [''] * n
+    if isinstance(tag, int):
+        for i in range(n):
+            a[i] = i + tag
+    elif tag == 'A':
+        a = tuple(map(lambda x: int2excel_col_name(x + 1), range(n)))
+    elif isinstance(tag, (list, tuple)):
+        k = len(tag)
+        a = tuple(map(lambda x: tag[x % k], range(n)))
+    return a

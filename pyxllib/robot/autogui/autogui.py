@@ -33,7 +33,7 @@ from pyxllib.debug.specialist import TicToc
 from pyxllib.file.specialist import File, Dir, get_etag
 from pyxllib.prog.newbie import first_nonnone, round_int
 from pyxllib.prog.pupil import xlwait, DictTool
-from pyxllib.cv.expert import imread, imwrite, get_sub_image, pil2cv, cv2pil
+from pyxllib.cv.expert import xlcv, xlpil
 from pyxllib.algo.geo import ComputeIou, ltrb2xywh, xywh2ltrb
 from pyxllib.algo.shapely_ import ShapelyPolygon
 from pyxllib.data.labelme import LabelmeDict
@@ -56,7 +56,7 @@ class AutoGuiLabelData:
         for file in self.root.select_files('**/*.json'):
             lmdict = file.read()
             imfile = file.with_name(lmdict['imagePath'])
-            img = imread(imfile)
+            img = xlcv.read(imfile)
             loc = file.relpath(self.root).replace('\\', '/')[:-5]
             self.imfiles[loc] = imfile
 
@@ -89,7 +89,7 @@ class AutoGuiLabelData:
 
         # 4 图片数据 img, etag
         if image is not None and attrs['ltrb']:
-            attrs['img'] = get_sub_image(image, attrs['ltrb'])
+            attrs['img'] = xlcv.get_sub(image, attrs['ltrb'])
             # attrs['etag'] = get_etag(attrs['img'])
             # TODO 这里目的其实就是让相同图片对比尽量相似，所以可以用dhash而不是etag
 
@@ -116,26 +116,26 @@ class AutoGuiLabelData:
         # 1 如果loc图片不存在，则新建一个jpg图片
         update = True
         if loc not in self.data or not self.data[loc]:
-            imfile = imwrite(img, File(loc, self.root, suffix='.jpg'))
+            imfile = xlcv.write(img, File(loc, self.root, suffix='.jpg'))
             self.imfiles[loc] = imfile
             shape = LabelmeDict.gen_shape(label, [[0, 0], [w, h]])
             self.data[loc][label] = self.parse_shape(shape)
         # 2 不存在的标签，则在最后一行新建一张图
         elif label not in self.data[loc]:
-            image = imread(self.imfiles[loc])
+            image = xlcv.read(self.imfiles[loc])
             height, width = image.shape[:2]
             assert width == w  # 先按行拼接，以后有时间可以扩展更灵活的拼接操作
             # 拼接，并重新存储为图片
             image = np.concatenate([image, img])
-            imwrite(image, self.imfiles[loc])
+            xlcv.write(image, self.imfiles[loc])
             shape = LabelmeDict.gen_shape(label, [[0, height], [width, height + h]])
             self.data[loc][label] = self.parse_shape(shape)
         # 3 已有的图，则进行替换
         elif if_exists == 'update':
-            image = imread(self.imfiles[loc])
+            image = xlcv.read(self.imfiles[loc])
             [x1, y1, x2, y2] = self.data[loc][label]['ltrb']
             image[y1:y2, x1:x2] = img
-            imwrite(image, self.imfiles[loc])
+            xlcv.write(image, self.imfiles[loc])
         else:
             update = False
 
@@ -211,7 +211,7 @@ class NamedLocate(AutoGuiLabelData):
         if isinstance(region, str):
             region = ltrb2xywh(self[region]['ltrb'])
         im = pyautogui.screenshot(region=region)
-        return pil2cv(im)
+        return xlpil.to_cv2_image(im)
 
     def update_shot(self, region=None):
         self.last_shot = self.screenshot(region)

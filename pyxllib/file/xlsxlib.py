@@ -8,9 +8,11 @@
 """
 扩展了些自己的openpyxl工具
 """
-
+import itertools
 import re
 import subprocess
+
+from pyxllib.prog.newbie import RunOnlyOnce
 
 try:
     import openpyxl
@@ -30,7 +32,10 @@ except ModuleNotFoundError:
     subprocess.run(['pip3', 'install', 'xlrd2'])
     import xlrd2
 
+import openpyxl
 from openpyxl.styles import Font
+from openpyxl.utils.cell import get_column_letter
+from openpyxl.cell.cell import MergedCell
 import pandas as pd
 
 from pyxllib.debug.pupil import dprint
@@ -38,24 +43,23 @@ from pyxllib.debug.specialist import browser
 from pyxllib.algo.specialist import product
 
 
-class Openpyxl:
+def __cell():
+    pass
+
+
+def excel_addr(n, m) -> str:
+    r"""数字索引转excel地址索引
+    :param n: 行号，可以输入字符串形式的数字
+    :param m: 列号，同上可以输入str的数字
+    :return:
+
+    >>> excel_addr(2, 3)
+    'C2'
     """
-    对openpyxl库做一些基本的功能拓展
-    """
+    return f'{get_column_letter(int(m))}{n}'
 
-    @staticmethod
-    def address(n, m) -> str:
-        r"""数字索引转excel地址索引
-        :param n: 行号，可以输入字符串形式的数字
-        :param m: 列号，同上可以输入str的数字
-        :return:
 
-        >>> Openpyxl.address(2, 3)
-        'C2'
-        """
-        from openpyxl.utils.cell import get_column_letter
-        return f'{get_column_letter(int(m))}{n}'
-
+class CellExtend:
     @staticmethod
     def in_range(cell):
         """判断一个单元格所在的合并单元格
@@ -77,11 +81,10 @@ class Openpyxl:
 
         因为跟合并单元格有关，所以 以m前缀 merge
         """
-        from openpyxl.cell.cell import MergedCell
         if isinstance(cell, MergedCell):
             ws = cell.parent
-            xy = Openpyxl.in_range(cell).top[0]
-            return ws[Openpyxl.address(*xy)]
+            xy = cell.in_range().top[0]
+            return ws[excel_addr(*xy)]
         else:
             return cell
 
@@ -96,12 +99,11 @@ class Openpyxl:
 
         TODO 这个函数还是可以看看能不能有更好的实现、提速
         """
-        from openpyxl.cell.cell import MergedCell
         if isinstance(cell, MergedCell):
             return 1
         elif isinstance(cell.offset(1, 0), MergedCell) or isinstance(cell.offset(0, 1), MergedCell):
             # 这里只能判断可能是合并单元格，具体是不是合并单元格，还要
-            rng = Openpyxl.in_range(cell)
+            rng = cell.in_range()
             return 2 if hasattr(rng, 'size') else 0
         else:
             return 0
@@ -111,7 +113,7 @@ class Openpyxl:
         """是普通单元格且值为None
         注意合并单元格的衍生单元格不为None
         """
-        celltype = Openpyxl.celltype(cell)
+        celltype = cell.celltype()
         return celltype == 0 and cell.value is None
 
     @staticmethod
@@ -140,42 +142,73 @@ class Openpyxl:
         """ 单元格全格式、包括值的整体复制
         """
         new_cell.value = cell.value
-        Openpyxl.copy_cell_format(cell, new_cell)
+        cell.copy_cell_format(new_cell)
 
-    @classmethod
-    def down(cls, cell):
+    @staticmethod
+    def down(cell):
         """输入一个单元格，向下移动一格
         注意其跟offset的区别，如果cell是合并单元格，会跳过自身的衍生单元格
         """
-        if cls.celltype(cell):  # 合并单元格
-            rng = cls.in_range(cell)
+        if cell.celltype():  # 合并单元格
+            rng = cell.in_range()
             return cell.parent.cell(rng.max_row + 1, cell.column)
         else:
             return cell.offset(1, 0)
 
-    @classmethod
-    def right(cls, cell):
-        if cls.celltype(cell):
-            rng = cls.in_range(cell)
+    @staticmethod
+    def right(cell):
+        if cell.celltype():
+            rng = cell.in_range()
             return cell.parent.cell(cell.row, rng.max_row + 1)
         else:
             return cell.offset(0, 1)
 
-    @classmethod
-    def up(cls, cell):
-        if cls.celltype(cell):
-            rng = cls.in_range(cell)
+    @staticmethod
+    def up(cell):
+        if cell.celltype():
+            rng = cell.in_range()
             return cell.parent.cell(rng.min_row - 1, cell.column)
         else:
             return cell.offset(-1, 0)
 
-    @classmethod
-    def left(cls, cell):
-        if cls.celltype(cell):
-            rng = cls.in_range(cell)
+    @staticmethod
+    def left(cell):
+        if cell.celltype():
+            rng = cell.in_range()
             return cell.parent.cell(cell.row, rng.min_row - 1)
         else:
             return cell.offset(0, -1)
+
+
+@RunOnlyOnce
+def binding_cell_extend():
+    def check_names():
+        exist_names = {'openpyxl.cell.cell.Cell': set(dir(openpyxl.cell.cell.Cell)),
+                       'openpyxl.cell.cell.MergedCell': set(dir(openpyxl.cell.cell.MergedCell))}
+        names = {x for x in dir(CellExtend) if x[:2] != '__'}
+
+        for name, k in itertools.product(names, exist_names):
+            if name in exist_names[k]:
+                print(f'警告！同名冲突！ {k}.{name}')
+
+        return names
+
+    names = check_names()
+
+    for name in names:
+        setattr(openpyxl.cell.cell.Cell, name, getattr(CellExtend, name))
+        setattr(openpyxl.cell.cell.MergedCell, name, getattr(CellExtend, name))
+
+
+binding_cell_extend()
+
+
+def __worksheet():
+    pass
+
+
+class WorksheetExtend:
+    """ 扩展标准的Workshhet功能 """
 
     @staticmethod
     def copy_worksheet(origin_ws, target_ws):
@@ -186,7 +219,7 @@ class Openpyxl:
         for row in origin_ws:
             for cell in row:
                 try:
-                    Openpyxl.copy_cell(cell, target_ws[cell.coordinate])
+                    cell.copy_cell(target_ws[cell.coordinate])
                 except AttributeError:
                     pass
         # 2 合并单元格的处理
@@ -197,17 +230,7 @@ class Openpyxl:
         # dprint(origin_ws.freeze_panes)
         # target_ws.freeze_panes = origin_ws.freeze_panes
 
-
-class Worksheet(openpyxl.worksheet.worksheet.Worksheet):
-    """ 扩展标准的Workshhet功能
-    >> wb = openpyxl.load_workbook(filename='高中数学知识树匹配终稿.xlsx', data_only=True)
-    >> ws1 = Worksheet(wb['main'])
-    >> ws2 = Worksheet(wb['导出'])
-    """
-
-    def __init__(self, ws):
-        self.__dict__ = ws.__dict__
-
+    @staticmethod
     def _cells_by_row(self, min_col, min_row, max_col, max_row, values_only=False):
         """openpyxl的这个迭代器，遇到合并单元格会有bug
         所以我把它重新设计一下~~
@@ -220,6 +243,7 @@ class Worksheet(openpyxl.worksheet.worksheet.Worksheet):
             else:
                 yield tuple(cells)
 
+    @staticmethod
     def search(self, pattern, min_row=None, max_row=None, min_col=None, max_col=None, order=None, direction=0):
         """查找满足pattern正则表达式的单元格
 
@@ -249,7 +273,7 @@ class Worksheet(openpyxl.worksheet.worksheet.Worksheet):
                 cel = self.search(p, x1, x2, y1, y2, order)
                 if cel:
                     # up, down, left, right 找到的单元格四边界
-                    l, u, r, d = getattr(Openpyxl.in_range(cel), 'bounds', (cel.column, cel.row, cel.column, cel.row))
+                    l, u, r, d = getattr(cel.in_range(), 'bounds', (cel.column, cel.row, cel.column, cel.row))
                     if direction == 0:
                         x1, y1, y2 = max(x1, d), max(y1, l), min(y2, r)
                     elif direction == 1:
@@ -267,23 +291,27 @@ class Worksheet(openpyxl.worksheet.worksheet.Worksheet):
             if isinstance(pattern, str): pattern = re.compile(pattern)
             for x, y in product(range(x1, x2 + 1), range(y1, y2 + 1), order=order):
                 cell = self.cell(x, y)
-                if Openpyxl.celltype(cell) == 1: continue  # 过滤掉合并单元格位置
+                if cell.celltype() == 1: continue  # 过滤掉合并单元格位置
                 if pattern.search(str(cell.value)): return cell  # 返回满足条件的第一个值
 
     findcel = search
 
+    @staticmethod
     def findrow(self, pattern, *args, **kwargs):
         cel = self.findcel(pattern, *args, **kwargs)
         return cel.row if cel else 0
 
+    @staticmethod
     def findcol(self, pattern, *args, **kwargs):
         cel = self.findcel(pattern, *args, **kwargs)
         return cel.column if cel else 0
 
+    @staticmethod
     def browser(self):
         """注意，这里会去除掉合并单元格"""
         browser(pd.DataFrame(self.values))
 
+    @staticmethod
     def select_columns(self, columns, column_name='searchkey'):
         r"""获取表中columns属性列的值，返回dataframe数据类型
 
@@ -315,7 +343,7 @@ class Worksheet(openpyxl.worksheet.worksheet.Worksheet):
                         names.append(str(cel.value))
                 else:
                     raise ValueError(f'{column_name}')
-                start_line = max(start_line, Openpyxl.down(cel).row)
+                start_line = max(start_line, cel.down().row)
             else:
                 dprint(search_name)  # 找不到指定列
 
@@ -326,7 +354,7 @@ class Worksheet(openpyxl.worksheet.worksheet.Worksheet):
                 col = cel.column
                 li = []
                 for i in range(start_line, self.max_row + 1):
-                    v = Openpyxl.mcell(self.cell(i, col)).value  # 注意合并单元格的取值
+                    v = self.cell(i, col).mcell().value  # 注意合并单元格的取值
                     li.append(v)
                 datas[names[k]] = li
             else:
@@ -339,6 +367,7 @@ class Worksheet(openpyxl.worksheet.worksheet.Worksheet):
 
         return df
 
+    @staticmethod
     def copy_range(self, cell_range, rows=0, cols=0):
         """ 同表格内的 range 复制操作
         Copy a cell range by the number of rows and/or columns:
@@ -361,8 +390,9 @@ class Worksheet(openpyxl.worksheet.worksheet.Worksheet):
         r = sorted(range(min_row, max_row + 1), reverse=rows > 0)
         c = sorted(range(min_col, max_col + 1), reverse=cols > 0)
         for row, column in product(r, c):
-            Openpyxl.copy_cell(self.cell(row, column), self.cell(row + rows, column + cols))
+            self.cell(row, column).copy_cell(self.cell(row + rows, column + cols))
 
+    @staticmethod
     def reindex_columns(self, orders):
         """ 重新排列表格的列顺序
         >> ws.reindex_columns('I,J,A,,,G,B,C,D,F,E,H,,,K'.split(','))
@@ -377,18 +407,67 @@ class Worksheet(openpyxl.worksheet.worksheet.Worksheet):
         self.delete_cols(1, max_column)
 
 
-def adjust_sheets(wb, new_sheetnames):
-    """ 按照 new_sheetnames 的清单重新调整sheets
-        在清单里的按顺序罗列
-        不在清单里的表格删除
-        不能出现wb原本没有的表格名
-    """
-    for name in set(wb.sheetnames) - set(new_sheetnames):
-        # 最好调用标准的remove接口删除sheet
-        #   不然虽然能表面上看也能删除sheet，但会有命名空间的一些冗余信息留下
-        wb.remove(wb[name])
-    wb._sheets = [wb[name] for name in new_sheetnames]
-    return wb
+@RunOnlyOnce
+def binding_worksheet_extend():
+    def check_names():
+        exist_names = {'openpyxl.worksheet.worksheet.Worksheet':
+                           set(dir(openpyxl.worksheet.worksheet.Worksheet)) - {'_cells_by_row'}}
+        names = {x for x in dir(WorksheetExtend) if x[:2] != '__'}
+
+        for name, k in itertools.product(names, exist_names):
+            if name in exist_names[k]:
+                print(f'警告！同名冲突！ {k}.{name}')
+
+        return names
+
+    names = check_names()
+
+    for name in names:
+        setattr(openpyxl.worksheet.worksheet.Worksheet, name, getattr(WorksheetExtend, name))
+
+
+binding_worksheet_extend()
+
+
+def __workbook():
+    pass
+
+
+class WorkbookExtend:
+    @staticmethod
+    def adjust_sheets(wb, new_sheetnames):
+        """ 按照 new_sheetnames 的清单重新调整sheets
+            在清单里的按顺序罗列
+            不在清单里的表格删除
+            不能出现wb原本没有的表格名
+        """
+        for name in set(wb.sheetnames) - set(new_sheetnames):
+            # 最好调用标准的remove接口删除sheet
+            #   不然虽然能表面上看也能删除sheet，但会有命名空间的一些冗余信息留下
+            wb.remove(wb[name])
+        wb._sheets = [wb[name] for name in new_sheetnames]
+        return wb
+
+
+@RunOnlyOnce
+def binding_workbook_extend():
+    def check_names():
+        exist_names = {'openpyxl.Workbook': set(dir(openpyxl.Workbook))}
+        names = {x for x in dir(WorkbookExtend) if x[:2] != '__'}
+
+        for name, k in itertools.product(names, exist_names):
+            if name in exist_names[k]:
+                print(f'警告！同名冲突！ {k}.{name}')
+
+        return names
+
+    names = check_names()
+
+    for name in names:
+        setattr(openpyxl.Workbook, name, getattr(WorkbookExtend, name))
+
+
+binding_workbook_extend()
 
 
 def demo_openpyxl():
@@ -421,7 +500,7 @@ def demo_openpyxl():
     ws['E3'].value = '属性2'
 
     dprint(ws['A1'].offset(1, 0).coordinate)  # A2
-    dprint(Openpyxl.down(ws['A1']).coordinate)  # A3
+    dprint(ws['A1'].down().coordinate)  # A3
 
     # 3 设置单元格样式、格式
     from openpyxl.comments import Comment
@@ -443,8 +522,6 @@ def demo_openpyxl():
             ws.cell(i, j).style = v
 
     # 二、测试一些功能
-    ws = Worksheet(ws)
-
     dprint(ws.search('模块二').coordinate)  # D1
     dprint(ws.search(['模块二', '属性1']).coordinate)  # D3
 

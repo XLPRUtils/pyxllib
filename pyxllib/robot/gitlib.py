@@ -35,7 +35,7 @@ from pyxllib.prog.newbie import swap_rowcol
 from pyxllib.debug.pupil import dprint
 from pyxllib.text.pupil import digit2weektag
 from pyxllib.debug.specialist import dataframe_str, bcompare
-from pyxllib.file.specialist import Dir, ensure_content, filesmatch
+from pyxllib.file.specialist import Dir, File, filesmatch
 
 
 class Git:
@@ -230,7 +230,7 @@ class Git:
         if sha:
             s = self.g.show(f'{sha}:{file}')
         else:
-            s = ensure_content(os.path.join(self.g.working_dir, file))
+            s = File(os.path.join(self.g.working_dir, file)).read()
         return s
 
     def bcompare(self, file, sha1=0, sha2=None):

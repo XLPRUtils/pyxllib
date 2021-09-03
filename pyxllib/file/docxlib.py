@@ -61,7 +61,7 @@ class Document:
         """ 获得 fitz的pdf文档对象
         :return: FitzDoc对象
         """
-        from pyxllib.cv.fitzlib import FitzDoc
+        from pyxllib.file.fitzlib import FitzDoc
         file_pdf = self.write_pdf()
         doc = FitzDoc(file_pdf)
         return doc
