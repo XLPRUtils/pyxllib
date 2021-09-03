@@ -16,6 +16,34 @@ import queue
 import socket
 import sys
 import time
+import pprint
+import tempfile
+
+
+def system_information():
+    """主要是测试一些系统变量值，顺便再演示一次Timer用法"""
+
+    def pc_messages():
+        """演示如何获取当前操作系统的PC环境数据"""
+        # fqdn：fully qualified domain name
+        print('1、socket.getfqdn() :', socket.getfqdn())  # 完全限定域名，可以理解成pcname，计算机名
+        # 注意py的很多标准库功能本来就已经处理了不同平台的问题，尽量用标准库而不是自己用sys.platform作分支处理
+        print('2、sys.platform     :', sys.platform)  # 运行平台，一般是win32和linux
+        # li = os.getenv('PATH').split(os.path.pathsep)  # 环境变量名PATH，win中不区分大小写，linux中区分大小写必须写成PATH
+        # print("3、os.getenv('PATH'):", f'数量={len(li)},', pprint.pformat(li, 4))
+
+    def executable_messages():
+        """演示如何获取被执行程序相关的数据"""
+        print('1、sys.executable   :', sys.executable)  # 当前被执行脚本位置
+        print('2、sys.version      :', sys.version)  # python的版本
+        print('3、os.getcwd()      :', os.getcwd())  # 获得当前工作目录
+        print('4、gettempdir()     :', tempfile.gettempdir())  # 临时文件夹位置
+        # print('5、sys.path       :', f'数量={len(sys.path)},', pprint.pformat(sys.path, 4))  # import绝对位置包的搜索路径
+
+    print('【pc_messages】')
+    pc_messages()
+    print('【executable_messages】')
+    executable_messages()
 
 
 def is_url(arg):

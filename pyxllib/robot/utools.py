@@ -268,11 +268,12 @@ class UtoolsRegex(UtoolsBase):
     def __init__(self, cmds, *, outfmt='text'):
         super().__init__(cmds, outfmt=outfmt)
 
+    @clipboard_paste
     def coderegex(self):
-        tt = TicToc()
-        text = self.cmds['ClipText']
-        eval(self.cmds['subinput'])
-        print(f'finished in {format_timespan(tt.tocvalue())}.')
+        # tt = TicToc()
+        s = self.cmds['ClipText']
+        return eval(self.cmds['subinput'])
+        # print(f'finished in {format_timespan(tt.tocvalue())}.')
 
     @clipboard_paste
     def refine_text(self, func):

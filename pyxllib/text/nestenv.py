@@ -10,7 +10,6 @@ import re
 from pyxllib.text.newbie import bracket_match2
 from pyxllib.text.pupil import grp_bracket, strfind
 from pyxllib.algo.intervals import Intervals, ReMatch
-from pyxllib.text.specialist import BRACE5
 
 
 def pqmove(s, p, q):
@@ -642,7 +641,7 @@ class LatexNestEnv(NestEnv):
             if inner:  # 只取\lewis{}花括号里内容的定位
                 raise ValueError(r"lewis模式没有inner模式，如果需要可以使用NestEnv(s).inner(r'\lewis{')")
 
-            lewis = r'\\(l|L)ewis' + BRACE5  # 基本匹配模式
+            lewis = r'\\(l|L)ewis' + grp_bracket(5, inner=True)  # 基本匹配模式
             ms = re.finditer(rf'(H?~*{lewis}\s*|~*H)*(~*{lewis}|~*H)', s)  # 有一定的延展
             return [m.span(0) for m in ms if 'lewis' in m.group().lower()]
 

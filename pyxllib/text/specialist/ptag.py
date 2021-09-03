@@ -135,13 +135,14 @@ def brieftexstr(s):
     return s
 
 
+# 默认不建议开，编校如果用的多，可以在那边定义
 # 定义常用的几种格式，并且只匹配抓取花括号里面的值，不要花括号本身
-SQUARE3 = r'\\[(' + grp_bracket(3, '[')[3:-3] + r')\\]'
-BRACE1 = '{(' + grp_bracket(1)[1:-1] + ')}'
-BRACE2 = '{(' + grp_bracket(2)[1:-1] + ')}'
-BRACE3 = '{(' + grp_bracket(3)[1:-1] + ')}'
-BRACE4 = '{(' + grp_bracket(4)[1:-1] + ')}'
-BRACE5 = '{(' + grp_bracket(5)[1:-1] + ')}'
+# SQUARE3 = r'\\[(' + grp_bracket(3, '[')[3:-3] + r')\\]'
+# BRACE1 = '{(' + grp_bracket(1)[1:-1] + ')}'
+# BRACE2 = '{(' + grp_bracket(2)[1:-1] + ')}'
+# BRACE3 = '{(' + grp_bracket(3)[1:-1] + ')}'
+# BRACE4 = '{(' + grp_bracket(4)[1:-1] + ')}'
+# BRACE5 = '{(' + grp_bracket(5)[1:-1] + ')}'
 """使用示例
 >> m = re.search(r'\\multicolumn' + BRACE3*3, r'\multicolumn{2}{|c|}{$2^{12}$个数}')
 >> m.groups()
@@ -166,14 +167,16 @@ def grp_figure(cnt_groups=0, parpic=False):
 
     191224周二18:20 更新：匹配到的图片名不带花括号
     """
+    ibrace3 = grp_bracket(3, inner=True)
+
     if cnt_groups == 0:  # 不分组
         s = r'\\(?:includegraphics|figt|figc|figr|fig).*?' + grp_bracket(3)  # 注意第1组fig要放最后面
     elif cnt_groups == 1:  # 只分1组，那么只对图片括号内的内容分组
-        s = r'\\(?:includegraphics|figt|figc|figr|fig).*?' + BRACE3
+        s = r'\\(?:includegraphics|figt|figc|figr|fig).*?' + ibrace3
     elif cnt_groups == 2:  # 只分2组，那么只对插图命令和图片分组
-        s = r'\\(includegraphics|figt|figc|figr|fig).*?' + BRACE3
+        s = r'\\(includegraphics|figt|figc|figr|fig).*?' + ibrace3
     elif cnt_groups == 3:
-        s = r'\\(includegraphics|figt|figc|figr|fig)(.*?)' + BRACE3
+        s = r'\\(includegraphics|figt|figc|figr|fig)(.*?)' + ibrace3
     else:
         s = None
 

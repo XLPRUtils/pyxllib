@@ -21,6 +21,7 @@ import os
 import re
 import sys
 
+from pyxllib.prog.newbie import RunOnlyOnce
 from pyxllib.text.newbie import circlednumber2digits, digits2circlednumber, roman2digits, digits2roman
 from pyxllib.debug.pupil import dprint
 
@@ -475,7 +476,8 @@ def briefstr(s):
     return s
 
 
-def grp_bracket(depth=0, left='{', right=None):
+@RunOnlyOnce
+def grp_bracket(depth=0, left='{', right=None, inner=False):
     r"""括号匹配，默认花括号匹配，也可以改为圆括号、方括号匹配。
 
     效果类似于“{.*?}”，
@@ -486,6 +488,10 @@ def grp_bracket(depth=0, left='{', right=None):
     :param depth: 括号递归深度
     :param left: 左边字符：(、[、{
     :param right: 右边字符
+    :param inner: 默认只是返回匹配的正则表达式，不编组
+        如果设置inner=True，则会对括号内的内容编组
+        该功能用来代替原来的BRACE5等机制
+
     :return:
 
     先了解一下正则常识：
@@ -506,15 +512,7 @@ def grp_bracket(depth=0, left='{', right=None):
     """
     # 用a, b简化引用名称
     a, b = left, right
-    if b is None:
-        if a == '(':
-            b = ')'
-        elif a == '[':
-            b = ']'
-        elif a == '{':
-            b = '}'
-        else:
-            raise NotImplementedError
+    b = b or {'(': ')', '[': ']', '{': '}'}[a]
     # 特殊符号需要转义
     if a in '([':
         a = '\\' + a
@@ -534,7 +532,12 @@ def grp_bracket(depth=0, left='{', right=None):
         return pattern
 
     s = gen(pattern_0, depth=depth)
-    return s
+
+    # inner
+    if inner:
+        return f'{a}({s[len(a):len(s) - len(b)]}){b}'
+    else:
+        return s
 
 
 def grp_chinese_char():
