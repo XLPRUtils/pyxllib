@@ -344,6 +344,44 @@ class CocoGtData:
                                        'not_finds': not_finds,
                                        'multimatch': Groups(multimatch)})
 
+    def split_data(self, parts, *, shuffle=True):
+        """ 数据拆分器
+
+        :param dict parts: 每个部分要拆分、写入的文件名，以及数据比例
+            py≥3.6的版本中，dict的key是有序的，会按顺序处理开发者输入的清单
+            这里比例求和可以不满1，但不能超过1
+        :param bool shuffle: 是否打乱原有images顺序
+        :return: 同parts的字典，但值变成了拆分后的coco数据
+        """
+        # 1 读入data
+        assert sum(parts.values()) <= 1, '比例和不能超过1'
+        data = self.gt_dict
+        if shuffle:
+            data = data.copy()
+            data['images'] = data['images'].copy()
+            random.shuffle(data['images'])
+
+        # 2 生成每一个部分的文件
+        def select_annotations(annotations, image_ids):
+            # 简单的for循环和if操作，可以用“列表推导式”写
+            return [an for an in annotations if (an['image_id'] in image_ids)]
+
+        res = {}
+        total_num, used_rate = len(data['images']), 0
+        for k, v in parts.items():
+            # 2.1 选择子集图片
+            images = data['images'][int(used_rate * total_num):int((used_rate + v) * total_num)]
+            image_ids = {im['id'] for im in images}
+
+            # 2.2 生成新的字典
+            res[k] = {'images': images,
+                      'annotations': select_annotations(data['annotations'], image_ids),
+                      'categories': data['categories']}
+
+            # 2.4 更新使用率
+            used_rate += v
+        return res
+
 
 class CocoData(CocoGtData):
     """ 这个类可以封装一些需要gt和dt衔接的功能 """
