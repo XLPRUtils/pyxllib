@@ -13,13 +13,26 @@ import PIL.Image
 import requests
 
 from pyxllib.prog.newbie import round_int, RunOnlyOnce
+from pyxllib.prog.pupil import EnchantBase
 from pyxllib.algo.geo import rect_bounds, warp_points, reshape_coords, quad_warp_wh, get_warp_mat, rect2polygon
 from pyxllib.file.specialist import File
 
 _show_win_num = 0
 
 
-class xlcv:
+class xlcv(EnchantBase):
+
+    @classmethod
+    @RunOnlyOnce
+    def enchant(cls):
+        """ 把xlcv的功能嵌入cv2中
+
+        不太推荐使用该类，可以使用CvImg类更好地解决问题。
+        """
+        # 虽然只绑定cv2，但其他相关的几个库的方法上，最好也不要重名
+        cls.check_enchant_names([np.ndarray, PIL.Image, PIL.Image.Image])
+        cls._enchant(cv2, 'staticmethod2modulefunc')
+
     @staticmethod
     def __1_read():
         pass
@@ -247,7 +260,7 @@ class xlcv:
         pass
 
     @staticmethod
-    def bg_color(src_im, edge_size=5, binary_img=None):
+    def bg_color(im, edge_size=5, binary_img=None):
         """ 智能判断图片背景色
     
         对全图二值化后，考虑最外一层宽度为edge_size的环中，0、1分布最多的作为背景色
@@ -264,11 +277,11 @@ class xlcv:
 
         # 1 获得二值图，区分前背景
         if binary_img is None:
-            gray_img = cv2.cvtColor(src_im, cv2.COLOR_BGR2GRAY) if src_im.ndim == 3 else src_im
+            gray_img = cv2.cvtColor(im, cv2.COLOR_BGR2GRAY) if src_im.ndim == 3 else src_im
             _, binary_img = cv2.threshold(gray_img, np.mean(gray_img), 255, cv2.THRESH_BINARY)
 
         # 2 分别存储点集
-        n, m = src_im.shape[:2]
+        n, m = im.shape[:2]
         colors0, colors1 = [], []
         for i in range(n):
             if i < edge_size or i >= n - edge_size:
@@ -277,9 +290,9 @@ class xlcv:
                 js = chain(range(edge_size), range(m - edge_size, m))
             for j in js:
                 if binary_img[i, j]:
-                    colors1.append(src_im[i, j])
+                    colors1.append(im[i, j])
                 else:
-                    colors0.append(src_im[i, j])
+                    colors0.append(im[i, j])
 
         # 3 计算平均像素
         # 以数量多的作为背景像素
@@ -287,41 +300,41 @@ class xlcv:
         return np.mean(np.array(colors), axis=0, dtype='int').tolist()
 
     @staticmethod
-    def get_plot_color(src):
+    def get_plot_color(im):
         """ 获得比较适合的作画颜色
     
         TODO 可以根据背景色智能推导画线用的颜色，目前是固定红色
         """
-        if src.ndim == 3:
+        if im.ndim == 3:
             return 0, 0, 255
-        elif src.ndim == 2:
+        elif im.ndim == 2:
             return 255  # 灰度图，默认先填白色
 
     @staticmethod
-    def get_plot_args(src, color=None):
+    def get_plot_args(im, color=None):
         # 1 作图颜色
         if not color:
-            color = xlcv.get_plot_color(src)
+            color = xlcv.get_plot_color(im)
 
         # 2 画布
-        if len(color) >= 3 and src.ndim <= 2:
-            dst = cv2.cvtColor(src, cv2.COLOR_GRAY2BGR)
+        if len(color) >= 3 and im.ndim <= 2:
+            dst = cv2.cvtColor(im, cv2.COLOR_GRAY2BGR)
         else:
-            dst = np.array(src)
+            dst = np.array(im)
 
         return dst, color
 
     @staticmethod
-    def lines(src, lines, color=None, thickness=1, line_type=cv2.LINE_AA, shift=None):
+    def lines(im, lines, color=None, thickness=1, line_type=cv2.LINE_AA, shift=None):
         """ 在src图像上画系列线段
         """
         # 1 判断 lines 参数内容
         lines = np.array(lines).reshape(-1, 4)
         if not lines.size:
-            return src
+            return im
 
         # 2 参数
-        dst, color = xlcv.get_plot_args(src, color)
+        dst, color = xlcv.get_plot_args(im, color)
 
         # 3 画线
         if lines.any():
@@ -331,7 +344,7 @@ class xlcv:
         return dst
 
     @staticmethod
-    def circles(src, circles, color=None, thickness=1, center=False):
+    def circles(im, circles, color=None, thickness=1, center=False):
         """ 在图片上画圆形
     
         :param src: 要作画的图
@@ -342,10 +355,10 @@ class xlcv:
         # 1 圆 参数
         circles = np.array(circles, dtype=int).reshape(-1, 3)
         if not circles.size:
-            return src
+            return im
 
         # 2 参数
-        dst, color = xlcv.get_plot_args(src, color)
+        dst, color = xlcv.get_plot_args(im, color)
 
         # 3 作画
         for x in circles:
@@ -497,7 +510,7 @@ class xlcv:
         return dst
 
     @staticmethod
-    def _get_subrect_image(src_im, pts, fill=0):
+    def _get_subrect_image(im, pts, fill=0):
         """
         :return:
             dst_img 按外接四边形截取的子图
@@ -505,21 +518,21 @@ class xlcv:
         """
         # 1 计算需要pad的宽度
         x1, y1, x2, y2 = [round_int(v) for v in rect_bounds(pts)]
-        h, w = src_im.shape[:2]
+        h, w = im.shape[:2]
         pad = [-y1, y2 - h, -x1, x2 - w]  # 各个维度要补充的宽度
         pad = [max(0, v) for v in pad]  # 负数宽度不用补充，改为0
 
         # 2 pad并定位rect局部图
-        tmp_img = xlcv.pad(src_im, pad, fill) if max(pad) > 0 else src_im
+        tmp_img = xlcv.pad(im, pad, fill) if max(pad) > 0 else im
         dst_img = tmp_img[y1 + pad[0]:y2, x1 + pad[2]:x2]  # 这里越界不会报错，只是越界的那个维度shape为0
         new_pts = [(pt[0] - x1, pt[1] - y1) for pt in pts]
         return dst_img, new_pts
 
     @staticmethod
-    def get_sub(src_im, pts, *, fill=0, warp_quad=False):
+    def get_sub(im, pts, *, fill=0, warp_quad=False):
         """ 从src_im取一个子图
     
-        :param src_im: 原图
+        :param im: 原图
             可以是图片路径、np.ndarray、PIL.Image对象
             TODO 目前只支持np.ndarray、pil图片输入，返回统一是np.ndarray
         :param pts: 子图位置信息
@@ -536,37 +549,12 @@ class xlcv:
             文件、np.ndarray --> np.ndarray
             PIL.Image --> PIL.Image
         """
-        dst, pts = xlcv._get_subrect_image(xlcv.read(src_im), reshape_coords(pts, 2), fill)
+        dst, pts = xlcv._get_subrect_image(xlcv.read(im), reshape_coords(pts, 2), fill)
         if len(pts) == 4 and warp_quad:
             w, h = quad_warp_wh(pts, method=warp_quad)
             warp_mat = get_warp_mat(pts, rect2polygon([0, 0, w, h]))
             dst = xlcv.warp(dst, warp_mat, (w, h))
         return dst
-
-
-def check_names_xlcv():
-    exist_names = {'cv2': set(dir(cv2)),
-                   'np.ndarray': set(dir(np.ndarray)),
-                   'PIL.Image': set(dir(PIL.Image)),
-                   'PIL.Image.Image': set(dir(PIL.Image.Image))}
-    names = {x for x in dir(xlcv) if x[:2] != '__'}
-
-    for name, k in itertools.product(names, exist_names):
-        if name in exist_names[k]:
-            print(f'警告！同名冲突！ {k}.{name}')
-
-    return names
-
-
-@RunOnlyOnce
-def binding_cv2_xlcv():
-    """ 把xlcv的功能嵌入cv2中
-
-    不太推荐使用该类，可以使用CvImg类更好地解决问题。
-    """
-    names = check_names_xlcv()
-    for name in names:
-        setattr(cv2, name, getattr(xlcv, name))
 
 
 class CvImg(np.ndarray):

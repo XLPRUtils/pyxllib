@@ -116,47 +116,6 @@ class CWord:
         return str(self.doc.Content)
 
 
-class CExcel:
-    def __init__(self, arg1=None, *, visible=None):
-        """visible默认为None，代表不对现有窗口显示情况做更改
-                如果设为bool值true或false，
-        """
-        import win32com.client as win32
-
-        self.__dict__['app'] = win32.gencache.EnsureDispatch('Excel.Application')
-        if isinstance(visible, bool): self.app.Visible = visible
-
-        if isinstance(arg1, str):  # 输入的是一个文件名则打开
-            file = arg1
-            self.app.Workbooks.Open(file)  # 打开文件
-            # self.__dict__ = app.Documents(Path(file).name).__dict__
-            self.__dict__['wb'] = self.app.Workbooks(File(file).name)  # 存储到doc成员变量
-        else:  # 如果输入参数不合法，新建一个空word
-            # self.app.Workbooks.Add()
-            # self.__dict__['wb'] = self.app.ActiveWorkbook
-            self.__dict__['wb'] = self.app.Workbooks.Add()
-        self.__dict__['st'] = self.wb.ActiveSheet
-
-    def WriteCell(self, row=0, col=0, val='', *, fontColor=None):
-        """往当前激活的st增加数据
-
-        row可以写0，表示往新的一行加数据
-        col可以列名，智能进行列查找
-
-        color可以设置颜色
-        """
-        # 空表还有bug
-        if row == 0: row = self.st.UsedRange.Count + 1
-        dprint(row)
-        # if col == 0: row = self.st.UsedRange.Count + 1
-
-        self.st.Cells(row, col).Value = str(val)
-
-    def GetVal(self, row, col):
-        """获得指定单元格的值"""
-        return self.st.Cells(row, col).Text
-
-
 def EnsureContent(ob=None, encoding='utf8'):
     """
     未输入ob参数时，自动从控制台获取文本

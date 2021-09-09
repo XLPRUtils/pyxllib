@@ -18,7 +18,7 @@ except ModuleNotFoundError:
     import fitz
 
 from pyxllib.prog.newbie import round_int, RunOnlyOnce, decode_bitflags
-from pyxllib.prog.pupil import DictTool
+from pyxllib.prog.pupil import DictTool, EnchantBase
 from pyxllib.algo.newbie import round_unit
 from pyxllib.algo.pupil import get_number_width
 from pyxllib.file.specialist import File, Dir, writefile, get_etag
@@ -112,51 +112,60 @@ class FitzDoc:
         return getattr(self.doc, item)
 
 
-class FitzPageExtend:
+class EnchantFitzPage(EnchantBase):
     """ 对fitz.fitz.Page的扩展成员方法 """
 
+    @classmethod
+    @RunOnlyOnce
+    def enchant(cls):
+        names = cls.check_enchant_names([fitz.fitz.Page])
+        cls_methods = {'parse_flags'}
+
+        cls._enchant(fitz.fitz.Page, cls_methods, 'staticmethod2classmethod')
+        cls._enchant(fitz.fitz.Page, names - cls_methods, 'staticmethod2objectmethod')
+
     @staticmethod
-    def get_svg_image2(self, scale=1):
+    def get_svg_image2(_self, scale=1):
         # svg 是一段表述性文本
         if scale != 1:
-            txt = self.get_svg_image(matrix=fitz.Matrix(scale, scale))
+            txt = _self.get_svg_image(matrix=fitz.Matrix(scale, scale))
         else:
-            txt = self.get_svg_image()
+            txt = _self.get_svg_image()
         return txt
 
     @staticmethod
-    def _get_png_data(self, scale=1):
+    def _get_png_data(_self, scale=1):
         # TODO 增加透明通道？
         if scale != 1:
-            pix = self.get_pixmap(matrix=fitz.Matrix(scale, scale))  # 长宽放大到scale倍
+            pix = _self.get_pixmap(matrix=fitz.Matrix(scale, scale))  # 长宽放大到scale倍
         else:
-            pix = self.get_pixmap()
+            pix = _self.get_pixmap()
         return pix.getPNGData()
 
     @staticmethod
-    def get_cv_image(self, scale=1):
-        return xlcv.read_from_buffer(self._get_png_data(scale), flags=1)
+    def get_cv_image(_self, scale=1):
+        return xlcv.read_from_buffer(_self._get_png_data(scale), flags=1)
 
     @staticmethod
-    def get_pil_image(self, scale=1):
+    def get_pil_image(_self, scale=1):
         # TODO 可以优化，直接从内存数据转pil，不用这样先转cv再转pil
-        return xlpil.read_from_buffer(self._get_png_data(scale), flags=1)
+        return xlpil.read_from_buffer(_self._get_png_data(scale), flags=1)
 
     @staticmethod
-    def write_image(self, outfile, *, scale=1, if_exists=None):
+    def write_image(_self, outfile, *, scale=1, if_exists=None):
         """ 转成为文件 """
         f = File(outfile)
         suffix = f.suffix.lower()
 
         if suffix == '.svg':
-            content = self.get_svg_image()
+            content = _self.get_svg_image()
             f.write(content, if_exists=if_exists)
         else:
-            im = self.get_cv_image(scale)
+            im = _self.get_cv_image(scale)
             xlcv.write(im, if_exists=if_exists)
 
     @staticmethod
-    def get_labelme_shapes(self, opt='dict', *, views=1, scale=1):
+    def get_labelme_shapes(_self, opt='dict', *, views=1, scale=1):
         """ 得到labelme版本的shapes标注信息
 
         :param opt: get_text的参数，默认使用无字符集标注的精简的dict
@@ -201,7 +210,7 @@ class FitzPageExtend:
             views += [0] * (4 - len(views))
 
         shapes = []
-        page_dict = self.get_text(opt)
+        page_dict = _self.get_text(opt)
 
         # 2 辅助函数
         def add_shape(name, refdict, add_keys, drop_keys=('bbox',)):
@@ -250,7 +259,7 @@ class FitzPageExtend:
         return shapes
 
     @staticmethod
-    def parse_flags(cls, n):
+    def parse_flags(_cls, n):
         """ 解析spans的flags参数明文含义 """
         flags = decode_bitflags(n, ('superscript', 'italic', 'serifed', 'monospaced', 'bold'))
         flags['sans'] = not flags['serifed']
@@ -258,9 +267,9 @@ class FitzPageExtend:
         return flags
 
     @staticmethod
-    def browser(self, opt='html'):
+    def browser(_self, opt='html'):
         if opt == 'html':
-            data = self.get_text('html')  # html、xhtml 可以转网页，虽然排版相对来说还是会乱一点
+            data = _self.get_text('html')  # html、xhtml 可以转网页，虽然排版相对来说还是会乱一点
             data = ''.join(data)
             etag = get_etag(data)
             f = File(etag, Dir.TEMP, suffix='.html')
@@ -270,30 +279,7 @@ class FitzPageExtend:
             raise ValueError
 
 
-def check_names_fitzpageextend():
-    exist_names = {'fitz.fitz.Page': set(dir(fitz.fitz.Page))}
-    names = {x for x in dir(FitzPageExtend) if x[:2] != '__'}
-
-    for name, k in itertools.product(names, exist_names):
-        if name in exist_names[k]:
-            print(f'警告！同名冲突！ {k}.{name}')
-
-    return names
-
-
-@RunOnlyOnce
-def binding_fitzpage_extend():
-    names = check_names_fitzpageextend()
-    cls_names = {'parse_flags'}
-
-    for name in cls_names:
-        setattr(fitz.fitz.Page, name, classmethod(getattr(FitzPageExtend, name)))
-
-    for name in (names - cls_names):
-        setattr(fitz.fitz.Page, name, getattr(FitzPageExtend, name))
-
-
-binding_fitzpage_extend()
+EnchantFitzPage.enchant()
 
 
 class DemoFitz:

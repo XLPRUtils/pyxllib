@@ -29,7 +29,7 @@ def 去除py交互标记(s):
 
 
 def import重排序(s):
-    from pyxllib.text.nestenv import PycodeNestEnv
+    from pyxllib.text.nestenv import PyNestEnv
 
     def cmp(line):
         """ 将任意一句import映射为一个可比较的list对象
@@ -50,12 +50,12 @@ def import重排序(s):
         return [name.lower(), line.startswith('import')]
 
     def sort_part(m):
-        parts = PycodeNestEnv(m.group()).imports().strings()
+        parts = PyNestEnv(m.group()).imports().strings()
         parts = [p.rstrip() + '\n' for p in parts]
         parts.sort(key=cmp)
         return ''.join(parts)
 
-    res = PycodeNestEnv(s).imports().sub(sort_part, adjacent=True)  # 需要邻接，分块处理
+    res = PyNestEnv(s).imports().sub(sort_part, adjacent=True)  # 需要邻接，分块处理
     return res
 
 

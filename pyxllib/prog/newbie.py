@@ -293,3 +293,4 @@ def decode_bitflags(n, flags, return_type=dict):
         return {x for i, x in enumerate(flags) if (n & (2 << i))}
     else:
         raise ValueError
+

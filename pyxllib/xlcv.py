@@ -13,4 +13,4 @@ from pyxllib.cv.expert import *
 # 如果这步没有给您“惊喜”而是“惊吓”，
 # 可以使用 from pyxllib.cv.expert import * 代替 from pyxllib.xlcv import *。
 # 然后显式使用 xlpil.imsize(im) 来代替 im.imsize 等用法。
-binding_pilimage_xlpil()
+xlpil.enchant()
