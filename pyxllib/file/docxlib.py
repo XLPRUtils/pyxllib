@@ -13,10 +13,10 @@ import docx
 from pyxllib.prog.pupil import DictTool
 from pyxllib.file.specialist import File, Dir, get_etag
 from pyxllib.debug.specialist import browser
-from pyxllib.cv.expert import binding_pilimage_xlpil
+from pyxllib.cv.expert import xlpil
 from pyxllib.data.labelme import LabelmeDict
 
-binding_pilimage_xlpil()
+xlpil.enchant()
 
 
 class Document:
@@ -61,7 +61,7 @@ class Document:
         """ 获得 fitz的pdf文档对象
         :return: FitzDoc对象
         """
-        from pyxllib.file.fitzlib import FitzDoc
+        from pyxllib.file.pdflib import FitzDoc
         file_pdf = self.write_pdf()
         doc = FitzDoc(file_pdf)
         return doc

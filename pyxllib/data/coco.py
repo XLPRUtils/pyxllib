@@ -291,7 +291,7 @@ class CocoGtData:
             anno['id'] = i
         return anns
 
-    def to_labelme(self, root, *, seg=False, prt=False):
+    def to_labelme(self, root, *, bbox=True, seg=False, prt=False):
         """
         :param root: 图片根目录
         :return:
@@ -323,10 +323,11 @@ class CocoGtData:
             img = DictTool.or_(img, {'xltype': 'image'})
             lmdict['shapes'].append(LabelmeDict.gen_shape(json.dumps(img, ensure_ascii=False), [[-10, 0], [-5, 0]]))
             for ann in anns:
-                ann = DictTool.or_(ann, {'category_name': catid2name[ann['category_id']]})
-                label = json.dumps(ann, ensure_ascii=False)
-                shape = LabelmeDict.gen_shape(label, xywh2ltrb(ann['bbox']))
-                lmdict['shapes'].append(shape)
+                if bbox:
+                    ann = DictTool.or_(ann, {'category_name': catid2name[ann['category_id']]})
+                    label = json.dumps(ann, ensure_ascii=False)
+                    shape = LabelmeDict.gen_shape(label, xywh2ltrb(ann['bbox']))
+                    lmdict['shapes'].append(shape)
 
                 if seg:
                     # 把分割也显示出来（用灰色）
@@ -442,7 +443,7 @@ class CocoData(CocoGtData):
         return dst
 
     def group_dt(self, *, reserve_empty=False):
-        """ 对annos按image_id分组，如果有"""
+        """ 对annos按image_id分组，返回 [(im1, dt_anns1), (im2, dt_anns2), ...] """
         group_anns = defaultdict(list)
         [group_anns[an['image_id']].append(an) for an in self.dt_list]
         return self._group_base(group_anns, reserve_empty)

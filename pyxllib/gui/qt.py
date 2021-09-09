@@ -149,7 +149,7 @@ class XlComboBox(QtWidgets.QComboBox):
 def get_input_widget(items=None, cur_value=None, *, valcvt=None,
                      n_widget=1, enabled=True,
                      correct_changed=None):
-    """ 根据items参数情况，智能判断生成对应的windet
+    """ 根据items参数情况，智能判断生成对应的widget
 
     :param items:
         None, 普通的文本编辑框

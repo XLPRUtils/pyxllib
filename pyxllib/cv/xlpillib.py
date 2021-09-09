@@ -27,11 +27,36 @@ except ImportError:
     accimage = None
 
 from pyxllib.prog.newbie import RunOnlyOnce
+from pyxllib.prog.pupil import EnchantBase
 from pyxllib.file.specialist import File
 from pyxllib.cv.xlcvlib import xlcv
 
 
-class xlpil:
+class xlpil(EnchantBase):
+    @classmethod
+    @RunOnlyOnce
+    def enchant(cls):
+        """ 把xlpil的功能嵌入到PIL.Image.Image类中，作为成员函数直接使用
+        即 im = Image.open('test.jpg')
+        im.to_buffer() 等价于使用 xlpil.to_buffer(im)
+
+        pil相比cv，由于无法类似CvImg这样新建一个和np.ndarray等效的类
+        所以还是比较支持嵌入到Image中直接操作
+        """
+        names = cls.check_enchant_names([cv2, np.ndarray, PIL.Image, PIL.Image.Image])
+
+        # 1 绑定到模块下的方法
+        pil_names = 'read read_from_buffer read_from_url'.split()
+        cls._enchant(PIL.Image, pil_names, 'staticmethod2modulefunc')
+
+        # 2 绑定到PIL.Image.Image下的方法
+        # 2.1 属性类
+        propertys = 'imsize n_channels'.split()
+        cls._enchant(PIL.Image.Image, propertys, 'staticmethod2property')
+
+        # 2.2 其他均为方法类
+        cls._enchant(PIL.Image.Image, names - pil_names - propertys, 'staticmethod2objectmethod')
+
     @staticmethod
     def __1_read():
         pass
@@ -331,44 +356,3 @@ class xlpil:
             # composite是合成的意思。将右图的alpha替换为左图内容
             im = Image.alpha_composite(background, im.convert('RGBA')).convert('RGB')
         return im
-
-
-def check_names_xlpil():
-    exist_names = {'cv2': set(dir(cv2)),
-                   'np.ndarray': set(dir(np.ndarray)),
-                   'PIL.Image': set(dir(PIL.Image)),
-                   'PIL.Image.Image': set(dir(PIL.Image.Image))}
-    names = {x for x in dir(xlpil) if x[:2] != '__'}
-
-    for name, k in itertools.product(names, exist_names):
-        if name in exist_names[k]:
-            print(f'警告！同名冲突！ {k}.{name}')
-
-    return names
-
-
-@RunOnlyOnce
-def binding_pilimage_xlpil():
-    """ 把xlpil的功能嵌入到PIL.Image.Image类中，作为成员函数直接使用
-    即 im = Image.open('test.jpg')
-    im.to_buffer() 等价于使用 xlpil.to_buffer(im)
-
-    pil相比cv，由于无法类似CvImg这样新建一个和np.ndarray等效的类
-    所以还是比较支持嵌入到Image中直接操作
-    """
-    all_names = check_names_xlpil()
-
-    # 1 绑定到模块下的方法
-    pil_names = set('read read_from_buffer read_from_url'.split())
-    for name in pil_names:
-        setattr(PIL.Image, name, getattr(xlpil, name))
-
-    # 2 绑定到PIL.Image.Image下的方法
-    # 2.1 属性类
-    attrs_names = set('imsize n_channels'.split())
-    for name in attrs_names:
-        setattr(PIL.Image.Image, name, property(getattr(xlpil, name)))
-
-    # 2.2 其他均为方法类
-    for name in (all_names - pil_names - attrs_names):
-        setattr(PIL.Image.Image, name, getattr(xlpil, name))

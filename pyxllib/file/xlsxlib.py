@@ -41,10 +41,7 @@ import pandas as pd
 from pyxllib.debug.pupil import dprint
 from pyxllib.debug.specialist import browser
 from pyxllib.algo.specialist import product
-
-
-def __cell():
-    pass
+from pyxllib.prog.pupil import EnchantBase
 
 
 def excel_addr(n, m) -> str:
@@ -59,7 +56,14 @@ def excel_addr(n, m) -> str:
     return f'{get_column_letter(int(m))}{n}'
 
 
-class CellExtend:
+class EnchantCell(EnchantBase):
+
+    @classmethod
+    @RunOnlyOnce
+    def enchant(cls):
+        cls._enchant(openpyxl.cell.cell.Cell, mode='staticmethod2objectmethod')
+        cls._enchant(openpyxl.cell.cell.MergedCell, mode='staticmethod2objectmethod')
+
     @staticmethod
     def in_range(cell):
         """判断一个单元格所在的合并单元格
@@ -180,50 +184,33 @@ class CellExtend:
             return cell.offset(0, -1)
 
 
-@RunOnlyOnce
-def binding_cell_extend():
-    def check_names():
-        exist_names = {'openpyxl.cell.cell.Cell': set(dir(openpyxl.cell.cell.Cell)),
-                       'openpyxl.cell.cell.MergedCell': set(dir(openpyxl.cell.cell.MergedCell))}
-        names = {x for x in dir(CellExtend) if x[:2] != '__'}
-
-        for name, k in itertools.product(names, exist_names):
-            if name in exist_names[k]:
-                print(f'警告！同名冲突！ {k}.{name}')
-
-        return names
-
-    names = check_names()
-
-    for name in names:
-        setattr(openpyxl.cell.cell.Cell, name, getattr(CellExtend, name))
-        setattr(openpyxl.cell.cell.MergedCell, name, getattr(CellExtend, name))
+EnchantCell.enchant()
 
 
-binding_cell_extend()
-
-
-def __worksheet():
-    pass
-
-
-class WorksheetExtend:
+class EnchantWorksheet(EnchantBase):
     """ 扩展标准的Workshhet功能 """
 
+    @classmethod
+    @RunOnlyOnce
+    def enchant(cls):
+        cls._enchant(openpyxl.worksheet.worksheet.Worksheet,
+                     mode='staticmethod2objectmethod',
+                     white_list=['_cells_by_row'])
+
     @staticmethod
-    def copy_worksheet(origin_ws, target_ws):
+    def copy_worksheet(_self, target_ws):
         """跨工作薄时复制表格内容的功能
         openpyxl自带的Workbook.copy_worksheet没法跨工作薄复制，很坑
         """
         # 1 取每个单元格的值
-        for row in origin_ws:
+        for row in _self:
             for cell in row:
                 try:
                     cell.copy_cell(target_ws[cell.coordinate])
                 except AttributeError:
                     pass
         # 2 合并单元格的处理
-        for rng in origin_ws.merged_cells.ranges:
+        for rng in _self.merged_cells.ranges:
             target_ws.merge_cells(rng.ref)
         # 3 其他表格属性的复制
         # 这个从excel读取过来的时候，是不准的，例如D3可能因为关闭时停留窗口的原因误跑到D103
@@ -231,12 +218,12 @@ class WorksheetExtend:
         # target_ws.freeze_panes = origin_ws.freeze_panes
 
     @staticmethod
-    def _cells_by_row(self, min_col, min_row, max_col, max_row, values_only=False):
+    def _cells_by_row(_self, min_col, min_row, max_col, max_row, values_only=False):
         """openpyxl的这个迭代器，遇到合并单元格会有bug
         所以我把它重新设计一下~~
         """
         for row in range(min_row, max_row + 1):
-            cells = (self.cell(row=row, column=column) for column in range(min_col, max_col + 1))
+            cells = (_self.cell(row=row, column=column) for column in range(min_col, max_col + 1))
             if values_only:
                 # yield tuple(cell.value for cell in cells)  # 原代码
                 yield tuple(getattr(cell, 'value', None) for cell in cells)
@@ -244,7 +231,7 @@ class WorksheetExtend:
                 yield tuple(cells)
 
     @staticmethod
-    def search(self, pattern, min_row=None, max_row=None, min_col=None, max_col=None, order=None, direction=0):
+    def search(_self, pattern, min_row=None, max_row=None, min_col=None, max_col=None, order=None, direction=0):
         """查找满足pattern正则表达式的单元格
 
         :param pattern: 正则匹配式，可以输入re.complier对象
@@ -263,14 +250,14 @@ class WorksheetExtend:
         <Cell '预算总表'.B2>
         """
         # 1 定界
-        x1, x2 = max(min_row or 1, 1), min(max_row or self.max_row, self.max_row)
-        y1, y2 = max(min_col or 1, 1), min(max_col or self.max_column, self.max_column)
+        x1, x2 = max(min_row or 1, 1), min(max_row or _self.max_row, _self.max_row)
+        y1, y2 = max(min_col or 1, 1), min(max_col or _self.max_column, _self.max_column)
 
         # 2 遍历
         if isinstance(pattern, (list, tuple)):
             cel = None
             for p in pattern:
-                cel = self.search(p, x1, x2, y1, y2, order)
+                cel = _self.search(p, x1, x2, y1, y2, order)
                 if cel:
                     # up, down, left, right 找到的单元格四边界
                     l, u, r, d = getattr(cel.in_range(), 'bounds', (cel.column, cel.row, cel.column, cel.row))
@@ -290,29 +277,29 @@ class WorksheetExtend:
         else:
             if isinstance(pattern, str): pattern = re.compile(pattern)
             for x, y in product(range(x1, x2 + 1), range(y1, y2 + 1), order=order):
-                cell = self.cell(x, y)
+                cell = _self.cell(x, y)
                 if cell.celltype() == 1: continue  # 过滤掉合并单元格位置
                 if pattern.search(str(cell.value)): return cell  # 返回满足条件的第一个值
 
     findcel = search
 
     @staticmethod
-    def findrow(self, pattern, *args, **kwargs):
-        cel = self.findcel(pattern, *args, **kwargs)
+    def findrow(_self, pattern, *args, **kwargs):
+        cel = _self.findcel(pattern, *args, **kwargs)
         return cel.row if cel else 0
 
     @staticmethod
-    def findcol(self, pattern, *args, **kwargs):
-        cel = self.findcel(pattern, *args, **kwargs)
+    def findcol(_self, pattern, *args, **kwargs):
+        cel = _self.findcel(pattern, *args, **kwargs)
         return cel.column if cel else 0
 
     @staticmethod
-    def browser(self):
+    def browser(_self):
         """注意，这里会去除掉合并单元格"""
-        browser(pd.DataFrame(self.values))
+        browser(pd.DataFrame(_self.values))
 
     @staticmethod
-    def select_columns(self, columns, column_name='searchkey'):
+    def select_columns(_self, columns, column_name='searchkey'):
         r"""获取表中columns属性列的值，返回dataframe数据类型
 
         :param columns: 搜索列名使用正则re.search字符串匹配查找
@@ -331,7 +318,7 @@ class WorksheetExtend:
         # 1 找到所有标题位置，定位起始行
         cels, names, start_line = [], [], -1
         for search_name in columns:
-            cel = self.findcel(search_name)
+            cel = _self.findcel(search_name)
             if cel:
                 cels.append(cel)
                 if column_name == 'searchkey':
@@ -353,13 +340,13 @@ class WorksheetExtend:
             if cel:
                 col = cel.column
                 li = []
-                for i in range(start_line, self.max_row + 1):
-                    v = self.cell(i, col).mcell().value  # 注意合并单元格的取值
+                for i in range(start_line, _self.max_row + 1):
+                    v = _self.cell(i, col).mcell().value  # 注意合并单元格的取值
                     li.append(v)
                 datas[names[k]] = li
             else:
                 # 如果没找到列，设一个空列
-                datas[names[k]] = [None] * (self.max_row + 1 - start_line)
+                datas[names[k]] = [None] * (_self.max_row + 1 - start_line)
         df = pd.DataFrame(datas)
 
         # 3 去除所有空行数据
@@ -368,7 +355,7 @@ class WorksheetExtend:
         return df
 
     @staticmethod
-    def copy_range(self, cell_range, rows=0, cols=0):
+    def copy_range(_self, cell_range, rows=0, cols=0):
         """ 同表格内的 range 复制操作
         Copy a cell range by the number of rows and/or columns:
         down if rows > 0 and up if rows < 0
@@ -390,50 +377,32 @@ class WorksheetExtend:
         r = sorted(range(min_row, max_row + 1), reverse=rows > 0)
         c = sorted(range(min_col, max_col + 1), reverse=cols > 0)
         for row, column in product(r, c):
-            self.cell(row, column).copy_cell(self.cell(row + rows, column + cols))
+            _self.cell(row, column).copy_cell(_self.cell(row + rows, column + cols))
 
     @staticmethod
-    def reindex_columns(self, orders):
+    def reindex_columns(_self, orders):
         """ 重新排列表格的列顺序
         >> ws.reindex_columns('I,J,A,,,G,B,C,D,F,E,H,,,K'.split(','))
 
         TODO 支持含合并单元格的整体移动？
         """
         from openpyxl.utils.cell import column_index_from_string
-        max_row, max_column = self.max_row, self.max_column
+        max_row, max_column = _self.max_row, _self.max_column
         for j, col in enumerate(orders, 1):
             if not col: continue
-            self.copy_range(f'{col}1:{col}{max_row}', cols=max_column + j - column_index_from_string(col))
-        self.delete_cols(1, max_column)
+            _self.copy_range(f'{col}1:{col}{max_row}', cols=max_column + j - column_index_from_string(col))
+        _self.delete_cols(1, max_column)
 
 
-@RunOnlyOnce
-def binding_worksheet_extend():
-    def check_names():
-        exist_names = {'openpyxl.worksheet.worksheet.Worksheet':
-                           set(dir(openpyxl.worksheet.worksheet.Worksheet)) - {'_cells_by_row'}}
-        names = {x for x in dir(WorksheetExtend) if x[:2] != '__'}
-
-        for name, k in itertools.product(names, exist_names):
-            if name in exist_names[k]:
-                print(f'警告！同名冲突！ {k}.{name}')
-
-        return names
-
-    names = check_names()
-
-    for name in names:
-        setattr(openpyxl.worksheet.worksheet.Worksheet, name, getattr(WorksheetExtend, name))
+EnchantWorksheet.enchant()
 
 
-binding_worksheet_extend()
+class EnchantWorkbook(EnchantBase):
+    @classmethod
+    @RunOnlyOnce
+    def enchant(cls):
+        cls._enchant(openpyxl.Workbook, mode='staticmethod2objectmethod')
 
-
-def __workbook():
-    pass
-
-
-class WorkbookExtend:
     @staticmethod
     def adjust_sheets(wb, new_sheetnames):
         """ 按照 new_sheetnames 的清单重新调整sheets
@@ -449,25 +418,7 @@ class WorkbookExtend:
         return wb
 
 
-@RunOnlyOnce
-def binding_workbook_extend():
-    def check_names():
-        exist_names = {'openpyxl.Workbook': set(dir(openpyxl.Workbook))}
-        names = {x for x in dir(WorkbookExtend) if x[:2] != '__'}
-
-        for name, k in itertools.product(names, exist_names):
-            if name in exist_names[k]:
-                print(f'警告！同名冲突！ {k}.{name}')
-
-        return names
-
-    names = check_names()
-
-    for name in names:
-        setattr(openpyxl.Workbook, name, getattr(WorkbookExtend, name))
-
-
-binding_workbook_extend()
+EnchantWorkbook.enchant()
 
 
 def demo_openpyxl():

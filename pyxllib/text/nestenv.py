@@ -303,9 +303,12 @@ class __NestEnvBase:
         """ 对每个子区间进行一层嵌套定位
 
         :param func: 输入一个函数，模式为 func(s)
-            支持输入一个字符串，返回一个类区间集
+            支持输入一个字符串，返回一个"区间集like"对象
         :param invert: 是否对最终的结果再做一次取反
         :return: 返回一个新的NestEnv对象
+
+        注意所有的定位功能，基本都要基于这个模式开发。
+        因为不是要对self.s整串匹配，而是要嵌套处理，只处理self.intervals标记的区间。
         """
         li = []
         for reg in self.intervals:
@@ -1053,11 +1056,56 @@ def substrfunc(s, head, tail, *, func1=lambda x: x, func2=lambda x: x):
     return intervals.replace(s, func1, out_repl=func2)
 
 
-class PycodeNestEnv(NestEnv):
-    def imports(self):
+class CppNestEnv(NestEnv):
+    def comments(self, *, invert=False):
+        """ 这个实现是不太严谨的，如果急用，可以先凑合吧 """
+
+        def core(s):
+            ne = NestEnv(s)
+            ne2 = ne.find2('/*', '*/') + ne.search(r'//.+')  # 找出c++的注释块
+            return ne2
+
+        return self.nest(core, invert)
+
+
+class PyNestEnv(NestEnv):
+    def imports(self, *, invert=False):
         """ 定位所有的from、import，默认每个import是分开的 """
-        # 捕捉连续的以'from ', 'import '开头的行
-        ne = NestEnv(self.s)
-        ne2 = ne.search(r'^(import|from)\s.+\n?', flags=re.MULTILINE) \
-              + ne.search(r'^from\s.+\([^\)]+\)[ \t]*\n?', flags=re.MULTILINE)
-        return type(self)(ne2.s, ne2.intervals)
+
+        def core(s):
+            # 捕捉连续的以'from ', 'import '开头的行
+            ne = NestEnv(s)
+            ne2 = ne.search(r'^(import|from)\s.+\n?', flags=re.MULTILINE) \
+                  + ne.search(r'^from\s.+\([^\)]+\)[ \t]*\n?', flags=re.MULTILINE)
+            return ne2
+
+        return self.nest(core, invert)
+
+    def search(self, pattern, flags=0, group=0, invert=False):
+        r""" 正则模式匹配
+
+        :param group: 可以指定返回的编组内容，默认第0组
+
+        >>> NestEnv(r'xx\teste{aa}{bb}').search(r'\\test[a-z]*').strings()
+        ['\\teste']
+
+        TODO 如果需要用iner可以用命名组 (?P<inner>.*?)，含inner组名时，inner默认值为True
+        """
+
+        def core(s):
+            return [m.span(group) for m in re.finditer(pattern, s, flags)]
+
+        return self.nest(core, invert)
+
+    def identifier(self, name, flags=0, group=0, *, invert=False):
+        """ 定位特定的标识符位置
+        这东西比较简单，可以在正则头尾加\b即可，也可以用普通正则实现
+
+        :param name: 支持正则格式
+
+        """
+
+        def core(s):
+            return [m.span(group) for m in re.finditer(rf'\b{name}\b', s, flags)]
+
+        return self.nest(core, invert)
