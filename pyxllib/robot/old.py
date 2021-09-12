@@ -59,63 +59,6 @@ def ReadFromUrl(url):
         return soup.get_text()
 
 
-class CWord:
-    def __init__(self, arg1=None, *, visible=None):
-        """visible默认为None，代表不对现有窗口显示情况做更改
-                如果设为bool值true或false，
-        """
-        self.__dict__['app'] = win32.gencache.EnsureDispatch('Word.Application')
-        if isinstance(visible, bool): self.app.Visible = visible
-
-        if isinstance(arg1, str):  # 输入的是一个文件名则打开
-            file = arg1
-            self.app.Documents.Open(file)  # 打开文件
-            # self.__dict__ = app.Documents(Path(file).name).__dict__
-            self.__dict__['doc'] = self.app.Documents(File(file).name)  # 存储到doc成员变量
-        else:  # 如果输入参数不合法，新建一个空word
-            self.app.Documents.Add()
-            self.__dict__['doc'] = self.app.ActiveDocument
-
-    def CheckAttr(self):
-        """ 输出 self.app.Documents 的成员 """
-        showdir(self.doc)
-
-    def CntPage(self):
-        """统计word页数"""
-        return self.doc.ActiveWindow.Panes(1).Pages.Count
-
-    def GetParagraphs(self):
-        """以 yield 形式获得每个段落文本内容"""
-        cntPar = self.doc.Paragraphs.Count
-        for i in range(1, cntPar + 1):
-            yield str(self.doc.Paragraphs(i))
-
-    def Close(self):
-        """ 关闭word文件 """
-        self.doc.Close(False)
-        # self.app.Quit()
-
-    def __getattr__(self, item):
-        """ 智能获取成员 """
-        if self.doc:
-            return getattr(self.doc, item)
-        else:
-            return None
-
-    def __setattr__(self, key, value):
-        """ 智能设置成员 """
-        if key in self.__dict__:
-            self.__dict__[key] = value
-        elif self.doc:
-            setattr(self.doc, key, value)
-        else:
-            pass
-
-    def __str__(self):
-        """ 获得word文件的全文纯文本 """
-        return str(self.doc.Content)
-
-
 def EnsureContent(ob=None, encoding='utf8'):
     """
     未输入ob参数时，自动从控制台获取文本
@@ -140,8 +83,10 @@ def EnsureContent(ob=None, encoding='utf8'):
             text = textract.process(ob)
             return text.decode(encoding, errors='ignore')
         elif ob.endswith('.doc'):
-            a = CWord(ob)
-            s = str(a)
+            from pyxllib.robot.win32lib import EnchantWin32WordApplication
+            app = EnchantWin32WordApplication.get_app()
+            a = app.open_doc(ob)
+            s = a.content
             a.Close()
             return s
         else:  # 其他按文本格式处理
