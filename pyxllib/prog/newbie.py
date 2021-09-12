@@ -90,6 +90,15 @@ class RunOnlyOnce:
         self.distinct_args = distinct_args
         self.results = {}
 
+    @classmethod
+    def decorator(cls, distinct_args=True):
+        """ 作为装饰器的时候，如果要设置参数，要用这个接口 """
+
+        def wrap(func):
+            return cls(func, distinct_args)
+
+        return wrap
+
     def __call__(self, *args, **kwargs):
         tag = f'{args}{kwargs}' if self.distinct_args else ''
         # TODO 思考更严谨，考虑了值类型的tag标记
@@ -293,4 +302,3 @@ def decode_bitflags(n, flags, return_type=dict):
         return {x for i, x in enumerate(flags) if (n & (2 << i))}
     else:
         raise ValueError
-

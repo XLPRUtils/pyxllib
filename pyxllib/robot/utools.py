@@ -19,7 +19,7 @@ import ujson
 import fire
 
 from pyxllib.file.specialist import File, Dir, get_etag
-from pyxllib.debug.specialist import browser, TicToc, Datetime
+from pyxllib.debug.specialist import browser, TicToc, parse_datetime
 
 
 def _print_df_result(df, outfmt='text'):
@@ -255,13 +255,15 @@ class UtoolsText(UtoolsBase):
 
     def wdate(self):
         """ 输入一周的简略日期值 """
+        import datetime
         import pyautogui
 
         start = int(self.cmds['subinput'])
 
+        weektag = '一二三四五六日'
         for i in range(7):
-            dt = Datetime(start) + i
-            pyperclip.copy(dt.strftime('%y%m%d周%k'))
+            dt = parse_datetime(start) + datetime.timedelta(i)
+            pyperclip.copy(dt.strftime('%y%m%d') + f'周{weektag[dt.weekday()]}')
             # pyperclip.paste()  # 这个没用
             # pyautogui.write('210503周一')  # 这个也没用
             pyautogui.hotkey('ctrl', 'v')
@@ -278,113 +280,27 @@ class UtoolsText(UtoolsBase):
         """ 将内容复制到word，另存为html文件后，用浏览器打开查看 """
         from pyxllib.robot.win32lib import EnchantWin32WordApplication
 
-        def _func(type_='html', close=None, visible=None, quit=None):
+        def _func(fmt='html', visible=False, quit=None):
             """
             Args:
-                type_: 输出文件类型
+                fmt: 输出文件类型
                     常见的可以简写：html、pdf、txt
                     其他特殊需求可以用word原变量名：wdFormatDocument
-                close: 运行完是否关闭文档
-                visible: 应用是否可见
+                visible: 是否展示运行过程，如果不展示，默认最后会close文档
                 quit: 运行完是否退出应用
             """
             # 保存的临时文件名采用etag
-            f = File(get_etag(self.cmds['ClipText']), Dir.TEMP, suffix=type_)
-
-            # 必须用gencache方法，才能获得_c的常量
+            f = File(get_etag(self.cmds['ClipText']), Dir.TEMP, suffix=fmt)
             app = EnchantWin32WordApplication.get_app(visible=visible)
-            doc = app.Documents.Add()  # 创建新的word文档
+            doc = app.new_doc(f)
             app.Selection.Paste()
-            # 复杂格式可能无法完美支持所有功能。比如复杂的pdf无法使用SaveAs2实现，要用ExportAsFixedFormat。
-            doc.SaveAs2(str(f), app.wd(type_, 'SaveFormat'))  # 另存为
-            if close:
+            doc.browser(fmt=fmt)
+            if not visible:
                 doc.Close()  # 关闭 word 文档
             if quit:
                 app.Quit()
 
-            browser(f)
-
-            fire.Fire(_func, self.cmds['subinput'], 'browser')
-
-    def win32(self):
-        """ 启动可支持pywin32自动化处理的应用
-
-        有的就是软件普通打开方式：OneNote
-        有的com模式和普通模式不一样，区分应用。这里又分为
-            可以直接用GetActiveObject操作的：Excel
-            不能的：Word
-        """
-        from pyxllib.robot.win32lib import get_win32_app
-        fire.Fire(partial(get_win32_app, visible=True), self.cmds['subinput'], 'win32')
-
-    def chrome_history(self):
-        """ 谷歌历史浏览记录结构化 / win32使用word自动化demo """
-
-        def chrome_history(visible=None, drop_duplicates=True, summary=False):
-            """
-            Args:
-                visible: 展示word处理过程
-                drop_duplicates: 删除link完全相同的记录
-                summary: 只展示摘要结果
-
-            Returns:
-
-            """
-            from urllib.parse import urlparse
-            from urllib.parse import unquote
-            from pyxllib.algo.stat import xlpivot
-            from pyxllib.robot.win32lib import EnchantWin32WordApplication, EnchantWin32WordDocument
-
-            # 1 初始化
-            app = EnchantWin32WordApplication.get_app(visible=visible)
-            doc = app.Documents.Add()
-            EnchantWin32WordDocument.enchant(doc)
-            app.Selection.Paste()  # 从剪切板粘贴数据到word中
-
-            # 2 获取content后，就可以在py做正则等各种复杂处理
-            ms = list(re.finditer(r'⨯\d{2}:\d{2}:\d{2}', doc.content))
-            for m in reversed(ms):
-                doc.Characters.Item(m.start() + 1).Select()  # 通过Characters.Item可以找到匹配的内容在文档中的实际range位置
-                app.Selection.MoveLeft()  # 这里是找到“⨯21:58:17"的标记
-                app.Selection.TypeParagraph()  # 换行，方便后面做解析，信息提取
-
-            # 3 信息提取
-            ls = []
-            for p in doc.Paragraphs:
-                # word是基于Range的线性结构（区间），去组合出Paragraphs、Sentences、Hyperlinks等数据的。Range算核心基础类。
-                r = p.Range
-                content = r()  # 获得区间的文本，等价于r.Text
-                if content[0] != '⨯':
-                    continue
-
-                time_ = content[1:9]
-                # r.Hyperlinks支持直接for迭代获取对象，用len计算数量等价于r.Hyperlinks.Count
-                link = r.Hyperlinks.Item(1)  # 注意Hyperlinks等容器的Item，统一都是从下标1开始
-                linkp = urlparse(link.Name)  # 链接格式解析
-                # netloc = linkp.netloc or Path(linkp.path).name
-                netloc = linkp.netloc or linkp.scheme  # 可能是本地文件，此时记录其所在磁盘
-
-                ls.append([time_, netloc, link.TextToDisplay, unquote(link.Name)])
-
-            df = pd.DataFrame.from_records(reversed(ls), columns=['time', 'netloc', 'title', 'link'])
-            if drop_duplicates:
-                df.drop_duplicates('link', inplace=True)
-
-            # 4 用浏览器展示出结果
-            doc.Close(False)  # 不用保存，直接退出文档。至于word要不要退出不用管，维持原样。
-            df['title'] = [f'<a href="{r.link}" target="_blank">{r.title}</a>' for idx, r in df.iterrows()]
-
-            if summary:
-                netloc_time = {}
-                for idx, r in df.iterrows():
-                    k = r['netloc']
-                    netloc_time[k] = min(r['time'], netloc_time.get(k, '99:99:99'))
-                df['netloc'] = pd.Categorical(df['netloc'], sorted(netloc_time.keys(), key=lambda x: netloc_time[x]))
-                df = xlpivot(df, ['netloc', 'time', 'title'], values={'link': lambda x: x.iloc[0]['link']})
-
-            browser(df, to_html_args={'escape': False})
-
-        fire.Fire(chrome_history, self.cmds['subinput'], 'chrome_history')
+        fire.Fire(_func, self.cmds['subinput'], 'browser')
 
 
 class UtoolsRegex(UtoolsBase):
