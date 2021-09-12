@@ -388,11 +388,11 @@ class PathBase:
     def mtime(self):
         r""" 文件的最近修改时间
 
-        >> Path(r"C:\pycode\code4101py").mtime
-        2020-03-10 17:32:37
+        >> PathBase(r"C:\pycode\code4101py").mtime
+        datetime.datetime(2021, 9, 6, 17, 28, 18, 960713)
         """
-        from pyxllib.debug.specialist.datetime import Datetime
-        return Datetime(os.stat(str(self)).st_mtime)
+        from datetime import datetime
+        return datetime.fromtimestamp(os.stat(str(self)).st_mtime)
 
     @property
     def ctime(self):
@@ -401,9 +401,9 @@ class PathBase:
         >> Path(r"C:\pycode\code4101py").ctime
         2018-05-25 10:46:37
         """
-        from pyxllib.debug.specialist.datetime import Datetime
+        from datetime import datetime
         # 注意：st_ctime是平台相关的值，在windows是创建时间，但在Unix是metadate最近修改时间
-        return Datetime(os.stat(str(self)).st_ctime)
+        return datetime.fromtimestamp(os.stat(str(self)).st_ctime)
 
     def relpath(self, ref_dir) -> str:
         r""" 当前路径，相对于ref_dir的路径位置
@@ -814,6 +814,9 @@ class File(PathBase):
             dst_dir = os.path.splitext(p)[0]
         shutil.unpack_archive(p, str(dst_dir))
 
+    def __eq__(self, other):
+        return str(self) == str(other)
+
 
 def demo_file():
     """ File类的综合测试"""
@@ -1141,12 +1144,14 @@ def genfilename(fd='.'):
         后面的6位记为数值d2，类似小时+分钟+秒的标签，但是在出现重名时，
         d2会一直自加1直到没有重名文件，所以秒上是可能会出现“99”之类的值的。
     """
-    from pyxllib.debug.specialist.datetime import Datetime
+    from datetime import datetime
     # 1 获取前段标签
-    s1 = Datetime().briefdateweek()  # '180827周一'
+    dt = datetime.now()
+    weektag = '一二三四五六日'
+    s1 = dt.strftime('%y%m%d') + f'周{weektag[dt.weekday()]}'  # '180827周一'
 
     # 2 获取后端数值标签
-    d2 = int(datetime.datetime.now().strftime('%H%M%S'))
+    d2 = int(datetime.now().strftime('%H%M%S'))
 
     # 3 获取目录下文件，并迭代确保生成一个不重名文件
     ls = os.listdir(fd)

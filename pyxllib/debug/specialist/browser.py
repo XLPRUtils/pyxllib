@@ -11,6 +11,7 @@ import inspect
 import os
 import subprocess
 import sys
+import datetime
 
 import pandas as pd
 from bs4 import BeautifulSoup
@@ -21,7 +22,6 @@ from pyxllib.file.specialist import File, Dir, get_etag
 from pyxllib.prog.newbie import typename
 from pyxllib.prog.pupil import is_url, is_file
 from pyxllib.text.pupil import ensure_gbk, shorten
-from pyxllib.debug.specialist.datetime import Datetime
 from pyxllib.debug.specialist.tictoc import TicToc
 
 
@@ -195,7 +195,7 @@ class Browser(Explorer):
             try:
                 name = arg.options['title'][0]['text']
             except (LookupError, TypeError):
-                name = Datetime().strftime('%H%M%S_%f')
+                name = datetime.datetime.now().strftime('%H%M%S_%f')
             if file is None:
                 file = File(name, Dir.TEMP, suffix='.html').to_str()
             arg.render(path=str(file))
