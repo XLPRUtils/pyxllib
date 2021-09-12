@@ -210,7 +210,7 @@ class Trainer:
         if accuracy_func: self.accuracy_func = accuracy_func
 
         # 1 日志
-        timetag = Datetime().strftime('%Y%m%d.%H%M%S')
+        timetag = datetime.datetime.now().strftime('%Y%m%d.%H%M%S')
         # self.curlog_dir = Dir(self.log_dir / timetag)  # 本轮运行，实际log位置，是存放在一个子目录里
         self.curlog_dir = Dir(self.log_dir)
         self.curlog_dir.ensure_dir()
@@ -777,7 +777,7 @@ class ZcPredictor:
         # 3 初始化各组件
         self.prepare_args = prepare_args
         self.batch_size = batch_size
-        self.transform = lambda x: CvPrcs.read(x, 1)  # 默认统一转cv2的图片格式
+        self.transform = lambda x: xlcv.read(x, 1)  # 默认统一转cv2的图片格式
         # self.transform = lambda x: PilPrcs.read(x, 1)  # 也可以使用pil图片格式
 
     def forward(self, imgs):

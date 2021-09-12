@@ -223,7 +223,7 @@ class Dir(PathBase):
         >> Dir('C:/pycode/code4101py').select('*.py', min_size=200*1024)  # 200kb以上的文件
         C:/pycode/code4101py: ['liangyb.py']
 
-        >> Dir(r'C:/pycode/code4101py').select('*.py', min_mtime=Datetime(2020, 3, 1))  # 修改时间在3月1日以上的
+        >> Dir(r'C:/pycode/code4101py').select('*.py', min_mtime=datetime.date(2020, 3, 1))  # 修改时间在3月1日以上的
         """
         subs = filesmatch(patter, root=str(self), type_=type_,
                           ignore_backup=ignore_backup, ignore_special=ignore_special,
@@ -427,7 +427,7 @@ def filesfilter(files, *, root=os.curdir, type_=None,
     :param max_mtime: ~
     :return:
     """
-    from pyxllib.debug.specialist.datetime import Datetime
+    from datetime import datetime
 
     def judge(f):
         if root: f = os.path.join(root, f)
@@ -446,14 +446,14 @@ def filesfilter(files, *, root=os.curdir, type_=None,
                 if max_size is not None and size > max_size: return False
 
             if min_ctime or max_ctime:
-                file_ctime = msg.st_ctime
-                if min_ctime and Datetime(file_ctime) < min_ctime: return False
-                if max_ctime and Datetime(file_ctime) > max_ctime: return False
+                file_ctime = datetime.fromtimestamp(msg.st_ctime)
+                if min_ctime and file_ctime < min_ctime: return False
+                if max_ctime and file_ctime > max_ctime: return False
 
             if min_mtime or max_mtime:
-                file_mtime = msg.st_mtime
-                if min_mtime and Datetime(file_mtime) < min_mtime: return False
-                if max_mtime and Datetime(file_mtime) > max_mtime: return False
+                file_mtime = datetime.fromtimestamp(msg.st_mtime)
+                if min_mtime and file_mtime < min_mtime: return False
+                if max_mtime and file_mtime > max_mtime: return False
 
         if ignore_special:
             parts = File(f).parts
