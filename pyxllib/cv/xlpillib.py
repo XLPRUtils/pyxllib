@@ -46,12 +46,12 @@ class xlpil(EnchantBase):
         names = cls.check_enchant_names([cv2, np.ndarray, PIL.Image, PIL.Image.Image])
 
         # 1 绑定到模块下的方法
-        pil_names = 'read read_from_buffer read_from_url'.split()
+        pil_names = set('read read_from_buffer read_from_url'.split())
         cls._enchant(PIL.Image, pil_names, 'staticmethod2modulefunc')
 
         # 2 绑定到PIL.Image.Image下的方法
         # 2.1 属性类
-        propertys = 'imsize n_channels'.split()
+        propertys = set('imsize n_channels'.split())
         cls._enchant(PIL.Image.Image, propertys, 'staticmethod2property')
 
         # 2.2 其他均为方法类

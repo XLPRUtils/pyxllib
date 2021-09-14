@@ -38,6 +38,8 @@ def get_win32_app(name, visible=False):
         app = win32.GetActiveObject(f'{name}')  # 不能关联到普通方式打开的应用。但代码打开的应用都能找得到。
     except pythoncom.com_error:
         app = win32.gencache.EnsureDispatch(f'{name}')
+        # 还有种常见的初始化方法，是 win32com.client.Dispatch和win32com.client.dynamic.Dispatch
+        # from win32com.client.dynamic import Disypatch
 
     if visible is not None:
         app.Visible = visible
@@ -111,7 +113,7 @@ class EnchantWin32WordApplication(EnchantBase):
         if app is None:
             # 必须用gencache方法，才能获得 from win32com.client import constants 的常量
             app = win32.gencache.EnsureDispatch('Word.Application')
-            print('gencache')
+            # print('gencache')
         cls.enchant(app, recursion_enchant=True)
 
         if visible is not None:
