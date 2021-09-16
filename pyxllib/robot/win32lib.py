@@ -124,6 +124,15 @@ class EnchantWin32WordApplication(EnchantBase):
         return app
 
     @staticmethod
+    def check_close(app, outfile):
+        """ 检查是否有指定名称的文件被打开，将其关闭，避免new_doc等操作出现问题
+        """
+        outfile = File(outfile)
+        for x in app.Documents:
+            if File(x.Name, x.Path) == outfile:
+                x.Close()
+
+    @staticmethod
     def open_doc(app, file_name):
         """ 打开已有的文件
         """
@@ -187,9 +196,9 @@ class EnchantWin32WordDocument(EnchantBase):
             开启retain时，返回 outfile, doc
         """
 
-        # 1 辅助函数，枚举值映射
+        # 1 辅助函数
         def save_format(fmt):
-            """ word保存类型的枚举
+            """ 枚举值映射，word保存类型的枚举
 
             >> _('.html')
             8
@@ -235,19 +244,14 @@ class EnchantWin32WordDocument(EnchantBase):
             else:
                 etag = get_etag(doc.content)
                 outfile = File(etag, Dir.TEMP, suffix=fmt)
-                try:
-                    doc.SaveAs2(str(outfile), save_format(fmt), **kwargs)
-                except pywintypes.com_error:
-                    # Word 为文档指定的名称不能与已打开文档的名称相同。
-                    # 使用open_doc、new_doc更合理的初始化方法，在初始化就确定名称后，应该能避免保存时出现该问题了
-                    raise ValueError
+                doc.SaveAs2(str(outfile), save_format(fmt), **kwargs)
 
         # 6 是否恢复原doc
         cur_file = File(doc.Name, doc.Path)  # 当前文件不一定是目标文件f，如果是pdf等格式也不会切换过去
         if retain and origin_file and origin_file != cur_file:
             app = doc.Application
             doc.Close()
-            doc = app.get_doc(origin_file)
+            doc = app.open_doc(origin_file)
 
         # 7 返回值
         if retain:
@@ -265,12 +269,15 @@ class EnchantWin32WordDocument(EnchantBase):
 
     @staticmethod
     def browser(doc, file_name=None, fmt='html', retain=False):
-        """ 这个函数可能会导致原doc指向对象被销毁，建议要不追返回值doc继续使用 """
+        """ 这个函数可能会导致原doc指向对象被销毁，建议要不追返回值doc继续使用
+        """
         res = doc.save(file_name, fmt, retain=retain)
+
         if retain:
             outfile, doc = res
         else:
             outfile = res
+
         browser(outfile)
         return doc
 
