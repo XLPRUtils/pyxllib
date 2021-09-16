@@ -12,9 +12,9 @@ from pyxllib.debug.pupil import dprint, prettifystr
 from pyxllib.debug.specialist.browser import Explorer
 from pyxllib.file.specialist import File, Dir, filesmatch
 
+
 # 需要使用的第三方软件
 # BCompare.exe， bcompare函数要用
-
 
 class BCompare(Explorer):
     def __init__(self, app='BCompare', shell=False):
@@ -86,7 +86,7 @@ class BCompare(Explorer):
         return files[0].read()
 
 
-bcompare = BCompare()
+bcompare = BCompare()  # nowatch: 调试阶段，不需要自动watch的变量
 
 
 def modify_file(file, func, *, outfile=None, file_mode=None, debug=0):

@@ -11,17 +11,17 @@ import collections
 from collections import Counter, defaultdict
 import re
 import textwrap
+import os
 
 import requests
 import pandas as pd
 import bs4
 from bs4 import BeautifulSoup
 
-from pyxllib.prog.newbie import typename
 from pyxllib.debug.pupil import dprint
 from pyxllib.text.newbie import xldictstr
 from pyxllib.text.pupil import listalign, int2myalphaenum, shorten, ensure_gbk
-from pyxllib.file.specialist import File, Dir
+from pyxllib.file.specialist import File, Dir, get_etag
 
 ____section_1_dfs_base = """
 一个通用的递归功能
@@ -600,53 +600,75 @@ MathJax.Hub.Config(MATHJAX_KLXX_CONFIG);
     return head + s + tail
 
 
-def 自动制作网页标题的导航栏(html_content, title='temphtml'):
-    """
-    :param html_content: 原始网页的完整内容
-    :param title: 页面标题，默认会先找head/title，如果没有，则取一个随机名称（TODO 未实装，目前固定名称'test'）
+class MakeHtmlNavigation:
+    """ 给网页添加一个带有超链接跳转的导航栏 """
 
-    算法基本原理：读取原网页，找出所有h标签，并增设a锚点
-        另外生成一个导航html文件
-        然后再生成一个主文件，让用户通过主文件来浏览页面
+    @classmethod
+    def from_url(cls, url, **kwargs):
+        """ 自动下载url的内容，缓存到本地后，加上导航栏打开 """
+        content = requests.get(url).content.decode('utf8')
+        etag = get_etag(url)  # 直接算url的etag，不用很严谨
+        return cls.from_content(content, etag, **kwargs)
 
-    # 读取csdn博客并展示目录 （不过因为这个存在跳级，效果不是那么好）
-    >> file = 自动制作网页标题的导航栏(requests.get(r'https://blog.csdn.net/code4101/article/details/83009000').content.decode('utf8'))
-    >> browser(str(file))
-    http://i2.tiimg.com/582188/64f40d235705de69.png
-    """
-    # 1 对原html，设置锚点，生成一个新的文件f2；生成导航目录文件f1。
-    cnt = 0
+    @classmethod
+    def from_file(cls, file, **kwargs):
+        """ 输入本地一个html文件的路径，加上导航栏打开 """
+        file = File(file)
+        content = file.read()
+        # 输入文件的情况，生成的_content等html要在同目录
+        return cls.from_content(content, os.path.splitext(str(file))[0], **kwargs)
 
-    # TODO 目前不支持跳级的情况
-    # 这个refs是可以用py算法生成的，目前是存储在github上引用
-    refs = ['<html><head>',
-            '<link rel=Stylesheet type="text/css" media=all href="https://code4101.github.io/css/navigation0.css">',
-            '</head><body>']
+    @classmethod
+    def from_content(cls, html_content, title='temphtml', *, encoding=None):
+        """
+        :param html_content: 原始网页的完整内容
+        :param title: 页面标题，默认会先找head/title，如果没有，则取一个随机名称（TODO 未实装，目前固定名称）
+        :param encoding: 保存的几个文件编码，默认是utf8，但windows平台有些特殊场合也可能要存储gbk
 
-    f2 = File(title + '_内容', Dir.TEMP, suffix='.html')
+        算法基本原理：读取原网页，找出所有h标签，并增设a锚点
+            另外生成一个导航html文件
+            然后再生成一个主文件，让用户通过主文件来浏览页面
 
-    def func(m):
-        nonlocal cnt
-        cnt += 1
-        name, content = m.group('name'), m.group('inner')
-        content = BeautifulSoup(content, 'lxml').get_text()
-        refs.append(f'<a href="{f2}#生成导航栏浏览网页{cnt}" target="showframe"><{name}>{content}</{name}></a>')
-        return f'<a name="生成导航栏浏览网页{cnt}"/>' + m.group()
+        # 读取csdn博客并展示目录 （不过因为这个存在跳级，效果不是那么好）
+        >> file = 自动制作网页标题的导航栏(requests.get(r'https://blog.csdn.net/code4101/article/details/83009000').content.decode('utf8'))
+        >> browser(str(file))
+        http://i2.tiimg.com/582188/64f40d235705de69.png
+        """
+        # 1 对原html，设置锚点，生成一个新的文件f2；生成导航目录文件f1。
+        cnt = 0
 
-    html_content = re.sub(r'<(?P<name>h\d+)(?:>|\s.*?>)(?P<body>\s*(?P<inner>.*?)\s*)</\1>',
-                          func, html_content, flags=re.DOTALL)
+        # TODO 目前不支持跳级的情况
+        # 这个refs是可以用py算法生成的，目前是存储在github上引用
+        refs = ['<html><head>',
+                '<link rel=Stylesheet type="text/css" media=all href="https://code4101.github.io/css/navigation0.css">',
+                '</head><body>']
 
-    refs.append('</body>\n</html>')
+        f2 = File(title + '_content', Dir.TEMP, suffix='.html')
 
-    f1 = File(title + '_导航', Dir.TEMP, suffix='.html').write('\n'.join(refs), if_exists='replace')
-    f2 = f2.write(html_content, if_exists='replace')
+        def func(m):
+            nonlocal cnt
+            cnt += 1
+            name, content = m.group('name'), m.group('inner')
+            content = BeautifulSoup(content, 'lxml').get_text()
+            refs.append(f'<a href="{f2}#navigation{cnt}" target="showframe"><{name}>{content}</{name}></a>')
+            return f'<a name="navigation{cnt}"/>' + m.group()
 
-    # 2 生成首页 f0
-    main_content = f"""<html>
-<frameset cols="20%,80%">
-	<frame src="{f1}">
-	<frame src="{f2}" name="showframe">
-</frameset></html>"""
+        html_content = re.sub(r'<(?P<name>h\d+)(?:>|\s.*?>)(?P<body>\s*(?P<inner>.*?)\s*)</\1>',
+                              func, html_content, flags=re.DOTALL)
 
-    f0 = File(title, Dir.TEMP, suffix='.html').write(main_content, if_exists='replace')
-    return f0
+        refs.append('</body>\n</html>')
+
+        f1 = File(title + '_catalogue', Dir.TEMP, suffix='.html').write('\n'.join(refs), encoding=encoding,
+                                                                        if_exists='replace')
+        f2 = f2.write(html_content, encoding=encoding, if_exists='replace')
+
+        # 2 生成首页 f0
+        main_content = f"""<html>
+        <frameset cols="20%,80%">
+        	<frame src="{f1}">
+        	<frame src="{f2}" name="showframe">
+        </frameset></html>"""
+
+        f0 = File(title + '_index', Dir.TEMP, suffix='.html').write(main_content, encoding=encoding,
+                                                                    if_exists='replace')
+        return f0
