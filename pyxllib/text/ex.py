@@ -11,6 +11,8 @@
 
 import re
 
+from pyxllib.file.specialist import File
+
 
 def __check():
     """
@@ -63,7 +65,7 @@ def pycode_sort__import(s):
     return res
 
 
-def translate_html(htmlfile):
+def translate_html(htmlcontent):
     """ 将word导出的html文件，转成方便谷歌翻译操作，进行双语对照的格式 """
     from bs4 import BeautifulSoup
     from pyxllib.text.nestenv import NestEnv
@@ -74,16 +76,20 @@ def translate_html(htmlfile):
         x = list(sp.body.children)[0]
         cls_ = x.get('class', None)
         x['class'] = (cls_ + ['notranslate']) if cls_ else 'notranslate'
-        x.name = 'p'  # 去掉标题格式，统一为段落格式
+        if re.match(r'h\d+$', x.name):
+            x.name = 'p'  # 去掉标题格式，统一为段落格式
         # &nbsp;的处理比较特别，要替换回来
+        # if x.name == 'pre':
+        #     return x.prettify(formatter=lambda s: s.replace(u'\xa0', '&nbsp;'))
+        # else:
         return s + '\n' + x.prettify(formatter=lambda s: s.replace(u'\xa0', '&nbsp;'))
 
-    ne = NestEnv(htmlfile.read())
+    ne = NestEnv(htmlcontent)
     ne2 = ne.xmltag('p')
-    for name in ('h1', 'h2', 'h3', 'h4', 'h5', 'h6'):
+    for name in ('h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'pre'):
         ne2 += ne.xmltag(name)
 
-    htmlfile.write(ne2.replace(func))
+    return ne2.replace(func)
 
 
 def __extract():

@@ -775,3 +775,81 @@ class StrDiffType:
             return t
         else:
             return 16
+
+
+class BookContents:
+    """ 书本目录类 """
+
+    def __init__(self):
+        self.contents = []  # 目录条目按顺序保存在list中
+
+    def add(self, level, title, page=None):
+        """
+        Args:
+            level:
+            title:
+            page: 不一定要放整数的页数，也可以放其他一些比例之类的数值
+
+        Returns:
+
+        """
+        self.contents.append([level, title, page])
+
+    def format_str(self, indent='\t', *, number='normal', page=False, start_level=1, jump=False):
+        """ 转文本展示
+
+        :param indent: 每级展示的缩进量
+        :param number: 编号格式，目前有默认方式，以后有需要可以扩展其他模式
+        :param page: 是否展示页码
+        :param start_level: 开始展示的层级（高层级也会展示，只是不带编号和缩进）
+            可以设为负数，表示自动推算，比如-1
+        :param jump: 支持跳级，比如2级"3"，跳到4级本来是"3.0.1"，但开启该参数则会优化为"3.1"
+        """
+        # 1
+        if start_level == -1:
+            # 自动推算合适的开始编号
+            # -1模式，表示第一个不只一项的level
+            levels = [x[0] for x in self.contents]
+            levels_cnt = collections.Counter(levels)
+            for i in range(min(levels), max(levels) + 1):
+                if levels_cnt[i] > 1:
+                    start_level = i
+                    break
+
+        # 2
+        ls = []
+        ct = collections.defaultdict(int)
+        for x in self.contents:
+            # print(x)
+            # 缩进
+            level = x[0]
+            sign = indent * (level - start_level)
+
+            # 处理计数器
+            ct[level] += 1
+            for k, v in ct.items():
+                if k > level:
+                    ct[k] = 0
+
+            # 当前编号
+            if number == 'normal':
+                numbers = [ct[i] for i in range(start_level, level + 1)]
+                if jump:  # 过滤0
+                    numbers = [x for x in numbers if x]
+                sign += '.'.join(map(str, numbers)) + ' '
+            else:
+                pass
+
+            # 标题
+            if level < start_level:
+                sign = x[1]
+            else:
+                sign += x[1]
+
+            # 加后缀
+            if page:
+                sign += f'，{x[2]}'
+
+            ls.append(sign)
+
+        return '\n'.join(ls)
