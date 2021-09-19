@@ -10,7 +10,7 @@ from pyxllib.algo.pupil import intersection_split
 from pyxllib.algo.specialist import DictCmper
 from pyxllib.debug.pupil import dprint, prettifystr
 from pyxllib.debug.specialist.browser import Explorer
-from pyxllib.file.specialist import File, Dir, filesmatch
+from pyxllib.file.specialist import File, Dir, filesmatch, get_encoding
 
 
 # 需要使用的第三方软件
@@ -98,7 +98,7 @@ def modify_file(file, func, *, outfile=None, file_mode=None, debug=0):
     :param file_mode: 指定文件读取类型格式，例如'.json'是json文件，读取为字典
     :param debug: 这个功能可以对照refine分级轮理解
         无outfile参数时，原地操作
-            0，【直接原地操作】关闭调试，直接运行 （根据outfile选择原地操作，或者生成新文件）
+            0，【直接原地操作】关闭调试，直接运行 （根据outfile=None选择原地操作，或者指定生成新文件）
             1，【进行审核】打开BC比较差异，左边原始内容，右边参考内容  （打开前后差异内容对比）
             -1，【先斩后奏】介于完全不调试和全部人工检查之间，特殊的差异比较。左边放原始文件修改后的结果，右边对照原内容。
         有outfile参数时
@@ -106,7 +106,8 @@ def modify_file(file, func, *, outfile=None, file_mode=None, debug=0):
             1 | True，直接生成目标文件，但是会弹出bc比较前后内容差异 （相同内容不会弹出）
     """
     infile = File(file)
-    data = infile.read(mode=file_mode)
+    enc = get_encoding(infile.read(mode='b'))
+    data = infile.read(mode=file_mode, encoding=enc)
     origin_content = str(data)
     new_data = func(data)
 
@@ -121,13 +122,13 @@ def modify_file(file, func, *, outfile=None, file_mode=None, debug=0):
             elif debug == -1:
                 temp_file = File('old_content', Dir.TEMP, suffix=infile.suffix)
                 infile.copy(temp_file)
-                infile.write(new_data, mode=file_mode)  # 把原文件内容替换了
+                infile.write(new_data, mode=file_mode, encoding=enc)  # 把原文件内容替换了
                 bcompare(infile, temp_file)  # 然后显示与旧内容进行对比
             else:
                 raise ValueError(f'{debug}')
     else:
         outfile = File(outfile)
-        outfile.write(new_data, mode=file_mode)  # 直接处理
+        outfile.write(new_data, mode=file_mode, encoding=enc)  # 直接处理
         if debug and isdiff:
             bcompare(infile, outfile)
 

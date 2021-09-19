@@ -164,7 +164,7 @@ def get_encoding_old(bstr):
     return encoding
 
 
-def get_encoding(bstr, *, maxn=100):
+def get_encoding(bstr, *, maxn=1000):
     # 1 从第一个大于127的字节开始判断
     for start_idx in range(len(bstr)):
         if bstr[start_idx] > 127:

@@ -17,10 +17,13 @@ import requests
 import pandas as pd
 import bs4
 from bs4 import BeautifulSoup
+from humanfriendly import format_size
 
 from pyxllib.debug.pupil import dprint
+from pyxllib.prog.pupil import EnchantBase
 from pyxllib.text.newbie import xldictstr
-from pyxllib.text.pupil import listalign, int2myalphaenum, shorten, ensure_gbk
+from pyxllib.text.pupil import listalign, int2myalphaenum, shorten, ensure_gbk, RunOnlyOnce, BookContents, strwidth, \
+    grp_chinese_char
 from pyxllib.file.specialist import File, Dir, get_etag
 
 ____section_1_dfs_base = """
@@ -339,65 +342,67 @@ ____section_3_xmlparser = """
 """
 
 
-def tag_name(t):
-    """输入一个bs4的Tag或NavigableString，
-    返回tag.name或者'NavigableString'
-    """
-    if t.name:
-        return t.name
-    elif isinstance(t, bs4.NavigableString):
-        return 'NavigableString'
-    else:
-        dprint(t)  # 获取结点t名称失败
-        return None
+class EnchantBs4Tag(EnchantBase):
+    @classmethod
+    @RunOnlyOnce
+    def enchant(cls):
+        """ 把xlcv的功能嵌入cv2中
 
+        不太推荐使用该类，可以使用CvImg类更好地解决问题。
+        """
+        names = cls.check_enchant_names([bs4.Tag])
+        propertys = {'tag_name'}
+        cls._enchant(bs4.Tag, propertys, mode='staticmethod2property')
+        cls._enchant(bs4.Tag, names - propertys, mode='staticmethod2objectmethod')
 
-def subtag_names(t):
-    """列出结点t的所有直接子结点（花括号后面跟的数字是连续出现次数）
-    例如body的： p{137}，tbl，p{94}，tbl，p{1640}，sectPr
-    """
+    @staticmethod
+    def tag_name(self):
+        """输入一个bs4的Tag或NavigableString，
+        返回tag.name或者'NavigableString'
+        """
+        if self.name:
+            return self.name
+        elif isinstance(self, bs4.NavigableString):
+            return 'NavigableString'
+        else:
+            dprint(self)  # 获取结点t名称失败
+            return None
 
-    def counter(m):
-        s1 = m.group(1)
-        n = (m.end(0) - m.start(0)) // len(s1)
-        s = s1[:-1] + '{' + str(n) + '}'
-        if m.string[m.end(0) - 1] == '，':
-            s += '，'
+    @staticmethod
+    def subtag_names(self):
+        """ 列出结点的所有直接子结点（花括号后面跟的数字是连续出现次数）
+        例如body的： p{137}，tbl，p{94}，tbl，p{1640}，sectPr
+        """
+
+        def counter(m):
+            s1 = m.group(1)
+            n = (m.end(0) - m.start(0)) // len(s1)
+            s = s1[:-1] + '{' + str(n) + '}'
+            if m.string[m.end(0) - 1] == '，':
+                s += '，'
+            return s
+
+        if self.name and self.contents:
+            s = '，'.join([x.tag_name for x in self.contents]) + '，'
+            s = re.sub(r'([^，]+，)(\1)+', counter, s)
+        else:
+            s = ''
+        if s and s[-1] == '，':
+            s = s[:-1]
         return s
 
-    if t.name and t.contents:
-        s = '，'.join(map(tag_name, t.contents)) + '，'
-        s = re.sub(r'([^，]+，)(\1)+', counter, s)
-    else:
-        s = ''
-    if s and s[-1] == '，':
-        s = s[:-1]
-    return s
-
-
-class XmlParser:
-    def __init__(self, node=None):
-        """两种初始化方式
-            提供node：用某个bs4的PageElement等对象初始化
-            未提供node，一般是方便给MyBs4等类继承使用
-        """
-        if node:  # TODO：可以扩展，支持不同类型的初始化
-            self._node = node
-
-    def node(self):
-        """获得xml结点的接口函数"""
-        return self._node if getattr(self, '_node') else self
-
+    @staticmethod
     def treestruct_raw(self, **kwargs):
-        """查看树形结构的raw版本
+        """ 查看树形结构的raw版本
         各参数含义详见dfs_base
         """
         # 1 先用dfs获得基本结果
-        s = dfs_base(self.node(), **kwargs)
+        s = dfs_base(self, **kwargs)
         return s
 
+    @staticmethod
     def treestruct_brief(self, linenum=True, prefix='- ', **kwargs):
-        """查看树形结构的简洁版
+        """ 查看树形结构的简洁版
         """
 
         def mystr(node):
@@ -417,9 +422,10 @@ class XmlParser:
                 s = '遇到特殊类型，' + str(node)
             return s
 
-        s = dfs_base(self.node(), mystr=mystr, prefix=prefix, linenum=linenum, **kwargs)
+        s = dfs_base(self, mystr=mystr, prefix=prefix, linenum=linenum, **kwargs)
         return s
 
+    @staticmethod
     def treestruct_stat(self):
         """生成一个两个二维表的统计数据
             ls1, ls2 = treestruct_stat()
@@ -449,15 +455,15 @@ class XmlParser:
         while t:
             # 1 结点规律表
             d = depth(t)
-            line = [i, d, '_' * d + str(d), tag_name(t.parent), tag_name(t),
+            line = [i, d, '_' * d + str(d), t.parent.tag_name, t.tag_name,
                     text(xldictstr(t.attrs) if t.name else t),  # 结点存属性，字符串存值
-                    subtag_names(t)]
+                    t.subtag_names()]
             ls1.append(line)
             # 2 属性规律表
             if t.name:
                 k = len(ls2)
                 for attr, value in t.attrs.items():
-                    ls2.append([k, i, tag_name(t), attr, value])
+                    ls2.append([k, i, t.tag_name, attr, value])
                     k += 1
             # 下个结点
             t = t.next_element
@@ -466,6 +472,7 @@ class XmlParser:
         df2 = pd.DataFrame.from_records(ls2, columns=['序号', 'element序号', '当前结点', '属性名', '属性值'])
         return df1, df2
 
+    @staticmethod
     def count_tagname(self):
         """统计每个标签出现的次数：
              1                    w:rpr  650
@@ -485,11 +492,12 @@ class XmlParser:
             except AttributeError:
                 pass
 
-        inner(self.node())
+        inner(self)
         return ct.most_common()
 
+    @staticmethod
     def check_tag(self, tagname=None):
-        """统计每个标签在不同层级出现的次数：
+        """ 统计每个标签在不同层级出现的次数：
 
         :param tagname:
             None：统计全文出现的各种标签在不同层级出现次数
@@ -520,15 +528,16 @@ class XmlParser:
 
         # 1 统计结点在每一层出现的次数
         if tagname:
-            for t in self.node().find_all(tagname):
+            for t in self.find_all(tagname):
                 inner(t, 0)
         else:
-            inner(self.node(), 0)
+            inner(self, 0)
 
         # 2 总出现次数和？
 
         return d
 
+    @staticmethod
     def check_namespace(self):
         """检查名称空间问题，会同时检查标签名和属性名：
             1  cNvPr  pic:cNvPr(579)，wps:cNvPr(52)，wpg:cNvPr(15)
@@ -536,7 +545,7 @@ class XmlParser:
         """
         # 1 获得所有名称
         #    因为是采用node的原始xml文本，所以能保证会取得带有名称空间的文本内容
-        ct0 = Counter(re.findall(r'<([a-zA-Z:]+)', str(self.node())))
+        ct0 = Counter(re.findall(r'<([a-zA-Z:]+)', str(self)))
         ct = defaultdict(str)
         s = set()
         for key, value in ct0.items():
@@ -560,25 +569,34 @@ class XmlParser:
         # browser(ls1, filename='检查名称空间问题')
         return ls1
 
+    @staticmethod
+    def get_catalogue(self, *args, size=False, start_level=-1, **kwargs):
+        """ 找到所有的h生成文本版的目录
 
-class MyBs4(BeautifulSoup, XmlParser):
-    """xml、html 等数据通用处理算法，常用功能有：
+        *args, **kwargs 参考 BookContents.format_str
 
-    show_brief：显示xml结构
-    count_tagname： 统计各个结点名称出现次数
-    """
+        注意这里算法跟css样式不太一样，避免这里能写代码，能做更细腻的操作
+        """
+        bc = BookContents()
+        for h in self.find_all(re.compile(r'h\d')):
+            if size:
+                # 这应该是相对比较简便的计算每一节内容多长的算法~~
+                part_size = 0
+                for x in h.next_siblings:
+                    if x.name == h.name:
+                        break
+                    else:
+                        text = str(x) if isinstance(x, bs4.NavigableString) else x.get_text()
+                        part_size += strwidth(text)
+            else:
+                part_size = None
+            bc.add(int(h.name[1]), h.get_text().replace('\n', ' '), format_size(part_size))
+        if 'page' not in kwargs:
+            kwargs['page'] = size
+        return bc.format_str(*args, start_level=start_level, **kwargs)
 
-    def __init__(self, markup="", features='lxml', *args, **kwargs):
-        # markup = Path(markup).read()
-        # TODO: **kwargs我不知道怎么传进来啊，不过感觉也不删大雅没什么鸟用吧~~
-        super().__init__(markup, features, *args, **kwargs)
 
-    def insert_after(self, successor):
-        pass
-
-    def insert_before(self, successor):
-        pass
-
+EnchantBs4Tag.enchant()
 
 ____section_temp = """
 """
@@ -634,10 +652,11 @@ class MakeHtmlNavigation:
         >> browser(str(file))
         http://i2.tiimg.com/582188/64f40d235705de69.png
         """
-        # 1 对原html，设置锚点，生成一个新的文件f2；生成导航目录文件f1。
+        from humanfriendly import format_size
+
+        # 1 对原html，设置锚点，生成一个新的文件f2
         cnt = 0
 
-        # TODO 目前不支持跳级的情况
         # 这个refs是可以用py算法生成的，目前是存储在github上引用
         refs = ['<html><head>',
                 '<link rel=Stylesheet type="text/css" media=all href="https://code4101.github.io/css/navigation0.css">',
@@ -650,19 +669,43 @@ class MakeHtmlNavigation:
             cnt += 1
             name, content = m.group('name'), m.group('inner')
             content = BeautifulSoup(content, 'lxml').get_text()
-            refs.append(f'<a href="{f2}#navigation{cnt}" target="showframe"><{name}>{content}</{name}></a>')
+            # 要写<h><a></a></h>，不能写<a><h></h></a>，否则css中设置的计数器重置不会起作用
+            refs.append(f'<{name}><a href="{f2}#navigation{cnt}" target="showframe">{content}</a></{name}>')
             return f'<a name="navigation{cnt}"/>' + m.group()
 
         html_content = re.sub(r'<(?P<name>h\d+)(?:>|\s.*?>)(?P<body>\s*(?P<inner>.*?)\s*)</\1>',
                               func, html_content, flags=re.DOTALL)
-
-        refs.append('</body>\n</html>')
-
-        f1 = File(title + '_catalogue', Dir.TEMP, suffix='.html').write('\n'.join(refs), encoding=encoding,
-                                                                        if_exists='replace')
         f2 = f2.write(html_content, encoding=encoding, if_exists='replace')
 
-        # 2 生成首页 f0
+        # 2 f1除了导航栏，可以多附带一些有用的参考信息
+        # 2.1 前文的refs已经存储了超链接的导航
+
+        # 2.2 文本版的目录
+        refs.append(f'<br/>【文本版的目录】')
+        bs = BeautifulSoup(html_content, 'lxml')
+        catalogue = bs.get_catalogue(indent='\t', start_level=-1, jump=True, size=True)
+        refs.append(f'<pre>{catalogue}</pre>')
+
+        # 2.3 文章总大小
+        text = bs.get_text()
+        n = strwidth(text)
+        refs.append('<br/>【Total Bytes】' + format_size(n))
+
+        # 2.4 文中使用的高频词
+        # 英文可以直接按空格切开统计，区分大小写
+        text2 = re.sub(grp_chinese_char(), '', text)  # 删除中文，先不做中文的功能~~
+        text2 = re.sub(r'[,\.，。\(\)（）;；?？"]', ' ', text2)  # 标点符号按空格处理
+        words = Counter(text2.split())
+        msg = '\n'.join([(x[0] if x[1] == 1 else f'{x[0]}，{x[1]}') for x in words.most_common()])
+        msg += f'<br/>共{len(words)}个词汇，用词数{sum(words.values())}。'
+        refs.append(f'<br/>【词汇表】<pre>{msg}</pre>')
+
+        # 2.5 收尾，写入f1
+        refs.append('</body>\n</html>')
+        f1 = File(title + '_catalogue', Dir.TEMP, suffix='.html').write('\n'.join(refs), encoding=encoding,
+                                                                        if_exists='replace')
+
+        # 3 生成主页 f0
         main_content = f"""<html>
         <frameset cols="20%,80%">
         	<frame src="{f1}">

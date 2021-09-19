@@ -20,6 +20,7 @@ import fire
 
 from pyxllib.file.specialist import File, Dir, get_etag
 from pyxllib.debug.specialist import browser, TicToc, parse_datetime
+from pyxllib.text.specialist import BeautifulSoup
 
 
 def _print_df_result(df, outfmt='text'):
@@ -305,7 +306,13 @@ class UtoolsText(UtoolsBase):
             htmlfile = doc.save(f, fmt)
             if translate:
                 doc.Close()  # 双语翻译要改写html，必须先关掉doc
-                translate_html(htmlfile)
+
+                content = htmlfile.read()
+                new_content = translate_html(content)
+                bs = BeautifulSoup(content, 'lxml')
+                catalogue = bs.get_catalogue(indent='\t', start_level=-1, jump=True, size=True)
+                pyperclip.copy(catalogue)
+                htmlfile.write(new_content)
             elif not visible:  # 这种情况也要关掉doc
                 doc.Close()
 

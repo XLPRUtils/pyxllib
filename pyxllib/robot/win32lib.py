@@ -219,7 +219,7 @@ class EnchantWin32WordDocument(EnchantBase):
         # 2 确认要存储的文件格式
         if isinstance(fmt, str):
             fmt = fmt.lower().lstrip('.')
-        elif file_name:
+        elif file_name is not None:
             fmt = File(file_name).suffix[1:].lower()
         elif doc.Path:
             fmt = os.path.splitext(doc.Name)[1][1:].lower()
