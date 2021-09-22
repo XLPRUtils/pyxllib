@@ -20,6 +20,7 @@ from bs4 import BeautifulSoup
 from humanfriendly import format_size
 
 from pyxllib.debug.pupil import dprint
+from pyxllib.prog.newbie import round_int
 from pyxllib.prog.pupil import EnchantBase
 from pyxllib.text.newbie import xldictstr
 from pyxllib.text.pupil import listalign, int2myalphaenum, shorten, ensure_gbk, RunOnlyOnce, BookContents, strwidth, \
@@ -573,6 +574,8 @@ class EnchantBs4Tag(EnchantBase):
     def get_catalogue(self, *args, size=False, start_level=-1, **kwargs):
         """ 找到所有的h生成文本版的目录
 
+        :param bool|int size: 布尔或者乘因子，表示是否展示文本，以及乘以倍率，比如双语阅读时，size可以缩放一半
+
         *args, **kwargs 参考 BookContents.format_str
 
         注意这里算法跟css样式不太一样，避免这里能写代码，能做更细腻的操作
@@ -580,20 +583,77 @@ class EnchantBs4Tag(EnchantBase):
         bc = BookContents()
         for h in self.find_all(re.compile(r'h\d')):
             if size:
-                # 这应该是相对比较简便的计算每一节内容多长的算法~~
-                part_size = 0
-                for x in h.next_siblings:
-                    if x.name == h.name:
-                        break
-                    else:
-                        text = str(x) if isinstance(x, bs4.NavigableString) else x.get_text()
-                        part_size += strwidth(text)
+                part_size = h.section_text_size(size, fmt=True)
+                bc.add(int(h.name[1]), h.get_text().replace('\n', ' '), part_size)
             else:
-                part_size = None
-            bc.add(int(h.name[1]), h.get_text().replace('\n', ' '), format_size(part_size))
+                bc.add(int(h.name[1]), h.get_text().replace('\n', ' '))
+
         if 'page' not in kwargs:
             kwargs['page'] = size
-        return bc.format_str(*args, start_level=start_level, **kwargs)
+
+        if bc.contents:
+            return bc.format_str(*args, start_level=start_level, **kwargs)
+        else:
+            return ''
+
+    @staticmethod
+    def section_text_size(self, factor=1, fmt=False):
+        """ 计算某节标题下的正文内容长度 """
+        if not re.match(r'h\d+$', self.name):
+            raise TypeError
+
+        # 这应该是相对比较简便的计算每一节内容多长的算法~~
+        part_size = 0
+        for x in self.next_siblings:
+            if x.name == self.name:
+                break
+            else:
+                text = str(x) if isinstance(x, bs4.NavigableString) else x.get_text()
+                part_size += strwidth(text)
+        part_size = round_int(part_size * factor)
+
+        if fmt:
+            return format_size(part_size).replace(' ', '').replace('bytes', 'B')
+        else:
+            return part_size
+
+    @staticmethod
+    def head_add_size(self, factor=1):
+        """ 标题增加每节内容大小标记
+
+        :param factor: 乘因子，默认是1。但双语阅读等情况，内容会多拷贝一份，此时可以乘以0.5，显示正常原文的大小。
+        """
+        for h in self.find_all(re.compile(r'h\d')):
+            part_size = h.section_text_size(factor, fmt=True)
+            navi_str = list(h.strings)[-1].rstrip()
+            navi_str.replace_with(str(navi_str) + '，' + part_size)
+
+    @staticmethod
+    def head_add_number(self, start_level=-1, jump=True):
+        """ 标题增加每节编号
+        """
+        bc = BookContents()
+        heads = list(self.find_all(re.compile(r'h\d')))
+        for h in heads:
+            bc.add(int(h.name[1]), h.get_text().replace('\n', ' '))
+
+        if not bc.contents:
+            return
+
+        nums = bc.format_numbers(start_level=start_level, jump=jump)
+        for i, h in enumerate(heads):
+            navi_str = list(h.strings)[0]
+            if nums[i]:
+                nums[i] += '&nbsp;'
+            navi_str.replace_with(nums[i] + str(navi_str))
+
+    @staticmethod
+    def xltext(self):
+        """ 自己特用的文本化方法
+
+        有些空格会丢掉，要用这句转回来
+        """
+        return self.prettify(formatter=lambda s: s.replace(u'\xa0', '&nbsp;'))
 
 
 EnchantBs4Tag.enchant()

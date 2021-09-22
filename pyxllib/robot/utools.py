@@ -279,53 +279,10 @@ class UtoolsText(UtoolsBase):
 
     def browser(self):
         """ 将内容复制到word，另存为html文件后，用浏览器打开查看 """
-        from pyxllib.robot.win32lib import EnchantWin32WordApplication
-        from pyxllib.text.ex import translate_html
+        from pyxllib.text.ex import rebuild_document_by_word
 
-        def _func(fmt='html', translate=False, navigation=False, visible=False, quit=None):
-            """
-            Args:
-                fmt: 输出文件类型
-                    常见的可以简写：html、pdf、txt
-                    其他特殊需求可以用word原变量名：wdFormatDocument
-                visible: 是否展示运行过程，如果不展示，默认最后会close文档
-                quit: 运行完是否退出应用
-                translate: html专用业务功能，表示是否对p拷贝一份notranslate的对象，用于谷歌翻译双语对照
-                navigation: 是否增加导航栏
-                    注意，使用导航栏后，页面就无法直接使用谷歌翻译了
-                    但可以自己进入_content文件，使用谷歌翻译处理，自覆盖保存
-                    然后再回到_index文件，刷新即可
-            """
-            # 保存的临时文件名采用etag
-            f = File(get_etag(self.cmds['ClipText']), Dir.TEMP, suffix=fmt)
-            app = EnchantWin32WordApplication.get_app(visible=visible)
-            app.check_close(f)
-            doc = app.new_doc(f)
-            app.Selection.Paste()
-
-            htmlfile = doc.save(f, fmt)
-            if translate:
-                doc.Close()  # 双语翻译要改写html，必须先关掉doc
-
-                content = htmlfile.read()
-                new_content = translate_html(content)
-                bs = BeautifulSoup(content, 'lxml')
-                catalogue = bs.get_catalogue(indent='\t', start_level=-1, jump=True, size=True)
-                pyperclip.copy(catalogue)
-                htmlfile.write(new_content)
-            elif not visible:  # 这种情况也要关掉doc
-                doc.Close()
-
-            if navigation:
-                from pyxllib.text.specialist import MakeHtmlNavigation
-                htmlfile = MakeHtmlNavigation.from_file(htmlfile, encoding='gbk')
-
-            browser(htmlfile)
-
-            if quit:
-                app.Quit()
-
-        fire.Fire(_func, self.cmds['subinput'], 'browser')
+        file = fire.Fire(rebuild_document_by_word, self.cmds['subinput'], 'browser')
+        browser(file)
 
 
 class UtoolsRegex(UtoolsBase):
