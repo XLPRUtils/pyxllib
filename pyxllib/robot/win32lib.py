@@ -14,6 +14,7 @@ import pythoncom
 from pyxllib.debug.specialist import TicToc, File, Dir, get_etag, browser
 from pyxllib.prog.newbie import RunOnlyOnce
 from pyxllib.prog.pupil import EnchantBase
+from pyxllib.text.pupil import strwidth
 
 
 def get_win32_app(name, visible=False):
@@ -129,7 +130,8 @@ class EnchantWin32WordApplication(EnchantBase):
         """
         outfile = File(outfile)
         for x in app.Documents:
-            if File(x.Name, x.Path) == outfile:
+            # 有可能文件来自onedrive，这里用safe_init更合理
+            if File.safe_init(x.Name, x.Path) == outfile:
                 x.Close()
 
     @staticmethod
@@ -280,6 +282,33 @@ class EnchantWin32WordDocument(EnchantBase):
 
         browser(outfile)
         return doc
+
+    @staticmethod
+    def add_section_size(doc, factor=1):
+        """ 增加每节长度的标记
+        一般在这里计算比在html计算方便
+        """
+        from humanfriendly import format_size
+
+        n = doc.Paragraphs.Count
+        style_names, text_lens = [], []
+        for p in doc.Paragraphs:
+            style_names.append(str(p.Style))
+            text_lens.append(strwidth(p.Range.Text))
+
+        for i, p in enumerate(doc.Paragraphs):
+            name = style_names[i]
+            if name.startswith('标题'):
+                cumulate_size = 0
+                for j in range(i + 1, n):
+                    if style_names[j] != name:
+                        cumulate_size += text_lens[j - 1]
+                    else:
+                        break
+                if cumulate_size:
+                    size = format_size(cumulate_size * factor).replace(' ', '').replace('bytes', 'B')
+                    r = p.Range
+                    doc.Range(r.Start, r.End - 1).InsertAfter(f'，{size}')
 
 
 class EnchantWin32WordRange(EnchantBase):

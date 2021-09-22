@@ -795,15 +795,14 @@ class BookContents:
         """
         self.contents.append([level, title, page])
 
-    def format_str(self, indent='\t', *, number='normal', page=False, start_level=1, jump=False):
-        """ 转文本展示
+    def format_numbers(self, number='normal', *, indent='', start_level=1, jump=False):
+        """ 每级目录的编号
 
-        :param indent: 每级展示的缩进量
         :param number: 编号格式，目前有默认方式，以后有需要可以扩展其他模式
-        :param page: 是否展示页码
         :param start_level: 开始展示的层级（高层级也会展示，只是不带编号和缩进）
             可以设为负数，表示自动推算，比如-1
         :param jump: 支持跳级，比如2级"3"，跳到4级本来是"3.0.1"，但开启该参数则会优化为"3.1"
+        :return: list，跟contents等长，表示每个标题的编号，可能为空''
         """
         # 1
         if start_level == -1:
@@ -821,7 +820,6 @@ class BookContents:
         ct = collections.defaultdict(int)
         for x in self.contents:
             # print(x)
-            # 缩进
             level = x[0]
             sign = indent * (level - start_level)
 
@@ -836,19 +834,36 @@ class BookContents:
                 numbers = [ct[i] for i in range(start_level, level + 1)]
                 if jump:  # 过滤0
                     numbers = [x for x in numbers if x]
-                sign += '.'.join(map(str, numbers)) + ' '
+                sign += '.'.join(map(str, numbers))
             else:
                 pass
 
+            ls.append(sign)
+
+        return ls
+
+    def format_str(self, indent='\t', *, number='normal', page=False, start_level=1, jump=False):
+        """ 转文本展示
+
+        :param indent: 每级展示的缩进量
+        :param page: 是否展示页码
+        """
+        numbers = self.format_numbers(number, indent=indent, start_level=start_level, jump=jump)
+
+        # 2
+        ls = []
+        for num, x in zip(numbers, self.contents):
+            level, title, page_ = x
+
             # 标题
             if level < start_level:
-                sign = x[1]
+                sign = title
             else:
-                sign += x[1]
+                sign = ' '.join([num, x[1]])
 
             # 加后缀
             if page:
-                sign += f'，{x[2]}'
+                sign += f'，{page_}'
 
             ls.append(sign)
 

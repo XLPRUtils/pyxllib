@@ -395,15 +395,40 @@ class NestEnv(__NestEnvBase):
         """
 
         def core(s):
-            return [m.span(group) for m in re.finditer(pattern, s, flags)]
+            return [m.span(group) for m in re.finditer(pattern, s, flags=flags)]
 
         return self.nest(core, invert)
 
-    def search2(self, pattern1, pattern2, *, flags1=0, flags2=0, invert=False):
+    def search2(self, pattern1, pattern2, *, inner=False, flags1=0, flags2=0, invert=False):
         """ 配对正则匹配
         TODO 实现应该可以参考find2
         """
-        raise NotImplementedError
+
+        def core(s):
+            parts = []
+            bias, a, b, c, d = 0, 0, 0, 0, 0
+            while bias < len(s):
+                m1 = re.search(pattern1, s[bias:], flags=flags1)
+                if m1:
+                    a, b = m1.regs[0]
+                    m2 = re.search(pattern2, s[bias + b:], flags=flags2)
+                    if m2:
+                        c, d = m2.regs[0]
+                        c += b
+                        d += b
+                        if inner:
+                            parts.append([bias + b, bias + c])
+                        else:
+                            parts.append([bias + a, bias + d])
+                        bias += d
+                    else:
+                        break
+                else:
+                    break
+
+            return parts
+
+        return self.nest(core, invert)
 
     def bracket(self, head, tail=None, inner=False, *, latexenv=False, invert=False):
         r""" (尾)括号匹配
