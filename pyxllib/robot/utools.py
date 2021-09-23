@@ -279,7 +279,7 @@ class UtoolsText(UtoolsBase):
 
     def browser(self):
         """ 将内容复制到word，另存为html文件后，用浏览器打开查看 """
-        from pyxllib.text.ex import rebuild_document_by_word
+        from pyxllib.file.docxlib import rebuild_document_by_word
 
         file = fire.Fire(rebuild_document_by_word, self.cmds['subinput'], 'browser')
         browser(file)

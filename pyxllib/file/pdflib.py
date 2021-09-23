@@ -94,6 +94,7 @@ class FitzDoc:
 
     def browser(self, opt='pdf'):
         if opt == 'pdf':
+            f = self.src_file
             browser(self.src_file)
         elif opt == 'html':
             ls = []
@@ -107,6 +108,7 @@ class FitzDoc:
             browser(f)
         else:
             raise ValueError(f'{opt}')
+        return f
 
     def __getattr__(self, item):
         return getattr(self.doc, item)
