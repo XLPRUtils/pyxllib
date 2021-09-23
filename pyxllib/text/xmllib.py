@@ -7,10 +7,10 @@
 """
 xml等网页结构方面的处理
 """
+
 import collections
 from collections import Counter, defaultdict
 import re
-import textwrap
 import os
 
 import requests
@@ -19,328 +19,13 @@ import bs4
 from bs4 import BeautifulSoup
 from humanfriendly import format_size
 
+from pyxllib.algo.pupil import SearchBase
 from pyxllib.debug.pupil import dprint
 from pyxllib.prog.newbie import round_int
 from pyxllib.prog.pupil import EnchantBase
 from pyxllib.text.newbie import xldictstr
-from pyxllib.text.pupil import listalign, int2myalphaenum, shorten, ensure_gbk, RunOnlyOnce, BookContents, strwidth, \
-    grp_chinese_char
+from pyxllib.text.pupil import shorten, ensure_gbk, RunOnlyOnce, BookContents, strwidth, grp_chinese_char
 from pyxllib.file.specialist import File, Dir, get_etag
-
-____section_1_dfs_base = """
-一个通用的递归功能
-"""
-
-
-def dfs_base(node, *,
-             child_generator=None, select_depth=None, linenum=False,
-             mystr=None, msghead=True, lsstr=None, show_node_type=False, prefix='    '):
-    """ 输入一个节点node，以及该节点当前depth
-
-    :param prefix: 缩进格式，默认用4个空格
-    :param node: 节点
-    :param child_generator: 子节点生成函数
-        函数支持输入一个节点参数
-        返回一个子节点列表
-    :param select_depth: 要显示的深度
-        单个数字：获得指定层
-        Sequences： 两个整数，取出这个闭区间内的层级内容
-    :param mystr: 自定义单个节点字符串方式
-        标准是输入2个参数 mystr(node, depth)，返回字符串化的结果，记得前缀缩进也要自己控制的！
-        也可以只输入一个参数 mystr(node)：
-            这种情况会自动按照每层4个空格进行缩进
-    :param lsstr: 自定义整个列表的字符串化方法，在mystr的基础上调控更加灵活，但要写的代码也更多
-    :param linenum：节点从1开始编号
-        行号后面，默认会跟一个类似Excel列名的字母，表示层级深度
-    :param msghead: 第1行输出一些统计信息
-    :param show_node_type:
-    :return 返回一个遍历清单ls
-        ls的每个元素是一个列表
-            第1个值是depth
-            第2个值是节点ref
-
-    Requires
-        textwrap：用到shorten
-        align.listalign：生成列编号时对齐
-    """
-
-    # 1 子节点生成器，与配置
-    def bs4_child_generator(node):
-        try:
-            return node.children
-        except AttributeError:
-            return []
-
-    # 配置子节点生成器
-    if not child_generator:
-        child_generator = bs4_child_generator
-
-    # 2 dfs实际实现代码，获得节点清单
-    def inner(node, depth=0):
-        """dfs实际实现代码
-        TODO：把depth过滤写进inner不生成？！ 不过目前还是按照生成整棵树处理，能统计到一些信息。
-        """
-        ls = [[node, depth]]
-        for t in child_generator(node):
-            ls += inner(t, depth + 1)
-        return ls
-
-    ls = inner(node)
-    total_node = len(ls)
-    total_depth = max(map(lambda x: x[1], ls))
-    head = f'总节点数：1~{total_node}，总深度：0~{total_depth}'
-
-    # 4 过滤与重新整理ls（select_depth）
-    logo = True
-    cnt = 0
-    tree_num = 0
-    if isinstance(select_depth, int):
-
-        for i in range(total_node):
-            if ls[i][1] == select_depth:
-                ls[i][1] = 0
-                cnt += 1
-                logo = True
-            elif ls[i][1] < select_depth and logo:  # 遇到第1个父节点添加一个空行
-                ls[i] = ''
-                tree_num += 1
-                logo = False
-            else:  # 删除该节点，不做任何显示
-                ls[i] = None
-        head += f'；挑选出的节点数：{cnt}，所选深度：{select_depth}，树数量：{tree_num}'
-
-    elif hasattr(select_depth, '__getitem__'):
-        for i in range(total_node):
-            if select_depth[0] <= ls[i][1] <= select_depth[1]:
-                ls[i][1] -= select_depth[0]
-                cnt += 1
-                logo = True
-            elif ls[i][1] < select_depth[0] and logo:  # 遇到第1个父节点添加一个空行
-                ls[i] = ''
-                tree_num += 1
-                logo = False
-            else:  # 删除该节点，不做任何显示
-                ls[i] = None
-        head += f'；挑选出的节点数：{cnt}，所选深度：{select_depth[0]}~{select_depth[1]}，树数量：{tree_num}'
-    """注意此时ls[i]的状态，有3种类型
-        (node, depth)：tuple类型，第0个元素是node对象，第1个元素是该元素所处层级
-        None：已删除元素，但为了后续编号方便，没有真正的移出，而是用None作为标记
-        ''：已删除元素，但这里涉及父节点的删除，建议此处留一个空行
-    """
-
-    # 5 格式处理
-    def default_mystr(node, depth):
-        s1 = prefix * depth
-        s2 = typename(node) + '，' if show_node_type else ''
-        s3 = textwrap.shorten(str(node), 200)
-        return s1 + s2 + s3
-
-    def default_lsstr(ls):
-        nonlocal mystr
-        if not mystr:
-            mystr = default_mystr
-        else:
-            try:  # 测试两个参数情况下是否可以正常运行
-                mystr('', 0)
-            except TypeError:
-                # 如果不能正常运行，则进行封装从而支持2个参数
-                func = mystr
-
-                def str_plus(node, depth):  # 注意这里函数名要换一个新的func
-                    return prefix * depth + func(node)
-
-                mystr = str_plus
-
-        line_num = listalign(range(1, total_node + 1))
-        res = []
-        for i in range(total_node):
-            if ls[i] is not None:
-                if isinstance(ls[i], str):  # 已经指定该行要显示什么
-                    res.append(ls[i])
-                else:
-                    if linenum:  # 增加了一个能显示层级的int2excel_col_name
-                        res.append(line_num[i] + int2myalphaenum(ls[i][1]) + ' ' + mystr(ls[i][0], ls[i][1]))
-                    else:
-                        res.append(mystr(ls[i][0], ls[i][1]))
-
-        s = '\n'.join(res)
-        return s
-
-    if not lsstr:
-        lsstr = default_lsstr
-
-    s = lsstr(ls)
-
-    # 是否要添加信息头
-    if msghead:
-        s = head + '\n' + s
-
-    return s
-
-
-def treetable(childreds, parents, arg3=None, nodename_colname=None):
-    """输入childres子结点id列表，和parents父结点id列表
-    两个列表长度必须相等
-    文档：http://note.youdao.com/noteshare?id=126200f45d301fcb4364d06a0cae8376
-
-    有两种调用形式
-    >> treetable(childreds, parents)  --> DataFrame  （新建df）
-    >> treetable(df, child_colname, parent_colname)  --> DataFrame （修改后的df）
-
-    返回一个二维列表
-        新的childreds （末尾可能回加虚结点）
-        新的parents
-        函数会计算每一行childred对应的树排序后的排序编号order
-        以及每个节点深度depth
-
-    >> ls1 = [6, 2, 4, 5, 3], ls2 = [7, 1, 2, 2, 1], treetable(ls1, ls2)
-          child_id   parent_id   depth     tree_order    tree_struct
-        5        7     root        1           1         = = 7
-        0        6        7        2           2         = = = = 6
-        6        1     root        1           3         = = 1
-        1        2        1        2           4         = = = = 2
-        2        4        2        3           5         = = = = = = 4
-        3        5        2        3           6         = = = = = = 5
-        4        3        1        2           7         = = = = 3
-    """
-    # 0 参数预处理
-    if isinstance(childreds, pd.DataFrame):
-        df = childreds
-        child_colname = parents
-        parent_colname = arg3
-        if not arg3: raise TypeError
-        childreds = df[child_colname].tolist()
-        parents = df[parent_colname].tolist()
-    else:
-        df = None
-
-    # 1 建立root根节点，确保除了root其他结点都存在记录
-    lefts = set(parents) - set(childreds)  # parents列中没有在childreds出现的结点
-    cs, ps = list(childreds), list(parents)
-
-    if len(lefts) == 0:
-        # b_left为空一定有环，b_left不为空也不一定是正常的树
-        raise ValueError('有环，不是树结构')
-    elif len(lefts) == 1:  # 只有一个未出现的结点，那么它既是根节点
-        root = list(lefts)[0]
-    else:  # 多个父结点没有记录，则对这些父结点统一加一个root父结点
-        root = 'root'
-        allnode = set(parents) | set(childreds)  # 所有结点集合
-        while root in allnode: root += '-'  # 一直在末尾加'-'，直到这个结点是输入里未出现的
-        # 添加结点
-        lefts = list(lefts)
-        lefts.sort(key=lambda x: parents.index(x))
-        for t in lefts:
-            cs.append(t)
-            ps.append(root)
-
-    n = len(cs)
-    depth, tree_order, len_childs = [-1] * n, [-1] * n, [0] * n
-
-    # 2 构造父结点-孩子结点的字典dd
-    dd = defaultdict(list)
-    for i in range(n): dd[ps[i]] += [i]
-
-    # 3 dfs
-    cnt = 1
-
-    def dfs(node, d):
-        """找node的所有子结点"""
-        nonlocal cnt
-        for i in dd.get(node, []):
-            tree_order[i], depth[i], len_childs[i] = cnt, d, len(dd[cs[i]])
-            cnt += 1
-            dfs(cs[i], d + 1)
-
-    dfs(root, 1)
-
-    # 4 输出格式
-    tree_struct = list(map(lambda i: f"{'_ _ ' * depth[i]}{cs[i]}" + (f'[{len_childs[i]}]' if len_childs[i] else ''),
-                           range(n)))
-
-    if df is None:
-        ls = list(zip(cs, ps, depth, tree_order, len_childs, tree_struct))
-        df = pd.DataFrame.from_records(ls, columns=('child_id', 'parent_id',
-                                                    'depth', 'tree_order', 'len_childs', 'tree_struct'))
-    else:
-        k = len(df)
-        df = df.append(pd.DataFrame({child_colname: cs[k:], parent_colname: ps[k:]}), sort=False, ignore_index=True)
-        if nodename_colname:
-            tree_struct = list(
-                map(lambda i: f"{'_ _ ' * depth[i]}{cs[i]} {df.iloc[i][nodename_colname]}"
-                              + (f'[{len_childs[i]}]' if len_childs[i] else ''), range(n)))
-        df['depth'], df['tree_order'], df['len_childs'], df['tree_struct'] = depth, tree_order, len_childs, tree_struct
-    df.sort_values('tree_order', inplace=True)  # 注意有时候可能不能排序，要维持输入时候的顺序
-    return df
-
-
-def treetable_flatten(df, *, reverse=False, childid_colname='id', parentid_colname='parent_id', format_colname=None):
-    """获得知识树横向展开表：列为depth-3, depth-2, depth-1，表示倒数第3级、倒数第2级、倒数第1级
-    :param df: DataFrame数据
-    :param reverse:
-        False，正常地罗列depth1、depth2、depth3...等结点信息
-        True，反向列举所属层级，即显示倒数第1层parent1，然后是倒数第2层parent2...
-    :param childid_colname: 孩子结点列
-    :param parentid_colname: 父结点列
-    :param format_colname: 显示的数值
-        None，默认采用 childid_colname 的值
-        str，某一列的名称，采用那一列的值（可以实现设置好格式）
-    :return:
-    """
-    # 1 构造辅助数组
-    if format_colname is None: format_colname = parentid_colname
-    parentid = dict()  # parentid[k] = v， 存储结点k对应的父结点v
-    nodeval = dict()  # nodeval[k] = v，  存储结点k需要显示的数值情况
-    if len(df[df.index.duplicated()]):
-        dprint(len(set(df.index)), len(df.index))  # 有重复index
-        raise ValueError
-
-    for idx, row in df.iterrows():
-        parentid[row[childid_colname]] = row[parentid_colname]
-        nodeval[row[childid_colname]] = str(row[format_colname])
-
-    # 2 每个结点往上遍历出所有父结点
-    parents = []
-    for idx, row in df.iterrows():
-        ps = [nodeval[row[childid_colname]]]  # 包含结点自身的所有父结点名称
-        p = row[parentid_colname]
-        while p in parentid:
-            ps.append(nodeval[p])
-            p = parentid[p]
-        parents.append(ps)
-    num_depth = max(map(len, parents), default=0)
-
-    # 3 这里可以灵活调整最终要显示的格式效果
-    df['parents'] = parents
-    if reverse:
-        for j in range(num_depth, 0, -1): df[f'depth-{j}'] = ''
-        for idx, row in df.iterrows():
-            for j in range(1, len(row.parents) + 1):
-                df.loc[idx, f'depth-{j}'] = row.parents[j - 1]
-    else:
-        for j in range(num_depth): df[f'depth{j}'] = ''
-        for idx, row in df.iterrows():
-            for j in range(len(row.parents)):
-                df.loc[idx, f'depth{j}'] = row.parents[-j - 1]
-    df.drop('parents', axis=1, inplace=True)
-    return df
-
-
-____section_2_xml = """
-xml相关的一些功能函数
-"""
-
-
-def readurl(url):
-    """从url读取文本"""
-    r = requests.get(url)
-    soup = BeautifulSoup(r.text, 'lxml')
-    s = soup.get_text()
-    return s
-
-
-____section_3_xmlparser = """
-"""
 
 
 class EnchantBs4Tag(EnchantBase):
@@ -398,7 +83,8 @@ class EnchantBs4Tag(EnchantBase):
         各参数含义详见dfs_base
         """
         # 1 先用dfs获得基本结果
-        s = dfs_base(self, **kwargs)
+        sb = SearchBase(self)
+        s = sb.fmt_nodes(**kwargs)
         return s
 
     @staticmethod
@@ -406,25 +92,23 @@ class EnchantBs4Tag(EnchantBase):
         """ 查看树形结构的简洁版
         """
 
-        def mystr(node):
-            # if isinstance(node, (bs4.ProcessingInstruction, code4101py.stdlib.bs4.ProcessingInstruction)):
-            if isinstance(node, bs4.ProcessingInstruction):
-                s = 'ProcessingInstruction，' + str(node)
-            # elif isinstance(node, (bs4.Tag, code4101py.stdlib.bs4.Tag)):
-            elif isinstance(node, bs4.Tag):
-                s = node.name + '，' + xldictstr(node.attrs, item_delimit='，')
-            # elif isinstance(node, (bs4.NavigableString, code4101py.stdlib.bs4.NavigableString)):
-            elif isinstance(node, bs4.NavigableString):
-                # s = 'NavigableString'
-                s = shorten(str(node), 200)
-                if not s.strip():
-                    s = '<??>'
-            else:
-                s = '遇到特殊类型，' + str(node)
-            return s
+        class Search(SearchBase):
+            def fmt_node(self, node, depth, *, prefix=prefix, show_node_type=False):
+                if isinstance(node, bs4.ProcessingInstruction):
+                    s = 'ProcessingInstruction，' + str(node)
+                elif isinstance(node, bs4.Tag):
+                    s = node.name + '，' + xldictstr(node.attrs, item_delimit='，')
+                elif isinstance(node, bs4.NavigableString):
+                    s = shorten(str(node), 200)
+                    if not s.strip():
+                        s = '<??>'
+                else:
+                    s = '遇到特殊类型，' + str(node)
+                return (prefix * depth) + s
 
-        s = dfs_base(self, mystr=mystr, prefix=prefix, linenum=linenum, **kwargs)
-        return s
+        search = Search(self)
+        res = search.fmt_nodes(linenum=linenum, **kwargs)
+        return res
 
     @staticmethod
     def treestruct_stat(self):
@@ -642,10 +326,14 @@ class EnchantBs4Tag(EnchantBase):
 
         nums = bc.format_numbers(start_level=start_level, jump=jump)
         for i, h in enumerate(heads):
-            navi_str = list(h.strings)[0]
-            if nums[i]:
-                nums[i] += '&nbsp;'
-            navi_str.replace_with(nums[i] + str(navi_str))
+            navi_strs = list(h.strings)
+            if navi_strs:
+                navi_str = navi_strs[0]
+                if nums[i]:
+                    nums[i] += '&nbsp;'
+                navi_str.replace_with(nums[i] + str(navi_str))
+            else:
+                h.string = nums[i]
 
     @staticmethod
     def xltext(self):
@@ -657,9 +345,6 @@ class EnchantBs4Tag(EnchantBase):
 
 
 EnchantBs4Tag.enchant()
-
-____section_temp = """
-"""
 
 
 def mathjax_html_head(s):
@@ -676,6 +361,70 @@ MathJax.Hub.Config(MATHJAX_KLXX_CONFIG);
 <body>"""
     tail = '</body></html>'
     return head + s + tail
+
+
+def html_bitran_template(htmlcontent):
+    """ 双语翻译的html模板，html bilingual translation template
+
+    一般是将word导出的html文件，转成方便谷歌翻译操作，进行双语对照的格式
+
+    基本原理，是利用chrome识别class="notranslate"标记会跳过不翻译的特性
+    对正文标签p拷贝两份，一份原文，一份带notranslate标记的内容
+    这样在执行谷歌翻译后，就能出现双语对照的效果
+
+    其实最好的办法，是能调用翻译API，直接给出双语成果的html
+    但谷歌的googletrans连不上外网无法使用
+    其他公司的翻译接口应该没问题，但我嫌其可能没有google好，以及不是重点，就先暂缓开发
+    """
+    from pyxllib.text.nestenv import NestEnv
+
+    # 1 区间定位分组
+    ne = NestEnv(htmlcontent)
+    ne2 = ne.xmltag('p')
+    for name in ('h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'pre'):
+        ne2 += ne.xmltag(name)
+
+    # 以下是针对python document复制到word的情况，不一定具有广泛泛用性
+    # 目的是让代码块按块复制，而不是按行复制
+    ne2 += ne.search2("<div style=['\"]mso-element:para-border-div;border:solid #AACC99", '</div>')
+
+    # 2 每个区间的处理规则
+    def func(s):
+        """ 找出p、h后，具体要执行的操作 """
+        s1, s2 = s, s  # 分前后两波文本s1，s2
+
+        # 1 s2 只要加 notranslate
+        bs = BeautifulSoup(s2, 'lxml')
+        x = next(bs.body.children)
+        cls_ = x.get('class', None)
+        x['class'] = (cls_ + ['notranslate']) if cls_ else 'notranslate'
+        if re.match(r'h\d+$', x.name):
+            x.name = 'p'  # 去掉标题格式，统一为段落格式
+
+        s2 = x.xltext()
+
+        # 2 s1 可能要做些骚操作
+        # 比如自定义翻译，这个无伤大雅的，如果搞不定，可以先注释掉，后面再说
+        # bs = BeautifulSoup(s1, 'lxml')
+        # x = list(bs.body.children)[0]
+        # if re.match(r'h\d+$', x.name):
+        #     for y in x.descendants:
+        #         if isinstance(y, NavigableString):
+        #             y.replace_with(re.sub(r'Conclusion', '总结', str(y)))
+        #         else:
+        #             for z in y.strings:
+        #                 z.replace_with(re.sub(r'Conclusion', '总结', str(z)))
+        #     y.replace_with(re.sub(r'^Abstract$', '摘要', str(y)))
+        # s1 = x.xltext()
+        if x.name in ('div', 'pre'):
+            # 实际使用体验，想了下，代码块还是不如保留原样最方便，不用拷贝翻译
+            s1 = ''
+
+        return s1 + '\n' + s2
+
+    res = ne2.replace(func)
+
+    return res
 
 
 class MakeHtmlNavigation:
@@ -697,11 +446,13 @@ class MakeHtmlNavigation:
         return cls.from_content(content, os.path.splitext(str(file))[0], **kwargs)
 
     @classmethod
-    def from_content(cls, html_content, title='temphtml', *, encoding=None):
+    def from_content(cls, html_content, title='temphtml', *,
+                     encoding=None, number=True, text_catalogue=True):
         """
         :param html_content: 原始网页的完整内容
         :param title: 页面标题，默认会先找head/title，如果没有，则取一个随机名称（TODO 未实装，目前固定名称）
         :param encoding: 保存的几个文件编码，默认是utf8，但windows平台有些特殊场合也可能要存储gbk
+        :param number: 是否对每节启用自动编号的css
 
         算法基本原理：读取原网页，找出所有h标签，并增设a锚点
             另外生成一个导航html文件
@@ -719,7 +470,8 @@ class MakeHtmlNavigation:
 
         # 这个refs是可以用py算法生成的，目前是存储在github上引用
         refs = ['<html><head>',
-                '<link rel=Stylesheet type="text/css" media=all href="https://code4101.github.io/css/navigation0.css">',
+                '<link rel=Stylesheet type="text/css" media=all '
+                f'href="https://code4101.github.io/css/navigation{int(number)}.css">',
                 '</head><body>']
 
         f2 = File(title + '_content', Dir.TEMP, suffix='.html')
@@ -741,17 +493,18 @@ class MakeHtmlNavigation:
         # 2.1 前文的refs已经存储了超链接的导航
 
         # 2.2 文本版的目录
-        refs.append(f'<br/>【文本版的目录】')
         bs = BeautifulSoup(html_content, 'lxml')
-        catalogue = bs.get_catalogue(indent='\t', start_level=-1, jump=True, size=True)
-        refs.append(f'<pre>{catalogue}</pre>')
-
-        # 2.3 文章总大小
         text = bs.get_text()
-        n = strwidth(text)
-        refs.append('<br/>【Total Bytes】' + format_size(n))
+        if text_catalogue:
+            # 目录
+            refs.append(f'<br/>【文本版的目录】')
+            catalogue = bs.get_catalogue(indent='\t', start_level=-1, jump=True, size=True)
+            refs.append(f'<pre>{catalogue}</pre>')
+            # 全文长度
+            n = strwidth(text)
+            refs.append('<br/>【Total Bytes】' + format_size(n))
 
-        # 2.4 文中使用的高频词
+        # 2.3 文中使用的高频词
         # 英文可以直接按空格切开统计，区分大小写
         text2 = re.sub(grp_chinese_char(), '', text)  # 删除中文，先不做中文的功能~~
         text2 = re.sub(r'[,\.，。\(\)（）;；?？"]', ' ', text2)  # 标点符号按空格处理

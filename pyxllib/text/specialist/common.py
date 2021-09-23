@@ -9,6 +9,8 @@ import textwrap
 import sys
 
 import pandas as pd
+import requests
+from bs4 import BeautifulSoup
 
 from pyxllib.prog.newbie import len_in_dim2
 from pyxllib.text.pupil import ContentLine
@@ -103,3 +105,11 @@ def file_lastlines(fn, n):
         pos *= 2
     f.close()
     return ''.join(lines[-n:])
+
+
+def readurl(url):
+    """从url读取文本"""
+    r = requests.get(url)
+    soup = BeautifulSoup(r.text, 'lxml')
+    s = soup.get_text()
+    return s

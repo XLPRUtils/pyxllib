@@ -5,5 +5,4 @@
 # @Date   : 2021/06/06 17:56
 
 from pyxllib.text.specialist.common import *
-from pyxllib.text.specialist.xml import *
 from pyxllib.text.specialist.ptag import *
