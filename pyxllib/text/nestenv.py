@@ -8,7 +8,7 @@ import bisect
 import re
 
 from pyxllib.text.newbie import bracket_match2
-from pyxllib.text.pupil import grp_bracket, strfind
+from pyxllib.text.pupil import grp_bracket, strfind, findspan, substr_count
 from pyxllib.algo.intervals import Intervals, ReMatch
 
 
@@ -354,8 +354,13 @@ class NestEnv(__NestEnvBase):
 
         return self.nest(core, invert)
 
-    def find2(self, head, tail, inner=False, invert=False):
+    def find2(self, head, tail, *, inner=False, invert=False, symmetry=False):
         r""" 配对字符串匹配
+
+        :param head: 默认字符串匹配，也支持输入re.compile的正则
+        :param tail: 同head
+        :param symmetry: 要求匹配到的head和tail数量对称
+            这个算法会慢非常多，如无必要不用开
 
         >>> ne = NestEnv('111222333')
         >>> ne.find2('1', '3').strings()
@@ -365,17 +370,31 @@ class NestEnv(__NestEnvBase):
         def core(s):
             pos1, parts = 0, []
             while True:
-                pos2 = s.find(head, pos1)
-                if pos2 == -1: break
-                t = s.find(tail, pos2 + len(head))
-                if t == -1:
-                    break  # 有头无尾，不处理，跳过
-                    # dprint(s, head, tail)
-                    # raise ValueError
-                pos1 = t + len(tail)
+                # 找到第1个head
+                pos2, pos2end = findspan(s, head, pos1)
+                if pos2 == -1:
+                    break
 
+                # 找到上一个head后，最近出现的tail
+                pos3, pos1 = findspan(s, tail, pos2end)
+
+                if symmetry:
+                    while True:
+                        substr = s[pos2:pos1]
+                        cnt1, cnt2 = substr_count(substr, head), substr_count(substr, tail)
+
+                        if pos3 == -1 or cnt1 == cnt2:
+                            break
+                        else:
+                            pos3, pos1 = findspan(s, tail, pos1)
+
+                if pos3 == -1:
+                    # 有头无尾，不处理，跳过
+                    break
+
+                # 坐标计算、存储
                 if inner:
-                    parts.append(pqmove(s, pos2 + len(head), pos1 - len(tail)))
+                    parts.append(pqmove(s, pos2end, pos3))
                 else:
                     parts.append([pos2, pos1])
 
@@ -403,32 +422,9 @@ class NestEnv(__NestEnvBase):
         """ 配对正则匹配
         TODO 实现应该可以参考find2
         """
-
-        def core(s):
-            parts = []
-            bias, a, b, c, d = 0, 0, 0, 0, 0
-            while bias < len(s):
-                m1 = re.search(pattern1, s[bias:], flags=flags1)
-                if m1:
-                    a, b = m1.regs[0]
-                    m2 = re.search(pattern2, s[bias + b:], flags=flags2)
-                    if m2:
-                        c, d = m2.regs[0]
-                        c += b
-                        d += b
-                        if inner:
-                            parts.append([bias + b, bias + c])
-                        else:
-                            parts.append([bias + a, bias + d])
-                        bias += d
-                    else:
-                        break
-                else:
-                    break
-
-            return parts
-
-        return self.nest(core, invert)
+        head = re.compile(pattern1, flags=flags1)
+        tail = re.compile(pattern2, flags=flags2)
+        return self.find2(head, tail, inner=inner, invert=invert)
 
     def bracket(self, head, tail=None, inner=False, *, latexenv=False, invert=False):
         r""" (尾)括号匹配
@@ -518,7 +514,7 @@ class NestEnv(__NestEnvBase):
 
         return self.nest(core, invert)
 
-    def xmltag(self, head, inner=False, invert=False):
+    def xmltag(self, head, inner=False, invert=False, symmetry=True):
         r"""
         # >>> s = 'a\n<p class="clearfix">\nbb\n</p>c<p a="2"/>cc'
         # >>> NestEnv(s).inside('<p').replace('x')
@@ -531,18 +527,10 @@ class NestEnv(__NestEnvBase):
             4、似乎只有用编译原理的理念一个个字符去解析文本才能真正确保准确性了。。。
                 但这不切实际，实际可行方案还是得用正则，虽然不严谨有风险
         """
-
-        def core(s):
-            i = 'inner' if inner else 0
-            pattern = fr'<({head})(?:>|\s.*?>)\s*(?P<inner>.*?)\s*</\1>'
-            res = [m.span(i) for m in re.finditer(pattern, s, flags=re.DOTALL + re.MULTILINE)]
-
-            # if not inner:  # 如果没开inner模式，还要再加上纯标签情况
-            #     pattern = fr'<({name})(?:/>|\s[^>]*?/>)'
-            # TODO 该函数应急使用，但算法本身非常不严谨，只要出现嵌套、自闭合等等特殊情况，就会有问题
-            return res
-
-        return self.nest(core, invert)
+        # 暂不考虑自关闭 <a/>的情况
+        h = re.compile(rf'<({head})(?:>|\s.*?>)', flags=re.DOTALL)
+        t = re.compile(f'</{head}>')
+        return self.find2(h, t, inner=inner, invert=invert, symmetry=symmetry)
 
     def attr(self, name, part=0, prefix=r'(?<![a-zA-Z])', suffix=r'\s*=\s*', invert=False):
         r"""

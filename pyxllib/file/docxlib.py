@@ -245,7 +245,7 @@ class EnchantWin32WordApplication(EnchantBase):
             doc.Close(False)
 
     @classmethod
-    def get_app(cls, mode='default', *, visible=None, display_alerts=0, recursion_enchant=False):
+    def get_app(cls, mode='default', *, visible=None, display_alerts=0, recursion_enchant=True):
         """
         Args:
             mode: 目前除了默认default，只有new，强制新建一个app
@@ -267,7 +267,7 @@ class EnchantWin32WordApplication(EnchantBase):
             # 必须用gencache方法，才能获得 from win32com.client import constants 的常量
             app = win32.gencache.EnsureDispatch('Word.Application')
             # print('gencache')
-        cls.enchant(app, recursion_enchant=True)
+        cls.enchant(app, recursion_enchant=recursion_enchant)
 
         if visible is not None:
             app.Visible = visible

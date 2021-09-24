@@ -4,27 +4,8 @@
 # @Email  : 877362867@qq.com
 # @Date   : 2021/08/20 11:46
 
-""" 一些特殊的专用业务功能
-
-因为是业务方面的，所以函数名可能多用中文~~
-"""
 
 import re
-
-from pyxllib.debug.specialist import browser
-from pyxllib.file.specialist import File, Dir, get_etag, BeautifulSoup
-
-
-def __check():
-    """
-    检查异常系列的功能
-    """
-
-
-def __refine():
-    """
-    文本优化的功能
-    """
 
 
 def py_remove_interaction_chars(s):
@@ -35,7 +16,7 @@ def py_remove_interaction_chars(s):
     return '\n'.join(lines)
 
 
-def pycode_sort__import(s):
+def pycode_sort_import(s):
     from pyxllib.text.nestenv import PyNestEnv
 
     def cmp(line):
@@ -64,9 +45,3 @@ def pycode_sort__import(s):
 
     res = PyNestEnv(s).imports().sub(sort_part, adjacent=True)  # 需要邻接，分块处理
     return res
-
-
-def __extract():
-    """
-    信息摘要提取功能
-    """
