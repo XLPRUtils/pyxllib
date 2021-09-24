@@ -381,8 +381,8 @@ def html_bitran_template(htmlcontent):
     # 1 区间定位分组
     ne = NestEnv(htmlcontent)
     ne2 = ne.xmltag('p')
-    for name in ('h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'pre'):
-        ne2 += ne.xmltag(name)
+    for name in ('h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'pre', 'ol', 'ul'):
+        ne2 += ne.xmltag(name, symmetry=True)
 
     # 以下是针对python document复制到word的情况，不一定具有广泛泛用性
     # 目的是让代码块按块复制，而不是按行复制
@@ -396,6 +396,10 @@ def html_bitran_template(htmlcontent):
         # 1 s2 只要加 notranslate
         bs = BeautifulSoup(s2, 'lxml')
         x = next(bs.body.children)
+
+        # print(x.name)
+        # print(x.xltext())
+
         cls_ = x.get('class', None)
         x['class'] = (cls_ + ['notranslate']) if cls_ else 'notranslate'
         if re.match(r'h\d+$', x.name):
@@ -416,8 +420,11 @@ def html_bitran_template(htmlcontent):
         #                 z.replace_with(re.sub(r'Conclusion', '总结', str(z)))
         #     y.replace_with(re.sub(r'^Abstract$', '摘要', str(y)))
         # s1 = x.xltext()
-        if x.name in ('div', 'pre'):
+        # if x.name in ('div', 'pre'):
             # 实际使用体验，想了下，代码块还是不如保留原样最方便，不用拷贝翻译
+            # s1 = ''
+        # 如果p没有文本字符串，也不拷贝
+        if not x.get_text().strip():
             s1 = ''
 
         return s1 + '\n' + s2

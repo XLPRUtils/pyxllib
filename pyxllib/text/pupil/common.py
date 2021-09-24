@@ -169,6 +169,53 @@ def strfind(fullstr, objstr, *, start=None, times=0, overlap=False):
     return p
 
 
+def findspan(src, sub, start=0, end=None):
+    """ str.find的封装
+
+    :param sub:
+        str，普通的字符串查找
+        re.Pattern，正则模式的查找
+    :return: (start, end)
+        找不到的时候返回 (-1, -1)
+        否则返回区间的左开右闭位置
+    """
+    if end is None:
+        end = len(src)
+
+    if isinstance(sub, str):
+        pos = src.find(sub, start, end)
+    elif isinstance(sub, re.Pattern):
+        pattern = sub
+        m = pattern.search(src[start:end])
+        if m:
+            pos = m.start() + start
+            sub = m.group()
+        else:
+            pos = -1
+    else:
+        raise TypeError
+
+    if pos == -1:
+        return -1, -1
+    else:
+        return pos, pos + len(sub)
+
+
+def substr_count(src, sub, overlape=False):
+    """ 判断字符串src中符合pattern的字串有几个 """
+    if overlape:
+        raise NotImplementedError
+    else:
+        if isinstance(sub, str):
+            cnt = src.count(sub)
+        elif isinstance(sub, re.Pattern):
+            cnt = len(sub.findall(src))
+        else:
+            raise TypeError
+
+    return cnt
+
+
 class Stdout:
     """重定向标准输出流，切换print标准输出位置
 
