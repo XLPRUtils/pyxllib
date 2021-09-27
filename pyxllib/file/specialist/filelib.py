@@ -817,6 +817,9 @@ class File(PathBase):
     def __eq__(self, other):
         return str(self) == str(other)
 
+    def exists(self):
+        return self._path.exists()
+
 
 def demo_file():
     """ File类的综合测试"""

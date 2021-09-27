@@ -40,8 +40,8 @@ class FitzDoc:
         self.src_file = File(file)
         self.doc = fitz.open(str(file))
 
-    def write_images(self, dst_dir=None, file_fmt='{filestem}_{number}.png', num_width=None, *,
-                     scale=1, start=1, fmt_onepage=False):
+    def to_images(self, dst_dir=None, file_fmt='{filestem}_{number}.png', num_width=None, *,
+                  scale=1, start=1, fmt_onepage=False):
         """ 将pdf转为若干页图片
 
         :param dst_dir: 目标目录
@@ -84,13 +84,29 @@ class FitzDoc:
             im = self.load_page(0).get_cv_image(scale)
             return [xlcv.write(im, File(srcfile.stem + os.path.splitext(file_fmt)[1], dst_dir))]
 
-    def write_labelmes(self, imfiles, opt='dict', *, views=(0, 0, 1, 0), scale=1, indent=None):
+    def to_labelmes(self, imfiles, opt='dict', *, views=(0, 0, 1, 0), scale=1, indent=None):
         """ 生成图片对应的标注，常跟to_images配合使用 """
         for i, imfile in enumerate(imfiles):
             page = self.load_page(i)
             lmdict = LabelmeDict.gen_data(imfile)
             lmdict['shapes'] = page.get_labelme_shapes(opt, views=views, scale=scale)
             imfile.with_suffix('.json').write(lmdict, indent=indent)
+
+    def to_docx(self, docx_file=None):
+        """ pdf转docx """
+        try:
+            from pdf2docx import parse
+        except ModuleNotFoundError:
+            subprocess.run('pip3 install pdf2docx')
+            from pdf2docx import parse
+
+        pdf_file = self.src_file
+
+        if docx_file is None:
+            docx_file = pdf_file.with_suffix('.docx')
+
+        # 注意这里是日志显示进度，不是printf输出.
+        parse(str(pdf_file), str(docx_file))
 
     def browser(self, opt='pdf'):
         if opt == 'pdf':
@@ -154,7 +170,7 @@ class EnchantFitzPage(EnchantBase):
         return xlpil.read_from_buffer(_self._get_png_data(scale), flags=1)
 
     @staticmethod
-    def write_image(_self, outfile, *, scale=1, if_exists=None):
+    def to_image(_self, outfile, *, scale=1, if_exists=None):
         """ 转成为文件 """
         f = File(outfile)
         suffix = f.suffix.lower()
@@ -410,7 +426,7 @@ def __pdfminer():
 
 class PdfMiner:
     @classmethod
-    def to_html(cls, file_pdf):
+    def to_html(cls, pdf_file):
         """ 相比fitz，pdfminer能正常提取出下划线
 
         文本重叠比fitz更严重，整体来说其实更不好用~~
@@ -422,11 +438,11 @@ class PdfMiner:
         from pdfminer.layout import LAParams
 
         output_string = StringIO()
-        with open(str(file_pdf)) as fin:
+        with open(str(pdf_file)) as fin:
             extract_text_to_fp(fin, output_string, laparams=LAParams(),
                                output_type='html', codec=None)
 
         # 打开浏览器查看重建的html效果
-        f = file_pdf.with_suffix('.html')
+        f = pdf_file.with_suffix('.html')
         f.write(output_string.getvalue())
         browser(f)
