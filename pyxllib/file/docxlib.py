@@ -30,14 +30,67 @@ def __docx():
     pass
 
 
+class DocxTools:
+    @classmethod
+    def to_pdf(cls, docx_file, pdf_file=None):
+        try:
+            import docx2pdf  # pip install docx2pdf，并且本地要安装word软件
+        except ModuleNotFoundError:
+            subprocess.run('pip3 install docx2pdf')  # 安装不成功的时候可以考虑加参数：--user
+            import docx2pdf
+
+        if pdf_file is None:
+            pdf_file = docx_file.with_suffix('.pdf')
+
+        docx2pdf.convert(str(docx_file), str(pdf_file))
+        return pdf_file
+
+    @classmethod
+    def merge(cls, master_file, toc):
+        """ 合并多份docx文件
+
+        :param master_file: 要合并到哪个主文件
+            注意如果这个文件已存在，会被替换，重置
+        :param toc: 类似fitz的table of contents，用一个n*3的表格表示新文档的格式
+            list，每个元素三列：标题级别，标题名称，(可选)对应文件内容
+
+        这个功能还有些局限性，后面要扩展鲁棒性
+        TODO 增加一个支持将原文档标题降级的功能，降到toc之后
+        """
+        app = EnchantWin32WordApplication.get_app()
+
+        master_doc = app.new_doc(master_file)
+        for item in toc:
+            lvl, title, file = item
+
+            # 1 加一个标题
+            r = master_doc.Paragraphs.Add().Range
+            r.InsertBefore(title)
+            r.Style = master_doc.Styles(f'标题 {lvl}')
+
+            # 2 拷贝完整的内容
+            if file:
+                file = File(file)
+                member_doc = app.open_doc(file)
+                member_doc.Activate()
+                app.Selection.WholeStory()
+                app.Selection.Copy()
+                master_doc.Activate()
+                app.Selection.EndKey(Unit=app.wd('Story'))  # 跳到文档末尾
+                app.Selection.Paste()
+                member_doc.Close()
+        master_doc.save()
+        master_doc.Close()
+
+
 class Document:
     """ 这个库写英文文档还不错。但不能做中文，字体会错乱。
     """
 
-    def __init__(self, file_docx=None):
+    def __init__(self, docx_file=None):
         """
         Args:
-            file_docx:
+            docx_file:
                 已有的word文件路径：打开
                 还没创建的word文件路径：在个别功能需要的时候，会自动创建
                 None：在临时文件夹生成一个默认的word文件
@@ -45,51 +98,43 @@ class Document:
         import docx
         # pip install python-docx
 
-        if file_docx is None:
-            file_docx = File(..., Dir.TEMP, suffix='.docx')
+        if docx_file is None:
+            self.docx_file = File(..., Dir.TEMP, suffix='.docx')
         else:
-            self.file_docx = File(file_docx)
-        if self.file_docx:
-            self.doc = docx.Document(str(file_docx))
+            self.docx_file = File(docx_file)
+        if self.docx_file:
+            self.doc = docx.Document(str(docx_file))
         else:
             self.doc = docx.Document()
 
     def write(self):
-        Dir(self.file_docx.parent).ensure_dir()
-        self.doc.save(str(self.file_docx))
+        Dir(self.docx_file.parent).ensure_dir()
+        self.doc.save(str(self.docx_file))
 
-    def write_pdf(self):
-        try:
-            import docx2pdf  # pip install docx2pdf，并且本地要安装word软件
-        except ModuleNotFoundError:
-            subprocess.run(['pip3', 'install', 'docx2pdf'])
-            import docx2pdf
-
+    def to_pdf(self, pdf_file=None):
         self.write()
-        file_pdf = self.file_docx.with_suffix('.pdf')
-        docx2pdf.convert(str(self.file_docx), str(file_pdf))
-
-        return file_pdf
+        pdf_file = DocxTools.to_pdf(self.docx_file, pdf_file)
+        return pdf_file
 
     def to_fitzdoc(self):
         """ 获得 fitz的pdf文档对象
         :return: FitzDoc对象
         """
         from pyxllib.file.pdflib import FitzDoc
-        file_pdf = self.write_pdf()
-        doc = FitzDoc(file_pdf)
+        pdf_file = self.to_pdf()
+        doc = FitzDoc(pdf_file)
         return doc
 
-    def write_images(self, file_fmt='{filestem}_{number}.png', *args, scale=1, **kwargs):
+    def to_images(self, file_fmt='{filestem}_{number}.png', *args, scale=1, **kwargs):
         doc = self.to_fitzdoc()
-        files = doc.write_images(doc.src_file.parent, file_fmt, *args, scale=scale, **kwargs)
+        files = doc.to_images(doc.src_file.parent, file_fmt, *args, scale=scale, **kwargs)
         return files
 
     def browser(self):
         """ 转pdf，使用浏览器的查看效果
         """
-        file_pdf = self.write_pdf()
-        browser(file_pdf)
+        pdf_file = self.to_pdf()
+        browser(pdf_file)
 
     def display(self):
         """ 转图片，使用jupyter环境的查看效果
@@ -106,14 +151,15 @@ class Document:
             img.trim(border=5).plot_border().display()
             del page
 
-    def write_labelmes(self, dst_dir=None, file_fmt='{filestem}_{number}.png', *, views=(0, 0, 1, 0), scale=1,
-                       advance=False, indent=None):
+    def to_labelmes(self, dst_dir=None, file_fmt='{filestem}_{number}.png', *, views=(0, 0, 1, 0), scale=1,
+                    advance=False, indent=None):
         """ 转labelme格式查看
+
         本质是把docx转成pdf，利用pdf的解析生成labelme格式的标准框查看
 
-        :param file_docx: 注意写的是docx文件的路径，然后pdf、png、json都会放在同目录下
+        :param docx_file: 注意写的是docx文件的路径，然后pdf、png、json都会放在同目录下
             这个不适合设成可选参数，需要显式指定一个输出目录比较好
-        :param views: 详见write_labelmes的描述
+        :param views: 详见to_labelmes的描述
             各位依次代表是否显示对应细粒度的标注：blocks、lines、spans、chars
         :param bool|dict advance: 是否开启“高级”功能，开启后能获得下划线等属性，但速度会慢很多
             源生的fitz pdf解析是处理不了下划线的，开启高级功能后，有办法通过特殊手段实现下划线的解析
@@ -124,13 +170,13 @@ class Document:
 
         # 1 转成图片，及json标注
         doc = self.to_fitzdoc()
-        imfiles = doc.write_images(dst_dir, file_fmt, scale=scale)
+        imfiles = doc.to_images(dst_dir, file_fmt, scale=scale)
 
         # 2 高级功能
         def is_color(x):
             return x and sum(x)
 
-        def write_labelmes_advance():
+        def to_labelmes_advance():
             m = 50  # 匹配run时，上文关联的文字长度，越长越严格
 
             # 1 将带有下划线的run对象，使用特殊的hash规则存储起来
@@ -173,9 +219,9 @@ class Document:
 
         # 3 获得json
         if advance:
-            write_labelmes_advance()
+            to_labelmes_advance()
         else:
-            doc.write_labelmes(imfiles, views=views, scale=scale)
+            doc.to_labelmes(imfiles, views=views, scale=scale)
 
     def __getattr__(self, item):
         # 属性：
@@ -572,10 +618,12 @@ def rebuild_document_by_word(fmt='html', translate=False, navigation=False, visi
     # 3 html格式扩展功能
     if fmt == 'html':
         # 3.1 默认扩展功能
-        bs = BeautifulSoup(file.read(encoding='gbk'), 'lxml')
+        s = file.read(encoding='gbk')
+        # s = s.replace('\xa0', '')  # 不知道这样去除\xa0行不行，等下次遇到尝试
+        bs = BeautifulSoup(s, 'lxml')
         bs.head_add_number()  # 给标题加上编号
         # bs.head_add_size()  # 显示每节内容长短
-        content = bs.xltext()
+        content = str(bs)
 
         # TODO 识别微信、pydoc，然后做一些自动化清理？
         # TODO 过度缩进问题？

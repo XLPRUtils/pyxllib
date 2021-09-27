@@ -330,8 +330,7 @@ class EnchantBs4Tag(EnchantBase):
             if navi_strs:
                 navi_str = navi_strs[0]
                 if nums[i]:
-                    nums[i] += '&nbsp;'
-                navi_str.replace_with(nums[i] + str(navi_str))
+                    navi_str.replace_with(nums[i] + ' ' + str(navi_str))
             else:
                 h.string = nums[i]
 
@@ -340,8 +339,14 @@ class EnchantBs4Tag(EnchantBase):
         """ 自己特用的文本化方法
 
         有些空格会丢掉，要用这句转回来
+
+        210924周五20:23，但后续实验又遭到了质疑，目前这功能虽然留着，但不建议使用
         """
-        return self.prettify(formatter=lambda s: s.replace(u'\xa0', '&nbsp;'))
+        # return self.prettify(formatter=lambda s: s.replace(u'\xa0', '&nbsp;'))
+        # \xa0好像是些特殊字符，删掉就行。。。  不对，也不是特殊字符~~
+        # return self.prettify(formatter=lambda s: s.replace(u'\xa0', ''))
+        # return self.prettify()
+        return str(self)
 
 
 EnchantBs4Tag.enchant()
@@ -378,36 +383,29 @@ def html_bitran_template(htmlcontent):
     """
     from pyxllib.text.nestenv import NestEnv
 
+    # 0 将所有负margin-left变为0
+    htmlcontent = re.sub(r'margin-left:-\d+(\.\d+)', 'margin-left:0', htmlcontent)
+
     # 1 区间定位分组
     ne = NestEnv(htmlcontent)
     ne2 = ne.xmltag('p')
-    for name in ('h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'pre', 'ol', 'ul'):
+    for name in ('h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'pre', 'ol', 'li'):
         ne2 += ne.xmltag(name, symmetry=True)
 
     # 以下是针对python document复制到word的情况，不一定具有广泛泛用性
     # 目的是让代码块按块复制，而不是按行复制
-    ne2 += ne.search2("<div style=['\"]mso-element:para-border-div;border:solid #AACC99", '</div>')
+    ne2 += ne.find2(re.compile("<div style=['\"]mso-element:para-border-div;.+?#AACC99"), '</div>')
 
     # 2 每个区间的处理规则
     def func(s):
         """ 找出p、h后，具体要执行的操作 """
+        # 0 共通操作
         s1, s2 = s, s  # 分前后两波文本s1，s2
-
-        # 1 s2 只要加 notranslate
-        bs = BeautifulSoup(s2, 'lxml')
+        bs = BeautifulSoup(s, 'lxml')
         x = next(bs.body.children)
 
-        # print(x.name)
-        # print(x.xltext())
+        # 1 s1 可能要做些骚操作
 
-        cls_ = x.get('class', None)
-        x['class'] = (cls_ + ['notranslate']) if cls_ else 'notranslate'
-        if re.match(r'h\d+$', x.name):
-            x.name = 'p'  # 去掉标题格式，统一为段落格式
-
-        s2 = x.xltext()
-
-        # 2 s1 可能要做些骚操作
         # 比如自定义翻译，这个无伤大雅的，如果搞不定，可以先注释掉，后面再说
         # bs = BeautifulSoup(s1, 'lxml')
         # x = list(bs.body.children)[0]
@@ -419,13 +417,25 @@ def html_bitran_template(htmlcontent):
         #             for z in y.strings:
         #                 z.replace_with(re.sub(r'Conclusion', '总结', str(z)))
         #     y.replace_with(re.sub(r'^Abstract$', '摘要', str(y)))
-        # s1 = x.xltext()
-        # if x.name in ('div', 'pre'):
+        # s1 = str(x)
+
+        if x.name in ('div', 'pre'):
             # 实际使用体验，想了下，代码块还是不如保留原样最方便，不用拷贝翻译
-            # s1 = ''
+            s1 = ''
         # 如果p没有文本字符串，也不拷贝
         if not x.get_text().strip():
             s1 = ''
+        # if x.name == 'p' and x.get('style', None) and 'margin-left' in x['style']:
+        #     x['style'] = re.sub(r'(margin-left:)\d+(\.\d+)?', r'\g<1>0', x['style'])
+
+        # 2 s2 只要加 notranslate
+        cls_ = x.get('class', None)
+        x['class'] = (cls_ + ['notranslate']) if cls_ else 'notranslate'
+
+        if re.match(r'h\d+$', x.name):
+            x.name = 'p'  # 去掉标题格式，统一为段落格式
+
+        s2 = x.prettify()
 
         return s1 + '\n' + s2
 
