@@ -22,7 +22,7 @@ from humanfriendly import format_size
 from pyxllib.algo.pupil import SearchBase
 from pyxllib.debug.pupil import dprint
 from pyxllib.prog.newbie import round_int
-from pyxllib.prog.pupil import EnchantBase
+from pyxllib.prog.pupil import EnchantBase, EnchantCvt
 from pyxllib.text.newbie import xldictstr
 from pyxllib.text.pupil import shorten, ensure_gbk, RunOnlyOnce, BookContents, strwidth, grp_chinese_char
 from pyxllib.file.specialist import File, Dir, get_etag
@@ -38,8 +38,8 @@ class EnchantBs4Tag(EnchantBase):
         """
         names = cls.check_enchant_names([bs4.Tag])
         propertys = {'tag_name'}
-        cls._enchant(bs4.Tag, propertys, mode='staticmethod2property')
-        cls._enchant(bs4.Tag, names - propertys, mode='staticmethod2objectmethod')
+        cls._enchant(bs4.Tag, propertys, EnchantCvt.staticmethod2property)
+        cls._enchant(bs4.Tag, names - propertys)
 
     @staticmethod
     def tag_name(self):

@@ -61,8 +61,8 @@ class EnchantCell(EnchantBase):
     @classmethod
     @RunOnlyOnce
     def enchant(cls):
-        cls._enchant(openpyxl.cell.cell.Cell, mode='staticmethod2objectmethod')
-        cls._enchant(openpyxl.cell.cell.MergedCell, mode='staticmethod2objectmethod')
+        cls._enchant(openpyxl.cell.cell.Cell)
+        cls._enchant(openpyxl.cell.cell.MergedCell)
 
     @staticmethod
     def in_range(cell):

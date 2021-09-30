@@ -7,6 +7,7 @@
 
 """ 封装一些代码开发中常用的功能，工程组件 """
 import itertools
+from enum import Enum
 from urllib.parse import urlparse
 import io
 import json
@@ -241,6 +242,85 @@ class DictTool:
                 del dict_[k]
 
 
+class EnchantCvt:
+    """ 把类_cls的功能绑定到类cls里
+
+    根源_cls里的实现类型不同，到cls需要呈现的接口形式不同，有很多种不同的转换形式
+
+    每个分支里，随附了getattr目标函数的一般默认定义模板
+    用_self、_cls表示dst_cls，区别原cls类的self、cls标记
+    """
+
+    @staticmethod
+    def staticmethod2objectmethod(cls, _cls, x):
+        # 目前用的最多的转换形式
+        # @staticmethod
+        # def func1(_self, *args, **kwargs): ...
+        setattr(_cls, x, getattr(cls, x))
+
+    @staticmethod
+    def staticmethod2property(cls, _cls, x):
+        # @staticmethod
+        # def func2(_self): ...
+        setattr(_cls, x, property(getattr(cls, x)))
+
+    @staticmethod
+    def staticmethod2classmethod(cls, _cls, x):
+        # @staticmethod
+        # def func3(_cls, *args, **kwargs): ...
+        setattr(_cls, x, classmethod(getattr(cls, x)))
+
+    @staticmethod
+    def staticmethod2classproperty(cls, _cls, x):
+        # @staticmethod
+        # def func4(_cls): ...
+        setattr(_cls, x, classproperty(getattr(cls, x)))
+
+    @staticmethod
+    def classmethod2objectmethod(cls, _cls, x):
+        # @classmethod
+        # def func5(cls, _self, *args, **kwargs): ...
+        setattr(_cls, x, lambda *args, **kwargs: getattr(cls, x)(*args, **kwargs))
+
+    @staticmethod
+    def classmethod2property(cls, _cls, x):
+        # @classmethod
+        # def func6(cls, _self): ...
+        setattr(_cls, x, lambda *args, **kwargs: property(getattr(cls, x)(*args, **kwargs)))
+
+    @staticmethod
+    def classmethod2classmethod(cls, _cls, x):
+        # @classmethod
+        # def func7(cls, _cls, *args, **kwargs): ...
+        setattr(_cls, x, lambda *args, **kwargs: classmethod(getattr(cls, x)(*args, **kwargs)))
+
+    @staticmethod
+    def classmethod2classproperty(cls, _cls, x):
+        # @classmethod
+        # def func8(cls, _cls): ...
+        setattr(_cls, x, lambda *args, **kwargs: classproperty(getattr(cls, x)(*args, **kwargs)))
+
+    @staticmethod
+    def staticmethod2modulefunc(cls, _cls, x):
+        # @staticmethod
+        # def func9(*args, **kwargs): ...
+        setattr(_cls, x, getattr(cls, x))
+
+    @staticmethod
+    def classmethod2modulefunc(cls, _cls, x):
+        # @classmethod
+        # def func10(cls, *args, **kwargs): ...
+        setattr(_cls, x, lambda *args, **kwargs: getattr(cls, x)(*args, **kwargs))
+
+    @staticmethod
+    def to_moduleproperty(cls, _cls, x):
+        # 理论上还有'to_moduleproperty'的转换模式
+        #   但这个很容易引起歧义，是应该存一个数值，还是动态计算？
+        #   如果是动态计算，可以使用modulefunc的机制显式执行，更不容易引起混乱。
+        #   从这个分析来看，是不需要实现'2moduleproperty'的绑定体系的。py标准语法本来也就没有module @property的概念。
+        raise NotImplementedError
+
+
 class EnchantBase:
     """
     一些三方库的类可能功能有限，我们想做一些扩展。
@@ -276,61 +356,11 @@ class EnchantBase:
         return set(names)
 
     @classmethod
-    def _enchant(cls, _cls, names=None, mode='staticmethod2objectmethod', *, white_list=None):
+    def _enchant(cls, _cls, names=None, cvt=EnchantCvt.staticmethod2objectmethod, *, white_list=None):
         """ 这个框架是支持classmethod形式的转换的，但推荐最好还是用staticmethod，可以减少函数嵌套层数，提高效率 """
         names = cls.check_enchant_names([_cls], names, white_list=white_list)
-
-        # 每个if分支里，随附了getattr目标函数的一般默认定义模板
-        # 用_self、_cls表示dst_cls，区别原cls类的self、cls标记
-        if mode in 'staticmethod2objectmethod':  # 目前用的最多的转换形式
-            # @staticmethod
-            # def func1(_self, *args, **kwargs): ...
-            func = lambda x: setattr(_cls, x, getattr(cls, x))
-        elif mode == 'staticmethod2property':
-            # @staticmethod
-            # def func2(_self): ...
-            func = lambda x: setattr(_cls, x, property(getattr(cls, x)))
-        elif mode == 'staticmethod2classmethod':
-            # @staticmethod
-            # def func3(_cls, *args, **kwargs): ...
-            func = lambda x: setattr(_cls, x, classmethod(getattr(cls, x)))
-        elif mode == 'staticmethod2classproperty':
-            # @staticmethod
-            # def func4(_cls): ...
-            func = lambda x: setattr(_cls, x, classproperty(getattr(cls, x)))
-        elif mode == 'classmethod2objectmethod':
-            # @classmethod
-            # def func5(cls, _self, *args, **kwargs): ...
-            func = lambda x: setattr(_cls, x, lambda *args, **kwargs: getattr(cls, x)(*args, **kwargs))
-        elif mode == 'classmethod2property':
-            # @classmethod
-            # def func6(cls, _self): ...
-            func = lambda x: setattr(_cls, x, lambda *args, **kwargs: property(getattr(cls, x)(*args, **kwargs)))
-        elif mode == 'classmethod2classmethod':
-            # @classmethod
-            # def func7(cls, _cls, *args, **kwargs): ...
-            func = lambda x: setattr(_cls, x, lambda *args, **kwargs: classmethod(getattr(cls, x)(*args, **kwargs)))
-        elif mode == 'classmethod2classproperty':
-            # @classmethod
-            # def func8(cls, _cls): ...
-            func = lambda x: setattr(_cls, x, lambda *args, **kwargs: classproperty(getattr(cls, x)(*args, **kwargs)))
-        elif mode == 'staticmethod2modulefunc':
-            # @staticmethod
-            # def func9(*args, **kwargs): ...
-            func = lambda x: setattr(_cls, x, getattr(cls, x))
-        elif mode == 'classmethod2modulefunc':
-            # @classmethod
-            # def func10(cls, *args, **kwargs): ...
-            func = lambda x: setattr(_cls, x, lambda *args, **kwargs: getattr(cls, x)(*args, **kwargs))
-        # 理论上还有'2moduleproperty'的转换模式
-        #   但这个很容易引起歧义，是应该存一个数值，还是动态计算？
-        #   如果是动态计算，可以使用modulefunc的机制显式执行，更不容易引起混乱。
-        #   从这个分析来看，是不需要实现'2moduleproperty'的绑定体系的。py标准语法本来也就没有module @property的概念。
-        else:
-            raise ValueError
-
         for name in set(names):
-            func(name)
+            cvt(cls, _cls, name)
 
     @classmethod
     def enchant(cls):

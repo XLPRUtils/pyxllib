@@ -13,7 +13,7 @@ import PIL.Image
 import requests
 
 from pyxllib.prog.newbie import round_int, RunOnlyOnce
-from pyxllib.prog.pupil import EnchantBase
+from pyxllib.prog.pupil import EnchantBase, EnchantCvt
 from pyxllib.algo.geo import rect_bounds, warp_points, reshape_coords, quad_warp_wh, get_warp_mat, rect2polygon
 from pyxllib.file.specialist import File
 
@@ -31,7 +31,7 @@ class xlcv(EnchantBase):
         """
         # 虽然只绑定cv2，但其他相关的几个库的方法上，最好也不要重名
         cls.check_enchant_names([np.ndarray, PIL.Image, PIL.Image.Image])
-        cls._enchant(cv2, 'staticmethod2modulefunc')
+        cls._enchant(cv2, EnchantCvt.staticmethod2modulefunc)
 
     @staticmethod
     def __1_read():
