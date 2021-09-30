@@ -291,7 +291,7 @@ class CocoGtData:
             anno['id'] = i
         return anns
 
-    def to_labelme(self, root, *, bbox=True, seg=False, prt=False):
+    def to_labelme_cls(self, root, *, bbox=True, seg=False, prt=False):
         """
         :param root: 图片根目录
         :return:
@@ -344,6 +344,9 @@ class CocoGtData:
                               extdata={'categories': self.gt_dict['categories'],
                                        'not_finds': not_finds,
                                        'multimatch': Groups(multimatch)})
+
+    def to_labelme(self, root, *, bbox=True, seg=False, prt=False):
+        self.to_labelme_cls(root, bbox=bbox, seg=seg, prt=prt).writes()
 
     def split_data(self, parts, *, shuffle=True):
         """ 数据拆分器

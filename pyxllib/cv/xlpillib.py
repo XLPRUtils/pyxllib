@@ -27,7 +27,7 @@ except ImportError:
     accimage = None
 
 from pyxllib.prog.newbie import RunOnlyOnce
-from pyxllib.prog.pupil import EnchantBase
+from pyxllib.prog.pupil import EnchantBase, EnchantCvt
 from pyxllib.file.specialist import File
 from pyxllib.cv.xlcvlib import xlcv
 
@@ -47,15 +47,15 @@ class xlpil(EnchantBase):
 
         # 1 绑定到模块下的方法
         pil_names = set('read read_from_buffer read_from_url'.split())
-        cls._enchant(PIL.Image, pil_names, 'staticmethod2modulefunc')
+        cls._enchant(PIL.Image, pil_names, EnchantCvt.staticmethod2modulefunc)
 
         # 2 绑定到PIL.Image.Image下的方法
         # 2.1 属性类
         propertys = set('imsize n_channels'.split())
-        cls._enchant(PIL.Image.Image, propertys, 'staticmethod2property')
+        cls._enchant(PIL.Image.Image, propertys, EnchantCvt.staticmethod2property)
 
         # 2.2 其他均为方法类
-        cls._enchant(PIL.Image.Image, names - pil_names - propertys, 'staticmethod2objectmethod')
+        cls._enchant(PIL.Image.Image, names - pil_names - propertys)
 
     @staticmethod
     def __1_read():

@@ -12,14 +12,14 @@ import subprocess
 try:
     import win32com
 except ModuleNotFoundError:
-    subprocess.run('pip install pypiwin32')
+    subprocess.run(['pip', 'install', 'pypiwin32'])
 
 import pythoncom
 from win32com.client import constants
 import win32com.client as win32
 
 from pyxllib.prog.newbie import RunOnlyOnce
-from pyxllib.prog.pupil import DictTool, EnchantBase
+from pyxllib.prog.pupil import DictTool, EnchantBase, EnchantCvt
 from pyxllib.text.pupil import strwidth
 from pyxllib.debug.specialist import File, Dir, get_etag, browser
 
@@ -46,13 +46,16 @@ class DocxTools:
         return pdf_file
 
     @classmethod
-    def merge(cls, master_file, toc):
+    def merge(cls, master_file, toc, *, subtoc='reduce'):
         """ 合并多份docx文件
 
         :param master_file: 要合并到哪个主文件
             注意如果这个文件已存在，会被替换，重置
         :param toc: 类似fitz的table of contents，用一个n*3的表格表示新文档的格式
             list，每个元素三列：标题级别，标题名称，(可选)对应文件内容
+        :param subtoc: 原来每份子文档里的标题，插入到新文档中的处理规则
+            reduce：降级
+            clear：清除
 
         这个功能还有些局限性，后面要扩展鲁棒性
         TODO 增加一个支持将原文档标题降级的功能，降到toc之后
@@ -72,7 +75,9 @@ class DocxTools:
             if file:
                 file = File(file)
                 member_doc = app.open_doc(file)
+
                 member_doc.Activate()
+
                 app.Selection.WholeStory()
                 app.Selection.Copy()
                 master_doc.Activate()
@@ -273,17 +278,21 @@ class EnchantWin32WordApplication(EnchantBase):
         _cls = type(app)
         names = cls.check_enchant_names([_cls])
         exclude_names = {'get_app'}
-        cls._enchant(_cls, names - exclude_names, mode='staticmethod2objectmethod')
+        cls._enchant(_cls, names - exclude_names)
 
         if recursion_enchant:
             # 建一个临时文件，把各种需要绑定的对象都生成绑定一遍
             # 确保初始化稍微慢点，但后面就方便了
             doc = app.Documents.Add()
+            print('Document')
             EnchantWin32WordDocument.enchant(doc)
 
+            doc.Activate()
             rng = doc.Range()  # 全空的文档，有区间[0,1)
+            print('Range')
             EnchantWin32WordRange.enchant(rng)
 
+            print('url')
             doc.Hyperlinks.Add(rng, 'url')  # 因为全空，这里会自动生成对应的明文url
             EnchantWin32WordHyperlink.enchant(doc.Hyperlinks(1))
 
@@ -291,28 +300,24 @@ class EnchantWin32WordApplication(EnchantBase):
             doc.Close(False)
 
     @classmethod
-    def get_app(cls, mode='default', *, visible=None, display_alerts=0, recursion_enchant=True):
+    def get_app(cls, app=None, *, visible=None, display_alerts=0, recursion_enchant=True):
         """
         Args:
-            mode: 目前除了默认default，只有new，强制新建一个app
-                210912周日10:07，可以先不管这个参数，使用默认模式就好了，现在所有app能统一为一个了
-                    之前是好像app会有多个版本，导致Documents管理不集中，但同名文件又会夸app冲突很麻烦
-                    所以才搞的这个复杂机制。如果该问题暂未出现，那么mode其实没用，多此一举。
+            app: 可以自定义在外部使用Dispatch、DispatchEx等形式给入已初始化好的app
             visible: 是否可见
             display_alerts: 是否关闭警告
             recursion_enchant: 是否递归执行enchant
-
         """
-        app = None
-        if mode == 'default':
-            try:
-                app = win32.GetActiveObject('Word.Application')
-            except pythoncom.com_error:
-                app = None
         if app is None:
-            # 必须用gencache方法，才能获得 from win32com.client import constants 的常量
-            app = win32.gencache.EnsureDispatch('Word.Application')
-            # print('gencache')
+            name = 'WORD.APPLICATION'
+            try:
+                # 名称用大写，会比较兼容旧的word2013等版本
+                # 尽量静态调度，才能获得 from win32com.client import constants 的常量
+                app = win32.gencache.EnsureDispatch(name)
+            except TypeError:
+                # 实在不行，就用动态调度
+                app = win32.dynamic.Dispatch(name)
+
         cls.enchant(app, recursion_enchant=recursion_enchant)
 
         if visible is not None:
@@ -378,9 +383,9 @@ class EnchantWin32WordDocument(EnchantBase):
     def enchant(cls, doc):
         _cls = type(doc)
         names = cls.check_enchant_names([_cls])
-        propertys = {'n_page', 'content'}
-        cls._enchant(_cls, propertys, mode='staticmethod2property')
-        cls._enchant(_cls, names - propertys, mode='staticmethod2objectmethod')
+        propertys = {'n_page'}
+        cls._enchant(_cls, propertys, EnchantCvt.staticmethod2property)
+        cls._enchant(_cls, names - propertys)
 
     @staticmethod
     def save(doc, file_name=None, fmt=None, retain=False, **kwargs):
@@ -408,13 +413,17 @@ class EnchantWin32WordDocument(EnchantBase):
             10
             """
             # 复杂格式可能无法完美支持所有功能。比如复杂的pdf无法使用SaveAs2实现，要用ExportAsFixedFormat。
-            common = {'doc': 'FormatDocument97',
-                      'html': 'FormatHTML',
-                      'txt': 'FormatText',
-                      'docx': 'FormatDocumentDefault',
-                      'pdf': 'FormatPDF'}
+            # 有些情况可能无法使用gencache，导致没有constants，所以默认可以直接映射到整数，避免使用到constants
+            common = {'doc': 0,
+                      'html': 8,
+                      'txt': 2,
+                      'docx': 16,
+                      'pdf': 17}
             name = common.get(fmt.lower().lstrip('.'), fmt)
-            return getattr(constants, 'wd' + name)
+            if name in common:
+                return common[name]
+            else:
+                return getattr(constants, 'wd' + name)
 
         # 2 确认要存储的文件格式
         if isinstance(fmt, str):
@@ -442,7 +451,7 @@ class EnchantWin32WordDocument(EnchantBase):
                 outfile = File(doc.Name, doc.Path, suffix='.' + fmt)
                 doc.SaveAs2(str(outfile), save_format(outfile.suffix), **kwargs)
             else:
-                etag = get_etag(doc.content)
+                etag = get_etag(doc.Content)
                 outfile = File(etag, Dir.TEMP, suffix=fmt)
                 doc.SaveAs2(str(outfile), save_format(fmt), **kwargs)
 
@@ -459,9 +468,10 @@ class EnchantWin32WordDocument(EnchantBase):
         else:
             return outfile
 
-    @staticmethod
-    def content(doc):
-        return doc.Range().content
+    # 先暂时不开启 doc.chars
+    # @staticmethod
+    # def chars(doc):
+    #     return doc.Range().chars
 
     @staticmethod
     def n_page(doc):
@@ -508,6 +518,14 @@ class EnchantWin32WordDocument(EnchantBase):
                     r = p.Range
                     doc.Range(r.Start, r.End - 1).InsertAfter(f'，{size}')
 
+    @staticmethod
+    def outline_demote(doc, demote_level):
+        """ 标题降级，降低level层 """
+        for p in doc.Paragraphs:
+            name = p.Range.Style.NameLocal  # 获得样式名称
+            m = re.match(r'标题 (\d)$', name)
+            lvl = int(m.groups(1))
+
 
 class EnchantWin32WordRange(EnchantBase):
     """ range是以下标0开始，左闭右开的区间
@@ -521,9 +539,9 @@ class EnchantWin32WordRange(EnchantBase):
     def enchant(cls, rng):
         _cls = type(rng)
         names = cls.check_enchant_names([_cls])
-        propertys = {'content'}
-        cls._enchant(_cls, propertys, mode='staticmethod2property')
-        cls._enchant(_cls, names - propertys, mode='staticmethod2objectmethod')
+        propertys = {'chars'}
+        cls._enchant(_cls, propertys, EnchantCvt.staticmethod2property)
+        cls._enchant(_cls, names - propertys)
 
     @staticmethod
     def set_hyperlink(rng, url):
@@ -533,7 +551,7 @@ class EnchantWin32WordRange(EnchantBase):
         doc.Hyperlinks.Add(rng, url)
 
     @staticmethod
-    def content(rng):
+    def chars(rng):
         # 有特殊换行，ch.Text可能会得到 '\r\x07'，为了位置对应，只记录一个字符
         return ''.join([ch.Text[0] for ch in rng.Characters])
 
@@ -561,8 +579,8 @@ class EnchantWin32WordHyperlink(EnchantBase):
         _cls = type(link)
         names = cls.check_enchant_names([_cls])
         propertys = {'netloc', 'name'}
-        cls._enchant(_cls, propertys, mode='staticmethod2property')
-        cls._enchant(_cls, names - propertys, mode='staticmethod2objectmethod')
+        cls._enchant(_cls, propertys, EnchantCvt.staticmethod2property)
+        cls._enchant(_cls, names - propertys)
 
     @staticmethod
     def netloc(link):
@@ -607,6 +625,7 @@ def rebuild_document_by_word(fmt='html', translate=False, navigation=False, visi
     app = EnchantWin32WordApplication.get_app(visible=visible)
     app.check_close(f)
     doc = app.new_doc(f)
+    doc.Activate()
     app.Selection.Paste()
 
     # 2 如果需要，也可以在这个阶段，插入word自动化的操作，而不是后续在html层面操作

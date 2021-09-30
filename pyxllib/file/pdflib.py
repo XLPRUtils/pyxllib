@@ -18,7 +18,7 @@ except ModuleNotFoundError:
     import fitz
 
 from pyxllib.prog.newbie import round_int, RunOnlyOnce, decode_bitflags
-from pyxllib.prog.pupil import DictTool, EnchantBase
+from pyxllib.prog.pupil import DictTool, EnchantBase, EnchantCvt
 from pyxllib.algo.newbie import round_unit
 from pyxllib.algo.pupil import get_number_width
 from pyxllib.file.specialist import File, Dir, writefile, get_etag
@@ -139,8 +139,8 @@ class EnchantFitzPage(EnchantBase):
         names = cls.check_enchant_names([fitz.fitz.Page])
         cls_methods = {'parse_flags'}
 
-        cls._enchant(fitz.fitz.Page, cls_methods, 'staticmethod2classmethod')
-        cls._enchant(fitz.fitz.Page, names - cls_methods, 'staticmethod2objectmethod')
+        cls._enchant(fitz.fitz.Page, cls_methods, EnchantCvt.staticmethod2classmethod)
+        cls._enchant(fitz.fitz.Page, names - cls_methods)
 
     @staticmethod
     def get_svg_image2(_self, scale=1):
