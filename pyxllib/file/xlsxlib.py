@@ -61,8 +61,9 @@ class EnchantCell(EnchantBase):
     @classmethod
     @RunOnlyOnce
     def enchant(cls):
-        cls._enchant(openpyxl.cell.cell.Cell)
-        cls._enchant(openpyxl.cell.cell.MergedCell)
+        names = cls.check_enchant_names([openpyxl.cell.cell.Cell, openpyxl.cell.cell.MergedCell])
+        cls._enchant(openpyxl.cell.cell.Cell, names)
+        cls._enchant(openpyxl.cell.cell.MergedCell, names)
 
     @staticmethod
     def in_range(cell):
@@ -193,9 +194,8 @@ class EnchantWorksheet(EnchantBase):
     @classmethod
     @RunOnlyOnce
     def enchant(cls):
-        cls._enchant(openpyxl.worksheet.worksheet.Worksheet,
-                     mode='staticmethod2objectmethod',
-                     white_list=['_cells_by_row'])
+        names = cls.check_enchant_names([openpyxl.worksheet.worksheet.Worksheet], white_list=['_cells_by_row'])
+        cls._enchant(openpyxl.worksheet.worksheet.Worksheet, names)
 
     @staticmethod
     def copy_worksheet(_self, target_ws):
@@ -401,7 +401,8 @@ class EnchantWorkbook(EnchantBase):
     @classmethod
     @RunOnlyOnce
     def enchant(cls):
-        cls._enchant(openpyxl.Workbook, mode='staticmethod2objectmethod')
+        names = cls.check_enchant_names([openpyxl.Workbook])
+        cls._enchant(openpyxl.Workbook, names)
 
     @staticmethod
     def adjust_sheets(wb, new_sheetnames):
