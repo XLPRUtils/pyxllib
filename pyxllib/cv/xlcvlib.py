@@ -30,8 +30,8 @@ class xlcv(EnchantBase):
         不太推荐使用该类，可以使用CvImg类更好地解决问题。
         """
         # 虽然只绑定cv2，但其他相关的几个库的方法上，最好也不要重名
-        cls.check_enchant_names([np.ndarray, PIL.Image, PIL.Image.Image])
-        cls._enchant(cv2, EnchantCvt.staticmethod2modulefunc)
+        names = cls.check_enchant_names([np.ndarray, PIL.Image, PIL.Image.Image])
+        cls._enchant(cv2, names, EnchantCvt.staticmethod2modulefunc)
 
     @staticmethod
     def __1_read():

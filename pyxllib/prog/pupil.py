@@ -336,12 +336,13 @@ class EnchantBase:
     """
 
     @classmethod
-    def check_enchant_names(cls, classes, names=None, *, white_list=None):
+    def check_enchant_names(cls, classes, names=None, *, white_list=None, ignore_case=False):
         """
         :param list classes: 不能跟这里列出的模块、类的成员重复
         :param list|str|tuple names: 要检查的名称清单
         :param white_list: 白名单，这里面的名称不警告
             在明确要替换三方库标准功能的时候，可以使用
+        :param ignore_case: 忽略大小写
         """
         exist_names = {x.__name__: set(dir(x)) for x in classes}
         if names is None:
@@ -349,6 +350,13 @@ class EnchantBase:
                     - {'check_enchant_names', '_enchant', 'enchant'}
 
         white_list = set(white_list) if white_list else {}
+
+        if ignore_case:
+            names = {x.lower() for x in names}
+            for k, values in exist_names.items():
+                exist_names[k] = {x.lower() for x in exist_names[k]}
+            white_list = {x.lower() for x in white_list}
+
         for name, k in itertools.product(names, exist_names):
             if name in exist_names[k] and name not in white_list:
                 print(f'警告！同名冲突！ {k}.{name}')
@@ -356,9 +364,8 @@ class EnchantBase:
         return set(names)
 
     @classmethod
-    def _enchant(cls, _cls, names=None, cvt=EnchantCvt.staticmethod2objectmethod, *, white_list=None):
+    def _enchant(cls, _cls, names, cvt=EnchantCvt.staticmethod2objectmethod):
         """ 这个框架是支持classmethod形式的转换的，但推荐最好还是用staticmethod，可以减少函数嵌套层数，提高效率 """
-        names = cls.check_enchant_names([_cls], names, white_list=white_list)
         for name in set(names):
             cvt(cls, _cls, name)
 

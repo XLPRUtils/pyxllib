@@ -11,16 +11,14 @@ import os
 import pathlib
 import pyperclip
 import re
-from functools import partial
 
 from humanfriendly import format_timespan
 import pandas as pd
 import ujson
 import fire
 
-from pyxllib.file.specialist import File, Dir, get_etag
+from pyxllib.file.specialist import File, Dir
 from pyxllib.debug.specialist import browser, TicToc, parse_datetime
-from pyxllib.text.specialist import BeautifulSoup
 
 
 def _print_df_result(df, outfmt='text'):

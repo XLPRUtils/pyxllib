@@ -46,15 +46,15 @@ class DocxTools:
         return pdf_file
 
     @classmethod
-    def merge(cls, master_file, toc, *, subtoc='reduce'):
+    def merge(cls, master_file, toc, *, outline='demote'):
         """ 合并多份docx文件
 
         :param master_file: 要合并到哪个主文件
             注意如果这个文件已存在，会被替换，重置
         :param toc: 类似fitz的table of contents，用一个n*3的表格表示新文档的格式
             list，每个元素三列：标题级别，标题名称，(可选)对应文件内容
-        :param subtoc: 原来每份子文档里的标题，插入到新文档中的处理规则
-            reduce：降级
+        :param outline: 原来每份子文档里的标题，插入到新文档中的处理规则
+            demote：降级
             clear：清除
 
         这个功能还有些局限性，后面要扩展鲁棒性
@@ -75,8 +75,14 @@ class DocxTools:
             if file:
                 file = File(file)
                 member_doc = app.open_doc(file)
-
                 member_doc.Activate()
+
+                # 处理原来文档的目录级别
+                if outline == 'demote':
+                    member_doc.outline_demote(lvl)
+                elif outline == 'clear':
+                    # 降10级就相当于清除所有原来的标题
+                    member_doc.outline_demote(10)
 
                 app.Selection.WholeStory()
                 app.Selection.Copy()
@@ -276,7 +282,7 @@ class EnchantWin32WordApplication(EnchantBase):
         """
         # app
         _cls = type(app)
-        names = cls.check_enchant_names([_cls])
+        names = cls.check_enchant_names([_cls], ignore_case=True)
         exclude_names = {'get_app'}
         cls._enchant(_cls, names - exclude_names)
 
@@ -284,15 +290,12 @@ class EnchantWin32WordApplication(EnchantBase):
             # 建一个临时文件，把各种需要绑定的对象都生成绑定一遍
             # 确保初始化稍微慢点，但后面就方便了
             doc = app.Documents.Add()
-            print('Document')
             EnchantWin32WordDocument.enchant(doc)
 
             doc.Activate()
             rng = doc.Range()  # 全空的文档，有区间[0,1)
-            print('Range')
             EnchantWin32WordRange.enchant(rng)
 
-            print('url')
             doc.Hyperlinks.Add(rng, 'url')  # 因为全空，这里会自动生成对应的明文url
             EnchantWin32WordHyperlink.enchant(doc.Hyperlinks(1))
 
@@ -308,8 +311,14 @@ class EnchantWin32WordApplication(EnchantBase):
             display_alerts: 是否关闭警告
             recursion_enchant: 是否递归执行enchant
         """
+        # 1 get app
+        name = 'WORD.APPLICATION'
         if app is None:
-            name = 'WORD.APPLICATION'
+            try:
+                app = win32.GetActiveObject(name)
+            except pythoncom.com_error:
+                pass
+        if app is None:
             try:
                 # 名称用大写，会比较兼容旧的word2013等版本
                 # 尽量静态调度，才能获得 from win32com.client import constants 的常量
@@ -318,6 +327,7 @@ class EnchantWin32WordApplication(EnchantBase):
                 # 实在不行，就用动态调度
                 app = win32.dynamic.Dispatch(name)
 
+        # 2 enchant
         cls.enchant(app, recursion_enchant=recursion_enchant)
 
         if visible is not None:
@@ -382,7 +392,7 @@ class EnchantWin32WordDocument(EnchantBase):
     @RunOnlyOnce.decorator(distinct_args=False)
     def enchant(cls, doc):
         _cls = type(doc)
-        names = cls.check_enchant_names([_cls])
+        names = cls.check_enchant_names([_cls], ignore_case=True)
         propertys = {'n_page'}
         cls._enchant(_cls, propertys, EnchantCvt.staticmethod2property)
         cls._enchant(_cls, names - propertys)
@@ -420,8 +430,8 @@ class EnchantWin32WordDocument(EnchantBase):
                       'docx': 16,
                       'pdf': 17}
             name = common.get(fmt.lower().lstrip('.'), fmt)
-            if name in common:
-                return common[name]
+            if isinstance(name, int):
+                return name
             else:
                 return getattr(constants, 'wd' + name)
 
@@ -522,9 +532,7 @@ class EnchantWin32WordDocument(EnchantBase):
     def outline_demote(doc, demote_level):
         """ 标题降级，降低level层 """
         for p in doc.Paragraphs:
-            name = p.Range.Style.NameLocal  # 获得样式名称
-            m = re.match(r'标题 (\d)$', name)
-            lvl = int(m.groups(1))
+            p.Range.demote(demote_level)
 
 
 class EnchantWin32WordRange(EnchantBase):
@@ -538,7 +546,7 @@ class EnchantWin32WordRange(EnchantBase):
     @RunOnlyOnce.decorator(distinct_args=False)
     def enchant(cls, rng):
         _cls = type(rng)
-        names = cls.check_enchant_names([_cls])
+        names = cls.check_enchant_names([_cls], ignore_case=True)
         propertys = {'chars'}
         cls._enchant(_cls, propertys, EnchantCvt.staticmethod2property)
         cls._enchant(_cls, names - propertys)
@@ -571,13 +579,24 @@ class EnchantWin32WordRange(EnchantBase):
         start_idx, end_idx = rng.Characters(start + 1).Start, rng.Characters(end).End
         return rng.Document.Range(start_idx, end_idx)
 
+    @staticmethod
+    def demote(rng, demote_level):
+        """ 标题降级，降低level层 """
+        name = rng.Style.NameLocal  # 获得样式名称
+        m = re.match(r'标题 (\d)$', name)
+        if m:
+            lvl = int(m.group(1))
+            new_lvl = lvl + demote_level
+            new_style = f'标题 {new_lvl}' if new_lvl < 10 else '正文'
+            rng.Style = rng.Parent.Styles(new_style)
+
 
 class EnchantWin32WordHyperlink(EnchantBase):
     @classmethod
     @RunOnlyOnce.decorator(distinct_args=False)
     def enchant(cls, link):
         _cls = type(link)
-        names = cls.check_enchant_names([_cls])
+        names = cls.check_enchant_names([_cls], ignore_case=True)
         propertys = {'netloc', 'name'}
         cls._enchant(_cls, propertys, EnchantCvt.staticmethod2property)
         cls._enchant(_cls, names - propertys)
