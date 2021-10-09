@@ -91,7 +91,7 @@ class DocxTools:
                 app.Selection.Paste()
                 member_doc.Close()
         master_doc.save()
-        master_doc.Close()
+        master_doc.Close(True)
 
 
 class Document:
@@ -168,8 +168,6 @@ class Document:
 
         本质是把docx转成pdf，利用pdf的解析生成labelme格式的标准框查看
 
-        :param docx_file: 注意写的是docx文件的路径，然后pdf、png、json都会放在同目录下
-            这个不适合设成可选参数，需要显式指定一个输出目录比较好
         :param views: 详见to_labelmes的描述
             各位依次代表是否显示对应细粒度的标注：blocks、lines、spans、chars
         :param bool|dict advance: 是否开启“高级”功能，开启后能获得下划线等属性，但速度会慢很多
@@ -534,6 +532,28 @@ class EnchantWin32WordDocument(EnchantBase):
         for p in doc.Paragraphs:
             p.Range.demote(demote_level)
 
+    @staticmethod
+    def set_style(doc, obj, name):
+        """ 给Paragraph、Range等按名称设置样式
+
+        :param obj: 当前doc下某个含有Style成员属性的子对象
+        :param name: 样式名称
+        """
+        setattr(obj, 'Style', doc.Styles(name))
+
+    @staticmethod
+    def add_paragraph(doc, text='', style=None):
+        """ 自定义的插入段落
+
+        默认的插入比较麻烦，新建段落、插入文本、设置格式要多步实现，这里封装支持在一步进行多种操作
+        """
+        p = doc.Paragraphs.Add()
+        if text:
+            p.Range.InsertBefore(text)
+        if style:
+            p.Style = doc.Styles(style)
+        return p
+
 
 class EnchantWin32WordRange(EnchantBase):
     """ range是以下标0开始，左闭右开的区间
@@ -580,6 +600,15 @@ class EnchantWin32WordRange(EnchantBase):
         return rng.Document.Range(start_idx, end_idx)
 
     @staticmethod
+    def shifting(rng, left=0, right=0):
+        """ range左右两边增加偏移量，返回重定位的rng
+
+        常用语段落定位，要在段落末尾增加内容时
+        >> rng2 = p.Range.shifting(right=-1)
+        """
+        return rng.Document.Range(rng.Start + left, rng.End + right)
+
+    @staticmethod
     def demote(rng, demote_level):
         """ 标题降级，降低level层 """
         name = rng.Style.NameLocal  # 获得样式名称
@@ -589,6 +618,63 @@ class EnchantWin32WordRange(EnchantBase):
             new_lvl = lvl + demote_level
             new_style = f'标题 {new_lvl}' if new_lvl < 10 else '正文'
             rng.Style = rng.Parent.Styles(new_style)
+
+    @staticmethod
+    def set_font(rng, font_fmt):
+        """ 设置字体各种格式
+
+        :param dict|str font_fmt:
+            dict，定制格式
+                布尔类型：Bold、Italic、Subscript、Superscript
+                可布尔的值类型：Underline
+                    支持的格式见：https://docs.microsoft.com/en-us/office/vba/api/word.wdunderline
+                值类型：Name、Size、Color、UnderlineColor
+            str，使用现有样式名
+        """
+        if isinstance(font_fmt, dict):
+            font = rng.Font
+            for k, v in font_fmt.items():
+                setattr(font, k, v)
+        elif isinstance(font_fmt, str):
+            rng.Style = rng.Parent.Styles(font_fmt)
+        else:
+            raise ValueError
+
+    @staticmethod
+    def insert_before(rng, text, font_fmt=None):
+        """ 对原InsertBefore的功能封装
+
+        :return: 增加返回值，是新插入内容的range定位
+        """
+        start1, end1 = rng.Start, rng.End
+        rng.InsertBefore(text)
+        bias = rng.End - end1  # 新插入的内容大小
+        new_rng = rng.Document.Range(start1, start1 + bias)
+        if font_fmt:
+            new_rng.set_font(font_fmt)
+        return new_rng
+
+    @staticmethod
+    def insert_after(rng, text, font_fmt=None):
+        """ 同insert_before，是InsertAfter的重封装
+        """
+        # 1
+        start1, end1 = rng.Start, rng.End
+
+        # 2 往后插入，会排除\r情况
+        doc = rng.Document
+        ch = doc.Range(end1 - 1, end1).Text
+        if ch == '\r':
+            end1 -= 1
+            rng = doc.Range(start1, end1)
+
+        # 3
+        rng.InsertAfter(text)
+        bias = rng.End - end1
+        new_rng = rng.Document.Range(end1, end1 + bias)
+        if font_fmt:
+            new_rng.set_font(font_fmt)
+        return new_rng
 
 
 class EnchantWin32WordHyperlink(EnchantBase):
