@@ -8,10 +8,8 @@
 TODO 写一些图片相似度相关功能
 """
 
-import subprocess
+from pyxllib.prog.pupil import check_install_package
 
-try:
-    import imagehash
-except ModuleNotFoundError:
-    subprocess.run(['pip3', 'install', 'imagehash'])
-    import imagehash
+check_install_package('imagehash')
+
+import imagehash

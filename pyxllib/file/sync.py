@@ -4,33 +4,22 @@
 # @Email  : 877362867@qq.com
 # @Date   : 2021/06/03 20:41
 
-import os
-import subprocess
+from pyxllib.prog.pupil import check_install_package
 
-try:
-    import paramiko
-except ModuleNotFoundError:
-    subprocess.run(['pip3', 'install', 'paramiko'])
-    import paramiko
-
+check_install_package('paramiko')
+check_install_package('scp')
 # 对 paramiko 进一步封装的库
-# try:
-#     import fabric
-# except ModuleNotFoundError:
-#     subprocess.run(['pip3', 'install', 'fabric'])
-#     import fabric
+# check_install_package('fabric')
 
-try:
-    import scp
-except ModuleNotFoundError:
-    subprocess.run(['pip3', 'install', 'scp'])
-    import scp
+import os
 
 import humanfriendly
+import paramiko
+import scp
 
 from pyxllib.file.newbie import linux_path_fmt
-from pyxllib.debug.specialist.tictoc import TicToc
 from pyxllib.file.specialist import Dir, file_or_dir_size
+from pyxllib.debug.specialist.tictoc import TicToc
 
 
 def createSSHClient(server, port, user, password):

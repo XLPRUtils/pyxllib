@@ -8,25 +8,18 @@
 百度人工智能API接口
 """
 
+from pyxllib.prog.pupil import check_install_package
+
+check_install_package('aip', 'baidu-aip')
+
+import aip
 import base64
-import io
-import requests
-import subprocess
-
 import cv2
-import numpy as np
-from PIL import Image
 
-try:
-    import aip
-except ModuleNotFoundError:
-    subprocess.run(['pip3', 'install', 'baidu-aip'])
-    import aip
-
-from pyxllib.prog.specialist import XlOsEnv
 from pyxllib.prog.pupil import is_url
+from pyxllib.prog.specialist import XlOsEnv
 from pyxllib.debug.specialist import TicToc
-from pyxllib.cv.expert import CvPrcs
+from pyxllib.cv.expert import xlcv
 
 
 class AipOcr(aip.AipOcr):
@@ -84,14 +77,14 @@ class AipOcr(aip.AipOcr):
 
         # 1 取不同来源的数据
         if is_url(in_):
-            im = CvPrcs.read_from_url(in_)
+            im = xlcv.read_from_url(in_)
         else:
-            im = CvPrcs.read(in_)
+            im = xlcv.read(in_)
 
         # 2 特定的格式转换
         if rgba2rgb:
             im = cv2.cvtColor(im, cv2.COLOR_BGRA2BGR)
-        buffer = CvPrcs.to_buffer(im)
+        buffer = xlcv.to_buffer(im)
         return buffer
 
     def text(self, im, options=None, *, position=False, imtype='normal'):

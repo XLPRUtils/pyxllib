@@ -4,17 +4,15 @@
 # @Email  : 877362867@qq.com
 # @Date   : 2021/06/06 17:00
 
-import subprocess
+from pyxllib.prog.pupil import check_install_package
 
-# 0 安装库和导入库
+# 拼写检查库，即词汇库
 #   spellchecker模块主要有两个类，SpellChecker和WordFrequency
 #       WordFrequency是一个词频类
 #       一般导入SpellChecker就行了：from spellchecker import SpellChecker
-try:  # 拼写检查库，即词汇库
-    from spellchecker import SpellChecker
-except ModuleNotFoundError:
-    subprocess.run(['pip3', 'install', 'pyspellchecker'])
-    from spellchecker import SpellChecker
+check_install_package('pyspellchecker')
+
+from spellchecker import SpellChecker
 
 from pyxllib.debug.pupil import dprint
 

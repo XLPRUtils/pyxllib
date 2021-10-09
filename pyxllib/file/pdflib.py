@@ -4,18 +4,16 @@
 # @Email  : 877362867@qq.com
 # @Date   : 2020/06/02 16:06
 
-import itertools
+from pyxllib.prog.pupil import check_install_package
+
+check_install_package('fitz', 'PyMuPdf>=1.18.17')
+
 import json
 import os
 import pprint
 import re
-import subprocess
 
-try:
-    import fitz
-except ModuleNotFoundError:
-    subprocess.run(['pip3', 'install', 'PyMuPdf>=1.18.17'])
-    import fitz
+import fitz
 
 from pyxllib.prog.newbie import round_int, RunOnlyOnce, decode_bitflags
 from pyxllib.prog.pupil import DictTool, EnchantBase, EnchantCvt
@@ -94,11 +92,8 @@ class FitzDoc:
 
     def to_docx(self, docx_file=None):
         """ pdf转docx """
-        try:
-            from pdf2docx import parse
-        except ModuleNotFoundError:
-            subprocess.run('pip3 install pdf2docx')
-            from pdf2docx import parse
+        check_install_package('pdf2docx')
+        from pdf2docx import parse
 
         pdf_file = self.src_file
 

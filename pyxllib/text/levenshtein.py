@@ -4,17 +4,14 @@
 # @Email  : 877362867@qq.com
 # @Date   : 2021/06/06 17:01
 
-import subprocess
+from pyxllib.prog.pupil import check_install_package
 
 # 这个需要C++14编译器 https://download.microsoft.com/download/5/f/7/5f7acaeb-8363-451f-9425-68a90f98b238/visualcppbuildtools_full.exe
 # 在需要的时候安装，防止只是想用pyxllib很简单的功能，但是在pip install阶段处理过于麻烦
-try:
-    # MatchSimString计算编辑距离需要
-    import Levenshtein
-except ModuleNotFoundError:
-    subprocess.run(['pip3', 'install', 'python-Levenshtein'])
-    import Levenshtein
+# MatchSimString计算编辑距离需要
+check_install_package('Levenshtein', 'python-Levenshtein')
 
+import Levenshtein
 import pandas as pd
 
 from pyxllib.text.pupil import briefstr

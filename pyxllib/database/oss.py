@@ -8,13 +8,11 @@
 oss2 · PyPI: https://pypi.org/project/oss2/
 """
 
-import subprocess
+from pyxllib.prog.pupil import check_install_package
 
-try:
-    import oss2
-except ModuleNotFoundError:
-    subprocess.run(['pip3', 'install', 'oss2'])
-    import oss2
+check_install_package('oss2')
+
+import oss2
 
 from pyxllib.file.specialist import File
 

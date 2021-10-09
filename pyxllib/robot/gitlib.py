@@ -19,23 +19,21 @@ TODO 清单
 3、将数据以图片的直观形式展现
 """
 
-import re
-import subprocess
+from pyxllib.prog.pupil import check_install_package
+
+check_install_package('git', 'gitpython')
+
 import os
+import re
 
-try:
-    import git
-except ModuleNotFoundError:
-    subprocess.run(['pip3', 'install', 'gitpython'])
-    import git
-
+import git
 import pandas as pd
 
 from pyxllib.prog.newbie import swap_rowcol
-from pyxllib.debug.pupil import dprint
 from pyxllib.text.pupil import digit2weektag
-from pyxllib.debug.specialist import dataframe_str, bcompare
 from pyxllib.file.specialist import Dir, File, filesmatch
+from pyxllib.debug.pupil import dprint
+from pyxllib.debug.specialist import dataframe_str, bcompare
 
 
 class Git:
