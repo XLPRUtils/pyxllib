@@ -13,7 +13,7 @@ from lxml import html
 from openpyxl import Workbook
 from openpyxl.utils import get_column_letter
 from premailer import Premailer
-from pyxllib.stdlib.tablepyxl import Table
+from pyxllib.stdlib.tablepyxl.style import Table
 
 
 def string_to_int(s):
