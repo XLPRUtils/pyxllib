@@ -8,15 +8,13 @@
 并查集相关功能
 """
 
+from pyxllib.prog.pupil import check_install_package
+
+check_install_package('disjoint_set', 'disjoint-set==0.6.3')
+
 from itertools import combinations
 
-import subprocess
-
-try:
-    from disjoint_set import DisjointSet
-except ModuleNotFoundError:
-    subprocess.run(['pip3', 'install', 'disjoint-set==0.6.3'])
-    from disjoint_set import DisjointSet
+from disjoint_set import DisjointSet
 
 
 def disjoint_set(items, join_checker):

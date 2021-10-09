@@ -20,8 +20,9 @@ import time
 import pprint
 import tempfile
 from functools import partial
+import subprocess
 
-from pyxllib.prog.newbie import classproperty
+from pyxllib.prog.newbie import classproperty, RunOnlyOnce
 
 
 def system_information():
@@ -372,3 +373,22 @@ class EnchantBase:
     @classmethod
     def enchant(cls):
         raise NotImplementedError
+
+
+def check_install_package(package, speccal_install_name=None, *, user=False):
+    """ https://stackoverflow.com/questions/12332975/installing-python-module-within-code
+
+    TODO 不知道频繁调用这个，会不会太影响性能，可以想想怎么提速优化？
+    注意不要加@RunOnlyOnce，亲测速度会更慢三倍
+
+    警告: 不要在频繁调用的底层函数里使用 check_install_package
+        如果是module级别的还好，调几次其实性能影响微乎其微
+        但在频繁调用的函数里使用，每百万次还是要额外的0.5秒开销的
+    """
+    try:
+        __import__(package)
+    except ModuleNotFoundError:
+        cmds = [sys.executable, "-m", "pip", "install"]
+        if user: cmds.append('--user')
+        cmds.append(speccal_install_name if speccal_install_name else package)
+        subprocess.check_call(cmds)

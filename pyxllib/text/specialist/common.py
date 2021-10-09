@@ -5,18 +5,18 @@
 # @Date   : 2021/06/06 17:34
 
 import re
-import textwrap
 import sys
+import textwrap
 
+from bs4 import BeautifulSoup
 import pandas as pd
 import requests
-from bs4 import BeautifulSoup
 
 from pyxllib.prog.newbie import len_in_dim2
+from pyxllib.prog.pupil import check_install_package
 from pyxllib.text.pupil import ContentLine
-from pyxllib.debug.pupil import dprint
-from pyxllib.debug.specialist.common import dataframe_str
 from pyxllib.file.specialist import get_encoding, File
+from pyxllib.debug.specialist.common import dataframe_str
 
 
 def regularcheck(pattern, string, flags=0):
@@ -67,11 +67,8 @@ def ensure_content(ob=None, encoding=None):
         return sys.stdin.read()  # 注意输入是按 Ctrl + D 结束
     elif File(ob):  # 如果存在这样的文件，那就读取文件内容（bug点：如果输入是目录名会PermissionError）
         if ob.endswith('.docx'):  # 这里还要再扩展pdf、doc文件的读取
-            try:
-                import textract
-            except ModuleNotFoundError:
-                dprint()  # 缺少textract模块，安装详见： https://blog.csdn.net/code4101/article/details/79328636
-                raise ModuleNotFoundError
+            # 安装详见： https://blog.csdn.net/code4101/article/details/79328636
+            check_install_package('textract')
             text = textract.process(ob)
             return text.decode('utf8', errors='ignore')
         elif ob.endswith('.doc'):

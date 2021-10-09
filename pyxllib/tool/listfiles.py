@@ -6,14 +6,13 @@
 
 """ 列出目录下所有文件清单的命令行工具 """
 
-import os
-import subprocess
+from pyxllib.prog.pupil import check_install_package
 
-try:
-    import fire
-except ModuleNotFoundError:
-    subprocess.run(['pip3', 'install', 'fire'])
-    import fire
+check_install_package('fire')
+
+import os
+
+import fire
 
 
 def listfiles(dirpath):

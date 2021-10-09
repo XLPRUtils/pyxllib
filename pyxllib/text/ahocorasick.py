@@ -4,15 +4,14 @@
 # @Email  : 877362867@qq.com
 # @Date   : 2021/06/06 16:57
 
+from pyxllib.prog.pupil import check_install_package
+
+check_install_package('ahocorasick', 'pyahocorasick')
+
 from collections import Counter
-import subprocess
 import re
 
-try:
-    import ahocorasick
-except ModuleNotFoundError:
-    subprocess.run(['pip3', 'install', 'pyahocorasick'])
-    import ahocorasick
+import ahocorasick
 
 
 def make_automaton(words):

@@ -23,6 +23,7 @@ from pyxllib.text.pupil import strfind
 from pyxllib.debug.pupil import dprint
 from pyxllib.file.specialist import get_etag, PathBase, File
 from pyxllib.prog.newbie import first_nonnone
+from pyxllib.prog.pupil import check_install_package
 
 ____dir = """
 支持文件或文件夹的对比复制删除等操作的函数：filescmp、filesdel、filescopy
@@ -791,11 +792,9 @@ class PackFile:
         if mode == 'zip':
             self.proc = zipfile.ZipFile(file)
         elif mode == 'rar':
-            try:
-                from unrar.rarfile import RarFile
-            except ModuleNotFoundError:
-                dprint()  # 缺少unrar模块，安装详见： https://blog.csdn.net/code4101/article/details/79328636
-                raise ModuleNotFoundError
+            # 安装详见： https://blog.csdn.net/code4101/article/details/79328636
+            check_install_package('unrar')
+            from unrar.rarfile import RarFile
             self.proc = RarFile(file)
         # 3 解压文件夹目录，None表示还未解压
         self.tempfolder = None

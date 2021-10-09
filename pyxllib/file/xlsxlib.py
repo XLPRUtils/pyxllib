@@ -4,44 +4,29 @@
 # @Email  : 877362867@qq.com
 # @Date   : 2020/06/02
 
-
 """
 扩展了些自己的openpyxl工具
 """
-import itertools
+
+from pyxllib.prog.pupil import check_install_package
+
+check_install_package('openpyxl')
+check_install_package('premailer')
+check_install_package('xlrd2')
+
 import re
-import subprocess
-
-from pyxllib.prog.newbie import RunOnlyOnce
-
-try:
-    import openpyxl
-except ModuleNotFoundError:
-    subprocess.run(['pip3', 'install', 'openpyxl'])
-    import openpyxl
-
-try:
-    import premailer
-except ModuleNotFoundError:
-    subprocess.run(['pip3', 'install', 'premailer'])
-    import premailer
-
-try:
-    import xlrd2
-except ModuleNotFoundError:
-    subprocess.run(['pip3', 'install', 'xlrd2'])
-    import xlrd2
 
 import openpyxl
+from openpyxl.cell.cell import MergedCell
 from openpyxl.styles import Font
 from openpyxl.utils.cell import get_column_letter
-from openpyxl.cell.cell import MergedCell
 import pandas as pd
 
+from pyxllib.prog.newbie import RunOnlyOnce
+from pyxllib.prog.pupil import EnchantBase, EnchantCvt
+from pyxllib.algo.specialist import product
 from pyxllib.debug.pupil import dprint
 from pyxllib.debug.specialist import browser
-from pyxllib.algo.specialist import product
-from pyxllib.prog.pupil import EnchantBase, EnchantCvt
 
 
 def excel_addr(n, m) -> str:

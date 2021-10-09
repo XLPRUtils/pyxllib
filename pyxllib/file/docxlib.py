@@ -4,15 +4,13 @@
 # @Email  : 877362867@qq.com
 # @Date   : 2021/08/31 09:56
 
+from pyxllib.prog.pupil import check_install_package
+
+check_install_package('pypiwin32')
+
 import json
 import os
 import re
-import subprocess
-
-try:
-    import win32com
-except ModuleNotFoundError:
-    subprocess.run(['pip', 'install', 'pypiwin32'])
 
 import pythoncom
 from win32com.client import constants
@@ -33,11 +31,8 @@ def __docx():
 class DocxTools:
     @classmethod
     def to_pdf(cls, docx_file, pdf_file=None):
-        try:
-            import docx2pdf  # pip install docx2pdf，并且本地要安装word软件
-        except ModuleNotFoundError:
-            subprocess.run('pip3 install docx2pdf')  # 安装不成功的时候可以考虑加参数：--user
-            import docx2pdf
+        check_install_package('docx2pdf')  # 安装不成功的时候可以考虑加参数：--user
+        import docx2pdf
 
         if pdf_file is None:
             pdf_file = docx_file.with_suffix('.pdf')

@@ -4,20 +4,18 @@
 # @Email  : 877362867@qq.com
 # @Date   : 2021/05/26 17:24
 
+from pyxllib.prog.pupil import check_install_package
+
+check_install_package('QtPy')
+
 import json
-import sys
-import subprocess
 import os.path as osp
+import sys
 
-try:
-    from qtpy import QtWidgets
-except ModuleNotFoundError:
-    subprocess.run(['pip3', 'install', 'QtPy'])
-    from qtpy import QtWidgets
-
+from PyQt5.QtCore import pyqtSignal
+from qtpy import QtWidgets
 from qtpy import QtGui
 from qtpy.QtWidgets import QFrame, QInputDialog, QApplication
-from PyQt5.QtCore import pyqtSignal
 
 from pyxllib.prog.newbie import CvtType
 

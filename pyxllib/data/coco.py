@@ -19,22 +19,35 @@
         生成的结果可以用 xllabelme 打开 （pip install xllabelme）
 """
 
-from pyxllib.xlcv import *
+from pyxllib.prog.pupil import check_install_package
 
-from collections import ChainMap
+check_install_package('xlcocotools')
 
-# 使用该模块需要安装 xlcocotools
-try:
-    import xlcocotools
-except ModuleNotFoundError:
-    subprocess.run(['pip3', 'install', 'xlcocotools'])
-from xlcocotools.coco import COCO
-from xlcocotools.cocoeval import COCOeval
+from collections import ChainMap, defaultdict, Counter
+import copy
+import json
+import os
+import pathlib
+import random
+import sys
+
+import pandas as pd
+from PIL.Image import Image
+from tqdm import tqdm
 
 from pyxllib.stdlib.zipfile import ZipFile
-from pyxllib.data.labelme import LABEL_COLORMAP7, ToLabelmeJson, LabelmeDataset, LabelmeDict
+from pyxllib.prog.newbie import round_int
+from pyxllib.prog.pupil import DictTool
+from pyxllib.prog.specialist import mtqdm
+from pyxllib.algo.pupil import Groups, make_index_function, matchpairs
+from pyxllib.algo.geo import rect_bounds, rect2polygon, reshape_coords, ltrb2xywh, xywh2ltrb, ComputeIou
+from pyxllib.algo.stat import dataframes_to_excel
+from pyxllib.file.specialist import File, Dir, PathGroups
+from pyxllib.debug.specialist import get_xllog
 from pyxllib.data.icdar import IcdarEval
-from pyxllib.algo.geo import rect_bounds
+from pyxllib.data.labelme import LABEL_COLORMAP7, ToLabelmeJson, LabelmeDataset, LabelmeDict
+from xlcocotools.coco import COCO
+from xlcocotools.cocoeval import COCOeval
 
 
 class CocoGtData:

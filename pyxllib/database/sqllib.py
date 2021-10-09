@@ -4,23 +4,17 @@
 # @Email  : 877362867@qq.com
 # @Date   : 2020/06/03 09:52
 
+from pyxllib.prog.pupil import check_install_package
+
+check_install_package('bidict')
+check_install_package('sqlalchemy')
+check_install_package('mysqlclient')
+
 import math
-import subprocess
 
-try:
-    from bidict import bidict
-except ModuleNotFoundError:
-    subprocess.run(['pip3', 'install', 'bidict'])
-    from bidict import bidict
-
-try:
-    import sqlalchemy
-except ModuleNotFoundError:
-    subprocess.run(['pip3', 'install', 'sqlalchemy'])
-    subprocess.run(['pip3', 'install', 'mysqlclient'])
-    import sqlalchemy
-
+from bidict import bidict
 import pandas as pd
+import sqlalchemy
 
 from pyxllib.file.specialist import File
 

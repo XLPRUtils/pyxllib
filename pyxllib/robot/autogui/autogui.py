@@ -4,38 +4,28 @@
 # @Email  : 877362867@qq.com
 # @Date   : 2020/06/06
 
+from pyxllib.prog.pupil import check_install_package
+
+check_install_package('pyautogui')
+check_install_package('keyboard')
+
 from collections import defaultdict
 import json
 import os
-import subprocess
-import sys
 import time
-
-try:
-    import pyautogui
-except ModuleNotFoundError:
-    subprocess.run(['pip3', 'install', 'pyautogui'])
-    import pyautogui
-
-try:
-    import keyboard
-except ModuleNotFoundError:
-    subprocess.run(['pip3', 'install', 'keyboard'])
-    import keyboard
-
-import pyscreeze  # NOQA pyautogui安装的时候会自动安装依赖的pyscreeze
-import imagehash
 
 import numpy as np
 from pandas.api.types import is_list_like
+import pyautogui
+import pyscreeze  # NOQA pyautogui安装的时候会自动安装依赖的pyscreeze
 
-from pyxllib.debug.specialist import TicToc
-from pyxllib.file.specialist import File, Dir, get_etag
 from pyxllib.prog.newbie import first_nonnone, round_int
-from pyxllib.prog.pupil import xlwait, DictTool
-from pyxllib.cv.expert import xlcv, xlpil
+from pyxllib.prog.pupil import xlwait, DictTool, check_install_package
 from pyxllib.algo.geo import ComputeIou, ltrb2xywh, xywh2ltrb
 from pyxllib.algo.shapely_ import ShapelyPolygon
+from pyxllib.file.specialist import File, Dir
+from pyxllib.debug.specialist import TicToc
+from pyxllib.cv.expert import xlcv, xlpil
 from pyxllib.data.labelme import LabelmeDict
 
 
@@ -558,6 +548,31 @@ def lookup_mouse_position2(w1, w2, reverse=False):
         elif k == 'esc':
             break
         time.sleep(0.4)
+
+
+def type_text(text):
+    """ 打印出文本内容
+
+    相比pyautogui.write，这里支持中文等unicode格式
+
+    这种需求一般也可以用剪切板实现，是剪切板不够静默、quit
+    """
+    check_install_package('pynput')
+    from pynput.keyboard import Controller
+
+    keyboard = Controller()
+    keyboard.type(text)
+
+
+def type_text_decorator(func):
+    """ 将函数的文本返回值，打印输出的装饰器 """
+
+    def wrapper(*args, **kwargs):
+        s = func(*args, **kwargs)
+        type_text(s)
+        return s
+
+    return wrapper
 
 
 if __name__ == '__main__':
