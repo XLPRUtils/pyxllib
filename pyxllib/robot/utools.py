@@ -253,20 +253,32 @@ class UtoolsText(UtoolsBase):
         return p
 
     def wdate(self):
-        """ 输入一周的简略日期值 """
+        """ week dates 输入一周的简略日期值 """
         import datetime
         import pyautogui
 
-        start = int(self.cmds['subinput'])
+        def func(start):
+            weektag = '一二三四五六日'
+            for i in range(7):
+                dt = parse_datetime(start) + datetime.timedelta(i)
+                pyperclip.copy(dt.strftime('%y%m%d') + f'周{weektag[dt.weekday()]}')
+                # pyperclip.paste()  # 这个没用
+                # pyautogui.write('210503周一')  # 这个也没用
+                pyautogui.hotkey('ctrl', 'v')
+                pyautogui.press('down')
 
-        weektag = '一二三四五六日'
-        for i in range(7):
-            dt = parse_datetime(start) + datetime.timedelta(i)
-            pyperclip.copy(dt.strftime('%y%m%d') + f'周{weektag[dt.weekday()]}')
-            # pyperclip.paste()  # 这个没用
-            # pyautogui.write('210503周一')  # 这个也没用
-            pyautogui.hotkey('ctrl', 'v')
-            pyautogui.press('down')
+        fire.Fire(func, self.cmds['subinput'], 'wdate')
+
+    def input_digits(self):
+        """ 输入数字 """
+        import pyautogui
+
+        def func(start, stop, step=1):
+            for i in range(start, stop, step):
+                pyautogui.write(str(i))
+                pyautogui.press('down')
+
+        fire.Fire(func, self.cmds['subinput'], 'input_digits')
 
     def __win32(self):
         """ win32相关自动化
