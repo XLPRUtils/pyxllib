@@ -541,10 +541,9 @@ class xlcv(EnchantBase):
             同理，其他点数量，默认为
         :param fill: 支持pts越界选取，此时可以设置fill自动填充的颜色值
             TODO fill填充一个rgb颜色的时候应该会不兼容报错，还要想办法优化
-        :param warp_quad: 变形的四边形
-            默认是截图pts的外接四边形区域，使用该参数
-                且当pts为四个点时，是否强行扭转为矩形
-            一般写 'average'，也可以写'max'、'min'，详见 quad_warp_wh()
+        :param warp_quad: 当pts为四个点时，是否进行仿射变换矫正
+            默认是截图pts的外接四边形区域
+            一般写 True、'average'，也可以写'max'、'min'，详见 quad_warp_wh()
         :return: 子图
             文件、np.ndarray --> np.ndarray
             PIL.Image --> PIL.Image

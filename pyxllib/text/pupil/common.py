@@ -915,3 +915,16 @@ class BookContents:
             ls.append(sign)
 
         return '\n'.join(ls)
+
+
+def continuous_zero(s):
+    """ 返回一个字符串中连续0的位置
+
+    :param s: 一个字符串
+
+    做html转latex表格中，合并单元格的处理要用到这个函数计算cline
+
+    >>> continuous_zero('0100')  # 从0开始编号，左闭右开区间
+    [(0, 1), (2, 4)]
+    """
+    return [m.span() for m in re.finditer(r'0+', s)]

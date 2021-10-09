@@ -41,7 +41,7 @@ import pandas as pd
 from pyxllib.debug.pupil import dprint
 from pyxllib.debug.specialist import browser
 from pyxllib.algo.specialist import product
-from pyxllib.prog.pupil import EnchantBase
+from pyxllib.prog.pupil import EnchantBase, EnchantCvt
 
 
 def excel_addr(n, m) -> str:
@@ -115,7 +115,8 @@ class EnchantCell(EnchantBase):
 
     @staticmethod
     def isnone(cell):
-        """是普通单元格且值为None
+        """ 是普通单元格且值为None
+
         注意合并单元格的衍生单元格不为None
         """
         celltype = cell.celltype()
@@ -300,7 +301,7 @@ class EnchantWorksheet(EnchantBase):
 
     @staticmethod
     def select_columns(_self, columns, column_name='searchkey'):
-        r"""获取表中columns属性列的值，返回dataframe数据类型
+        r""" 获取表中columns属性列的值，返回dataframe数据类型
 
         :param columns: 搜索列名使用正则re.search字符串匹配查找
             可以单列：'attr1'，找到列头后，会一直往后取到最后一个非空值
@@ -357,6 +358,7 @@ class EnchantWorksheet(EnchantBase):
     @staticmethod
     def copy_range(_self, cell_range, rows=0, cols=0):
         """ 同表格内的 range 复制操作
+
         Copy a cell range by the number of rows and/or columns:
         down if rows > 0 and up if rows < 0
         right if cols > 0 and left if cols < 0
@@ -382,6 +384,7 @@ class EnchantWorksheet(EnchantBase):
     @staticmethod
     def reindex_columns(_self, orders):
         """ 重新排列表格的列顺序
+
         >> ws.reindex_columns('I,J,A,,,G,B,C,D,F,E,H,,,K'.split(','))
 
         TODO 支持含合并单元格的整体移动？
@@ -393,6 +396,237 @@ class EnchantWorksheet(EnchantBase):
             _self.copy_range(f'{col}1:{col}{max_row}', cols=max_column + j - column_index_from_string(col))
         _self.delete_cols(1, max_column)
 
+    @staticmethod
+    def to_html(ws, *, border=1,
+                style='border-collapse:collapse; text-indent:0; margin:0 auto;') -> str:
+        r"""
+        .from_latex(r'''\begin{tabular}{|c|c|c|c|}
+                      \hline
+                      1 & 2 & & 4\\
+                      \hline
+                      \end{tabular}''').to_html())
+
+        ==>
+
+        <table border="1" style="border-collapse: collapse;">
+          <tr>
+            <td style="text-align:center">
+              1
+            </td>
+            <td style="text-align:center">
+              2
+            </td>
+            <td style="text-align:center"></td>
+            <td style="text-align:center">
+              4
+            </td>
+          </tr>
+        </table>
+        """
+        from yattag import Doc, indent
+
+        doc, tag, text = Doc().tagtext()
+        tag_attrs = [('border', border), ('style', style)]
+        # if self.data_tex:  # 原来做latex的时候有的一个属性
+        #     tag_attrs.append(('data-tex', self.data_tex))
+
+        with tag('table', *tag_attrs):
+            # dprint(ws.max_row, ws.max_column)
+            for i in range(1, ws.max_row + 1):
+                if ws.cell(i, 1).isnone(): continue
+                with tag('tr'):
+                    for j in range(1, ws.max_column + 1):
+                        # ① 判断单元格类型
+                        cell = ws.cell(i, j)
+                        celltype = cell.celltype()
+                        if celltype == 1:  # 合并单元格的衍生单元格
+                            continue
+                        elif cell.isnone():
+                            continue
+                        # ② 对齐等格式控制
+                        params = {}
+                        if celltype == 2:  # 合并单元格的左上角
+                            rng = cell.in_range()
+                            params['rowspan'] = rng.size['rows']
+                            params['colspan'] = rng.size['columns']
+                        if cell.alignment.horizontal:
+                            params['style'] = 'text-align:' + cell.alignment.horizontal
+                        # if cell.alignment.vertical:
+                        #     params['valign'] = cell.alignment.vertical
+                        with tag('td', **params):
+                            v = str(cell.value)
+                            # if not v: v = '&nbsp;'  # 200424周五15:40，空值直接上平台表格会被折叠，就加了个空格
+                            doc.asis(v, )  # 不能用text，html特殊字符不用逃逸
+        # res = indent(doc.getvalue(), indent_text=True)  # 美化输出模式。但是这句在某些场景会有bug。
+        res = doc.getvalue()  # 紧凑模式
+
+        return res
+
+    @staticmethod
+    def init_from_latex(ws, content):
+        """ 注意没有取名为from_latex，因为ws是实现创建好的，这里只是能输入latex代码进行初始化而已 """
+        from openpyxl.styles import Border, Alignment, Side
+
+        from pyxllib.text.pupil import grp_bracket
+        from pyxllib.text.latex import TexTabular
+
+        BRACE2 = grp_bracket(2, inner=True)
+        BRACE5 = grp_bracket(5, inner=True)
+
+        # 暂时统一边框线的样式 borders。不做细化解析
+        double = Side(border_style='thin', color='000000')
+
+        # 处理表头
+        data_tex = re.search(r'\\begin{tabular}\s*(?:\[.*?\])?\s*' + BRACE5, content).group(1)
+        col_pos = TexTabular.parse_align(data_tex)  # 每列的格式控制
+        # dprint(self.data_tex, col_pos)
+        total_col = len(col_pos)
+        # 删除头尾标记
+        s = re.sub(r'\\begin{tabular}(?:\[.*?\])?' + BRACE5, '', re.sub(r'\\end{tabular}', '', content))
+        row, col = 1, 1
+
+        # 先用简单不严谨的规则确定用全网格，还是无网格
+        # if '\\hline' not in s and '\\midrule' not in s:
+        #     border = 0
+
+        # 用 \\ 分割处理每一行
+        for line in re.split(r'\\\\(?!{)', s)[:-1]:
+            # dprint(line)
+            # 1 处理当前行的所有列元素
+            cur_line = line
+            # dprint(line)
+            # 清除特殊格式数据
+            cur_line = re.sub(r'\\cmidrule' + BRACE2, '', cur_line)
+            cur_line = re.sub(r'\\cline' + BRACE2, '', cur_line)
+            for t in (r'\midrule', r'\toprule', r'\bottomrule', r'\hline', '\n'):
+                cur_line = cur_line.replace(t, '')
+
+            # 遍历每列
+            # dprint(cur_line)
+            for item in cur_line.strip().split('&'):
+                item = item.strip()
+                # dprint(item)
+                cur_loc = excel_addr(row, col)
+                # dprint(row, col)
+
+                if 'multicolumn' in item:
+                    size, align, text = TexTabular.parse_multicolumn(item)
+                    align = TexTabular.parse_align(align) if align else col_pos[col - 1]  # 如果没有写对齐，用默认列的格式
+                    n, m = size
+                    # 左右对齐，默认是left
+                    align = {'l': 'left', 'c': 'center', 'r': 'right'}.get(align, 'left')
+                    cell = ws[cur_loc].mcell()
+                    if cell.value:
+                        cell.value += '\n' + text
+                    else:
+                        cell.value = text
+                    ws[cur_loc].alignment = Alignment(horizontal=align, vertical='center')
+                    merge_loc = excel_addr(row + n - 1, col + m - 1)
+                    ws.merge_cells(f'{cur_loc}:{merge_loc}')
+                    col += m
+                elif 'multirow' in item:
+                    n, bigstructs, width, fixup, text = TexTabular.parse_multirow(item, brace_text_only=False)
+                    try:
+                        ws[cur_loc] = text
+                    except AttributeError:
+                        # 遇到合并单元格重叠问题，就修改旧的合并单元格，然后添加新单元格
+                        # 例如原来 A1:A3 是一个合并单元格，现在要独立一个A3，则原来的部分重置为A1:A2
+                        rng = ws[cur_loc].in_range()
+                        ws.unmerge_cells(rng.coord)  # 解除旧的合并单元格
+                        ws.merge_cells(re.sub(r'\d+$', f'{row - 1}', rng.coord))
+                        ws[cur_loc] = text
+                    align = {'l': 'left', 'c': 'center', 'r': 'right'}.get(col_pos[col - 1], 'left')
+                    ws[cur_loc].alignment = Alignment(horizontal=align, vertical='center')
+                    # dprint(item, row, n)
+                    merge_loc = excel_addr(row + n - 1, col)
+                    ws.merge_cells(f'{cur_loc}:{merge_loc}')
+                    col += 1
+                else:
+                    if ws[cur_loc].celltype() == 0:
+                        ws[cur_loc].value = item
+                        # dprint(item, col_pos, col)
+                        align = {'l': 'left', 'c': 'center', 'r': 'right'}.get(col_pos[col - 1], 'left')
+                        ws[cur_loc].alignment = Alignment(horizontal=align, vertical='center')
+                    col += 1
+
+            # 2 其他border等格式控制
+            if r'\midrule' in line or r'\toprule' in line or r'\bottomrule' in line or r'\hline' in line:
+                # 该行画整条线
+                loc_1 = excel_addr(row, 1)
+                loc_2 = excel_addr(row, total_col)
+                comb_loc = f'{loc_1}:{loc_2}'
+                for cell in ws[comb_loc][0]:
+                    cell.border = Border(top=double)
+            if r'\cmidrule' in line:
+                for match in re.findall(r'\\cmidrule{([0-9]+)-([0-9]+)}', line):
+                    loc_1 = excel_addr(row, match[0])
+                    loc_2 = excel_addr(row, match[1])
+                    comb_loc = f'{loc_1}:{loc_2}'
+                    for cell in ws[comb_loc][0]:
+                        cell.border = Border(top=double)
+            if r'\cline' in line:
+                for match in re.findall(r'\\cline{([0-9]+)-([0-9]+)}', line):
+                    loc_1 = excel_addr(row, match[0])
+                    loc_2 = excel_addr(row, match[1])
+                    comb_loc = f'{loc_1}:{loc_2}'
+                    for cell in ws[comb_loc][0]:
+                        cell.border = Border(top=double)
+            row, col = row + 1, 1
+
+    @staticmethod
+    def to_latex(ws):
+        from pyxllib.text.latex import TexTabular
+
+        li = []
+        n, m = ws.max_row, ws.max_column
+        format_count = [''] * m  # 记录每一列中各种对齐格式出现的次数
+        merge_count = [0] * m  # 每列累积被合并行数，用于计算cline
+
+        li.append('\\hline')
+        for i in range(1, n + 1):
+            if ws.cell(i, 1).isnone(): continue
+            line = []
+            j = 1
+            while j < m + 1:
+                cell = ws.cell(i, j)
+                celltype = cell.celltype()
+                if celltype == 0:  # 普通单元格
+                    line.append(str(cell.value))
+                elif celltype == 1:  # 合并单元格的衍生单元格
+                    mcell = cell.mcell()  # 找出其母单元格
+                    if mcell.column == cell.column:
+                        columns = mcell.in_range().size['columns']
+                        if columns > 1:
+                            line.append(f'\\multicolumn{{{columns}}}{{|c|}}{{}}')  # 加一个空的multicolumn
+                        else:
+                            line.append('')  # 加一个空值
+                elif celltype == 2:  # 合并单元格的左上角
+                    rng = cell.in_range()
+                    v = cell.value
+                    rows, columns = rng.size['rows'], rng.size['columns']
+                    if rows > 1:  # 有合并行
+                        v = f'\\multirow{{{rows}}}*{{{v}}}'
+                        for k in range(j, j + columns): merge_count[k - 1] = rows - 1
+                    if columns > 1:  # 有合并列
+                        # horizontal取值有情况有
+                        # {‘center’, ‘centerContinuous’, ‘fill’, ‘left’, ‘justify’, ‘distributed’, ‘right’, ‘general’}
+                        # 所以如果不是left、center、right，改成默认c
+                        align = cell.alignment.horizontal[0]
+                        if align not in 'lcr': align = 'c'
+                        v = f'\\multicolumn{{{columns}}}{{|{align}|}}{{{v}}}'
+                    line.append(str(v))
+                    j += columns - 1
+                if cell.alignment.horizontal:
+                    format_count[j - 1] += cell.alignment.horizontal[0]
+                j += 1
+            li.append(' & '.join(line) + r'\\ ' + TexTabular.create_cline(merge_count))
+            merge_count = [(x - 1 if x > 0 else x) for x in merge_count]
+        li.append('\\end{tabular}\n')
+        head = '\\begin{tabular}' + TexTabular.create_formats(format_count)
+        li = [head] + li  # 开头其实可以最后加，在遍历中先确认每列用到最多的格式情况
+
+        return '\n'.join(li)
+
 
 EnchantWorksheet.enchant()
 
@@ -402,7 +636,9 @@ class EnchantWorkbook(EnchantBase):
     @RunOnlyOnce
     def enchant(cls):
         names = cls.check_enchant_names([openpyxl.Workbook])
-        cls._enchant(openpyxl.Workbook, names)
+        cls_names = {'from_html'}
+        cls._enchant(openpyxl.Workbook, cls_names, EnchantCvt.staticmethod2classmethod)
+        cls._enchant(openpyxl.Workbook, names - cls_names)
 
     @staticmethod
     def adjust_sheets(wb, new_sheetnames):
@@ -417,6 +653,45 @@ class EnchantWorkbook(EnchantBase):
             wb.remove(wb[name])
         wb._sheets = [wb[name] for name in new_sheetnames]
         return wb
+
+    @staticmethod
+    def from_html(content):
+        from pyxllib.stdlib.tablepyxl.tablepyxl import document_to_workbook
+        # 支持多 <table> 结构
+        return document_to_workbook(content)
+
+    @staticmethod
+    def from_latex(content):
+        """
+        参考：kun0zhou，https://github.com/kun-zhou/latex2excel/blob/master/latex2excel.py
+        """
+        from openpyxl import Workbook
+
+        # 可以处理多个表格
+        wb = Workbook()
+        for idx, s in enumerate(re.findall(r'(\\begin{tabular}.*?\\end{tabular})', content, flags=re.DOTALL), start=1):
+            if idx == 1:
+                ws = wb.active
+                ws.title = 'Table 1'
+            else:
+                ws = wb.create_sheet(title=f'Table {idx}')
+            ws.init_from_latex(s)
+
+        return wb
+
+    @staticmethod
+    def to_html(wb) -> str:
+        li = []
+        for ws in wb.worksheets:
+            li.append(ws.to_html())
+        return '\n\n'.join(li)
+
+    @staticmethod
+    def to_latex(wb):
+        li = []
+        for ws in wb.worksheets:
+            li.append(ws.to_latex())
+        return '\n'.join(li)
 
 
 EnchantWorkbook.enchant()

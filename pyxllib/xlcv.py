@@ -6,6 +6,7 @@
 
 from pyxllib.xl import *
 from pyxllib.algo.geo import *
+from pyxllib.cv.newbie import *
 from pyxllib.cv.expert import *
 
 # 把自定义的一些功能嵌入到PIL.Image.Image类中。
