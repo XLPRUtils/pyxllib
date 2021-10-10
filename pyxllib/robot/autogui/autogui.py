@@ -564,15 +564,47 @@ def type_text(text):
     keyboard.type(text)
 
 
-def type_text_decorator(func):
-    """ 将函数的文本返回值，打印输出的装饰器 """
+def clipboard_decorator(rtype='text', *, copy=True, paste=False, typing=False):
+    """
 
-    def wrapper(*args, **kwargs):
-        s = func(*args, **kwargs)
-        type_text(s)
-        return s
+    Args:
+        rtype: 函数返回值类型
+        paste: 是否执行剪切板的粘贴功能
+        typing: 是否键入文本内容
 
-    return wrapper
+    Returns:
+
+    """
+    from bs4 import BeautifulSoup
+    import pyautogui
+    import klembord
+
+    def decorator(func):
+        def wrapper(*args, **kwargs):
+            # 1 运行函数获得结果
+            s = func(*args, **kwargs)
+
+            # 2 复制到剪切板
+            if copy:
+                if rtype == 'text' and isinstance(s, str):
+                    klembord.set_text(s)
+                elif rtype == 'html' and isinstance(s, str):
+                    s0 = BeautifulSoup(s, 'lxml').text
+                    klembord.set_with_rich_text(s0, s)
+                elif rtype == 'dict' and isinstance(s, dict):
+                    klembord.set(s)
+
+            # 3 输出
+            if paste:
+                pyautogui.hotkey('ctrl', 'v')  # 目前来看就这个方法最靠谱
+            if typing:
+                type_text(s)
+
+            return s
+
+        return wrapper
+
+    return decorator
 
 
 if __name__ == '__main__':
