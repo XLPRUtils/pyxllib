@@ -6,19 +6,28 @@
 
 """ 专门给utools的快捷命令扩展的一系列python工具库
 """
+from pyxllib.prog.pupil import check_install_package
 
+check_install_package('fire')
+check_install_package('humanfriendly')
+check_install_package('pandas')
+check_install_package('pyautogui', 'PyAutoGui')  # 其实pip install不区分大小写，不过官方这里安装是驼峰名
+
+import datetime
+import json
 import os
 import pathlib
 import pyperclip
 import re
 
+import fire
 from humanfriendly import format_timespan
 import pandas as pd
-import ujson
-import fire
+import pyautogui
 
 from pyxllib.file.specialist import File, Dir
 from pyxllib.debug.specialist import browser, TicToc, parse_datetime
+from pyxllib.robot.autogui import type_text, clipboard_decorator
 
 
 def _print_df_result(df, outfmt='text'):
@@ -69,12 +78,12 @@ class UtoolsBase:
         # 3 解析json数据
         # 解析window模式的WindowInfo
         if 'WindowInfo' in self.cmds:
-            self.cmds['WindowInfo'] = ujson.loads(self.cmds['WindowInfo'].encode('utf8'))
+            self.cmds['WindowInfo'] = json.loads(self.cmds['WindowInfo'].encode('utf8'))
 
         # 解析files模式的MatchedFiles
         if 'MatchedFiles' in self.cmds:
             # 右边引用没写错。因为MatchedFiles本身获取内容不稳定，可能会有bug，取更稳定的payload来初始化MatchedFiles
-            self.cmds['MatchedFiles'] = ujson.loads(self.cmds['payload'].encode('utf8'))
+            self.cmds['MatchedFiles'] = json.loads(self.cmds['payload'].encode('utf8'))
             # 在有些软件中，比如everything，是可以选中多个不同目录的文件的。。。所以严格来说不能直接按第一个文件算pwd
             # 但这个讯息是可以写一个工具分析的
             # self.cmds['pwd'] = os.path.dirname(self.cmds['MatchedFiles'][0]['path'])
@@ -209,69 +218,43 @@ class UtoolsFile(UtoolsBase):
         print(f'finished in {format_timespan(tt.tocvalue())}.')
 
 
-def clipboard_paste(func):
-    """ 将函数运行完的文本结果复制到剪切板 """
-
-    def wrapper(*args, **kwargs):
-        import pyautogui
-        s = func(*args, **kwargs)
-
-        # print(s, end='')
-        pyperclip.copy(s)
-        # pyperclip.paste()  # 这个没用
-        # pyautogui.write(s)  # 这个也不能写入中文
-        pyautogui.hotkey('ctrl', 'v')  # 目前来看就这个方法最靠谱
-
-        return s
-
-    return wrapper
-
-
 class UtoolsText(UtoolsBase):
     """ 目录路径生成工具 """
 
-    @clipboard_paste
-    def wpath(self):
-        """ windows上的路径 """
+    @clipboard_decorator(copy=False, typing=True)
+    def common_dir(self):
         from pyxlpr.data.datasets import CommonDir
 
-        p = getattr(CommonDir, self.cmds['subinput'])
-        # slns比较特别，本地要重定向到D:/slns
-        p = str(p).replace('D:/home/chenkunze/slns', 'D:/slns')
-        p = p.replace('/', '\\')
-        return p
+        def func(name, unix_path=False):
+            p = getattr(CommonDir, name)
 
-    @clipboard_paste
-    def upath(self):
-        """ unix上的路径 """
-        from pyxlpr.data.datasets import CommonDir
+            if unix_path:
+                # 因为用了符号链接，实际位置会变回D:/slns，这里需要反向替换下
+                p = str(p).replace('D:/slns', 'D:/home/chenkunze/slns')
+                p = str(p)[2:]
+            else:
+                # slns比较特别，本地要重定向到D:/slns
+                p = str(p).replace('D:/home/chenkunze/slns', 'D:/slns')
+                p = p.replace('/', '\\')
 
-        p = getattr(CommonDir, self.cmds['subinput'])
-        # 因为用了符号链接，实际位置会变回D:/slns，这里需要反向替换下
-        p = str(p).replace('D:/slns', 'D:/home/chenkunze/slns')
-        p = str(p)[2:]
-        return p
+            return p
+
+        return fire.Fire(func, self.cmds['subinput'], 'CommonDir')
 
     def wdate(self):
         """ week dates 输入一周的简略日期值 """
-        import datetime
-        import pyautogui
 
         def func(start):
             weektag = '一二三四五六日'
             for i in range(7):
                 dt = parse_datetime(start) + datetime.timedelta(i)
-                pyperclip.copy(dt.strftime('%y%m%d') + f'周{weektag[dt.weekday()]}')
-                # pyperclip.paste()  # 这个没用
-                # pyautogui.write('210503周一')  # 这个也没用
-                pyautogui.hotkey('ctrl', 'v')
+                type_text(dt.strftime('%y%m%d') + f'周{weektag[dt.weekday()]}')
                 pyautogui.press('down')
 
         fire.Fire(func, self.cmds['subinput'], 'wdate')
 
     def input_digits(self):
         """ 输入数字 """
-        import pyautogui
 
         def func(start, stop, step=1):
             for i in range(start, stop, step):
@@ -299,14 +282,14 @@ class UtoolsRegex(UtoolsBase):
     def __init__(self, cmds, *, outfmt='text'):
         super().__init__(cmds, outfmt=outfmt)
 
-    @clipboard_paste
+    @clipboard_decorator(paste=True)
     def coderegex(self):
         # tt = TicToc()
         s = self.cmds['ClipText']
         return eval(self.cmds['subinput'])
         # print(f'finished in {format_timespan(tt.tocvalue())}.')
 
-    @clipboard_paste
+    @clipboard_decorator(paste=True)
     def refine_text(self, func):
         return func(self.cmds['ClipText'])
 
