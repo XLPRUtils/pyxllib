@@ -119,7 +119,7 @@ def func_input_message(depth=2) -> dict:
 def dformat(*args, depth=2,
             delimiter=' ' * 4,
             strfunc=repr,
-            fmt='[{depth:02}]{filename}/{lineno}: {argmsg}    {comment}',
+            fmt='[{depth:02}]{filename}/{lineno}: {argmsg}',
             subfmt='{name}<{tp}>={val}'):
     r"""
     :param args:  需要检查的表达式

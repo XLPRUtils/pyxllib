@@ -20,10 +20,10 @@ ____xllog = """
 """
 
 
-def get_xllog(*, log_file=None):
+def get_xllog(name='xllog', *, log_file=None):
     """ 获得pyxllib库的日志类
 
-    :param log_file: 增加输出到一个日志文件，该功能仅在xllog首次初始化时有效
+    :param log_file: 增加输出到一个日志文件，该功能仅在首次初始化时有效
         注意这个是'w'机制，会删除之前的日志文件
         # TODO 这样的功能设计问题挺大的，工程逻辑很莫名其妙，有空要把日志功能修缮下
         #   例如一个通用的初始化类，然后xllog只是一个特定的实例日志类
@@ -32,32 +32,38 @@ def get_xllog(*, log_file=None):
     """
     import logging, coloredlogs
 
-    if 'pyxllib.xllog' in logging.root.manager.loggerDict:
-        # 1 判断xllog是否已存在，直接返回
-        pass
-    elif os.path.isfile(XLLOG_CONF_FILE):
-        # 2 若不存在，尝试在默认位置是否有自定义配置文件，读取配置文件来创建
-        import logging.config
-        from pyxllib.file.specialist import File
-        data = File(XLLOG_CONF_FILE).read()
-        if isinstance(data, dict):
-            # 推荐使用yaml的字典结构，格式更简洁清晰
-            logging.config.dictConfig(data)
+    # 1 判断是否已存在，直接返回
+    if ('pyxllib.' + name) in logging.root.manager.loggerDict:
+        return logging.getLogger('pyxllib.' + name)
+
+    # 2 初次构建
+    if name == 'xllog':  # 附带运行时间信息
+        if os.path.isfile(XLLOG_CONF_FILE):
+            # 尝试在默认位置是否有自定义配置文件，读取配置文件来创建
+            import logging.config
+            from pyxllib.file.specialist import File
+            data = File(XLLOG_CONF_FILE).read()
+            if isinstance(data, dict):
+                # 推荐使用yaml的字典结构，格式更简洁清晰
+                logging.config.dictConfig(data)
+            else:
+                # 但是普通的conf配置文件也支持
+                logging.config.fileConfig(XLLOG_CONF_FILE)
         else:
-            # 但是普通的conf配置文件也支持
-            logging.config.fileConfig(XLLOG_CONF_FILE)
-    else:
-        # 3 否则生成一个非常简易版的xllog
-        xllog = logging.getLogger('pyxllib.xllog')
-        fmt = '%(asctime)s %(message)s'
-        if log_file:
-            # todo 这里的格式设置是否能统一、精简？
-            file_handler = logging.FileHandler(f'{log_file}', 'w')
-            file_handler.setLevel(logging.DEBUG)
-            file_handler.setFormatter(logging.Formatter(fmt))
-            xllog.addHandler(file_handler)
-        coloredlogs.install(level='DEBUG', logger=xllog, fmt=fmt)
-    return logging.getLogger('pyxllib.xllog')
+            # 3 否则生成一个非常简易版的xllog
+            xllog = logging.getLogger('pyxllib.xllog')
+            fmt = '%(asctime)s %(message)s'
+            if log_file:
+                # TODO 这里的格式设置是否能统一、精简？
+                file_handler = logging.FileHandler(f'{log_file}', 'w')
+                file_handler.setLevel(logging.DEBUG)
+                file_handler.setFormatter(logging.Formatter(fmt))
+                xllog.addHandler(file_handler)
+            coloredlogs.install(level='DEBUG', logger=xllog, fmt=fmt)
+    elif name == 'location':  # 附带代码所处位置信息
+        loclog = logging.getLogger('pyxllib.location')
+        coloredlogs.install(level='DEBUG', logger=loclog, fmt='%(filename)s/%(lineno)d: %(message)s')
+    return logging.getLogger('pyxllib.' + name)
 
 
 class Iterate:
