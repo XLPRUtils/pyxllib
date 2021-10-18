@@ -223,10 +223,10 @@ class UtoolsText(UtoolsBase):
 
     @clipboard_decorator(copy=False, typing=True)
     def common_dir(self):
-        from pyxlpr.data.datasets import CommonDir
+        from pyxlpr.data.datasets import common_path
 
         def func(name, unix_path=False):
-            p = getattr(CommonDir, name)
+            p = getattr(common_path, name)
 
             if unix_path:
                 # 因为用了符号链接，实际位置会变回D:/slns，这里需要反向替换下
