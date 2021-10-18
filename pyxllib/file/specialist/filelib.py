@@ -22,10 +22,12 @@ import chardet
 import qiniu
 import requests
 import yaml
+import humanfriendly
 
 from pyxllib.algo.pupil import Groups
 from pyxllib.file.pupil import struct_unpack, gen_file_filter
-from pyxllib.prog.pupil import is_url, is_file, DictTool
+from pyxllib.prog.newbie import RunOnlyOnce
+from pyxllib.prog.pupil import is_url, is_file, DictTool, EnchantBase
 
 ____judge = """
 """
@@ -305,12 +307,6 @@ class PathBase:
     def resolve(self):
         return self._path.resolve()
 
-    def glob(self, pattern):
-        return self._path.glob(pattern)
-
-    def match(self, path_pattern):
-        return self._path.match(path_pattern)
-
     @property
     def drive(self) -> str:
         return self._path.drive
@@ -531,6 +527,12 @@ class PathBase:
         if not p.exists():
             os.makedirs(str(p))
 
+    def __getattr__(self, item):
+        return getattr(self._path, item)
+
+    def start(self):
+        os.startfile(str(self))
+
 
 class File(PathBase):
     r""" 通用文件处理类，大部分基础功能是从pathlib.Path衍生过来的
@@ -662,7 +664,7 @@ class File(PathBase):
     def size(self) -> int:
         """ 计算文件大小
         """
-        if self:
+        if self.eixsts():
             total_size = os.path.getsize(str(self))
         else:
             total_size = 0
@@ -819,6 +821,141 @@ class File(PathBase):
 
     def exists(self):
         return self._path.exists()
+
+
+class XlPath(type(pathlib.Path())):
+
+    @classmethod
+    def desktop(cls):
+        if os.environ.get('Desktop', None):  # 如果修改了win10默认的桌面路径，需要在环境变量添加一个正确的Desktop路径值
+            desktop = os.environ['Desktop']
+        else:
+            desktop = os.path.join(pathlib.Path.home(), 'Desktop')  # 这个不一定准，桌面是有可能被移到D盘等的
+        return cls(desktop)
+
+    @classmethod
+    def tempdir(cls):
+        return cls(tempfile.gettempdir())
+
+    def start(self, *args, **kwargs):
+        """ 使用关联的程序打开p，类似于双击的效果
+
+        这就像在 Windows 资源管理器中双击文件、文件夹
+        """
+        os.startfile(self, *args, **kwargs)
+
+    def exists_type(self):
+        """
+        不存在返回0，文件返回1，目录返回-1
+        这样任意两个文件类型编号相乘，负数就代表不匹配
+        """
+        if self.is_file():
+            return 1
+        elif self.is_dir():
+            return -1
+        else:
+            return 0
+
+    def mtime(self):
+        # windows会带小数，linux使用%Ts只有整数部分。
+        # 这里不用四舍五入，取整数部分就是对应的。
+        return int(os.stat(self).st_mtime)
+
+    def size(self, *, human_readable=False):
+        if self.is_file():
+            sz = os.path.getsize(self)
+        elif self.is_dir():
+            sz = sum([os.path.getsize(p) for p in self.glob('**/*') if p.is_file()])
+        else:
+            sz = 0
+
+        if human_readable:
+            return humanfriendly.format_size(self.size, binary=True)
+        else:
+            return sz
+
+    def sub_rel_paths(self, mtime=False):
+        """ 返回self目录下所有含递归的文件、目录，存储相对路径，as_posix
+        当带有mtime参数时，会返回字典，并附带返回mtime的值
+
+        主要用于 scp 同步目录数据时，对比目录下文件情况
+        """
+
+        if mtime:
+            res = {}
+            for p in self.glob('**/*'):
+                res[p.relative_to(self).as_posix()] = p.mtime()
+        else:
+            res = set()
+            for p in self.glob('**/*'):
+                res.add(p.relative_to(self).as_posix())
+        return res
+
+    def __read_write(self):
+        """ 参考标准库的
+        read_bytes、read_text
+        write_bytes、write_text
+        """
+        pass
+
+    def read_text(self, encoding=None, errors=None, rich_return: bool = False):
+        bstr = self.read_bytes()
+        if not encoding: encoding = get_encoding(bstr)
+        s = bstr.decode(encoding=encoding, erros=errors)
+
+        if rich_return:
+            return s, encoding
+        else:
+            return s
+
+    def read_pkl(self):
+        with open(self, 'rb') as f:
+            return pickle.load(f)
+
+    def write_pkl(self, data):
+        with open(self, 'wb') as f:
+            pickle.dump(data, f)
+
+    def read_json(self, encoding=None, *, errors=None, rich_return: bool = False):
+        """
+
+        Args:
+            p: Path对象
+            encoding: 可以主动指定编码，否则默认会自动识别编码
+            rich_return: 默认只返回读取的数据
+                开启后，得到更丰富的返回信息: data, encoding
+                    该功能常用在需要自动识别编码，重写回文件时使用相同的编码格式
+        Returns:
+
+        """
+        s, encoding = self.read_text(encoding=encoding, errors=errors, rich_return=True)
+        try:
+            data = ujson.loads(s)
+        except ValueError:  # ujson会有些不太标准的情况处理不了
+            data = json.loads(s)
+
+        if rich_return:
+            return data, encoding
+        else:
+            return data
+
+    def write_json(self, data, encoding=None, **kwargs):
+        with open(self, 'w', encoding=encoding) as f:
+            DictTool.ior(kwargs, {'ensure_ascii': False})
+            json.dump(data, f, **kwargs)
+
+    def read_yaml(self, encoding=None, *, errors=None, rich_return=False):
+        s, encoding = self.read_text(encoding=encoding, errors=errors, rich_return=True)
+        data = yaml.safe_load(s)
+
+        if rich_return:
+            return data, encoding
+        else:
+            return data
+
+    def write_yaml(self, data, encoding=None):
+        with open(self, 'w', encoding=encoding) as f:
+            yaml.dump(data, f)
 
 
 def demo_file():

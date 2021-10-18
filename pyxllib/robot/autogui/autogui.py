@@ -565,7 +565,7 @@ def type_text(text):
 
 
 def clipboard_decorator(rtype='text', *, copy=True, paste=False, typing=False):
-    """
+    """ 装饰器，能方便地将函数的返回值转移到剪切板文本、富文本，甚至typing出来。
 
     Args:
         rtype: 函数返回值类型

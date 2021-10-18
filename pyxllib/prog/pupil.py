@@ -6,23 +6,21 @@
 
 
 """ 封装一些代码开发中常用的功能，工程组件 """
-import itertools
-from enum import Enum
-from urllib.parse import urlparse
+from collections import defaultdict
 import io
+import itertools
 import json
 import math
 import os
 import queue
 import socket
-import sys
-import time
-import pprint
-import tempfile
-from functools import partial
 import subprocess
+import sys
+import tempfile
+import time
+from urllib.parse import urlparse
 
-from pyxllib.prog.newbie import classproperty, RunOnlyOnce
+from pyxllib.prog.newbie import classproperty
 
 
 def system_information():
@@ -392,3 +390,28 @@ def check_install_package(package, speccal_install_name=None, *, user=False):
         if user: cmds.append('--user')
         cmds.append(speccal_install_name if speccal_install_name else package)
         subprocess.check_call(cmds)
+
+
+def limit_call_number(limit=1, object_method=False):
+    """ 限制装饰的函数对象，最多执行几次 """
+
+    def decorator(func):
+        counter = defaultdict(int) if object_method else 0
+
+        def wrapper(*args, **kwargs):
+            nonlocal counter
+
+            if object_method:
+                id_ = id(args[0])
+                counter[id_] += 1
+                cnt = counter[id_]
+            else:
+                counter += 1
+                cnt = counter
+
+            if cnt <= limit:
+                return func(*args, **kwargs)
+
+        return wrapper
+
+    return decorator
