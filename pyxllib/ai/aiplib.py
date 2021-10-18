@@ -38,7 +38,7 @@ class AipOcr(aip.AipOcr):
         用法一：传统方式
             accounts = {'user': 'user1', 'app_id': 1, 'api_key': '2', 'secret_key': '3'}
             XlOsEnv.persist_set('AipOcrAccount', accounts, True)
-            aipocr1 = AipOcr(**XlOsEnv.get('TP10_ACCOUNT', decoding=True))
+            aipocr1 = AipOcr(**XlOsEnv.get('AipOcrAccount', decoding=True))
             aipocr2 = AipOcr('user1')  # 可以不用自己解环境变量，指定user即可
         用法二：多账号方式（推荐）
             accounts = [{'user': 'user1', 'app_id': 1, 'api_key': '2', 'secret_key': '3'},
