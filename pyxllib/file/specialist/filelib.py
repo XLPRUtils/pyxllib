@@ -865,7 +865,7 @@ class XlPath(type(pathlib.Path())):
         if self.is_file():
             sz = os.path.getsize(self)
         elif self.is_dir():
-            sz = sum([os.path.getsize(p) for p in self.glob('**/*') if p.is_file()])
+            sz = sum([os.path.getsize(p) for p in self.rglob('*') if p.is_file()])
         else:
             sz = 0
 
@@ -898,10 +898,10 @@ class XlPath(type(pathlib.Path())):
         """
         pass
 
-    def read_text(self, encoding=None, errors=None, rich_return: bool = False):
+    def read_text(self, encoding=None, errors='strict', rich_return: bool = False):
         bstr = self.read_bytes()
         if not encoding: encoding = get_encoding(bstr)
-        s = bstr.decode(encoding=encoding, erros=errors)
+        s = bstr.decode(encoding=encoding, errors=errors)
 
         if rich_return:
             return s, encoding
@@ -916,7 +916,7 @@ class XlPath(type(pathlib.Path())):
         with open(self, 'wb') as f:
             pickle.dump(data, f)
 
-    def read_json(self, encoding=None, *, errors=None, rich_return: bool = False):
+    def read_json(self, encoding=None, *, errors='strict', rich_return: bool = False):
         """
 
         Args:
@@ -944,7 +944,7 @@ class XlPath(type(pathlib.Path())):
             DictTool.ior(kwargs, {'ensure_ascii': False})
             json.dump(data, f, **kwargs)
 
-    def read_yaml(self, encoding=None, *, errors=None, rich_return=False):
+    def read_yaml(self, encoding=None, *, errors='strict', rich_return=False):
         s, encoding = self.read_text(encoding=encoding, errors=errors, rich_return=True)
         data = yaml.safe_load(s)
 
@@ -956,6 +956,20 @@ class XlPath(type(pathlib.Path())):
     def write_yaml(self, data, encoding=None):
         with open(self, 'w', encoding=encoding) as f:
             yaml.dump(data, f)
+
+    def read_bib(self, encoding=None):
+        import bibtexparser
+
+        with open(self, encoding=encoding) as bibtex_file:
+            bib_database = bibtexparser.load(bibtex_file)
+
+        return bib_database
+
+    def write_bib(self, bibtex_database, encoding=None):
+        import bibtexparser
+
+        with open(self, 'w', encoding=encoding) as f:
+            bibtexparser.dump(bibtex_database, f)
 
 
 def demo_file():
