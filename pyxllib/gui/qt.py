@@ -6,11 +6,12 @@
 
 from pyxllib.prog.pupil import check_install_package
 
-check_install_package('QtPy')
+check_install_package('qtpy', 'QtPy')
 
 import json
 import os.path as osp
 import sys
+import time
 
 from PyQt5.QtCore import pyqtSignal
 from qtpy import QtWidgets
@@ -294,3 +295,43 @@ def main_qapp(window):
     app = QApplication(sys.argv)
     window.show()  # 展示窗口
     sys.exit(app.exec_())
+
+
+def qt_clipboard_monitor(func=None, info=1):
+    """ 剪切板监控器
+
+    感觉这个组件还有很多可以扩展的，比如设置可以退出的快捷键
+    """
+    import pyperclip
+
+    last_str = ''
+
+    if func is None:
+        func = lambda s: s
+
+    def on_clipboard_change():
+        # 1 数据内容一样则跳过不处理，表示很可能是该函数调用pyperclip.copy(s)产生的重复响应
+        nonlocal last_str
+        s0 = pyperclip.paste()
+        s0 = s0.replace('\r\n', '\n')
+
+        if s0 == last_str:
+            return
+        else:
+            last_str = s0
+
+        # 2 处理函数
+        s1 = func(s0)
+        if s1 != s0:
+            if info:
+                print('【处理前】', time.strftime('%H:%M:%S'))
+                print(s0)
+                print('【处理后】')
+                print(s1)
+                print()
+            pyperclip.copy(s1)
+
+    app = QApplication([])
+    clipboard = app.clipboard()
+    clipboard.dataChanged.connect(on_clipboard_change)
+    app.exec_()
