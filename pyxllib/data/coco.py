@@ -304,7 +304,7 @@ class CocoGtData:
             anno['id'] = i
         return anns
 
-    def to_labelme_cls(self, root, *, bbox=True, seg=False, prt=False):
+    def to_labelme_cls(self, root, *, bbox=True, seg=False, info=False):
         """
         :param root: 图片根目录
         :return:
@@ -319,7 +319,7 @@ class CocoGtData:
         # 2 遍历生成labelme数据
         not_finds = set()  # coco里有的图片，root里没有找到
         multimatch = dict()  # coco里的某张图片，在root找到多个匹配文件
-        for img, anns in tqdm(self.group_gt(reserve_empty=True), disable=not prt):
+        for img, anns in tqdm(self.group_gt(reserve_empty=True), disable=not info):
             # 2.1 文件匹配
             imfiles = gs.find_files(img['file_name'])
             if not imfiles:  # 没有匹配图片的，不处理
@@ -358,8 +358,8 @@ class CocoGtData:
                                        'not_finds': not_finds,
                                        'multimatch': Groups(multimatch)})
 
-    def to_labelme(self, root, *, bbox=True, seg=False, prt=False):
-        self.to_labelme_cls(root, bbox=bbox, seg=seg, prt=prt).writes()
+    def to_labelme(self, root, *, bbox=True, seg=False, info=False):
+        self.to_labelme_cls(root, bbox=bbox, seg=seg, info=info).writes()
 
     def split_data(self, parts, *, shuffle=True):
         """ 数据拆分器

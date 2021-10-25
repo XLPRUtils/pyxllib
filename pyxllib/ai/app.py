@@ -36,22 +36,20 @@ class ImageDirectionModelV2(nn.Module):
         )
 
     def forward(self, x):
+        device = next(self.parameters()).device
+        x = x.to(device)
+        # dprint(x.shape)
+        x = self.feature_extractor(x)
+        x = torch.flatten(x, 1)
+        logits = self.classifier(x)
+
         if self.training:
-            x = self.feature_extractor(x)
-            x = torch.flatten(x, 1)
-            # dprint(x.shape)
-            logits = self.classifier(x)
             return logits
         else:
-            # 这个如果用 XlPredictor 框架，输入是一个list
-            x = self.feature_extractor(x[0])
-            x = torch.flatten(x, 1)
-            # dprint(x.shape)
-            logits = self.classifier(x)
             return logits.argmax(dim=1)
 
 
-def get_imagedirection_func(state_file=None, device=None, batch_size=1):
+def get_imagedirection_predictor(state_file=None, device=None, batch_size=1):
     """
     :param state_file: 权重文件
         默认会自动下载，可以不输入
@@ -94,11 +92,68 @@ def get_imagedirection_func(state_file=None, device=None, batch_size=1):
     def img_transform(arg):
         # 输入的参数可以是路径、opencv图片、pil图片
         # 然后会转为灰度图、resize、to_tensor
-        img = CvImg(arg, 0).resize((512, 512)).im
+        img = CvImg.read(arg, 0).resize2((512, 512))
         return torchvision.transforms.functional.to_tensor(img)
 
     pred.transform = img_transform
 
     # pred.target_transform  还可以指定对model.forward结果的y_hat进行后处理
+
+    return pred
+
+
+class ContentTypeModel(nn.Module):
+    def __init__(self, n_classes=3):
+        super().__init__()
+
+        self.feature_extractor = nn.Sequential(
+            nn.Conv2d(3, 10, kernel_size=5, padding=2),
+            nn.BatchNorm2d(10, track_running_stats=False),
+            nn.ReLU(inplace=True),
+            nn.MaxPool2d(kernel_size=2),
+            nn.Conv2d(10, 5, kernel_size=3),
+            nn.BatchNorm2d(5, track_running_stats=False),
+            nn.ReLU(inplace=True),
+            nn.MaxPool2d(kernel_size=2),
+            nn.Conv2d(in_channels=5, out_channels=5, kernel_size=3),
+            nn.BatchNorm2d(5, track_running_stats=False),
+            nn.ReLU(inplace=True),
+            nn.MaxPool2d(kernel_size=2),
+        )
+
+        self.classifier = nn.Sequential(
+            nn.Linear(in_features=180, out_features=n_classes),
+        )
+
+    def forward(self, x):
+        device = next(self.parameters()).device
+        x = x.to(device)
+
+        x = self.feature_extractor(x)
+        x = torch.flatten(x, 1)
+        logits = self.classifier(x)
+
+        if self.training:
+            return logits
+        else:
+            return logits.argmax(dim=1)
+
+
+def get_contenttype_predictor(state_file=None, device=None, batch_size=1):
+    # 1 确定本地权重文件路径，没有则预制了一个网络上的模型，会自动下载
+    if state_file is None:
+        state_file = 'https://gitee.com/code4101/TestData/raw/master/ContentTypeModel%20epoch=15.pth'
+
+    # 2 初始化分类器 （不一定都要用XlPredictor框架实现，但最终提供的接口希望都跟get_imagedirection_func这样简洁）
+    pred = XlPredictor(ContentTypeModel(3), state_file, device=device, batch_size=batch_size)
+
+    # 自定义预处理器，即pred(datas)中的data要经过怎样的预处理，再传入model.forward
+    def img_transform(arg):
+        # 输入的参数可以是路径、opencv图片、pil图片
+        # 然后会转为灰度图、resize、to_tensor
+        img = CvImg.read(arg, 1).resize2((64, 64))
+        return torchvision.transforms.functional.to_tensor(img)
+
+    pred.transform = img_transform
 
     return pred

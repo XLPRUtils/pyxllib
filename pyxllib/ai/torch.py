@@ -513,7 +513,7 @@ class XlPredictor:
 
         if state_file is not None:
             if is_url(state_file):
-                state_file = download(state_file, Dir.TEMP / 'xlpr')
+                state_file = download(state_file, XlPath.tempdir() / 'xlpr')
             state = torch.load(str(state_file), map_location=self.device)
             if 'model' in state:
                 state = state['model']
@@ -559,7 +559,7 @@ class XlPredictor:
                 通常是图片文件路径清单
                     XlPredictor原生并没有扩展图片读取功能，但可以通过transform增加CvPrcs.read来支持
             single_data，单个数据
-                通常是单个图片文件路径，注意transfrom要增加CvPrcs.read或PilPrcs.read来支持路径读取
+                通常是单个图片文件路径，注意transfrom要增加xlcv.read或xlpil.read来支持路径读取
                 注意：有时候单个数据就是list格式，此时需要麻烦点，再套一层list避免歧义
         :param batch_size: 支持每次最多几个样本一起推断
             TODO batch_size根据device空间大小自适应设置
@@ -588,14 +588,14 @@ class XlPredictor:
 
         return loader
 
-    def forward(self, loader, *, progress=False, return_gt=True):
+    def forward(self, loader, *, info=False, return_gt=True):
         """ 前向传播
 
         改功能是__call__的子部分，常在train、eval阶段单独调用
         因为eval阶段，已经有预设好的train_loader、val_loader，不需要使用inputs2loader智能生成一个loader
 
         :param torch.utils.data.DataLoader loader: 标准的DataLoader类型，每次能获取[batch_x, batch_y]
-        :param progress: 有时候数据量比较大，可能会需要看推断进度条
+        :param info: 有时候数据量比较大，可能会需要看推断进度条
         :param return_gt: 注意跟__call__的不同，这里默认是True，__call__默认是False
             前者常用于评价阶段，后者常用于部署阶段，应用场景不同，常见配置有区别
         :return:
@@ -604,8 +604,9 @@ class XlPredictor:
         """
         preds = []
         with torch.no_grad():
-            for batched_inputs in tqdm(loader, 'eval batch', disable=not progress):
+            for batched_inputs in tqdm(loader, 'eval batch', disable=not info):
                 # 有的模型forward里没有处理input的device问题，则需要在这里使用self.device设置
+                # batched_inputs = batched_inputs.to(self.device)  # 这一步可能不应该写在这里，还是先注释掉吧
                 batch_y = self.model(batched_inputs).tolist()
                 if self.target_transform:
                     batch_y = [self.target_transform(y) for y in batch_y]
@@ -617,7 +618,7 @@ class XlPredictor:
         return preds
 
     def __call__(self, raw_in, *, batch_size=None, y_placeholder=...,
-                 progress=False, return_gt=False):
+                 info=False, return_gt=False):
         """ 前传推断结果
 
         :param batch_size: 具体运行中可以重新指定batch_size
@@ -631,7 +632,7 @@ class XlPredictor:
         根据不同model结构特殊性
         """
         loader = self.inputs2loader(raw_in, batch_size=batch_size, y_placeholder=y_placeholder)
-        preds = self.forward(loader, progress=progress, return_gt=return_gt)
+        preds = self.forward(loader, info=info, return_gt=return_gt)
         # 返回结果，单样本的时候作简化
         if len(preds) == 1 and not isinstance(raw_in, (list, tuple, set)):
             return preds[0]
