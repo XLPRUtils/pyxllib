@@ -298,7 +298,7 @@ def main_qapp(window):
 
 
 def qt_clipboard_monitor(func=None, info=1):
-    """ 剪切板监控器
+    """ qt实现的剪切板监控器
 
     感觉这个组件还有很多可以扩展的，比如设置可以退出的快捷键
     """
