@@ -139,7 +139,17 @@ class ContentTypeModel(nn.Module):
             return logits.argmax(dim=1)
 
 
-def get_contenttype_predictor(state_file=None, device=None, batch_size=1):
+def get_contenttype_predictor(state_file=None, device=None, batch_size=1, text=None):
+    """
+
+    :param text: 将结果类别映射到字符串
+
+    Returns:
+        0, handwriting，手写体
+        1, printed，印刷体
+        2, seal，印章
+
+    """
     # 1 确定本地权重文件路径，没有则预制了一个网络上的模型，会自动下载
     if state_file is None:
         state_file = 'https://gitee.com/code4101/TestData/raw/master/ContentTypeModel%20epoch=15.pth'
@@ -155,5 +165,8 @@ def get_contenttype_predictor(state_file=None, device=None, batch_size=1):
         return torchvision.transforms.functional.to_tensor(img)
 
     pred.transform = img_transform
+
+    if text:
+        pred.target_transform = lambda idx: text[idx]
 
     return pred
