@@ -392,25 +392,46 @@ def check_install_package(package, speccal_install_name=None, *, user=False):
         subprocess.check_call(cmds)
 
 
-def limit_call_number(limit=1, object_method=False):
-    """ 限制装饰的函数对象，最多执行几次 """
+def run_once(distinct_mode=False, *, limit=1):
+    """
+    Args:
+        distinct_mode:
+            0，默认False，不区分输入的参数值（包括cls、self），强制装饰的函数只运行一次
+            'str'，设为True或1时，仅以字符串化的差异判断是否是重复调用，参数不同，会判断为不同的调用，每种调用限制最多执行limit次
+            'id,str'，在'str'的基础上，第一个参数使用id代替。一般用于类方法、对象方法的装饰。
+                不考虑类、对象本身的内容改变，只要还是这个类或对象，视为重复调用。
+            'ignore,str'，首参数忽略，第2个开始的参数使用str格式化
+                用于父类某个方法，但是子类继承传入cls，原本id不同会重复执行
+                使用该模式，首参数会ignore忽略，只比较第2个开始之后的参数
+        limit: 默认只会执行一次，该参数可以提高限定的执行次数，一般用不到，用于兼容旧的 limit_call_number 装饰器
+    Returns: 返回decorator
+    """
+
+    def get_tag(args, kwargs):
+        if not distinct_mode:
+            ls = tuple()
+        elif distinct_mode == 'str':
+            ls = (str(args), str(kwargs))
+        elif distinct_mode == 'id,str':
+            ls = (id(args[0]), str(args[1:]), str(kwargs))
+        elif distinct_mode == 'ignore,str':
+            ls = (str(args[1:]), str(kwargs))
+        else:
+            raise ValueError
+        return ls
 
     def decorator(func):
-        counter = defaultdict(int) if object_method else 0
+        counter = {}  # 映射到一个[cnt, last_result]
 
         def wrapper(*args, **kwargs):
-            nonlocal counter
-
-            if object_method:
-                id_ = id(args[0])
-                counter[id_] += 1
-                cnt = counter[id_]
-            else:
-                counter += 1
-                cnt = counter
-
-            if cnt <= limit:
-                return func(*args, **kwargs)
+            tag = get_tag(args, kwargs)
+            if tag not in counter:
+                counter[tag] = [0, None]
+            x = counter[tag]
+            if x[0] < limit:
+                res = func(*args, **kwargs)
+                x = counter[tag] = [x[0] + 1, res]
+            return x[1]
 
         return wrapper
 

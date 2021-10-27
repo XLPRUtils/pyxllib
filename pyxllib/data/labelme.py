@@ -421,6 +421,28 @@ class LabelmeDict:
         return lmdict
 
     @classmethod
+    def flip_img_and_json(cls, impath, direction):
+        """  旋转impath，如果有对应的json也会自动处理
+        demo_flip_labelme，演示如何使用翻转图片、labelme标注功能
+
+        :param XlPath impath: 图片路径
+        :param direction: 标记现在图片是哪个方向：0是正常，1是向右翻转，2是向下翻转，3是向左翻转
+            顺时针0123表示当前图片方向
+            甚至该参数可以设成None，没有输入的时候调用模型识别结果，不过那个模型不是很准确，先不搞这种功能
+        """
+        # 图片旋转
+        im = xlpil.read(impath)
+        im = xlpil.flip_direction(im, direction)
+        xlpil.write(im, impath)
+
+        # json格式
+        jsonpath = impath.with_suffix('.json')
+        if jsonpath.exists():
+            lmdict = jsonpath.read_json('utf8')  # 必须是labelme的格式，其他格式不支持处理哦
+            cls.flip_points(lmdict, -direction)  # 默认是inplace操作
+            jsonpath.write_json(lmdict, 'utf8')
+
+    @classmethod
     def update_labelattr(cls, lmdict, *, points=False, inplace=True):
         """
 
