@@ -66,6 +66,7 @@ def is_file(arg, exists=True):
         设为False，则只判断文件名合法性，不要求其一定要存在
     """
     if not isinstance(arg, str): return False
+    if len(arg) > 500: return False
     if not exists:
         raise NotImplementedError
     return os.path.isfile(arg)
