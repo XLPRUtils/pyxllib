@@ -336,7 +336,7 @@ class ComputeIou:
         >>> ComputeIou.polygon2([[0, 0], [10, 10]], [[5, 5], [15, 15]])
         0.14285714285714285
         """
-        from pyxllib.algo.shapely_ import ShapelyPolygon
+        from pyxllib.algo.shapelylib import ShapelyPolygon
         polygon1, polygon2 = ShapelyPolygon.gen(pts1), ShapelyPolygon.gen(pts2)
         return cls.polygon(polygon1, polygon2)
 
@@ -500,3 +500,21 @@ def split_vector_interval(vec, maxsplit=None, minwidth=3):
     for interval in intervals:
         res.append([interval.start(), interval.end()])
     return res
+
+
+def bound_scale(bound, scale):
+    """ 一个矩形，以中心为原点，缩放面积为原来scale的新矩形
+
+    :param bound: [x1, y1, x2, y2]
+    :param scale: 比例，例如0.5，就是缩放一半
+    """
+    x1, y1, x2, y2 = bound
+    x0 = (x2 - x1) / 2
+    y0 = (y2 - y1) / 2
+    r = 1 - scale ** 0.5
+
+    x1 += r * abs(x0 - x1)
+    y1 += r * abs(y0 - y1)
+    x2 -= r * abs(x0 - x2)
+    y2 -= r * abs(y0 - y2)
+    return x1, y1, x2, y2

@@ -8,6 +8,7 @@ from pyxllib.xl import *
 from pyxllib.algo.geo import *
 from pyxllib.cv.newbie import *
 from pyxllib.cv.expert import *
+from pyxllib.cv.xlpillib import xlpil
 
 # 把自定义的一些功能嵌入到PIL.Image.Image类中。
 # 因为pyxllib.xlcv设计初衷本就是为了便捷而牺牲工程性。

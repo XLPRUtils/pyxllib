@@ -22,7 +22,7 @@ import pyscreeze  # NOQA pyautogui安装的时候会自动安装依赖的pyscree
 from pyxllib.prog.newbie import first_nonnone, round_int
 from pyxllib.prog.pupil import xlwait, DictTool, check_install_package
 from pyxllib.algo.geo import ComputeIou, ltrb2xywh, xywh2ltrb
-from pyxllib.algo.shapely_ import ShapelyPolygon
+from pyxllib.algo.shapelylib import ShapelyPolygon
 from pyxllib.file.specialist import File, Dir
 from pyxllib.debug.specialist import TicToc
 from pyxllib.cv.expert import xlcv, xlpil
