@@ -1122,7 +1122,7 @@ def cache_file(file, make_data_func: Callable[[], Any] = None, *, reset=False, *
     def decorator(func):
         def wrapper(*args2, **kwargs2):
             f = File(file)
-            if f and not reset:  # 文件存在，直接读取返回
+            if f.exists() and not reset:  # 文件存在，直接读取返回
                 data = f.read(**kwargs)
             else:  # 文件不存在则要生成一份数据
                 data = func(*args2, **kwargs2)
