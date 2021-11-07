@@ -13,6 +13,7 @@ from pyxllib.algo.geo import bound_scale, rect2polygon
 from pyxllib.algo.shapelylib import ShapelyPolygon
 from pyxllib.algo.disjoint import disjoint_set
 from pyxllib.cv.xlcvlib import xlcv
+from pyxllib.cv.xlpillib import xlpil  # noqa
 from pyxllib.file.specialist import File
 
 

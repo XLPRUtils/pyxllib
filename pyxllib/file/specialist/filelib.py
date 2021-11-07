@@ -870,7 +870,7 @@ class XlPath(type(pathlib.Path())):
             sz = 0
 
         if human_readable:
-            return humanfriendly.format_size(self.size, binary=True)
+            return humanfriendly.format_size(sz, binary=True)
         else:
             return sz
 
@@ -916,7 +916,7 @@ class XlPath(type(pathlib.Path())):
         with open(self, 'wb') as f:
             pickle.dump(data, f)
 
-    def read_json(self, encoding=None, *, errors='strict', rich_return: bool = False):
+    def read_json(self, encoding='utf8', *, errors='strict', rich_return: bool = False):
         """
 
         Args:
@@ -939,12 +939,12 @@ class XlPath(type(pathlib.Path())):
         else:
             return data
 
-    def write_json(self, data, encoding=None, **kwargs):
+    def write_json(self, data, encoding='utf8', **kwargs):
         with open(self, 'w', encoding=encoding) as f:
             DictTool.ior(kwargs, {'ensure_ascii': False})
             json.dump(data, f, **kwargs)
 
-    def read_yaml(self, encoding=None, *, errors='strict', rich_return=False):
+    def read_yaml(self, encoding='utf8', *, errors='strict', rich_return=False):
         s, encoding = self.read_text(encoding=encoding, errors=errors, rich_return=True)
         data = yaml.safe_load(s)
 
@@ -953,11 +953,11 @@ class XlPath(type(pathlib.Path())):
         else:
             return data
 
-    def write_yaml(self, data, encoding=None):
+    def write_yaml(self, data, encoding='utf8'):
         with open(self, 'w', encoding=encoding) as f:
             yaml.dump(data, f)
 
-    def read_bib(self, encoding=None):
+    def read_bib(self, encoding='utf8'):
         import bibtexparser
 
         with open(self, encoding=encoding) as bibtex_file:
@@ -965,7 +965,7 @@ class XlPath(type(pathlib.Path())):
 
         return bib_database
 
-    def write_bib(self, bibtex_database, encoding=None):
+    def write_bib(self, bibtex_database, encoding='utf8'):
         import bibtexparser
 
         with open(self, 'w', encoding=encoding) as f:

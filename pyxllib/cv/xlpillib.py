@@ -286,11 +286,14 @@ class xlpil(EnchantBase):
     @staticmethod
     def flip_direction(im, direction):
         """
-        :param direction: 标记现在图片是哪个方向：0是正常，1是向右翻转，2是向下翻转，3是向左翻转
+        :param direction: 逆时针旋转几个90度
+            标记现在图片是哪个方向：0是正常，1是向右翻转，2是向下翻转，3是向左翻转
         """
-        im = im.transpose({1: PIL.Image.ROTATE_90,
-                           2: PIL.Image.ROTATE_180,
-                           3: PIL.Image.ROTATE_270}[direction])
+        direction = direction % 4
+        if direction:
+            im = im.transpose({1: PIL.Image.ROTATE_90,
+                               2: PIL.Image.ROTATE_180,
+                               3: PIL.Image.ROTATE_270}[direction])
         return im
 
     @staticmethod
