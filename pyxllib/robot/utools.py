@@ -13,21 +13,21 @@ check_install_package('humanfriendly')
 check_install_package('pandas')
 check_install_package('pyautogui', 'PyAutoGui')  # 其实pip install不区分大小写，不过官方这里安装是驼峰名
 
-import datetime
-import json
-import os
 import pathlib
 import pyperclip
 import re
+import datetime
+import json
+import os
 
 import fire
 from humanfriendly import format_timespan
 import pandas as pd
 import pyautogui
 
+from pyxllib.robot.autogui import type_text, clipboard_decorator
 from pyxllib.file.specialist import File, Dir
 from pyxllib.debug.specialist import browser, TicToc, parse_datetime
-from pyxllib.robot.autogui import type_text, clipboard_decorator
 
 
 def _print_df_result(df, outfmt='text'):
@@ -289,9 +289,15 @@ class UtoolsRegex(UtoolsBase):
         return eval(self.cmds['subinput'])
         # print(f'finished in {format_timespan(tt.tocvalue())}.')
 
-    @clipboard_decorator(paste=True)
-    def refine_text(self, func):
-        return func(self.cmds['ClipText'])
+    def refine_text(self, func, rtype='text', *, copy=True, paste=True, typing=False):
+        from functools import partial
+
+        @clipboard_decorator(rtype=rtype, copy=copy, paste=paste, typing=typing)
+        def _refine():
+            return fire.Fire(partial(func, self.cmds['ClipText']),
+                             self.cmds['subinput'], func.__name__)
+
+        return _refine()
 
 
 if __name__ == '__main__':

@@ -7,7 +7,7 @@
 from pyxllib.xlcv import *
 
 from pyxllib.ai.torch import *
-from pyxllib.ai.app import *
+from pyxllib.ai.torch_app import *
 
 from pyxllib.data.icdar import IcdarEval
 from pyxllib.data.labelme import *
