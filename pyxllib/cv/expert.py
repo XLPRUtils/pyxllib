@@ -56,7 +56,7 @@ class TextlineShape:
     def __init__(self, box, *, shrink_bound=False):
         """
         :param box: 可以转成Polygon的数据类型
-        :param shrink_bound: 倾斜度过大的文本框，需要特殊处理
+        :param shrink_bound: 倾斜度过大的文本框，需要特殊处理，把外接矩形缩小会更准确些。
         """
         self.polygon = ShapelyPolygon.gen(box)
         self.bounds = self.polygon.bounds
