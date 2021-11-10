@@ -8,10 +8,13 @@
 pp是paddlepaddle的缩写
 """
 
+import os
+
 from tqdm import tqdm
 
 import paddle
 
+from pyxllib.xl import XlPath
 from pyxllib.ai.specialist import ClasEvaluater
 
 
@@ -141,3 +144,36 @@ class ClasAccuracy(paddle.metric.Metric):
         self.total = 0
         self.gt = []
         self.pred = []
+
+
+class VisualAcc(paddle.callbacks.Callback):
+    def __init__(self, logdir, experimental_name, *, save_model_with_input=None):
+        """
+        :param logdir:
+        :param experimental_name:
+        :param save_model_with_input: 默认不存储模型结构，当开启该参数时，
+        """
+        from pyxllib.prog.pupil import check_install_package
+        check_install_package('visualdl')
+        from visualdl import LogWriter
+
+        super().__init__()
+        # 这样奇怪地加后缀，是为了字典序后，每个实验的train显示在eval之前
+        d = XlPath(logdir) / (experimental_name + '__train')
+        # if d.exists(): shutil.rmtree(d)
+        self.write = LogWriter(logdir=str(d))
+        d = XlPath(logdir) / (experimental_name + '_eval')
+        # if d.exists(): shutil.rmtree(d)
+        self.eval_writer = LogWriter(logdir=str(d))
+        self.eval_times = 0
+
+        self.save_model_with_input = save_model_with_input
+
+    def on_epoch_end(self, epoch, logs=None):
+        self.write.add_scalar('acc', step=epoch, value=logs['acc'])
+        self.write.flush()
+
+    def on_eval_end(self, logs=None):
+        self.eval_writer.add_scalar('acc', step=self.eval_times, value=logs['acc'])
+        self.eval_writer.flush()
+        self.eval_times += 1
