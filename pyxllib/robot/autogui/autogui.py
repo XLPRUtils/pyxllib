@@ -8,6 +8,7 @@ from pyxllib.prog.pupil import check_install_package
 
 check_install_package('pyautogui')
 check_install_package('keyboard')
+check_install_package('klembord')
 
 from collections import defaultdict
 import json
@@ -605,6 +606,50 @@ def clipboard_decorator(rtype='text', *, copy=True, paste=False, typing=False):
         return wrapper
 
     return decorator
+
+
+def get_clipboard_content(rich=False, *, head=False):
+    """ klembord的get_with_rich_text获取富文本有点小问题，所以自己重写了一个版本
+    好在有底层接口，所以也不难改
+
+    :param rich: 是否返回html格式的富文本，默认True
+    :param head: 富文本时，是否要返回<html><body>的标记
+    """
+    import re
+    import html
+
+    import klembord
+    from klembord import W_HTML, W_UNICODE
+
+    if not rich:
+        return klembord.get_text()
+
+    content = klembord.get((W_HTML, W_UNICODE))
+    html_content = content[W_HTML]
+    if html_content:
+        html_content = html_content.decode('utf8')
+        html_content = re.search(r'<body>\s*(?:<!--StartFragment-->)?(.+?)(?:<!--EndFragment-->)?\s*</body>',
+                                 html_content).group(1)
+    else:
+        # 没有html的时候，可以封装成html格式返回
+        text = content[W_UNICODE].decode('utf16')
+        html_content = html.escape(text)
+
+    if head:
+        html_content = '<html><body>' + html_content + '</body></html>'
+
+    return html_content
+
+
+def set_clipboard_content(content, *, rich=False):
+    """ 对klembord剪切板的功能做略微的简化 """
+    from bs4 import BeautifulSoup
+    import klembord
+
+    if rich:
+        klembord.set_with_rich_text(BeautifulSoup(content, 'lxml').text, content)
+    else:
+        klembord.set_text(content)
 
 
 if __name__ == '__main__':

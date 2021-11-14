@@ -908,6 +908,10 @@ class XlPath(type(pathlib.Path())):
         else:
             return s
 
+    def write_text(self, data, encoding='utf8', errors=None):
+        with self.open(mode='w', encoding=encoding, errors=errors) as f:
+            return f.write(data)
+
     def read_pkl(self):
         with open(self, 'rb') as f:
             return pickle.load(f)
@@ -970,6 +974,28 @@ class XlPath(type(pathlib.Path())):
 
         with open(self, 'w', encoding=encoding) as f:
             bibtexparser.dump(bibtex_database, f)
+
+    def read_auto(self, *args, **kwargs):
+        """ 根据文件后缀自动识别读取函数 """
+        if self.isfile():  # 如果存在这样的文件，那就读取文件内容
+            # 获得文件扩展名，并统一转成小写
+            mode = self.suffix.lower()[1:]
+            read_func = getattr(self, 'read_' + mode, None)
+            if read_func:
+                return read_func(*args, **kwargs)
+            else:
+                return self.read_text(*args, **kwargs)
+        else:  # 非文件对象
+            raise FileNotFoundError(f'{self} 文件不存在，无法读取。')
+
+    def write_auto(self, data, *args, **kwargs):
+        """ 根据文件后缀自动识别写入函数 """
+        mode = self.suffix.lower()[1:]
+        write_func = getattr(self, 'write_' + mode, None)
+        if write_func:
+            return write_func(data, *args, **kwargs)
+        else:
+            return self.write_text(str(data), *args, **kwargs)
 
 
 def demo_file():

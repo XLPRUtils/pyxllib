@@ -97,13 +97,13 @@ class ComputingReceptiveFields:
         return df
 
     @classmethod
-    def from_paddle_sequential(cls, network):
+    def from_paddle_layers(cls, network):
         """ 先对一些基础的常见类型做些功能接口，复杂的情况以后有需要再说吧 """
 
         import paddle
 
         ls = []
-        for x in network:
+        for x in network.sublayers():
             if isinstance(x, paddle.nn.layer.conv.Conv2D):
                 ls.append(['Conv2D', x._kernel_size[0], x._stride[0]])
             elif isinstance(x, paddle.nn.layer.pooling.MaxPool2D):

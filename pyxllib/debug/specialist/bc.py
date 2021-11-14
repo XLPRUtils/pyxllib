@@ -5,12 +5,14 @@
 # @Date   : 2020/06/01 18:13
 
 import copy
+import shutil
 
+from pyxllib.prog.deprecatedlib import deprecated
 from pyxllib.algo.pupil import intersection_split
 from pyxllib.algo.specialist import DictCmper
+from pyxllib.file.specialist import File, Dir, filesmatch, get_encoding, XlPath
 from pyxllib.debug.pupil import dprint, prettifystr
 from pyxllib.debug.specialist.browser import Explorer
-from pyxllib.file.specialist import File, Dir, filesmatch, get_encoding
 
 
 # 需要使用的第三方软件
@@ -117,10 +119,10 @@ def modify_file(file, func, *, outfile=None, file_mode=None, debug=0):
             if debug == 0:
                 infile.write(new_data, mode=file_mode)  # 直接处理
             elif debug == 1:
-                temp_file = File('refine_file', Dir.TEMP, suffix=infile.suffix).write(new_data)
+                temp_file = File('refine_content', Dir.TEMP, suffix=infile.suffix).write(new_data)
                 bcompare(infile, temp_file)  # 使用beyond compare软件打开对比查看
             elif debug == -1:
-                temp_file = File('old_content', Dir.TEMP, suffix=infile.suffix)
+                temp_file = File('origin_content', Dir.TEMP, suffix=infile.suffix)
                 infile.copy(temp_file)
                 infile.write(new_data, mode=file_mode, encoding=enc)  # 把原文件内容替换了
                 bcompare(infile, temp_file)  # 然后显示与旧内容进行对比
