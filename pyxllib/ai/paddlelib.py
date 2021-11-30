@@ -9,6 +9,7 @@ pp是paddlepaddle的缩写
 """
 
 import os
+import logging
 
 from tqdm import tqdm
 
@@ -39,6 +40,10 @@ def build_testdata_loader(samples, transform=None, *args, **kwargs):
 
     :param samples: list类型的输入格式
     """
+    import paddle.fluid.dataloader.fetcher
+    # 暂时不知道怎么关闭这个警告，先用暴力方法
+    paddle.fluid.dataloader.fetcher._WARNING_TO_LOG = False
+
     if isinstance(samples, paddle.io.DataLoader):
         return samples
     elif isinstance(samples, paddle.io.Dataset):
@@ -159,10 +164,10 @@ class VisualAcc(paddle.callbacks.Callback):
 
         super().__init__()
         # 这样奇怪地加后缀，是为了字典序后，每个实验的train显示在eval之前
-        d = XlPath(logdir) / (experimental_name + '__train')
+        d = XlPath(logdir) / (experimental_name + '_train')
         # if d.exists(): shutil.rmtree(d)
         self.write = LogWriter(logdir=str(d))
-        d = XlPath(logdir) / (experimental_name + '_eval')
+        d = XlPath(logdir) / (experimental_name + '_val')
         # if d.exists(): shutil.rmtree(d)
         self.eval_writer = LogWriter(logdir=str(d))
         self.eval_times = 0

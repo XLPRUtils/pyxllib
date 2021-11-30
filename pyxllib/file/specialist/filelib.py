@@ -909,7 +909,7 @@ class XlPath(type(pathlib.Path())):
             return s
 
     def write_text(self, data, encoding='utf8', errors=None):
-        with self.open(mode='w', encoding=encoding, errors=errors) as f:
+        with open(self, 'w', encoding=encoding, errors=errors) as f:
             return f.write(data)
 
     def read_pkl(self):
