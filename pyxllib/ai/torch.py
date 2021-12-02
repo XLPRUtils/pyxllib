@@ -23,8 +23,6 @@ from pyxllib.ai.specialist import ClasEvaluater
 
 __base = """
 """
-for i, x in enumerate(range(5)):
-    pass
 
 
 class NvmDevice:
