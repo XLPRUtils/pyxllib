@@ -9,6 +9,7 @@ pp是paddlepaddle的缩写
 """
 
 import os
+import sys
 import logging
 
 from tqdm import tqdm
@@ -20,9 +21,12 @@ from pyxllib.ai.specialist import ClasEvaluater
 
 
 class SequenceDataset(paddle.io.Dataset):
-    def __init__(self, samples, transform=None):
+    def __init__(self, samples, labels=None, transform=None):
         super().__init__()
         self.samples = samples
+        self.labels = labels
+        if self.labels:
+            assert len(self.samples) == len(self.labels)
         self.transform = transform
 
     def __len__(self):
@@ -32,10 +36,14 @@ class SequenceDataset(paddle.io.Dataset):
         x = self.samples[index]
         if self.transform:
             x = self.transform(x)
-        return x
+
+        if self.labels:
+            return x, self.labels[index]
+        else:
+            return x
 
 
-def build_testdata_loader(samples, transform=None, *args, **kwargs):
+def build_testdata_loader(samples, *, labels=None, transform=None, **kwargs):
     """ 简化的一个创建paddle的DataLoader的函数。主要用于简化部署阶段的推理。
 
     :param samples: list类型的输入格式
@@ -49,9 +57,9 @@ def build_testdata_loader(samples, transform=None, *args, **kwargs):
     elif isinstance(samples, paddle.io.Dataset):
         dataset = samples
     else:
-        dataset = SequenceDataset(samples, transform)
+        dataset = SequenceDataset(samples, labels, transform)
 
-    return paddle.io.DataLoader(dataset, *args, **kwargs)
+    return paddle.io.DataLoader(dataset, **kwargs)
 
 
 class ImageClasPredictor:
@@ -77,11 +85,13 @@ class ImageClasPredictor:
         import paddle.nn.functional as F
 
         if not batch_size: batch_size = len(samples)
-        data_loader = build_testdata_loader(samples, self.transform, batch_size=batch_size)
+        data_loader = build_testdata_loader(samples, transform=self.transform, batch_size=batch_size)
 
         logits = []
         for inputs in tqdm(data_loader, desc='预测：', disable=verbose < 1):
             logits.append(self.model(inputs))
+            if sys.version_info.minor >= 8:
+                break
         logits = paddle.concat(logits, axis=0)
 
         if verbose < 2:
@@ -182,3 +192,11 @@ class VisualAcc(paddle.callbacks.Callback):
         self.eval_writer.add_scalar('acc', step=self.eval_times, value=logs['acc'])
         self.eval_writer.flush()
         self.eval_times += 1
+
+
+def check_network(x):
+    """ 检查输入的模型x的相关信息 """
+    msg = '总参数量：'
+    msg += str(sum([p.size for p in x.parameters()]))
+    msg += ' | ' + ', '.join([f'{p.name}={p.size}' for p in x.parameters()])
+    print(msg)

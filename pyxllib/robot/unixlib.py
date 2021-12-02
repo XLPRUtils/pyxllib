@@ -300,8 +300,9 @@ class XlSSHClient(paramiko.SSHClient):
         """ 文档参考 self.scp_put
 
         :param local_path: 可以不输入远程remote_path，仅输入local_path来映射、运行
-
         get应该会比put更慢一点，因为get需要使用命令从服务器获得更多参考信息，而put很多文件信息可以在本地直接获得
+
+        >> self.scp_get('/home/datasets/doc3D', '/home/dataset')
         """
         if local_path:
             local_path = XlPath(local_path)
