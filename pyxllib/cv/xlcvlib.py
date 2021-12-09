@@ -555,6 +555,42 @@ class xlcv(EnchantBase):
             dst = xlcv.warp(dst, warp_mat, (w, h))
         return dst
 
+    @staticmethod
+    def trim(im, *, border=0, color=None):
+        """ 如果想用cv2实现，可以参考： https://stackoverflow.com/questions/49907382/how-to-remove-whitespace-from-an-image-in-opencv
+        目前为了偷懒节省代码量，就直接调用pil的版本了
+        """
+        from pyxllib.cv.xlpillib import xlpil
+        im = xlcv.to_pil_image(im)
+        im = xlpil.trim(im, border=border, color=color)
+        return xlpil.to_cv2_image(im)
+
+    @staticmethod
+    def keep_subtitles(im, judge_func=None, trim_color=(255, 255, 255)):
+        """ 保留（白色）字幕，去除背景，并会裁剪图片缩小尺寸
+
+        是比较业务级的一个功能，主要是这段代码挺有学习价值的，有其他变形需求，
+        可以修改judge_func，也可以另外写函数，这个仅供参考
+        """
+
+        def fore_pixel(rgb):
+            """ 把图片变成白底黑字
+
+            判断像素是不是前景，是返回0，不是返回255
+            """
+            if sum(rgb > 170) == 3 and rgb.max() - rgb.min() < 30:
+                return [0, 0, 0]
+            else:
+                return [255, 255, 255]
+
+        if judge_func is None:
+            judge_func = fore_pixel
+
+        im2 = np.apply_along_axis(judge_func, 2, im).astype('uint8')
+        if trim_color:
+            im2 = xlcv.trim(im2, color=trim_color)
+        return im2
+
 
 class CvImg(np.ndarray):
     def __new__(cls, input_array, info=None):

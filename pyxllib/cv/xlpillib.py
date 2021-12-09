@@ -237,16 +237,22 @@ class xlpil(EnchantBase):
         return im
 
     @staticmethod
-    def trim(im, *, border=0, color=(255, 255, 255)):
+    def trim(im, *, border=0, color=None):
         """ 默认裁剪掉白色边缘，可以配合 get_backgroup_color 裁剪掉背景色
 
         :param border: 上下左右保留多少边缘
             输入一个整数，表示统一留边
             也可以输入[int, int, int, int]，分别表示left top right bottom留白
+        :param color: 要裁剪的颜色，这是精确值，没有误差，如果需要模糊，可以提前预处理成精确值
+            这个默认值设成None，本来是想说支持灰度图，此时输入一个255的值就好
+            但是pil的灰度图机制好像有些不太一样，总之目前默认值还是自动会设成 (255, 255, 255)
         :param percent-background: TODO 控制裁剪百分比上限
         """
         from PIL import Image, ImageChops
         from pyxllib.algo.geo import xywh2ltrb, ltrb2xywh, ltrb_border
+
+        if color is None:
+            color = (255, 255, 255)
 
         bg = Image.new(im.mode, im.size, color)
         diff = ImageChops.difference(im, bg)
@@ -369,3 +375,9 @@ class xlpil(EnchantBase):
             # composite是合成的意思。将右图的alpha替换为左图内容
             im = Image.alpha_composite(background, im.convert('RGBA')).convert('RGB')
         return im
+
+    @staticmethod
+    def keep_subtitles(im, judge_func=None, trim_color=(255, 255, 255)):
+        im = xlpil.to_cv2_image(im)
+        im = xlcv.keep_subtitles(im, judge_func=judge_func, trim_color=trim_color)
+        return xlcv.to_pil_image(im)

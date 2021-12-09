@@ -68,7 +68,7 @@ class TrackbarTool:
             f = obj(**kws, p=1)  # p是概率，这里做可视化，是百分百执行
             return f(image=img)['image']
 
-        return cls(**kwargs, imgproc=imgproc)
+        return cls(**kwargs, imgproc=imgproc, winname=obj.__name__)
 
     def imshow(self, img=None):
         """ 刷新显示的图片 """
@@ -214,25 +214,6 @@ class HoughLinesPTool(TrackbarTool):
         if lines is None: lines = np.array([])
         # 处理用二值化，显示用原图
         self.imshow(xlcv.lines(self.img, lines))
-
-
-class CoarseDropoutTool(TrackbarTool):
-    def __init__(self, img, winname='CoarseDropout', flags=1):
-        super().__init__(winname, img=img, flags=flags)
-
-        self.create_trackbar('max_holes', 50, 8)
-        self.create_trackbar('max_height', 50, 8)
-        self.create_trackbar('max_width', 50, 8)
-        self.create_trackbar('fill_value', 255, 0)
-
-    def default_run(self, **kwargs):
-        import albumentations as A
-
-        tt = TicToc()
-        # 随机噪声遮挡
-        res = A.CoarseDropout(**kwargs)(image=self.img)
-        self.imshow(res['image'])
-        tt.toc('run')
 
 
 def test_adaptiveThreshold(img=None):
