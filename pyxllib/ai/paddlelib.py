@@ -13,10 +13,14 @@ import sys
 import logging
 
 from tqdm import tqdm
+import numpy as np
+import pandas as pd
+import humanfriendly
 
 import paddle
 
-from pyxllib.xl import XlPath
+import pyxllib.xl
+from pyxllib.xl import XlPath, browser
 from pyxllib.ai.specialist import ClasEvaluater
 
 
@@ -200,3 +204,51 @@ def check_network(x):
     msg += str(sum([p.size for p in x.parameters()]))
     msg += ' | ' + ', '.join([f'{p.name}={p.size}' for p in x.parameters()])
     print(msg)
+
+
+def model_state_dict_df(model, *, browser=False):
+    """ 统计模型中所有的参数
+
+    :param browser: 不单纯返回统计表，而是用浏览器打开，展示更详细的分析报告
+
+    详细见 w211206周报
+    """
+    ls = []
+    # 摘选ParamBase中部分成员属性进行展示
+    columns = ['var_name', 'name', 'shape', 'size', 'dtype', 'trainable', 'stop_gradient']
+
+    state_dict = model.state_dict()  # 可能会有冗余重复
+
+    used = set()
+    for k, v in state_dict.items():
+        # a 由于state_dict的机制，self.b=self.a，a、b都是会重复获取的，这时候不应该重复计算参数量
+        # 但是后面计算存储文件大小的时候，遵循原始机制冗余存储计算空间消耗
+        param_id = id(v)
+        if param_id in used:
+            continue
+        else:
+            used.add(param_id)
+        # b msg
+        msg = [k]
+        for col_name in columns[1:]:
+            msg.append(getattr(v, col_name))
+        ls.append(msg)
+    df = pd.DataFrame.from_records(ls, columns=columns)
+
+    def html_content(df):
+        import io
+
+        content = f'<pre>{model}' + '</pre><br/>'
+        content += df.to_html()
+        total_params = sum(df['size'])
+        content += f'<br/>总参数量：{total_params}'
+
+        f = io.BytesIO()
+        paddle.save(state_dict, f)
+        content += f'<br/>文件大小：{humanfriendly.format_size(len(f.getvalue()))}'
+        return content
+
+    if browser:
+        pyxllib.xl.browser.html(html_content(df))
+
+    return df

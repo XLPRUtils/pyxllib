@@ -10,6 +10,6 @@ TODO 写一些图片相似度相关功能
 
 from pyxllib.prog.pupil import check_install_package
 
-check_install_package('imagehash')
+check_install_package('imagehash', 'ImageHash')
 
 import imagehash
