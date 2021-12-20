@@ -183,3 +183,52 @@ def _test_getfile_speed():
 
 ____perf = """
 """
+
+
+def check_os_status():
+    """ 检查系统当前运行状态 """
+    import time
+    import psutil
+
+    # 1
+    print(f'1 逻辑cpu数量：{psutil.cpu_count()}  \t{psutil.cpu_percent(1) / 100:-3.0%}')
+
+    # 2
+    m = psutil.virtual_memory()
+    print(f'2 内存大小：{m.total / (1024 ** 3):.0f} GB \t{m.percent / 100:-3.0%}')
+
+    # 3
+    disks = psutil.disk_partitions()
+    used, total = 0, 0
+    for d in disks:
+        msg = psutil.disk_usage(d.mountpoint)
+        used += msg.used
+        total += msg.total
+    used /= 1024 ** 4
+    total /= 1024 ** 4
+    print(f'3 磁盘空间：{total:.2f} TB\t{used / total:-3.0%}')
+
+    # 4
+    msg1 = psutil.disk_io_counters()
+    sec = 5  # 统计几秒内的读写状态
+    time.sleep(sec)
+    msg2 = psutil.disk_io_counters()
+    print(f'4 读写：', end='')
+    for name in ['read_bytes', 'write_bytes']:
+        value = getattr(msg2, name) - getattr(msg1, name)
+        if name.endswith('_count'):
+            print(f'{name}={value / sec:.0f} /s', end=' ')
+        else:
+            print(f'{name}={value / (1024 ** 2) / sec:.0f}MB/s', end=' ')
+    print()
+
+    # 5
+    msg1 = psutil.net_io_counters()
+    sec = 5  # 统计几秒内的读写状态
+    time.sleep(sec)
+    msg2 = psutil.net_io_counters()
+    print(f'5 网络：', end='')
+    for name in ['bytes_sent', 'bytes_recv']:
+        value = getattr(msg2, name) - getattr(msg1, name)
+        print(f'{name}={value / (1024 ** 2) / sec:.0f}MB/s', end=' ')
+    print()

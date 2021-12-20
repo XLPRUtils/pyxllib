@@ -8,7 +8,7 @@ import torch
 from torch import nn
 import torchvision
 
-from pyxllib.cv.expert import CvImg
+from pyxllib.cv.xlcvlib import CvImg
 from pyxllib.ai.torch import XlPredictor
 
 

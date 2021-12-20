@@ -898,7 +898,7 @@ class XlPath(type(pathlib.Path())):
         """
         pass
 
-    def read_text(self, encoding=None, errors='strict', rich_return: bool = False):
+    def read_text(self, encoding='utf8', errors='strict', rich_return: bool = False):
         bstr = self.read_bytes()
         if not encoding: encoding = get_encoding(bstr)
         s = bstr.decode(encoding=encoding, errors=errors)
