@@ -17,6 +17,7 @@ check_install_package('xlrd2')
 import re
 
 import openpyxl
+from openpyxl import Workbook
 from openpyxl.cell.cell import MergedCell
 from openpyxl.styles import Font
 from openpyxl.utils.cell import get_column_letter

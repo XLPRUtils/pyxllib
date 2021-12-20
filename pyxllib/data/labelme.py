@@ -473,6 +473,24 @@ class LabelmeDict:
             shape['label'] = json.dumps(labelattr, ensure_ascii=False)
         return lmdict
 
+    @classmethod
+    def to_quad_pts(cls, shape):
+        """ 将一个形状标注变成4个点标注的四边形 """
+        pts = shape['points']
+        t = shape['shape_type']
+        if t == 'rectangle':
+            return rect2polygon(pts)
+        elif t == 'polygon':
+            if len(pts) != 4:
+                # 暂用外接矩形代替
+                xs = [p[0] for p in pts]
+                ys = [p[1] for p in pts]
+                r = [(min(xs), min(ys)), (max(xs), max(ys))]
+                pts = rect2polygon(r)
+            return pts
+        else:
+            raise NotImplementedError(f'{t}')
+
 
 class LabelmeDataset(BasicLabelDataset):
     def __init__(self, root, relpath2data=None, *, reads=True, prt=False, fltr='json', slt='json', extdata=None):
