@@ -837,6 +837,12 @@ class XlPath(type(pathlib.Path())):
     def tempdir(cls):
         return cls(tempfile.gettempdir())
 
+    @classmethod
+    def tempfile(cls, suffix="", dir=None):
+        if dir is None:
+            dir = tempfile.gettempdir()
+        return cls(tempfile.mktemp(suffix=suffix, dir=dir))
+
     def start(self, *args, **kwargs):
         """ 使用关联的程序打开p，类似于双击的效果
 
@@ -957,9 +963,9 @@ class XlPath(type(pathlib.Path())):
         else:
             return data
 
-    def write_yaml(self, data, encoding='utf8'):
+    def write_yaml(self, data, encoding='utf8', *, sort_keys=False, **kwargs):
         with open(self, 'w', encoding=encoding) as f:
-            yaml.dump(data, f)
+            yaml.dump(data, f, sort_keys=sort_keys, **kwargs)
 
     def read_bib(self, encoding='utf8'):
         import bibtexparser

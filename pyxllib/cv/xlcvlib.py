@@ -31,6 +31,7 @@ class xlcv(EnchantBase):
         """
         # 虽然只绑定cv2，但其他相关的几个库的方法上，最好也不要重名
         names = cls.check_enchant_names([np.ndarray, PIL.Image, PIL.Image.Image])
+        names -= {'concat'}
         cls._enchant(cv2, names, EnchantCvt.staticmethod2modulefunc)
 
     @staticmethod
@@ -590,6 +591,64 @@ class xlcv(EnchantBase):
         if trim_color:
             im2 = xlcv.trim(im2, color=trim_color)
         return im2
+
+    @classmethod
+    def concat(cls, images, *, pad=5, pad_color=None):
+        """ 拼接输入的多张图为一张图，请自行确保尺寸匹配
+
+        :param images: 一维或二维list数组存储的np.array矩阵
+            一维的时候，默认按行拼接，变成 n*1 的图片。如果要显式按列拼接，请再套一层list，输入 [1, n] 的list
+        :param pad: 图片之间的间隔，也可以输入 [5, 10] 表示左右间隔5像素，上下间隔10像素
+        :param pad_color: 填充颜色，默认白色
+
+        # TODO 下标编号
+        """
+        if pad_color is None:
+            pad_color = 255
+
+        if isinstance(pad, int):
+            pad = [pad, pad]
+
+        def hstack(imgs):
+            """ 水平拼接图片 """
+            patches = []
+
+            max_length = max([im.shape[0] for im in imgs])
+            max_channel = max([xlcv.n_channels(im) for im in imgs])
+            board = np.ones([max_length, pad[1]], dtype='uint8') * pad_color
+            if max_channel == 3:
+                board = xlcv.cvt_channel(board, 1)
+
+            for im in imgs:
+                h = im.shape[0]
+                if h != max_length:
+                    im = xlcv.pad(im, [0, max_length - h, 0, 0])
+                if max_channel == 3:
+                    im = xlcv.cvt_channel(im, 1)
+                patches += [board, im]
+            return np.hstack(patches[1:])
+
+        def vstack(imgs):
+            patches = []
+
+            max_length = max([im.shape[1] for im in imgs])
+            max_channel = max([xlcv.n_channels(im) for im in imgs])
+            board = np.ones([pad[0], max_length], dtype='uint8') * pad_color
+            if max_channel == 3:
+                board = xlcv.cvt_channel(board, 1)
+
+            for im in imgs:
+                w = im.shape[1]
+                if w != max_length:
+                    im = xlcv.pad(im, [0, 0, 0, max_length - w])
+                if max_channel == 3:
+                    im = xlcv.cvt_channel(im, 1)
+                patches += [board, im]
+            return np.vstack(patches[1:])
+
+        if isinstance(images[0], list):
+            images = [hstack(imgs) for imgs in images]
+        return vstack(images)
 
 
 class CvImg(np.ndarray):

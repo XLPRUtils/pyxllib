@@ -21,7 +21,7 @@ import paddle
 
 import pyxllib.xl
 from pyxllib.xl import XlPath, browser
-from pyxllib.ai.specialist import ClasEvaluater
+from pyxllib.ai.specialist import ClasEvaluater, show_feature_map
 
 
 class SequenceDataset(paddle.io.Dataset):
