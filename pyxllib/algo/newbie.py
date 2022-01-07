@@ -99,7 +99,7 @@ def excel_col_name2int(s):
     """
     d = 0
     for ch in s:
-        d = d * 26 + (ord(ch) - 64)
+        d = d * 26 + (ord(ch.upper()) - 64)
     return d
 
 
