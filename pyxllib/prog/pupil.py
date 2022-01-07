@@ -377,6 +377,9 @@ class EnchantBase:
 def check_install_package(package, speccal_install_name=None, *, user=False):
     """ https://stackoverflow.com/questions/12332975/installing-python-module-within-code
 
+    :param speccal_install_name: 注意有些包使用名和安装名不同，比如pip install python-opencv，使用时是import cv2，
+        此时应该写 check_install_package('cv2', 'python-opencv')
+
     TODO 不知道频繁调用这个，会不会太影响性能，可以想想怎么提速优化？
     注意不要加@RunOnlyOnce，亲测速度会更慢三倍
 

@@ -147,10 +147,11 @@ class Browser(Explorer):
         """
 
         if app is None:
-            # 智能判断环境变量，选择存在的浏览器，我的偏好 msedge > chrome
+            # 智能判断环境变量，选择存在的浏览器，我的偏好 chrome > msedge
             paths = os.environ['PATH']
-            chrome_dir = r'C:\Program Files\Google\Chrome\Application'
-            msedge_dir = r'C:\Program Files (x86)\Microsoft\Edge\Application'
+            # 220107周五10:34，不能写完整路径，有x86和x64版本，路径会有区别
+            chrome_dir = r'Google\Chrome\Application'
+            msedge_dir = r'Microsoft\Edge\Application'
             if chrome_dir in paths:
                 app = 'chrome'
             elif msedge_dir in paths:

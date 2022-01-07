@@ -13,6 +13,7 @@ from pyxllib.prog.pupil import check_install_package
 check_install_package('openpyxl')
 check_install_package('premailer')
 check_install_package('xlrd2')
+check_install_package('yattag')
 
 import re
 
@@ -138,38 +139,41 @@ class EnchantCell(EnchantBase):
 
     @staticmethod
     def down(cell):
-        """输入一个单元格，向下移动一格
+        """ 输入一个单元格，向下移动一格
         注意其跟offset的区别，如果cell是合并单元格，会跳过自身的衍生单元格
+
+        注意这里移动跟excel中操作也不太一样，设计的更加"原子化"，可以多配合cell.mcell功能使用。
+        详见：【腾讯文档】cell移动机制说明 https://docs.qq.com/doc/DUkRUaFhlb3l4UG1P
         """
-        if cell.celltype():  # 合并单元格
+        r, c = cell.row, cell.column
+        if cell.celltype():
             rng = cell.in_range()
-            return cell.parent.cell(rng.max_row + 1, cell.column)
-        else:
-            return cell.offset(1, 0)
+            r = rng.max_row
+        return cell.parent.cell(r + 1, c)
 
     @staticmethod
     def right(cell):
+        r, c = cell.row, cell.column
         if cell.celltype():
             rng = cell.in_range()
-            return cell.parent.cell(cell.row, rng.max_row + 1)
-        else:
-            return cell.offset(0, 1)
+            c = rng.max_col
+        return cell.parent.cell(r, c + 1)
 
     @staticmethod
     def up(cell):
+        r, c = cell.row, cell.column
         if cell.celltype():
             rng = cell.in_range()
-            return cell.parent.cell(rng.min_row - 1, cell.column)
-        else:
-            return cell.offset(-1, 0)
+            r = rng.min_row
+        return cell.parent.cell(max(r - 1, 1), c)
 
     @staticmethod
     def left(cell):
+        r, c = cell.row, cell.column
         if cell.celltype():
             rng = cell.in_range()
-            return cell.parent.cell(cell.row, rng.min_row - 1)
-        else:
-            return cell.offset(0, -1)
+            r = rng.min_col
+        return cell.parent.cell(r, max(c - 1, 1))
 
 
 EnchantCell.enchant()
