@@ -110,32 +110,32 @@ class EnchantCell(EnchantBase):
         return celltype == 0 and cell.value is None
 
     @staticmethod
-    def copy_cell_format(cell, new_cell):
+    def copy_cell_format(cell, dst_cell):
         """ 单元格全格式复制，需要事先指定好新旧单元格的物理位置
         参考：https://stackoverflow.com/questions/23332259/copy-cell-style-openpyxl
         """
         from copy import copy
         if cell.has_style:
-            new_cell.font = copy(cell.font)  # 字体
-            new_cell.border = copy(cell.border)  # 表格线
-            new_cell.fill = copy(cell.fill)  # 填充色
-            new_cell.number_format = copy(cell.number_format)  # 数字格式
-            new_cell.protection = copy(cell.protection)  # 保护？
-            new_cell.alignment = copy(cell.alignment)  # 对齐格式
-            # new_cell.style = cell.style
+            dst_cell.font = copy(cell.font)  # 字体
+            dst_cell.border = copy(cell.border)  # 表格线
+            dst_cell.fill = copy(cell.fill)  # 填充色
+            dst_cell.number_format = copy(cell.number_format)  # 数字格式
+            dst_cell.protection = copy(cell.protection)  # 保护？
+            dst_cell.alignment = copy(cell.alignment)  # 对齐格式
+            # dst_cell.style = cell.style
         # if cell.comment:
         # 这个会引发AttributeError。。。
         #       vml = fromstring(self.workbook.vba_archive.read(ws.legacy_drawing))
         #   AttributeError: 'NoneType' object has no attribute 'read'
-        # new_cell.comment = copy(cell.comment)
+        # dst_cell.comment = copy(cell.comment)
         # 就算开了keep_vba可以强制写入了，打开的时候文件可能还是会错
 
     @staticmethod
-    def copy_cell(cell, new_cell):
+    def copy_cell(cell, dst_cell):
         """ 单元格全格式、包括值的整体复制
         """
-        new_cell.value = cell.value
-        cell.copy_cell_format(new_cell)
+        dst_cell.value = cell.value
+        cell.copy_cell_format(dst_cell)
 
     @staticmethod
     def down(cell):
@@ -223,7 +223,7 @@ class EnchantWorksheet(EnchantBase):
 
     @staticmethod
     def search(_self, pattern, min_row=None, max_row=None, min_col=None, max_col=None, order=None, direction=0):
-        """查找满足pattern正则表达式的单元格
+        """ 查找满足pattern正则表达式的单元格
 
         :param pattern: 正则匹配式，可以输入re.complier对象
             会将每个单元格的值转成str，然后进行字符串规则search匹配
@@ -422,10 +422,17 @@ class EnchantWorksheet(EnchantBase):
 
         with tag('table', *tag_attrs):
             # dprint(ws.max_row, ws.max_column)
+            cols = ws.max_column
             for i in range(1, ws.max_row + 1):
-                if ws.cell(i, 1).isnone(): continue
+                # TODO 这样跳过其实也不太好，有时候可能就是想创建一个空内容的表格
+                for j in range(1, cols + 1):
+                    if not ws.cell(i, j).isnone():
+                        break
+                else:  # 如果没有内容，跳过该行
+                    continue
+
                 with tag('tr'):
-                    for j in range(1, ws.max_column + 1):
+                    for j in range(1, cols + 1):
                         # ① 判断单元格类型
                         cell = ws.cell(i, j)
                         celltype = cell.celltype()
