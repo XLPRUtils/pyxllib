@@ -664,10 +664,19 @@ class File(PathBase):
     def size(self) -> int:
         """ 计算文件大小
         """
-        if self.eixsts():
+        if self.exists():
             total_size = os.path.getsize(str(self))
         else:
             total_size = 0
+        return total_size
+
+    def size2(self) -> int:
+        """ 220102周日17:23
+
+        size有点bug，临时写个函数接口
+        这个bug有点莫名其妙，搞不定
+        """
+        total_size = os.path.getsize(str(self))
         return total_size
 
     # 四、文件操作功能
