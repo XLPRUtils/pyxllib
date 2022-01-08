@@ -32,7 +32,7 @@ import random
 import sys
 
 import pandas as pd
-from PIL.Image import Image
+from PIL import Image
 from tqdm import tqdm
 
 from pyxllib.stdlib.zipfile import ZipFile
