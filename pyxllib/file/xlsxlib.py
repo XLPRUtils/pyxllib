@@ -33,6 +33,7 @@ from pyxllib.debug.specialist import browser
 
 def excel_addr(n, m) -> str:
     r"""数字索引转excel地址索引
+
     :param n: 行号，可以输入字符串形式的数字
     :param m: 列号，同上可以输入str的数字
     :return:
@@ -461,7 +462,7 @@ class EnchantWorksheet(EnchantBase):
 
     @staticmethod
     def init_from_latex(ws, content):
-        """ 注意没有取名为from_latex，因为ws是实现创建好的，这里只是能输入latex代码进行初始化而已 """
+        """ 注意没有取名为from_latex，因为ws是事先创建好的，这里只是能输入latex代码进行初始化而已 """
         from openpyxl.styles import Border, Alignment, Side
 
         from pyxllib.text.pupil import grp_bracket
