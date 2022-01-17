@@ -906,7 +906,7 @@ class XlPath(type(pathlib.Path())):
                 res.add(p.relative_to(self).as_posix())
         return res
 
-    def __read_write(self):
+    def __1_read_write(self):
         """ 参考标准库的
         read_bytes、read_text
         write_bytes、write_text
@@ -1011,6 +1011,58 @@ class XlPath(type(pathlib.Path())):
             return write_func(data, *args, **kwargs)
         else:
             return self.write_text(str(data), *args, **kwargs)
+
+    def __2_glob(self):
+        """ 类型判断、glob系列 """
+        pass
+
+    def is_image(self):
+        suffixs = {'png', 'jpg', 'jpeg', 'bmp'}
+        return self.suffix[1:].lower() in suffixs
+
+    def _glob_images(self, glob_func, pattern):
+        """ 在满足glob规则基础上，后缀还必须是合法的图片格式后缀
+        """
+        suffixs = {'png', 'jpg', 'jpeg', 'bmp'}
+        for f in glob_func(pattern):
+            if f.is_file() and f.suffix[1:].lower() in suffixs:
+                yield f
+
+    def glob_images(self, pattern):
+        return self._glob_images(self.glob, pattern)
+
+    def rglob_images(self, pattern):
+        return self._glob_images(self.rglob, pattern)
+
+    def glob_files(self, pattern):
+        for f in self.glob(pattern):
+            if f.is_file():
+                yield f
+
+    def rglob_files(self, pattern):
+        for f in self.rglob(pattern):
+            if f.is_file():
+                yield f
+
+    def glob_dirs(self, pattern):
+        for f in self.glob(pattern):
+            if f.is_dir():
+                yield f
+
+    def rglob_dirs(self, pattern):
+        for f in self.rglob(pattern):
+            if f.is_dir():
+                yield f
+
+    def __3_delete(self):
+        """ 复制、删除、移动等操作 """
+        pass
+
+    def delete(self):
+        if self.is_file():
+            os.remove(self)
+        elif self.is_dir():
+            shutil.rmtree(self)
 
 
 def demo_file():

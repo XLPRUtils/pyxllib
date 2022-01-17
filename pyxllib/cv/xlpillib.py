@@ -15,7 +15,6 @@ import itertools
 
 import cv2
 import numpy as np
-from PIL import Image
 import PIL.ExifTags
 import PIL.Image
 import PIL.ImageOps
@@ -68,7 +67,7 @@ class xlpil(EnchantBase):
         elif xlcv.is_cv2_image(file):
             im = xlcv.to_pil_image(file)
         elif File.safe_init(file):
-            im = Image.open(str(file), **kwargs)
+            im = PIL.Image.open(str(file), **kwargs)
         else:
             raise TypeError(f'类型错误或文件不存在：{type(file)} {file}')
         return xlpil.cvt_channel(im, flags)
@@ -78,7 +77,7 @@ class xlpil(EnchantBase):
         """ 先用opencv实现，以后可以再研究PIL.Image.frombuffer是否有更快处理策略 """
         if b64decode:
             buffer = base64.b64decode(buffer)
-        im = Image.open(io.BytesIO(buffer))
+        im = PIL.Image.open(io.BytesIO(buffer))
         return xlpil.cvt_channel(im, flags)
 
     @staticmethod
@@ -113,9 +112,9 @@ class xlpil(EnchantBase):
     @staticmethod
     def is_pil_image(im):
         if accimage is not None:
-            return isinstance(im, (Image.Image, accimage.Image))
+            return isinstance(im, (PIL.Image.Image, accimage.Image))
         else:
-            return isinstance(im, Image.Image)
+            return isinstance(im, PIL.Image.Image)
 
     @staticmethod
     def write(im, path, if_exists=None, **kwargs):
@@ -371,9 +370,9 @@ class xlpil(EnchantBase):
     def rgba2rgb(im):
         if im.mode in ('RGBA', 'P'):
             # 判断图片mode模式，如果是RGBA或P等可能有透明底，则和一个白底图片合成去除透明底
-            background = Image.new('RGBA', im.size, (255, 255, 255))
+            background = PIL.Image.new('RGBA', im.size, (255, 255, 255))
             # composite是合成的意思。将右图的alpha替换为左图内容
-            im = Image.alpha_composite(background, im.convert('RGBA')).convert('RGB')
+            im = PIL.Image.alpha_composite(background, im.convert('RGBA')).convert('RGB')
         return im
 
     @staticmethod

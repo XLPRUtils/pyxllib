@@ -340,9 +340,25 @@ class LabelmeDict:
         return data
 
     @classmethod
+    def gen_ocr_data(cls, imfile=None, **kwargs):
+        """" 支持调用PaddleOCR进行预识别 """
+        from paddleocr import PaddleOCR
+        ppocr = PaddleOCR.get_paddleocr()
+
+        data = cls.gen_data(imfile, **kwargs)
+        lines = ppocr.ocr(str(imfile))
+        for line in lines:
+            pts, [text, score] = line
+            pts = [[int(p[0]), int(p[1])] for p in pts]  # 转整数
+            sp = cls.gen_shape({'text': text, 'score': round(float(score), 4)}, pts)
+            data['shapes'].append(sp)
+        return data
+
+    @classmethod
     def gen_shape(cls, label, points, shape_type=None, dtype=None, group_id=None, **kwargs):
         """ 最基本的添加形状功能
 
+        :param label: 支持输入dict类型，会编码为json格式的字符串
         :param shape_type: 会根据points的点数量，智能判断类型，默认一般是polygon
             其他需要自己指定的格式：line、circle
         :param dtype: 可以重置points的存储数值类型，一般是浮点数，可以转成整数更精简
@@ -362,6 +378,8 @@ class LabelmeDict:
             else:
                 raise ValueError
         # 3 创建标注
+        if isinstance(label, dict):
+            label = json.dumps(label, ensure_ascii=False)
         shape = {'flags': {},
                  'group_id': group_id,
                  'label': str(label),
