@@ -108,6 +108,8 @@ class CocoGtData:
 
         这个略微有点过度封装了
         但没事，先放着，可以不拿出来用~~
+
+        :param points: 必须是n*2的结构
         """
         a = kwargs.copy()
 

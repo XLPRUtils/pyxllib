@@ -5,6 +5,7 @@
 # @Date   : 2021/10/07 09:06
 
 class RgbFormatter:
+    """ Format Color """
     def __init__(self, r=0, g=0, b=0):
         """ 标准的RGB颜色表达方式，数值范围在0~255 """
         self.r, self.g, self.b = r, g, b

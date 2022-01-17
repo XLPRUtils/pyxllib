@@ -414,7 +414,8 @@ def showdir(c, *, to_html=None, printf=True, width=200):
             t = df.to_html()
             table = BeautifulSoup(t, 'lxml')
             table.thead.tr['bgcolor'] = 'LightSkyBlue'  # 设置表头颜色
-            ch = 'A' if '成员变量' in table.tr.contents[3].string else 'F'
+            # 根据pycharm的规则，命名应该是成员变量Field，成员方法Member
+            ch = 'F' if '成员变量' in table.tr.contents[3].string else 'M'
             table.thead.tr.th.string = f'编号{ch}{len(df)}'
             t = table.prettify()
         else:

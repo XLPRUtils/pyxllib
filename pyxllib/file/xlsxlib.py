@@ -190,20 +190,22 @@ class EnchantWorksheet(EnchantBase):
         cls._enchant(openpyxl.worksheet.worksheet.Worksheet, names)
 
     @staticmethod
-    def copy_worksheet(_self, target_ws):
+    def copy_worksheet(_self, dst_ws):
         """跨工作薄时复制表格内容的功能
         openpyxl自带的Workbook.copy_worksheet没法跨工作薄复制，很坑
+
+        src_ws.copy_worksheet(dst_ws)
         """
         # 1 取每个单元格的值
         for row in _self:
             for cell in row:
                 try:
-                    cell.copy_cell(target_ws[cell.coordinate])
+                    cell.copy_cell(dst_ws[cell.coordinate])
                 except AttributeError:
                     pass
         # 2 合并单元格的处理
         for rng in _self.merged_cells.ranges:
-            target_ws.merge_cells(rng.ref)
+            dst_ws.merge_cells(rng.ref)
         # 3 其他表格属性的复制
         # 这个从excel读取过来的时候，是不准的，例如D3可能因为关闭时停留窗口的原因误跑到D103
         # dprint(origin_ws.freeze_panes)
