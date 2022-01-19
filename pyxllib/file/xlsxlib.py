@@ -21,7 +21,7 @@ import openpyxl
 from openpyxl import Workbook
 from openpyxl.cell.cell import MergedCell
 from openpyxl.styles import Font
-from openpyxl.utils.cell import get_column_letter
+from openpyxl.utils.cell import get_column_letter, column_index_from_string
 import pandas as pd
 
 from pyxllib.prog.newbie import RunOnlyOnce
@@ -139,42 +139,69 @@ class EnchantCell(EnchantBase):
         cell.copy_cell_format(dst_cell)
 
     @staticmethod
-    def down(cell):
+    def down(cell, count=1):
         """ 输入一个单元格，向下移动一格
         注意其跟offset的区别，如果cell是合并单元格，会跳过自身的衍生单元格
+
+        :param count: 重复操作次数
 
         注意这里移动跟excel中操作也不太一样，设计的更加"原子化"，可以多配合cell.mcell功能使用。
         详见：【腾讯文档】cell移动机制说明 https://docs.qq.com/doc/DUkRUaFhlb3l4UG1P
         """
-        r, c = cell.row, cell.column
-        if cell.celltype():
-            rng = cell.in_range()
-            r = rng.max_row
-        return cell.parent.cell(r + 1, c)
+
+        def _func(cell):
+            r, c = cell.row, cell.column
+            if cell.celltype():
+                rng = cell.in_range()
+                r = rng.max_row
+            return cell.parent.cell(r + 1, c)
+
+        while count > 0:
+            cell = _func(cell)
+            count -= 1
+        return cell
 
     @staticmethod
-    def right(cell):
-        r, c = cell.row, cell.column
-        if cell.celltype():
-            rng = cell.in_range()
-            c = rng.max_col
-        return cell.parent.cell(r, c + 1)
+    def right(cell, count=1):
+        def _func(cell):
+            r, c = cell.row, cell.column
+            if cell.celltype():
+                rng = cell.in_range()
+                c = rng.max_col
+            return cell.parent.cell(r, c + 1)
+
+        while count > 0:
+            cell = _func(cell)
+            count -= 1
+        return cell
 
     @staticmethod
-    def up(cell):
-        r, c = cell.row, cell.column
-        if cell.celltype():
-            rng = cell.in_range()
-            r = rng.min_row
-        return cell.parent.cell(max(r - 1, 1), c)
+    def up(cell, count=1):
+        def _func(cell):
+            r, c = cell.row, cell.column
+            if cell.celltype():
+                rng = cell.in_range()
+                r = rng.min_row
+            return cell.parent.cell(max(r - 1, 1), c)
+
+        while count > 0:
+            cell = _func(cell)
+            count -= 1
+        return cell
 
     @staticmethod
-    def left(cell):
-        r, c = cell.row, cell.column
-        if cell.celltype():
-            rng = cell.in_range()
-            r = rng.min_col
-        return cell.parent.cell(r, max(c - 1, 1))
+    def left(cell, count=1):
+        def _func(cell):
+            r, c = cell.row, cell.column
+            if cell.celltype():
+                rng = cell.in_range()
+                r = rng.min_col
+            return cell.parent.cell(r, max(c - 1, 1))
+
+        while count > 0:
+            cell = _func(cell)
+            count -= 1
+        return cell
 
 
 EnchantCell.enchant()
@@ -256,13 +283,13 @@ class EnchantWorksheet(EnchantBase):
                     # up, down, left, right 找到的单元格四边界
                     l, u, r, d = getattr(cel.in_range(), 'bounds', (cel.column, cel.row, cel.column, cel.row))
                     if direction == 0:
-                        x1, y1, y2 = max(x1, d), max(y1, l), min(y2, r)
+                        x1, x2, y1, y2 = max(x1, d + 1), x2, max(y1, l), min(y2, r)
                     elif direction == 1:
-                        x1, x2, y1 = max(x1, u), min(x2, d), max(y1, r)
+                        x1, x2, y1, y2 = max(x1, u), min(x2, d), max(y1, r + 1), y2
                     elif direction == 2:
-                        x2, y1, y2 = min(x2, d), max(y1, l), min(y2, r)
+                        x1, x2, y1, y2 = x1, min(x2, u - 1), max(y1, l), min(y2, r)
                     elif direction == 3:
-                        x1, x2, y2 = max(x1, u), min(x2, d), min(y2, l)
+                        x1, x2, y1, y2 = max(x1, u), min(x2, d), y1, min(y2, l - 1)
                     else:
                         raise ValueError(f'direction参数值错误{direction}')
                 else:
@@ -626,6 +653,74 @@ class EnchantWorksheet(EnchantBase):
         li = [head] + li  # 开头其实可以最后加，在遍历中先确认每列用到最多的格式情况
 
         return '\n'.join(li)
+
+    @staticmethod
+    def cell2(self, row, column, value=None):
+        """ column支持字母列名引用 """
+        if isinstance(column, str):
+            column = column_index_from_string(column)
+        cell = self.cell(row, column, value)
+        return cell
+
+    @staticmethod
+    def cell3(self, row, column, value=None):
+        """ 支持用字段名column找单元格 """
+        # 1 设置一个字典，缓存列名所在编号
+        if not hasattr(self, 'name2cols'):
+            self.name2cols = {}
+
+        # 2 column设为合法的key
+        if isinstance(column, list):
+            column = tuple(column)
+
+        # 3 查找列编号
+        if column in self.name2cols:
+            col = self.name2cols[column]
+        else:
+            col = self.name2cols[column] = self.findcol(column)
+
+        # 单元格
+        cell = self.cell(row, col, value)
+        return cell
+
+    @staticmethod
+    def iterrows(self, key_column_name, mode='default'):
+        """ 通过某个属性列作为key，判断数据所在行
+
+        :param key_column_name: 参考的主要字段名，判断数据起始行
+        :param mode: 计算数据范围的一些细分方法，目前主要是数据结束位置的判断方法
+            default: 从ws.max_row往前找到第一个key非空的单元格
+            any_content: 从ws.max_row往前找到第一个含有值的行
+            ... 待开发更多需求
+        :return: 返回range类型，可以直接用于for循环
+        """
+        # 1 起始行
+        cel = self.findcel(key_column_name).down()
+        min_row = cel.row
+
+        # 2 终止行
+        max_row = self.max_row
+
+        if mode == 'default':
+            col = cel.column
+            while max_row > min_row:
+                if self.cell(max_row, col).value:
+                    break
+                max_row -= 1
+        elif mode == 'any_content':
+            max_column = self.max_column
+            while max_row > min_row:
+                empty_line = True
+                for j in range(1, max_column + 1):
+                    if self.cell(max_row, j).value:
+                        empty_line = False
+                        break
+                if not empty_line:
+                    break
+        else:
+            raise NotImplementedError(f'{mode}')
+
+        return range(min_row, max_row + 1)
 
 
 EnchantWorksheet.enchant()
