@@ -193,6 +193,17 @@ class NvmDevice:
                 gpu_id, most_free = idx, row['free']
         return gpu_id
 
+    def get_free_gpu_ids(self, minimum_free_byte=10 * 1024 ** 3):
+        """ 获取多个有剩余空间的gpu id
+
+        :param minimum_free_byte: 默认值至少需要10G
+        """
+        gpu_ids = []
+        for idx, row in self.stat.iterrows():
+            if row['free'] >= minimum_free_byte:
+                gpu_ids.append(idx)
+        return gpu_ids
+
 
 def auto_set_visible_device():
     """ 自动设置环境变量为可见的某一张单卡

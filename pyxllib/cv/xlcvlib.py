@@ -552,7 +552,7 @@ class xlcv(EnchantBase):
         dst, pts = xlcv._get_subrect_image(xlcv.read(im), reshape_coords(pts, 2), fill)
         if len(pts) == 4 and warp_quad:
             w, h = quad_warp_wh(pts, method=warp_quad)
-            warp_mat = get_warp_mat(pts, rect2polygon([0, 0, w, h]))
+            warp_mat = get_warp_mat(pts, rect2polygon([[0, 0], [w, h]]))
             dst = xlcv.warp(dst, warp_mat, (w, h))
         return dst
 
