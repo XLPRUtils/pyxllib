@@ -19,87 +19,22 @@ from easydict import EasyDict
 import torch.utils.data
 from torchvision.datasets import VisionDataset
 
-from pyxllib.ai.specialist import ClasEvaluater
+from pyxllib.ai.specialist import ClasEvaluater, NvmDevice
 
 __base = """
 """
 
 
-class NvmDevice:
-    """
-    TODO 增加获得多张卡的接口
-    """
-
-    def __init__(self, *, set_cuda_visible=True):
-        """ 获得各个gpu内存使用信息
-
-        :param set_cuda_visible: 是否根据 环境变量 CUDA_VISIBLE_DEVICES 重新计算gpu的相对编号
-        """
-        import pynvml
-
-        records = []
-        columns = ['origin_id',  # 原始id编号
-                   'total',  # 总内存
-                   'used',  # 已使用
-                   'free']  # 剩余空间
-
-        try:
-            # 1 初始化
-            pynvml.nvmlInit()
-
-            # 2 每张gpu卡的绝对、相对编号
-            if set_cuda_visible and 'CUDA_VISIBLE_DEVICES' in os.environ:
-                idxs = re.findall(r'\d+', os.environ['CUDA_VISIBLE_DEVICES'])
-                idxs = [int(v) for v in idxs]
-            else:
-                cuda_num = pynvml.nvmlDeviceGetCount()
-                idxs = list(range(cuda_num))  # 如果不限定，则获得所有卡的信息
-
-            # 3 获取每张候选gpu卡的内存使用情况
-            for i in idxs:
-                handle = pynvml.nvmlDeviceGetHandleByIndex(i)
-                meminfo = pynvml.nvmlDeviceGetMemoryInfo(handle)
-                records.append([i, meminfo.total, meminfo.used, meminfo.free])
-        except (FileNotFoundError, pynvml.nvml.NVMLError_LibraryNotFound) as e:
-            # 注意，找不到nvml.dll文件，不代表没有gpu卡~
-            pass
-
-        self.stat = pd.DataFrame.from_records(records, columns=columns)
-
-    def get_most_free_gpu_id(self, minimum_free_byte=-1):
-        """ 获得当前剩余空间最大的gpu的id，没有则返回None
-
-        :param minimum_free_byte: 最少需要剩余的空闲字节数，少于这个值则找不到gpu，返回None
-        """
-        gpu_id, most_free = None, minimum_free_byte
-        for idx, row in self.stat.iterrows():
-            # 个人习惯，从后往前找空闲最大的gpu，这样也能尽量避免使用到0卡
-            #   所以≥就更新，而不是>才更新
-            if row['free'] >= most_free:
-                gpu_id, most_free = idx, row['free']
-        return gpu_id
-
-    def get_most_free_gpu_device(self):
-        gpu_id = self.get_most_free_gpu_id()
-        if gpu_id is not None:
-            return torch.device(f'cuda:{gpu_id}')
-
-    def get_free_gpu_ids(self, minimum_free_byte=10 * 1024 ** 3):
-        """ 获取多个有剩余空间的gpu id
-
-        :param minimum_free_byte: 默认值至少需要10G
-        """
-        gpu_ids = []
-        for idx, row in self.stat.iterrows():
-            if row['free'] >= minimum_free_byte:
-                gpu_ids.append(idx)
-        return gpu_ids
+def get_most_free_torch_gpu_device():
+    gpu_id = NvmDevice().get_most_free_gpu_id()
+    if gpu_id is not None:
+        return torch.device(f'cuda:{gpu_id}')
 
 
 def get_device():
     """ 自动获得一个可用的设备
     """
-    return NvmDevice().get_most_free_gpu_device() or torch.device('cpu')
+    return get_most_free_torch_gpu_device() or torch.device('cpu')
 
 
 __data = """
