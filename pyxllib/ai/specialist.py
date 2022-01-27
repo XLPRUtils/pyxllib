@@ -149,6 +149,9 @@ class NvmDevice:
 
         :param set_cuda_visible: 是否根据 环境变量 CUDA_VISIBLE_DEVICES 重新计算gpu的相对编号
         """
+        from pyxllib.prog.pupil import check_install_package
+        check_install_package('pynvml')
+
         import pynvml
 
         records = []
@@ -180,16 +183,18 @@ class NvmDevice:
 
         self.stat = pd.DataFrame.from_records(records, columns=columns)
 
-    def get_most_free_gpu_id(self, minimum_free_byte=-1):
+    def get_most_free_gpu_id(self, minimum_free_byte=-1, *, reverse=False):
         """ 获得当前剩余空间最大的gpu的id，没有则返回None
 
         :param minimum_free_byte: 最少需要剩余的空闲字节数，少于这个值则找不到gpu，返回None
         """
         gpu_id, most_free = None, minimum_free_byte
         for idx, row in self.stat.iterrows():
+            if row['free'] > most_free:
+                gpu_id, most_free = idx, row['free']
             # 个人习惯，从后往前找空闲最大的gpu，这样也能尽量避免使用到0卡
             #   所以≥就更新，而不是>才更新
-            if row['free'] >= most_free:
+            if reverse and row['free'] >= most_free:
                 gpu_id, most_free = idx, row['free']
         return gpu_id
 
@@ -205,15 +210,16 @@ class NvmDevice:
         return gpu_ids
 
 
-def auto_set_visible_device():
+def auto_set_visible_device(reverse=False):
     """ 自动设置环境变量为可见的某一张单卡
 
     CUDA_VISIBLE_DEVICES
+
+    对于没有gpu的机子，可以自动设置CUDA_VISIBLE_DEVICES=''空值
     """
     name = 'CUDA_VISIBLE_DEVICES'
     if name not in os.environ:
-        gpu_id = NvmDevice().get_most_free_gpu_id()
-        if gpu_id is not None:
-            os.environ[name] = str(gpu_id)
+        gpu_id = NvmDevice().get_most_free_gpu_id(reverse=reverse)
+        os.environ[name] = '' if gpu_id is None else str(gpu_id)
     if name in os.environ:
         print('{}={}'.format(name, os.environ[name]))
