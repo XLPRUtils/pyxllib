@@ -906,6 +906,18 @@ class XlPath(type(pathlib.Path())):
                 res.add(p.relative_to(self).as_posix())
         return res
 
+    def relpath(self, ref_dir) -> str:
+        r""" 当前路径，相对于ref_dir的路径位置
+
+        >>> File('C:/a/b/c.txt').relpath('C:/a/')
+        'b/c.txt'
+        >>> File('C:/a/b\\c.txt').relpath('C:\\a/')
+        'b/c.txt'
+
+        >> File('C:/a/b/c.txt').relpath('D:/')  # ValueError
+        """
+        return XlPath(os.path.relpath(self, str(ref_dir)))
+
     def __1_read_write(self):
         """ 参考标准库的
         read_bytes、read_text

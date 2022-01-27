@@ -220,6 +220,7 @@ def auto_set_visible_device(reverse=False):
     name = 'CUDA_VISIBLE_DEVICES'
     if name not in os.environ:
         gpu_id = NvmDevice().get_most_free_gpu_id(reverse=reverse)
-        os.environ[name] = '' if gpu_id is None else str(gpu_id)
+        if gpu_id is not None:
+            os.environ[name] = str(gpu_id)
     if name in os.environ:
         print('{}={}'.format(name, os.environ[name]))
