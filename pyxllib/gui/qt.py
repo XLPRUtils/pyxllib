@@ -297,33 +297,36 @@ def main_qapp(window):
     sys.exit(app.exec_())
 
 
-def qt_clipboard_monitor(func=None, info=1):
+def qt_clipboard_monitor(func=None, verbose=1, *, cooldown=0.5):
     """ qt实现的剪切板监控器
+
+    :param cooldown: cd，冷切时间，防止短时间内因为重复操作响应剪切板，重复执行功能
 
     感觉这个组件还有很多可以扩展的，比如设置可以退出的快捷键
     """
     import pyperclip
 
-    last_str = ''
+    last_response = time.time()
 
     if func is None:
         func = lambda s: s
 
     def on_clipboard_change():
         # 1 数据内容一样则跳过不处理，表示很可能是该函数调用pyperclip.copy(s)产生的重复响应
-        nonlocal last_str
+        nonlocal last_response
         s0 = pyperclip.paste()
         s0 = s0.replace('\r\n', '\n')
 
-        if s0 == last_str:
+        cur_time = time.time()
+
+        if cur_time - last_response < cooldown:
             return
-        else:
-            last_str = s0
+        last_response = cur_time
 
         # 2 处理函数
         s1 = func(s0)
         if s1 != s0:
-            if info:
+            if verbose:
                 print('【处理前】', time.strftime('%H:%M:%S'))
                 print(s0)
                 print('【处理后】')
