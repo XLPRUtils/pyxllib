@@ -35,7 +35,7 @@ import pandas as pd
 from PIL import Image
 from tqdm import tqdm
 
-from pyxllib.stdlib.zipfile import ZipFile
+from pyxllib.file.packlib.zipfile import ZipFile
 from pyxllib.prog.newbie import round_int
 from pyxllib.prog.pupil import DictTool
 from pyxllib.prog.specialist import mtqdm

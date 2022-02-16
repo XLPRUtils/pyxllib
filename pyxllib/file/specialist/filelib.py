@@ -843,6 +843,11 @@ class XlPath(type(pathlib.Path())):
         return cls(desktop)
 
     @classmethod
+    def userdir(cls):
+        from os.path import expanduser
+        return cls(expanduser("~"))
+
+    @classmethod
     def tempdir(cls):
         return cls(tempfile.gettempdir())
 

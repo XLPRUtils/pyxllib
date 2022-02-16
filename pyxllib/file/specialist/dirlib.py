@@ -17,13 +17,10 @@ import tempfile
 import humanfriendly
 
 # 大小写不敏感字典
-import pyxllib.stdlib.zipfile as zipfile  # 重写了标准库的zipfile文件，cp437改为gbk，解决zip中文乱码问题
 from pyxllib.algo.pupil import natural_sort
 from pyxllib.text.pupil import strfind
-from pyxllib.debug.pupil import dprint
-from pyxllib.file.specialist import get_etag, PathBase, File
+from pyxllib.file.specialist import get_etag, PathBase, File, XlPath
 from pyxllib.prog.newbie import first_nonnone
-from pyxllib.prog.pupil import check_install_package
 
 ____dir = """
 支持文件或文件夹的对比复制删除等操作的函数：filescmp、filesdel、filescopy
@@ -763,132 +760,33 @@ def file_or_dir_size(path):
         return 0
 
 
-class PackFile:
+def reduce_dir_depth(srcdir, unwrap=999):
+    """ 精简冗余嵌套的目录
+
+    比如a目录下只有一个文件：a/b/1.txt，
+    那么可以精简为a/1.txt，不需要多嵌套一个b目录
+
+    :param srcdir: 要处理的目录
+    :param unwrap: 打算解开的层数，未设置则会尽可能多解开
     """
-    处理压缩文件
-    """
+    import tempfile
+    root = p = XlPath(srcdir)
+    depth = 0
 
-    def __init__(self, file, mode=None):
-        """
-        :param file: 要处理的文件
-        :param mode: 要处理的格式，不输入会有一套智能匹配算法
-            'rar'：
-            'zip'： docx后缀的，默认采用zip格式解压
-        """
-        # 1 确定压缩格式
-        name, ext = os.path.splitext(file)
-        ext = ext.lower()
-        if not mode:
-            if ext in ('.docx', '.zip'):
-                mode = 'zip'
-            elif ext == '.rar':
-                mode = 'rar'
-            else:
-                dprint(ext)  # 从文件扩展名无法得知压缩格式
-                raise ValueError
-        self.mode = mode
+    ps = list(p.glob('*'))
+    while len(ps) == 1 and ps[0].is_dir() and depth < unwrap:
+        depth += 1
+        p = ps[0]
+        ps = list(p.glob('*'))
 
-        # 2 确定是用的解压“引擎”
-        if mode == 'zip':
-            self.proc = zipfile.ZipFile(file)
-        elif mode == 'rar':
-            # 安装详见： https://blog.csdn.net/code4101/article/details/79328636
-            check_install_package('unrar')
-            from unrar.rarfile import RarFile
-            self.proc = RarFile(file)
-        # 3 解压文件夹目录，None表示还未解压
-        self.tempfolder = None
+    if depth:
+        # 注意这里技巧，为了避免多层目录里会有相对同名的目录，导致出现不可预料的bug
+        # 算法原理是把要搬家的那层目录里的文件先移到临时文件，然后把原目录树结构删除后，再报临时文件的文件移回来
+        tmpdir = tempfile.mktemp()
+        shutil.move(str(p), str(tmpdir))
+        if depth > 1:
+            shutil.rmtree(next(root.glob('*')))
 
-    def open(self, member, pwd=None):
-        """Return file-like object for 'member'.
-
-           'member' may be a filename or a RarInfo object.
-        """
-        return self.proc.open(member, pwd)
-
-    def read(self, member, pwd=None):
-        """Return file bytes (as a string) for name."""
-        return self.proc.read(member, pwd)
-
-    def namelist(self):
-        """>> self.namelist()  # 获得文件清单列表
-             1           [Content_Types].xml
-             2                   _rels/.rels
-            ......
-            20            word/fontTable.xml
-            21              docProps/app.xml
-        """
-        return self.proc.namelist()
-
-    def setpassword(self, pwd):
-        """Set default password for encrypted files."""
-        return self.proc.setpassword(pwd)
-
-    def getinfo(self, name):
-        """
-        >> self.getinfo('word/document.xml')  # 获得某个文件的信息
-        <ZipInfo filename='word/document.xml' compress_type=deflate file_size=140518 compress_size=10004>
-        """
-        return self.proc.getinfo(name)
-
-    def infolist(self, prefix=None, zipinfo=True):
-        """>> self.infolist()  # getinfo的多文件版本
-             1           <ZipInfo filename='[Content_Types].xml' compress_type=deflate file_size=1495 compress_size=383>
-             2                    <ZipInfo filename='_rels/.rels' compress_type=deflate file_size=590 compress_size=243>
-            ......
-            20            <ZipInfo filename='word/fontTable.xml' compress_type=deflate file_size=1590 compress_size=521>
-            21               <ZipInfo filename='docProps/app.xml' compress_type=deflate file_size=720 compress_size=384>
-
-            :param prefix:
-                可以筛选文件的前缀，例如“word/”可以筛选出word目录下的
-            :param zipinfo:
-                返回的list每个元素是zipinfo数据类型
-        """
-        ls = self.proc.infolist()
-        if prefix:
-            ls = list(filter(lambda t: t.filename.startswith(prefix), ls))
-        if not zipinfo:
-            ls = list(map(lambda x: x.filename, ls))
-        return ls
-
-    def printdir(self):
-        """Print a table of contents for the RAR file."""
-        return self.proc.printdir()
-
-    def testrar(self):
-        """Read all the files and check the CRC."""
-        return self.proc.testrar()
-
-    def extract(self, member, path=None, pwd=None):
-        """注意，如果写extract('word/document.xml', 'a')，那么提取出来的文件是在'a/word/document.xml'
-        """
-        return self.proc.extract(member, path, pwd)
-
-    def extractall(self, path=None, members=None, pwd=None):
-        """Extract all members from the archive to the current working
-           directory. `path' specifies a different directory to extract to.
-           `members' is optional and must be a subset of the list returned
-           by namelist().
-        """
-        return self.proc.extractall(path, members, pwd)
-
-    def extractall2tempfolder(self):
-        """将文件解压到一个临时文件夹，并返回临时文件夹目录"""
-        if not self.tempfolder:
-            self.tempfolder = tempfile.mkdtemp()
-            self.proc.extractall(path=self.tempfolder)
-        return self.tempfolder
-
-    def clear_tempfolder(self):
-        """删除创建的临时文件夹内容"""
-        filesdel(self.tempfolder)
-
-    def __enter__(self):
-        """使用with ... as ...语法能自动建立解压目录和删除
-        注意：这里返回的不是PackFile对象，而是解压后的目录
-        """
-        path = self.extractall2tempfolder()
-        return path
-
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        self.clear_tempfolder()
+        for pp in XlPath(tmpdir).glob('*'):
+            shutil.move(str(pp), str(root))
+        shutil.rmtree(tmpdir)
