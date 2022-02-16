@@ -7,8 +7,7 @@
 """ pyxllib常用功能
 """
 
-from pyxllib.stdlib import zipfile
-from pyxllib.stdlib import shutil
+from pyxllib.file.packlib import shutil
 
 from pyxllib.prog.newbie import *
 from pyxllib.prog.pupil import *
