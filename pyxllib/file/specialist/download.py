@@ -13,7 +13,7 @@ from urllib import request
 import requests
 from bs4 import BeautifulSoup
 
-from pyxllib.file.specialist.dirlib import File, Dir
+from pyxllib.file.specialist import File, Dir
 
 
 def download_file(url, fn=None, *, encoding=None, if_exists=None, ext=None, temp=False):
@@ -124,7 +124,7 @@ def ensure_localfile(localfile, from_url, *, if_exists=None, progress=True):
         使用 'replace' 可以强制下载重置文件
     :param progress: 是否显示下载进度
 
-    >> ensure_localfile(File('ufo.csv'), r'https://gitee.com/code4101/TestData/raw/master/ufo.csv')
+    >> ensure_localfile('ufo.csv', r'https://gitee.com/code4101/TestData/raw/master/ufo.csv')
     """
     path, file = str(localfile), File(localfile)
 
@@ -132,3 +132,22 @@ def ensure_localfile(localfile, from_url, *, if_exists=None, progress=True):
         dirname, name = os.path.split(path)
         download(from_url, dirname, filename=name, progress=progress)
     return localfile
+
+
+def ensure_localdir(localdir, from_url, *, if_exists=None, progress=True, wrap=0):
+    """
+
+    :param from_url: 相比 ensure_localfile，这个链接一般是一个压缩包，下载到本地后要解压到目标目录
+    :param wrap:
+        wrap=1，如果压缩包里的文件有多个，可以多加一层目录包装起来
+        wrap<0，有的从url下载的压缩包，还会自带一层目录，为了避免冗余，要去掉
+    """
+    from pyxllib.file.packlib import unpack_archive
+    d = Dir(localdir)
+    if not d.is_dir():
+        if d.exist_preprcs(if_exists):
+            pack_file = download(from_url, d.parent, progress=progress)
+            unpack_archive(pack_file, localdir, wrap=wrap)
+            os.remove(pack_file)
+
+    return localdir
