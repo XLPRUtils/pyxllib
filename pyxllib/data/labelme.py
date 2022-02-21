@@ -343,7 +343,7 @@ class LabelmeDict:
     def gen_ocr_data(cls, imfile=None, **kwargs):
         """" 支持调用PaddleOCR进行预识别
 
-        该接口是为了方便性保留，更推荐使用 PaddleOCR.auto_labelme的功能进行批量识别
+        该接口是为了方便性保留，更推荐使用 PaddleOCR.labelme_ocr 的功能进行批量识别
         """
         from paddleocr import PaddleOCR
         ppocr = PaddleOCR.get_paddleocr()

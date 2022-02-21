@@ -32,7 +32,7 @@ import random
 import sys
 
 import pandas as pd
-from PIL import Image
+import PIL
 from tqdm import tqdm
 
 from pyxllib.file.packlib.zipfile import ZipFile
@@ -61,8 +61,14 @@ class CocoGtData:
         self.gt_dict = gt if isinstance(gt, dict) else File(gt).read()
 
     @classmethod
-    def gen_image(cls, image_id, file_name, height, width, **kwargs):
+    def gen_image(cls, image_id, file_name, height=None, width=None, **kwargs):
         """ 初始化一个图片标注，使用位置参数，复用的时候可以节省代码量 """
+
+        # 没输入height、width时会自动从file_name读取计算
+        # 但千万注意，这里coco的file_name输入的是相对路径，并不一定在工作目录下能work，一般还是推荐自己输入height、width
+        if height is None or width is None:
+            width, height = PIL.Image.open(str(file_name)).size
+
         im = {'id': int(image_id), 'file_name': file_name,
               'height': int(height), 'width': int(width)}
         if kwargs:
@@ -132,6 +138,8 @@ class CocoGtData:
                 a[k] = 0
         if 'category_id' not in a:
             a['category_id'] = 1
+        if 'iscrowd' not in a:
+            a['iscrowd'] = 0
 
         return a
 
@@ -1261,7 +1269,7 @@ class CocoMatch(CocoParser, CocoMatchBase):
             lm.add_shape('', [0, 0, 10, 0], shape_type='line', shape_color=[0, 0, 0],
                          size=f'{height}x{width}', **(image.to_dict()))
             getattr(lm, match_func_name)(df, segmentation=segmentation, hide_match_dt=hide_match_dt, **kwargs)
-            lm.write()  # 保存json文件到img对应目录下
+            lm.write(if_exists=None)  # 保存json文件到img对应目录下
 
         if dst_dir is not None:
             dst_dir = Dir(dst_dir)
