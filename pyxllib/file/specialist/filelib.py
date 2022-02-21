@@ -430,7 +430,7 @@ class PathBase:
             'backup': 先做备份  （对原文件先做一个备份）
         """
         need_run = True
-        if self:
+        if self.exists():
             if if_exists is None:
                 return need_run
             elif if_exists == 'error':
@@ -707,7 +707,8 @@ class File(PathBase):
     def delete(self):
         r""" 删除自身文件
         """
-        os.remove(str(self))
+        if self.is_file():
+            os.remove(str(self))
 
     # 五、其他综合性功能
 
