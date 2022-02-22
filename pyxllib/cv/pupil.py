@@ -4,6 +4,8 @@
 # @Email  : 877362867@qq.com
 # @Date   : 2021/10/07 09:06
 
+import re
+
 class RgbFormatter:
     """ Format Color """
     def __init__(self, r=0, g=0, b=0):

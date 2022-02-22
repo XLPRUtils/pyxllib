@@ -6,7 +6,7 @@
 
 from pyxllib.xl import *
 from pyxllib.algo.geo import *
-from pyxllib.cv.newbie import *
+from pyxllib.cv.pupil import *
 from pyxllib.cv.expert import *
 from pyxllib.cv.xlpillib import xlpil
 
