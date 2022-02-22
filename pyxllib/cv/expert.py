@@ -130,3 +130,31 @@ class TextlineShape:
             shape = reduce(lambda x, y: x + y, sorted(group))
             new_shapes.append(shape)
         return new_shapes
+
+
+def get_font_file(name):
+    """ 获得指定名称的字体文件
+
+    :param name: 记得要写后缀，例如 "simfang.ttf"
+        simfang.ttf，仿宋
+        msyh.ttf，微软雅黑
+    """
+    from pyxllib.file.specialist import ensure_localfile, XlPath
+
+    # 1 windows直接找系统的字体目录
+    font_file = XlPath(f'C:/Windows/Fonts/{name}')
+    if font_file.is_file():
+        return font_file
+
+    # 2 否则下载到.xlpr/fonts
+    # 注意不能下载到C:/Windows/Fonts，会遇到权限问题，报错
+    font_file = XlPath.userdir() / f'.xlpr/fonts/{name}'
+    # 去github上paddleocr项目下载
+    # TODO 不过paddleocr字体数量有限，而且github有时候可能会卡下载不了~~本来要弄到码云，但是码云现在要登陆才能下载了
+    from_url = f'https://raw.githubusercontent.com/code4101/data1/main/fonts/{name}'
+    try:
+        ensure_localfile(font_file, from_url)
+    except TimeoutError as e:
+        raise TimeoutError(f'{font_file} 下载失败：{from_url}')
+
+    return font_file
