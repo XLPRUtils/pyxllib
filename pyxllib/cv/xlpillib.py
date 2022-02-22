@@ -20,6 +20,7 @@ import PIL.Image
 import PIL.ImageOps
 import requests
 
+
 try:
     import accimage
 except ImportError:
@@ -27,7 +28,7 @@ except ImportError:
 
 from pyxllib.prog.newbie import RunOnlyOnce
 from pyxllib.prog.pupil import EnchantBase, EnchantCvt
-from pyxllib.file.specialist import File
+from pyxllib.file.specialist import File, get_font_file
 from pyxllib.cv.xlcvlib import xlcv
 
 
@@ -165,6 +166,15 @@ class xlpil(EnchantBase):
         from PIL import ImageOps
         im2 = ImageOps.expand(im, border=border, fill=fill)
         return im2
+
+    @staticmethod
+    def plot_text(im, xy, text, font_size=10, font_type='simfang.ttf', **kwargs):
+        from PIL import ImageFont, ImageDraw
+        font_file = get_font_file(font_type)
+        font = ImageFont.truetype(font=str(font_file), size=font_size, encoding="utf-8")
+        draw = ImageDraw.Draw(im)
+        draw.text(xy, text, font=font, **kwargs)
+        return im
 
     @staticmethod
     def __5_resize():

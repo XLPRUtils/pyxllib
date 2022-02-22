@@ -129,3 +129,7 @@ def gentuple(n, tag):
         k = len(tag)
         a = tuple(map(lambda x: tag[x % k], range(n)))
     return a
+
+
+
+
