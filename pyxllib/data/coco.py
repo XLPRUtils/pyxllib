@@ -604,7 +604,10 @@ class Coco2Labelme(ToLabelmeJson):
 
         # 2 主要字段
         r['label'] = row['dt_category_name']
-        r['points'] = row['dt_ltrb']
+        if 'dt_segmentation' in row:
+            r['points'] = row['dt_segmentation'][0]
+        else:
+            r['points'] = row['dt_ltrb']
 
         # 3 扩展字段
         if attrs:
@@ -707,7 +710,7 @@ class Coco2Labelme(ToLabelmeJson):
 
 
 class CocoEval(CocoData):
-    def __init__(self, gt, dt, iou_type='bbox', *, min_score=0, printf=False):
+    def __init__(self, gt, dt, iou_type='bbox', *, min_score=0, print_mode=False):
         """
         TODO coco_gt、coco_dt本来已存储了很多标注信息，有些冗余了，是否可以跟gt_dict、dt_list等整合，去掉些没必要的组件？
         """
@@ -717,19 +720,19 @@ class CocoEval(CocoData):
         self.iou_type = iou_type
 
         # evaluater
-        self.coco_gt = COCO(gt, printf=printf)  # 这不需要按图片、类型分类处理
+        self.coco_gt = COCO(gt, print_mode=print_mode)  # 这不需要按图片、类型分类处理
         self.coco_dt, self.evaluater = None, None
         if self.dt_list:
             self.coco_dt = self.coco_gt.loadRes(self.dt_list)  # 这个返回也是coco对象
-            self.evaluater = COCOeval(self.coco_gt, self.coco_dt, iou_type, printf=printf)
+            self.evaluater = COCOeval(self.coco_gt, self.coco_dt, iou_type, print_mode=print_mode)
 
     @classmethod
-    def evaluater_eval(cls, et, img_ids=None, *, printf=False):
+    def evaluater_eval(cls, et, img_ids=None, *, print_mode=False):
         """ coco官方目标检测测评方法
         https://github.com/cocodataset/cocoapi/blob/master/PythonAPI/pycocoEvalDemo.ipynb
 
         :param img_ids:
-        :param printf: 注意这里的printf不同于初始化的printf，指的是不同的东西
+        :param print_mode: 注意这里的print_mode不同于初始化的print_mode，指的是不同的东西
         :return:
         """
         # 1 coco是有方法支持过滤id，只计算部分图的分值结果
@@ -744,14 +747,14 @@ class CocoEval(CocoData):
         et.accumulate()
 
         # 3 显示结果
-        if printf:  # 如果要显示结果则使用标准计算策略
-            et.summarize(printf=printf)
+        if print_mode:  # 如果要显示结果则使用标准计算策略
+            et.summarize(print_mode=print_mode)
             return round(et.stats[0], 4)
         else:  # 否则简化计算过程
             return round(et.step_summarize(), 4)
 
-    def eval(self, img_ids=None, *, printf=False):
-        return self.evaluater_eval(self.evaluater, img_ids=img_ids, printf=printf)
+    def eval(self, img_ids=None, *, print_mode=False):
+        return self.evaluater_eval(self.evaluater, img_ids=img_ids, print_mode=print_mode)
 
     def eval_dt_score(self, step=0.1):
         """ 计算按一定阈值滤除框后，对coco指标产生的影响 """
@@ -770,11 +773,11 @@ class CocoEval(CocoData):
         df = pd.DataFrame.from_records(records, columns=columns)
         return df
 
-    def parse_dt_score(self, step=0.1, *, printf=False):
+    def parse_dt_score(self, step=0.1, *, print_mode=False):
         """ dt按不同score过滤后效果
 
         注意如果数据集很大，这个功能运算特别慢，目前测试仅20张图都要10秒
-        可以把printf=True打开观察中间结果
+        可以把print_mode=True打开观察中间结果
 
         注意这个方法，需要调用后面的 CocoMatch
         """
@@ -786,7 +789,7 @@ class CocoEval(CocoData):
                    'coco_score',
                    'icdar2013', 'ic13_precision', 'ic13_recall',
                    'f1_score']
-        if printf: print(columns)
+        if print_mode: print(columns)
         while i < 1:
             dt_list = [x for x in dt_list if x['score'] >= i]
             if not dt_list: break
@@ -798,12 +801,12 @@ class CocoEval(CocoData):
             row = [i, cm.n_dt_box(), cm.n_match_box(), cm.n_matchcat_box(),
                    cm.eval(), ic13['hmean'], ic13['precision'], ic13['recall'], cm.f1_score()]
 
-            if printf: print(row)
+            if print_mode: print(row)
             records.append(row)
             i += step
         df = pd.DataFrame.from_records(records, columns=columns)
 
-        if printf:
+        if print_mode:
             with pd.option_context('display.max_colwidth', -1, 'display.max_columns', 20,
                                    'display.width', 200):  # 上下文控制格式
                 print(df)
@@ -812,11 +815,11 @@ class CocoEval(CocoData):
 
 
 class CocoParser(CocoEval):
-    def __init__(self, gt, dt=None, iou_type='bbox', *, min_score=0, printf=False):
+    def __init__(self, gt, dt=None, iou_type='bbox', *, min_score=0, print_mode=False):
         """ coco格式相关分析工具，dt不输入也行，当做没有任何识别结果处理~~
             相比CocoMatch比较轻量级，不会初始化太久，但提供了一些常用的基础功能
         """
-        super().__init__(gt, dt, iou_type, min_score=min_score, printf=printf)
+        super().__init__(gt, dt, iou_type, min_score=min_score, print_mode=print_mode)
         # gt里的images、categories数据，已转成df表格格式
         self.images, self.categories = self._get_images_df(), self._get_categories_df()
         # gt、dt的统计表
@@ -872,8 +875,11 @@ class CocoParser(CocoEval):
         if len(df) > 0:
             df['dt_ltrb'] = [self.bbox2ltrb(b) for b in df['bbox']]
             df['dt_score'] = [round(v, 4) for v in df['score']]
+            df['dt_segmentation'] = df['segmentation']  # 就算构建的时候没有segmentation字段，xlcocotools也会自动添加生成的
             df.rename(columns={'category_id': 'dt_category_id'}, inplace=True)
             # 3 筛选最终使用的表格及顺序
+            ext = set(df.columns) - set(columns + ['bbox', 'score', 'category_id', 'segmentation'])  # 扩展字段
+            columns += list(ext)
             return df[columns]
         else:
             return pd.DataFrame(columns=columns)
@@ -1033,7 +1039,7 @@ class CocoMatchBase:
 
 
 class CocoMatch(CocoParser, CocoMatchBase):
-    def __init__(self, gt, dt=None, *, min_score=0, eval_im=True, printf=False):
+    def __init__(self, gt, dt=None, *, min_score=0, eval_im=True, print_mode=False):
         """ coco格式相关分析工具，dt不输入也行，当做没有任何识别结果处理~~
 
         :param min_score: 滤除dt中score小余min_score的框
@@ -1042,12 +1048,12 @@ class CocoMatch(CocoParser, CocoMatchBase):
         # 因为这里 CocoEval、_CocoMatchBase 都没有父级，不会出现初始化顺序混乱问题
         #   所以我直接指定类初始化顺序了，没用super
         CocoParser.__init__(self, gt, dt, min_score=min_score)
-        match_anns = self._get_match_anns_df(printf=printf)
+        match_anns = self._get_match_anns_df(print_mode=print_mode)
         CocoMatchBase.__init__(self, match_anns)
-        self.images = self._get_match_images_df(eval_im=eval_im, printf=printf)
+        self.images = self._get_match_images_df(eval_im=eval_im, print_mode=print_mode)
         self.categories = self._get_match_categories_df()
 
-    def _get_match_anns_df(self, *, printf=False):
+    def _get_match_anns_df(self, *, print_mode=False):
         """ 将结果的dt框跟gt的框做匹配，注意iou非常低的情况也会匹配上
 
         TODO 有些框虽然没匹配到，但并不是没有iou，只是被其他iou更高的框抢掉了而已，可以考虑新增一个实际最大iou值列
@@ -1062,13 +1068,17 @@ class CocoMatch(CocoParser, CocoMatchBase):
         # 2 初始化
         records = []
         gt_columns = ['gt_box_id', 'gt_category_id', 'gt_ltrb', 'gt_area']
-        gt_default = [-1, -1, '', 0]  # 没有配对项时填充的默认值
+        ext = set(self.gt_anns.keys()) - set(gt_columns + ['image_id'])
+        gt_columns += list(ext)
+        gt_default = [-1, -1, '', 0] + [None]*len(ext)  # 没有配对项时填充的默认值
         if 'label' in self.gt_anns.columns:
             gt_columns.append('label')
             gt_default.append('')
 
-        dt_columns = ['dt_category_id', 'dt_ltrb', 'dt_score']
-        dt_default = [-1, '', 0]
+        dt_columns = ['dt_category_id', 'dt_ltrb', 'dt_score', 'dt_segmentation']
+        ext = set(self.dt_anns.keys()) - set(dt_columns + ['image_id', 'iscrowd', 'area', 'id'])
+        dt_columns += list(ext)
+        dt_default = [-1, '', 0] + [None]*len(ext)
 
         columns = ['image_id'] + gt_columns + ['iou'] + dt_columns
 
@@ -1086,7 +1096,7 @@ class CocoMatch(CocoParser, CocoMatchBase):
 
         # 3 遍历匹配
         for image_id, image in tqdm(self.images.iterrows(),
-                                    f'_get_match_anns_df, groups={len(self.images)}', disable=not printf):
+                                    f'_get_match_anns_df, groups={len(self.images)}', disable=not print_mode):
             # 3.1 计算匹配项
             # gt和dt关于某张图都有可能没有框
             # 比如合同检测，有的图可能什么类别对象都没有，gt中这张图本来就没有box；dt检测也是，某张图不一定有结果
@@ -1128,7 +1138,7 @@ class CocoMatch(CocoParser, CocoMatchBase):
         # 4 保存结果
         return pd.DataFrame.from_records(records, columns=columns)
 
-    def _get_match_images_df(self, *, eval_im=True, printf=False):
+    def _get_match_images_df(self, *, eval_im=True, print_mode=False):
         """ 在原有images基础上，扩展一些图像级别的识别结果情况数据 """
         # 1 初始化，新增字段
         images, match_anns = self.images.copy(), self.match_anns.groupby('image_id')
@@ -1138,7 +1148,7 @@ class CocoMatch(CocoParser, CocoMatchBase):
             images[c] = -1.0
 
         # 2 填写扩展字段的值
-        for image_id in tqdm(images.index, '_get_match_images_df', disable=not printf):
+        for image_id in tqdm(images.index, '_get_match_images_df', disable=not print_mode):
             # 2.1 跳过不存在的图
             if image_id not in match_anns.groups:
                 continue
@@ -1214,7 +1224,7 @@ class CocoMatch(CocoParser, CocoMatchBase):
         """
         xllog = get_xllog()
         xllog.info('1 coco官方评测指标（综合性指标）')
-        self.eval(printf=True)
+        self.eval(print_mode=True)
 
         xllog.info('2 icdar官方三种评测方法')
         ie = IcdarEval(*self.to_icdareval_data())
@@ -1260,7 +1270,7 @@ class CocoMatch(CocoParser, CocoMatchBase):
             image = image.drop(['file_name', 'height', 'width'])
 
             # 2 生成这张图片对应的json标注
-            if dst_dir:
+            if dst_dir and dst_dir.exists():
                 imfile = imfile.copy(dst_dir, if_exists='skip')
             lm = Coco2Labelme(imfile)
 
