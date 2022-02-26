@@ -131,5 +131,38 @@ def gentuple(n, tag):
     return a
 
 
+def cvsecs(time):
+    """ 从moviepy抄来的，任何时间格式转秒数的功能
+    Will convert any time into seconds.
+
+    If the type of `time` is not valid,
+    it's returned as is.
+
+    Here are the accepted formats::
+
+    >>> cvsecs(15.4)   # seconds
+    15.4
+    >>> cvsecs((1, 21.5))   # (min,sec)
+    81.5
+    >>> cvsecs((1, 1, 2))   # (hr, min, sec)
+    3662
+    >>> cvsecs('01:01:33.045')
+    3693.045
+    >>> cvsecs('01:01:33,5')    # coma works too
+    3693.5
+    >>> cvsecs('1:33,5')    # only minutes and secs
+    99.5
+    >>> cvsecs('33.5')      # only secs
+    33.5
+    """
+    factors = (1, 60, 3600)
+
+    if isinstance(time, str):
+        time = [float(f.replace(',', '.')) for f in time.split(':')]
+
+    if not isinstance(time, (tuple, list)):
+        return time
+
+    return sum(mult * part for mult, part in zip(factors, reversed(time)))
 
 

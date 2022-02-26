@@ -267,7 +267,7 @@ class xlcv(EnchantBase):
         对全图二值化后，考虑最外一层宽度为edge_size的环中，0、1分布最多的作为背景色
             然后取全部背景色的平均值返回
     
-        :param src_im: 支持黑白图、彩图
+        :param im: 支持黑白图、彩图
         :param edge_size: 边缘宽度，宽度越高一般越准确，但也越耗性能
         :param binary_img: 运算中需要用二值图，如果外部已经计算了，可以直接传入进来，避免重复运算
         :return: color
@@ -278,7 +278,7 @@ class xlcv(EnchantBase):
 
         # 1 获得二值图，区分前背景
         if binary_img is None:
-            gray_img = cv2.cvtColor(im, cv2.COLOR_BGR2GRAY) if src_im.ndim == 3 else src_im
+            gray_img = cv2.cvtColor(im, cv2.COLOR_BGR2GRAY) if im.ndim == 3 else im
             _, binary_img = cv2.threshold(gray_img, np.mean(gray_img), 255, cv2.THRESH_BINARY)
 
         # 2 分别存储点集
@@ -615,9 +615,12 @@ class xlcv(EnchantBase):
 
             max_length = max([im.shape[0] for im in imgs])
             max_channel = max([xlcv.n_channels(im) for im in imgs])
-            board = np.ones([max_length, pad[1]], dtype='uint8') * pad_color
-            if max_channel == 3:
-                board = xlcv.cvt_channel(board, 1)
+            if pad[1]:
+                board = np.ones([max_length, pad[1]], dtype='uint8') * pad_color
+                if max_channel == 3:
+                    board = xlcv.cvt_channel(board, 1)
+            else:
+                board = None
 
             for im in imgs:
                 h = im.shape[0]
@@ -625,17 +628,25 @@ class xlcv(EnchantBase):
                     im = xlcv.pad(im, [0, max_length - h, 0, 0])
                 if max_channel == 3:
                     im = xlcv.cvt_channel(im, 1)
-                patches += [board, im]
-            return np.hstack(patches[1:])
+                patches += [im]
+                if board is not None:
+                    patches += [board]
+            if board is None:
+                return np.hstack(patches)
+            else:
+                return np.hstack(patches[:-1])
 
         def vstack(imgs):
             patches = []
 
             max_length = max([im.shape[1] for im in imgs])
             max_channel = max([xlcv.n_channels(im) for im in imgs])
-            board = np.ones([pad[0], max_length], dtype='uint8') * pad_color
-            if max_channel == 3:
-                board = xlcv.cvt_channel(board, 1)
+            if pad[0]:
+                board = np.ones([pad[0], max_length], dtype='uint8') * pad_color
+                if max_channel == 3:
+                    board = xlcv.cvt_channel(board, 1)
+            else:
+                board = None
 
             for im in imgs:
                 w = im.shape[1]
@@ -643,8 +654,14 @@ class xlcv(EnchantBase):
                     im = xlcv.pad(im, [0, 0, 0, max_length - w])
                 if max_channel == 3:
                     im = xlcv.cvt_channel(im, 1)
-                patches += [board, im]
-            return np.vstack(patches[1:])
+                patches += [im]
+                if board is not None:
+                    patches += [board]
+
+            if board is None:
+                return np.vstack(patches)
+            else:
+                return np.vstack(patches[:-1])
 
         if isinstance(images[0], list):
             images = [hstack(imgs) for imgs in images]

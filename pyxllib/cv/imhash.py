@@ -13,3 +13,18 @@ from pyxllib.prog.pupil import check_install_package
 check_install_package('imagehash', 'ImageHash')
 
 import imagehash
+import numpy as np
+
+from pyxllib.cv.xlpillib import xlpil
+
+
+def get_init_hash():
+    """ 获得一个初始、空哈希值 """
+    return imagehash.ImageHash(np.zeros([8, 8]).astype(bool))
+
+
+def phash(image, *args, **kwargs):
+    """ 修改了官方接口，这里输入的image支持泛用格式
+    """
+    im = xlpil.read(image)
+    return imagehash.phash(im, *args, **kwargs)

@@ -407,9 +407,14 @@ def run_once(distinct_mode=False, *, limit=1):
             'ignore,str'，首参数忽略，第2个开始的参数使用str格式化
                 用于父类某个方法，但是子类继承传入cls，原本id不同会重复执行
                 使用该模式，首参数会ignore忽略，只比较第2个开始之后的参数
+            func等callable类型的对象也行，是使用run_once装饰器的简化写法
         limit: 默认只会执行一次，该参数可以提高限定的执行次数，一般用不到，用于兼容旧的 limit_call_number 装饰器
     Returns: 返回decorator
     """
+    if callable(distinct_mode):
+        # @run_once，没写括号的时候去装饰一个函数，distinct_mode传入的是一个函数func
+        # 使用run_once本身的默认值
+        return run_once()(distinct_mode)
 
     def get_tag(args, kwargs):
         if not distinct_mode:
@@ -436,6 +441,29 @@ def run_once(distinct_mode=False, *, limit=1):
                 res = func(*args, **kwargs)
                 x = counter[tag] = [x[0] + 1, res]
             return x[1]
+
+        return wrapper
+
+    return decorator
+
+
+def set_default_args(*d_args, **d_kwargs):
+    """ 增设默认参数
+
+    有时候需要调试一个函数，试跑一些参数结果，
+    但这些参数又不适合定为标准化的接口值，可以用这个函数设置
+
+    参数加载、覆盖顺序（越后面的优先级越高）
+    1、函数定义阶段设置的默认值
+    2、装饰器定义的参数 d_args、d_kwargs
+    3、运行阶段明确指定的参数，即传入的f_args、f_kwargs
+    """
+
+    def decorator(func):
+        def wrapper(*f_args, **f_kwargs):
+            args = f_args + d_args
+            d_kwargs.update(f_kwargs)  # 优先使用外部传参传入的值，再用装饰器里扩展的默认值
+            return func(*args, **d_kwargs)
 
         return wrapper
 
