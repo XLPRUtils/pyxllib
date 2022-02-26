@@ -8,7 +8,7 @@
 扩展了些自己的openpyxl工具
 """
 
-from pyxllib.prog.pupil import check_install_package
+from pyxllib.prog.pupil import check_install_package, run_once
 
 check_install_package('openpyxl')
 check_install_package('premailer')
@@ -252,6 +252,7 @@ class EnchantWorksheet(EnchantBase):
                 yield tuple(cells)
 
     @staticmethod
+    @run_once('id,str')
     def search(_self, pattern, min_row=None, max_row=None, min_col=None, max_col=None, order=None, direction=0):
         """ 查找满足pattern正则表达式的单元格
 
@@ -656,31 +657,45 @@ class EnchantWorksheet(EnchantBase):
 
     @staticmethod
     def cell2(self, row, column, value=None):
-        """ column支持字母列名引用 """
-        if isinstance(column, str):
+        """ 相比原版的cell，支持智能定位单元格位置
+
+        :param row:
+            int，第几行，从1开始编号
+            dict, {k: v}，找k所在列，且值为v的行。结果可能不唯一，只会取第1个匹配项。
+                支持多键同时检索
+                目前v只用普通数值，以后可以扩展更灵活丰富的格式
+        :param column: 用字段名column找单元格
+            int，正常第几列，从1开始编号
+            str,
+                优先判断是否为纯大写字幕，使用'P'、'AZ'等进行解析
+                其次使用findcol检索对应单元格
+            List[str]，类似str，findcol
+        """
+        # 1 智能 row
+        if isinstance(row, dict):
+            cols = {self.findcol(k): v for k, v in row.items()}
+            for i in self.iterrows(tuple(cols.keys())[0]):
+                logo = True
+                for c, v in cols.items():
+                    if self.cell(i, c).value != v:
+                        logo = False
+                        break
+                if logo:
+                    row = i
+                    break
+            else:
+                raise ValueError('Not find cell')
+
+        # 2 智能 column
+        if isinstance(column, int):
+            pass
+        elif isinstance(column, str) and re.match(r'[A-Z]+$', column):
             column = column_index_from_string(column)
-        cell = self.cell(row, column, value)
-        return cell
-
-    @staticmethod
-    def cell3(self, row, column, value=None):
-        """ 支持用字段名column找单元格 """
-        # 1 设置一个字典，缓存列名所在编号
-        if not hasattr(self, 'name2cols'):
-            self.name2cols = {}
-
-        # 2 column设为合法的key
-        if isinstance(column, list):
-            column = tuple(column)
-
-        # 3 查找列编号
-        if column in self.name2cols:
-            col = self.name2cols[column]
         else:
-            col = self.name2cols[column] = self.findcol(column)
+            column = self.findcol(column)
 
-        # 单元格
-        cell = self.cell(row, col, value)
+        # 3 单元格
+        cell = self.cell(row, column, value)
         return cell
 
     @staticmethod
