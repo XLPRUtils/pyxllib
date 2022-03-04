@@ -673,8 +673,9 @@ class EnchantWorksheet(EnchantBase):
         """
         # 1 智能 row
         if isinstance(row, dict):
+            idx_name = tuple(row.keys())[0]
             cols = {self.findcol(k): v for k, v in row.items()}
-            for i in self.iterrows(tuple(cols.keys())[0]):
+            for i in self.iterrows(idx_name):
                 logo = True
                 for c, v in cols.items():
                     if self.cell(i, c).value != v:
@@ -701,6 +702,8 @@ class EnchantWorksheet(EnchantBase):
     @staticmethod
     def iterrows(self, key_column_name, mode='default'):
         """ 通过某个属性列作为key，判断数据所在行
+
+        正常遍历行用iterrows，离散找数据用cell2
 
         :param key_column_name: 参考的主要字段名，判断数据起始行
         :param mode: 计算数据范围的一些细分方法，目前主要是数据结束位置的判断方法
