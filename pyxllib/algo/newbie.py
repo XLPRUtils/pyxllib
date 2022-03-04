@@ -164,5 +164,3 @@ def cvsecs(time):
         return time
 
     return sum(mult * part for mult, part in zip(factors, reversed(time)))
-
-

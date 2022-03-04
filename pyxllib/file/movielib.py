@@ -10,10 +10,13 @@ check_install_package('moviepy')
 
 import cv2
 from moviepy.editor import VideoFileClip
+import numpy as np
+from tqdm import tqdm
 
 from pyxllib.prog.pupil import EnchantBase, run_once
-from pyxllib.cv.xlcvlib import xlcv
+from pyxllib.file.specialist import XlPath
 from pyxllib.cv.imhash import get_init_hash, phash
+from pyxllib.cv.xlcvlib import xlcv
 
 
 class EnchantVideoFileClip(EnchantBase):
@@ -39,7 +42,8 @@ class EnchantVideoFileClip(EnchantBase):
         return frame
 
     @staticmethod
-    def get_frames(self, time_points, *, cur_hash=None, head_frame=None, scale=None, filter_mode=2):
+    def get_frames(self, time_points=None, *, interval_second=0.1, cur_hash=None, head_frame=None, scale=None,
+                   filter_mode=2, print_mode=True):
         """ 同时获得多帧图片
 
         :param time_points: 类list对象，元素是时间点（可以是字符串格式，也可以是数值秒数）
@@ -62,7 +66,10 @@ class EnchantVideoFileClip(EnchantBase):
             else:
                 cur_hash = phash(head_frame)
 
-        for time_point in time_points:
+        if time_points is None:
+            time_points = np.arange(0, self.duration, interval_second)
+
+        for time_point in tqdm(time_points, disable=not print_mode):
             im = self.get_frame2(time_point, scale=scale)
 
             if filter_mode >= 0:
@@ -72,6 +79,23 @@ class EnchantVideoFileClip(EnchantBase):
                 yield time_point, im
             else:
                 yield im
+
+    @staticmethod
+    def save_frames(self, out_dir, time_points=None, interval_second=0.1, **kwargs):
+        """ 跟get_frames差不多，多了一步自动存储图片文件到目录里
+
+        这个功能是比较定制化的，不是那么泛用，但会有很多相关类似的操作需求，可以参考这里的代码实现
+        """
+        # 1 time_points
+        if time_points is None:
+            time_points = np.arange(0, self.duration, interval_second)
+        out_dir = XlPath(out_dir)
+
+        # 2 按时间点取图片，保存文件
+        for time_point, frame in self.get_frames(time_points, **kwargs):
+            tt = int(time_point * 10)
+            m, s, ms = tt // 600, (tt // 10) % 60, tt % 10
+            xlcv.write(frame, out_dir / f'{m:03}_{s:02}.{ms}.jpg')
 
     @staticmethod
     def join_subtitles_image(self, time_points, ltrb_pos=None, *,
