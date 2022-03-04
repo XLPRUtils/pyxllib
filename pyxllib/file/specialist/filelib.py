@@ -1155,7 +1155,7 @@ class XlBytesIO(io.BytesIO):
 
 
 class PathGroups(Groups):
-    """ 按文件名（不含后缀）分组的相关功能 """
+    """ 按stem文件名（不含后缀）分组的相关功能 """
 
     @classmethod
     def groupby(cls, files, key=lambda x: os.path.splitext(str(x))[0], ykey=lambda y: y.suffix[1:]):
