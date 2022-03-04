@@ -6,13 +6,56 @@
 
 """ 单位功能库 """
 
+from pyxllib.prog.pupil import check_install_package
+
+check_install_package('pint')
+
 import pint
 
-from pyxllib.prog.newbie import RunOnlyOnce
+import pandas as pd
+
+from pyxllib.prog.newbie import xl_format_g
+from pyxllib.prog.pupil import run_once
 
 
-@RunOnlyOnce
+@run_once
 def get_ureg():
     """ 如果不想重复生成，可以用这个函数，只定义一个 """
     ureg = pint.UnitRegistry()
     return ureg
+
+
+def compare_quantity(units, base_unit):
+    """ 同一物理维度的数值量级大小对比
+
+    比如一套天文长度、距离数据，对比它们之间的量级大小
+
+    :param List[str, str] units: 一组要对比的单位数值
+        第1个str是描述，第2个str是数值和单位
+    :param base_unit: 基础单位值，比如长度是m，也可以用km等自己喜欢的基础单位值
+
+    """
+    ureg = get_ureg()
+
+    # 统一到单位：米
+    for x in units:
+        x[1] = ureg(x[1]).to(base_unit)
+
+    # 从小到大排
+    units.sort(key=lambda x: x[1])
+
+    # 格式化输出r
+    unit_list = []
+    columns = ['name', f'基础单位：{base_unit}', '与上一项倍率']
+    last_value = units[0][1]
+    for i, x in enumerate(units, start=1):
+        x = x.copy()
+        # x.append('{:.3g}'.format(round(float(x[1] / last_value), 2)))
+        x.append(xl_format_g(round(float(x[1] / last_value), 2)))
+        last_value = x[1]
+        x[1] = f'{x[1]:.2e}'
+        # print(f'{i:>4}', '\t'.join(x))
+        unit_list.append(x)
+
+    df = pd.DataFrame.from_records(unit_list, columns=columns)
+    return df

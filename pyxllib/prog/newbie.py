@@ -284,6 +284,7 @@ class classproperty(property):
 
 def decode_bitflags(n, flags, return_type=dict):
     """ 解析一个位标记的功能
+
     :param int n: 一个整数标记
     :param list|tuple flags: 一个对应明文数组
         flags[0]对应2**0的明文，flags[1]对应2**1的明文，以此类推
@@ -302,3 +303,19 @@ def decode_bitflags(n, flags, return_type=dict):
         return {x for i, x in enumerate(flags) if (n & (2 << i))}
     else:
         raise ValueError
+
+
+def xl_format_g(x, p=3):
+    """ 普通format的g模式不太满足我的需求，做了点修改
+
+    注：g是比较方便的一种数值格式化方法，会比较智能地判断是否整数显示，或者普通显示、科学计数法显示
+
+    :param x: 数值x
+    """
+    s = f'{x:g}'
+    if 'e' in s:
+        # 如果变成了科学计数法，明确保留3位有效数字
+        return '{:.{}g}'.format(x, p=3)
+    else:
+        # 否则返回默认的g格式
+        return s
