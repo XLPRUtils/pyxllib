@@ -437,7 +437,7 @@ def html_bitran_template(htmlcontent):
 
         s2 = x.prettify()
 
-        return s1 + '\n' + s2
+        return s2 + '\n' + s1
 
     res = ne2.replace(func)
 
