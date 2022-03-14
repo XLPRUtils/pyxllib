@@ -931,12 +931,12 @@ class XlPath(type(pathlib.Path())):
         """
         pass
 
-    def read_text(self, encoding='utf8', errors='strict', rich_return: bool = False):
+    def read_text(self, encoding='utf8', errors='strict', return_mode: bool = False):
         bstr = self.read_bytes()
         if not encoding: encoding = get_encoding(bstr)
         s = bstr.decode(encoding=encoding, errors=errors)
 
-        if rich_return:
+        if return_mode:
             return s, encoding
         else:
             return s
@@ -953,25 +953,24 @@ class XlPath(type(pathlib.Path())):
         with open(self, 'wb') as f:
             pickle.dump(data, f)
 
-    def read_json(self, encoding='utf8', *, errors='strict', rich_return: bool = False):
+    def read_json(self, encoding='utf8', *, errors='strict', return_mode: bool = False):
         """
 
         Args:
-            p: Path对象
             encoding: 可以主动指定编码，否则默认会自动识别编码
-            rich_return: 默认只返回读取的数据
+            return_mode: 默认只返回读取的数据
                 开启后，得到更丰富的返回信息: data, encoding
                     该功能常用在需要自动识别编码，重写回文件时使用相同的编码格式
         Returns:
 
         """
-        s, encoding = self.read_text(encoding=encoding, errors=errors, rich_return=True)
+        s, encoding = self.read_text(encoding=encoding, errors=errors, return_mode=True)
         try:
             data = ujson.loads(s)
         except ValueError:  # ujson会有些不太标准的情况处理不了
             data = json.loads(s)
 
-        if rich_return:
+        if return_mode:
             return data, encoding
         else:
             return data
@@ -982,7 +981,7 @@ class XlPath(type(pathlib.Path())):
             json.dump(data, f, **kwargs)
 
     def read_yaml(self, encoding='utf8', *, errors='strict', rich_return=False):
-        s, encoding = self.read_text(encoding=encoding, errors=errors, rich_return=True)
+        s, encoding = self.read_text(encoding=encoding, errors=errors, return_mode=True)
         data = yaml.safe_load(s)
 
         if rich_return:

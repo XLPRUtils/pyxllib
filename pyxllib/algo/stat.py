@@ -237,3 +237,31 @@ def xlpivot(df, index=None, columns=None, values=None):
     else:  # 只有columns，没有index
         view_table = df2.set_index(index_).T
     return view_table
+
+
+def count_key_combinations(df, col_names, count_col_name='count'):
+    """ 统计列出的几个列名，各种组合出现的次数
+
+    :param df:
+    :param col_names: ['a', 'b', 'c']
+    :param count_col_name: 新增的统计出现次数的列名，默认count
+    :return: 新的次数统计的df表格
+
+    这个功能跟 SqlCodeGenerator 的 keys_count、one2many很像，是可以代替这两个功能的
+    """
+    from collections import Counter
+
+    # 0 参数处理
+    if isinstance(col_names, str):
+        col_names = [col_names]
+
+    # 1 统计每种组合出现的次数
+    cols = [df[name] for name in col_names]
+    ct = Counter(tuple(zip(*cols)))
+
+    # 2 生成新的df的统计表
+    ls = []
+    for k, v in ct.most_common():
+        ls.append([*k, v])
+    df2 = pd.DataFrame.from_records(ls, columns=list(col_names) + [count_col_name])
+    return df2
