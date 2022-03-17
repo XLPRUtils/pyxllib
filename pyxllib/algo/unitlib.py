@@ -25,7 +25,7 @@ def get_ureg():
     return ureg
 
 
-def compare_quantity(units, base_unit):
+def compare_quantity(units, base_unit, scale=None):
     """ 同一物理维度的数值量级大小对比
 
     比如一套天文长度、距离数据，对比它们之间的量级大小
@@ -33,7 +33,7 @@ def compare_quantity(units, base_unit):
     :param List[str, str] units: 一组要对比的单位数值
         第1个str是描述，第2个str是数值和单位
     :param base_unit: 基础单位值，比如长度是m，也可以用km等自己喜欢的基础单位值
-
+    :param scale: 对数值进行缩放
     """
     ureg = get_ureg()
 
@@ -46,11 +46,16 @@ def compare_quantity(units, base_unit):
 
     # 格式化输出r
     unit_list = []
-    columns = ['name', f'基础单位：{base_unit}', '与上一项倍率']
+    if scale:
+        columns = ['name', f'基础单位：{base_unit}', 'scale', '与上一项倍率']
+    else:
+        columns = ['name', f'基础单位：{base_unit}', 'scale', '与上一项倍率']
     last_value = units[0][1]
     for i, x in enumerate(units, start=1):
         x = x.copy()
         # x.append('{:.3g}'.format(round(float(x[1] / last_value), 2)))
+        if scale:
+            x.append(f'{x[1] * scale:.2e}')
         x.append(xl_format_g(round(float(x[1] / last_value), 2)))
         last_value = x[1]
         x[1] = f'{x[1]:.2e}'

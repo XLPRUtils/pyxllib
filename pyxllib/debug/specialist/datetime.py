@@ -129,3 +129,4 @@ def parse_timedelta(s):
     d = {k: int(v) for k, v in zip(['seconds', 'minutes', 'hours'], parts)}
     td = datetime.timedelta(**d)
     return td
+
