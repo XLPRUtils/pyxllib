@@ -1033,6 +1033,15 @@ class XlPath(type(pathlib.Path())):
         """ 类型判断、glob系列 """
         pass
 
+    def glob(self, pattern):
+        if isinstance(pattern, str):
+            return super(XlPath, self).glob(pattern)
+        elif isinstance(pattern, (list, tuple)):
+            # TODO 有重复这么办？要去重
+            from itertools import chain
+            ls = [super(XlPath, self).glob(x) for x in pattern]
+            return chain(*ls)
+
     def is_image(self):
         suffixs = {'png', 'jpg', 'jpeg', 'bmp'}
         return self.suffix[1:].lower() in suffixs
@@ -1248,7 +1257,8 @@ class UsedRecords:
     """存储用户的使用记录到一个文件"""
 
     def __init__(self, filename, default_value=None, *, use_temp_root=False, limit_num=30):
-        """记录存储文件
+        """ 记录存储文件
+
         :param filename: 文件路径与名称
         :param default_value:
         :param use_temp_root: 使用临时文件夹作为根目录

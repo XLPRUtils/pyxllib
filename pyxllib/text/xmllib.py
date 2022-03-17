@@ -21,8 +21,9 @@ from humanfriendly import format_size
 
 from pyxllib.algo.pupil import SearchBase
 from pyxllib.debug.pupil import dprint
+from pyxllib.debug.specialist import browser, getmembers
 from pyxllib.prog.newbie import round_int
-from pyxllib.prog.pupil import EnchantBase, EnchantCvt
+from pyxllib.prog.pupil import EnchantBase, EnchantCvt, run_once
 from pyxllib.text.newbie import xldictstr
 from pyxllib.text.pupil import shorten, ensure_gbk, RunOnlyOnce, BookContents, strwidth, grp_chinese_char
 from pyxllib.file.specialist import File, Dir, get_etag
@@ -30,16 +31,16 @@ from pyxllib.file.specialist import File, Dir, get_etag
 
 class EnchantBs4Tag(EnchantBase):
     @classmethod
-    @RunOnlyOnce
+    @run_once
     def enchant(cls):
         """ 把xlcv的功能嵌入cv2中
 
         不太推荐使用该类，可以使用CvImg类更好地解决问题。
         """
-        names = cls.check_enchant_names([bs4.Tag])
+        names = cls.check_enchant_names([bs4.element.Tag])
         propertys = {'tag_name'}
-        cls._enchant(bs4.Tag, propertys, EnchantCvt.staticmethod2property)
-        cls._enchant(bs4.Tag, names - propertys)
+        cls._enchant(bs4.element.Tag, propertys, EnchantCvt.staticmethod2property)
+        cls._enchant(bs4.element.Tag, names - propertys)
 
     @staticmethod
     def tag_name(self):
@@ -348,6 +349,43 @@ class EnchantBs4Tag(EnchantBase):
         # return self.prettify()
         return str(self)
 
+    @staticmethod
+    def browser(self):
+        browser.html(self)
+
+    @staticmethod
+    @run_once('id,str')
+    def get_nonempty_childrens(self, *args):
+        """ 获得所有Tag类型的直接子结点 （偏定制，不是那么通用的接口）
+
+        会同时检查NavigableString类型，且必须是空白字符串，比如空格、\n之类
+        """
+        def check(x):
+            if isinstance(x, bs4.element.Tag):
+                return True
+            elif isinstance(x, bs4.element.Comment):
+                return False
+            elif isinstance(x, bs4.element.NavigableString):
+                assert not x.strip(), f'非空字符串值：{x}'
+                return False
+            else:
+                raise ValueError(f'未见类型 {x}')
+
+        ls = list(filter(check, self.children))
+
+        if len(args):
+            return ls[args[0]].get_nonempty_childrens(*args[1:])
+        else:
+            return ls
+
+    @staticmethod
+    def get_nonempty_children(self, *args):
+        if len(args):
+            ls = self.get_nonempty_childrens(*args[:-1])
+            return ls[args[-1]]
+        else:
+            return self
+
 
 EnchantBs4Tag.enchant()
 
@@ -545,3 +583,36 @@ class MakeHtmlNavigation:
         f0 = File(title + '_index', Dir.TEMP, suffix='.html').write(main_content, encoding=encoding,
                                                                     if_exists='replace')
         return f0
+
+
+class HtmlParser:
+    """ 对树形结构、位置比较固定的html文档的一个解析框架 """
+
+    def __init__(self, root):
+        """ 输入根节点root """
+        self.root = root
+
+    @classmethod
+    @run_once
+    def get_parse_funcs(cls):
+        res = []
+
+        # 获取所有的方法名
+        members = dir(cls)
+        methods = filter(lambda m: callable(getattr(cls, m)), members)
+
+        # 以parse、parse_0、parse_0_2等格式命名的函数，是解析树结构特定位置，这里自动执行解析
+        for method in methods:
+            if re.match(r'parse(_\d+)*$', method):
+                # 智能获取对应下标的结构变量
+                res.append(method)
+
+        return res
+
+    def run(self):
+        for method in self.get_parse_funcs():
+            # 智能获取对应下标的结构变量
+            idxs = [int(v) for v in method[5:].split('_') if v]
+            x = self.root.get_nonempty_children(*idxs)
+            # 自动执行函数
+            getattr(self, method)(x)
