@@ -11,6 +11,7 @@ Deprecated
 pyperclip
 envariable
 decorator
+more-itertools
 
 pympler
 lxml

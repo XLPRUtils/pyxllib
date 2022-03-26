@@ -10,25 +10,28 @@ import json
 import os
 import re
 import subprocess
+import time
 
 from tqdm import tqdm
 
 from pyxllib.text.newbie import add_quote
 
 
-def mtqdm(func, iterable, *args, max_workers=1, **kwargs):
+def mtqdm(func, iterable, *args, max_workers=1, check_per_seconds=0.1, **kwargs):
     """ 对tqdm的封装，增加了多线程的支持
 
     这里名称前缀多出的m有multi的意思
 
     :param max_workers: 默认是单线程，改成None会自动变为多线程
         或者可以自己指定线程数
+        注意，使用负数，可以用对等绝对值数据的“多进程”
     :param smoothing: tqdm官方默认值是0.3
         这里关掉指数移动平均，直接计算整体平均速度
         因为对我个人来说，大部分时候需要严谨地分析性能，得到整体平均速度，而不是预估当前速度
     :param mininterval: 官方默认值是0.1，表示显示更新间隔秒数
         这里不用那么频繁，每秒更新就行了~~
-
+    :param check_per_seconds: 每隔多少秒检查队列
+        有些任务，这个值故意设大一点，可以减少频繁的队列检查时间，提高运行速度
     整体功能类似Iterate
     """
 
@@ -51,14 +54,25 @@ def mtqdm(func, iterable, *args, max_workers=1, **kwargs):
             except Exception as e:
                 error = e
 
-        # 3 多线程和进度条功能的结合
-        executor = concurrent.futures.ThreadPoolExecutor(max_workers)
-        for x in tqdm(iterable, *args, **kwargs):
-            while executor._work_queue.qsize():
-                pass
-            executor.submit(wrap_func, x)
-            if error:
-                raise error
+        # 3 多线程/多进程 和 进度条 功能的结合
+        if max_workers > 1:
+            executor = concurrent.futures.ThreadPoolExecutor(max_workers)
+            for x in tqdm(iterable, *args, **kwargs):
+                while executor._work_queue.qsize():
+                    if check_per_seconds:
+                        time.sleep(check_per_seconds)
+                executor.submit(wrap_func, x)
+                if error:
+                    raise error
+        else:
+            executor = concurrent.futures.ProcessPoolExecutor(-max_workers)
+            for x in tqdm(iterable, *args, **kwargs):
+                # while executor._call_queue.pending_work_items:
+                #     if check_per_seconds:
+                #         time.sleep(check_per_seconds)
+                executor.submit(wrap_func, x)
+                if error:
+                    raise error
 
         executor.shutdown()
 

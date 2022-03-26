@@ -23,6 +23,7 @@ import qiniu
 import requests
 import yaml
 import humanfriendly
+from more_itertools import chunked
 
 from pyxllib.algo.pupil import Groups
 from pyxllib.file.pupil import struct_unpack, gen_file_filter
@@ -940,6 +941,25 @@ class XlPath(type(pathlib.Path())):
             return s, encoding
         else:
             return s
+
+    def readlines_batch(self, batch_size, *, encoding='utf8'):
+        """ 将文本行打包，每次返回一个批次多行数据
+
+        python的io.IOBase.readlines有个hint参数，不是预期的读取几行的功能，所以这里重点是扩展了一个readlines的功能
+
+        :param batch_size: 默认每次获取一行内容，可以设参数，每次返回多行内容
+            如果遍历每次只获取一行，一般不用这个接口，直接对open得到的文件句柄f操作就行了
+
+        :return: list[str]
+            注意返回的每行str，末尾都带'\n'
+            但最后一行视情况可能有\n，可能没有\n
+
+        注，开发指南：不然扩展支持batch_size=-1获取所有数据，因为
+
+        """
+
+        f = open(self, 'r', encoding=encoding)
+        return chunked(f, batch_size)
 
     def write_text(self, data, encoding='utf8', errors=None):
         with open(self, 'w', encoding=encoding, errors=errors) as f:
