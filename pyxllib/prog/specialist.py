@@ -17,7 +17,7 @@ from tqdm import tqdm
 from pyxllib.text.newbie import add_quote
 
 
-def mtqdm(func, iterable, *args, max_workers=1, check_per_seconds=0.1, **kwargs):
+def mtqdm(func, iterable, *args, max_workers=1, check_per_seconds=0.01, **kwargs):
     """ 对tqdm的封装，增加了多线程的支持
 
     这里名称前缀多出的m有multi的意思
