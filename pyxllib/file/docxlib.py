@@ -16,8 +16,7 @@ import pythoncom
 from win32com.client import constants
 import win32com.client as win32
 
-from pyxllib.prog.newbie import RunOnlyOnce
-from pyxllib.prog.pupil import DictTool, EnchantBase, EnchantCvt
+from pyxllib.prog.pupil import DictTool, EnchantBase, EnchantCvt, run_once
 from pyxllib.text.pupil import strwidth
 from pyxllib.debug.specialist import File, Dir, get_etag, browser
 
@@ -262,7 +261,7 @@ def __win32_word():
 
 class EnchantWin32WordApplication(EnchantBase):
     @classmethod
-    @RunOnlyOnce.decorator(distinct_args=False)
+    @run_once
     def enchant(cls, app, recursion_enchant=False):
         """
         :param app: win32的类是临时生成的，需要给一个参考对象，才方便type(word)算出类型
@@ -382,7 +381,7 @@ class EnchantWin32WordApplication(EnchantBase):
 
 class EnchantWin32WordDocument(EnchantBase):
     @classmethod
-    @RunOnlyOnce.decorator(distinct_args=False)
+    @run_once
     def enchant(cls, doc):
         _cls = type(doc)
         names = cls.check_enchant_names([_cls], ignore_case=True)
@@ -558,7 +557,7 @@ class EnchantWin32WordRange(EnchantBase):
     """
 
     @classmethod
-    @RunOnlyOnce.decorator(distinct_args=False)
+    @run_once
     def enchant(cls, rng):
         _cls = type(rng)
         names = cls.check_enchant_names([_cls], ignore_case=True)
@@ -674,7 +673,7 @@ class EnchantWin32WordRange(EnchantBase):
 
 class EnchantWin32WordHyperlink(EnchantBase):
     @classmethod
-    @RunOnlyOnce.decorator(distinct_args=False)
+    @run_once
     def enchant(cls, link):
         _cls = type(link)
         names = cls.check_enchant_names([_cls], ignore_case=True)
