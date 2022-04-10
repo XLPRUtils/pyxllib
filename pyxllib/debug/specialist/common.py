@@ -5,13 +5,16 @@
 # @Date   : 2020/06/02 11:09
 
 from collections import defaultdict, Counter
+import copy
+import re
 import sys
 
 import pandas as pd
+from more_itertools import unique_everseen
 
 from pyxllib.prog.newbie import typename
-from pyxllib.text.pupil import shorten, east_asian_shorten
 from pyxllib.algo.pupil import natural_sort_key
+from pyxllib.text.pupil import shorten, east_asian_shorten
 
 
 def dataframe_str(df, *args, ambiguous_as_wide=None, shorten=True):
@@ -184,3 +187,161 @@ class KeyValuesCounter:
 
     def to_html_table(self, max_items=10):
         return NestedDict.to_html_table(self.kvs, max_items=max_items)
+
+
+class JsonStructParser:
+    """ 类json数据格式的结构解析
+
+    【名称定义】
+    item: 一条类json的数据条目
+    path: 用类路径的格式，表达item中某个数值的索引。例如
+        /a/b/3/c: 相当于 item['a']['b'][3]['c']
+        有一些特殊的path，例如容器类会以/结尾： /a/
+        以及一般会带上数值的类型标记，区分度更精确：/a/=dict
+    pathx: 泛指下述中某种格式
+        pathlist: list, 一条item对应的扁平化的路径
+        pathstr/struct: paths拼接成一个str
+        pathdict: paths重新组装成一个dict字典(未实装，太难写，性价比也低)
+    """
+
+    default_cfg = {'include_container': True,  # 包含容器（dict、list）的路径
+                   'value_type': True,  # 是否带上后缀：数值的类型
+                   # 可以输入一个自定义的路径合并函数 path,type=merge_path(path,type)。
+                   # 一般是字典中出现不断变化的数值id，格式不统一，使用一定的规则，可以将path几种相近的冗余形式合并。
+                   # 也可以设True，默认会将数值类统一为0。
+                   'merge_path': False,
+                   }
+
+    @classmethod
+    def _get_item_path_types(cls, item, prefix=''):
+        """
+        :param item: 类json结构的数据，可以含有类型： dict, list(tuple), int, str, bool, None
+            结点类型
+                其中 dict、list称为 container 容器类型
+                其他int、str称为数值类型
+            结构
+                item 可以看成一个树形结构
+                其中数值类型可以视为叶子结点，其他容器类是非叶子结点
+
+        瑕疵
+        1、如果key本身带有"/"，会导致混乱
+        2、list的下标转为0123，和字符串类型的key会混淆，和普通的字典key也会混淆
+        """
+        path_types = []
+        if isinstance(item, dict):
+            path_types.append([prefix + '/', 'dict'])
+            for k in sorted(item.keys()):  # 实验表明，在这里对字典的键进行排序就行，最后总的paths不要排序，不然结构会乱
+                v = item[k]
+                path_types.extend(cls._get_item_path_types(v, f'{prefix}/{k}'))
+        elif isinstance(item, (list, tuple)):
+            path_types.append([prefix + '/', type(item).__name__])
+            for k, v in enumerate(item):
+                path_types.extend(cls._get_item_path_types(v, f'{prefix}/{k}'))
+        else:
+            path_types.append([prefix, type(item).__name__])
+        return path_types
+
+    @classmethod
+    def get_item_pathlist(cls, item, prefix='', **kwargs):
+        """ 获得字典的结构标识
+        """
+        # 1 底层数据
+        cfg = copy.copy(cls.default_cfg)
+        cfg.update(kwargs)
+        paths = cls._get_item_path_types(item, prefix)
+
+        # 2 配置参数
+        if cfg['merge_path']:
+            if callable(cfg['merge_path']):
+                func = cfg['merge_path']
+            else:
+                def func(p, t):
+                    return re.sub(r'\d+', '0', p), t
+
+            # 保序去重
+            paths = list(unique_everseen(map(lambda x: func(x[0], x[1]), paths)))
+
+        if not cfg['include_container']:
+            paths = [pt for pt in paths if (pt[0][-1] != '/')]
+
+        if cfg['value_type']:
+            paths = ['='.join(pt) for pt in paths]
+        else:
+            paths = [pt[0] for pt in paths]
+
+        return paths
+
+    @classmethod
+    def get_item_pathstr(cls, item, prefix='', **kwargs):
+        paths = cls.get_item_pathlist(item, prefix, **kwargs)
+        return '\n'.join(paths)
+
+    @classmethod
+    def get_items_struct2cnt(cls, items, **kwargs):
+        # 1 统计每种结构出现的次数
+        struct2cnt = Counter()
+        for item in items:
+            pathstr = cls.get_item_pathstr(item, **kwargs)
+            struct2cnt[pathstr] += 1
+        # 2 按照从多到少排序
+        struct2cnt = Counter(dict(sorted(struct2cnt.items(), key=lambda item: -item[1])))
+        return struct2cnt
+
+    @classmethod
+    def get_items_structdf(cls, items, **kwargs):
+        """ 分析一组题目里，出现了多少种不同的json结构 """
+        # 1 获取原始数据，初始化
+        struct2cnt = cls.get_items_struct2cnt(items, **kwargs)
+        m = len(struct2cnt)
+
+        # 2 path2cnt
+        path2cnt = Counter()
+        for struct in struct2cnt.keys():
+            path2cnt.update({path: struct2cnt[struct] for path in struct.splitlines()})
+        paths = sorted(path2cnt.keys(), key=lambda path: re.split(r'/=', path))
+        path2cnt = {path: path2cnt[path] for path in paths}
+
+        # 3 生成统计表
+        ls = []
+        columns = ['path', 'total'] + [f'struct{i}' for i in range(1, m + 1)]
+        for path, cnt in path2cnt.items():
+            row = [path, cnt]
+            for struct, cnt in struct2cnt.items():
+                t = cnt if path in struct else 0
+                row.append(t)
+            ls.append(row)
+
+        df = pd.DataFrame.from_records(ls, columns=columns)
+        return df
+
+    @classmethod
+    def get_itemgroups_structdf(cls, itemgroups, **kwargs):
+        """ 分析不同套数据间的json结构区别
+
+        这里为了减少冗余开发，直接复用get_items_structdf
+            虽然会造成一些冗余功能，
+        """
+        # 1 统计所有paths出现情况
+        n = len(itemgroups)
+        d = dict()
+        for i, gs in enumerate(itemgroups):
+            for x in gs:
+                paths = cls.get_item_pathlist(x, **kwargs)
+                for p in paths:
+                    if p not in d:
+                        d[p] = [0] * n
+                    d[p][i] += 1
+
+        # 排序
+        paths = sorted(d.keys(), key=lambda path: re.split(r'/=', path))
+
+        # 2 统计表
+        ls = []
+        columns = ['path', 'total'] + [f'group{i}' for i in range(1, n + 1)]
+        for path in paths:
+            vals = d[path]
+            row = [path, sum(vals)] + vals
+            ls.append(row)
+
+        df = pd.DataFrame.from_records(ls, columns=columns)
+        return df
