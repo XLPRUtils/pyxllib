@@ -348,7 +348,7 @@ class xlcv(EnchantBase):
     def circles(im, circles, color=None, thickness=1, center=False):
         """ 在图片上画圆形
     
-        :param src: 要作画的图
+        :param im: 要作画的图
         :param circles: 要画的圆形参数 (x, y, 半径 r)
         :param color: 画笔颜色
         :param center: 是否画出圆心
