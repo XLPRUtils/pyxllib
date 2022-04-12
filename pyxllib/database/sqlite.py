@@ -1,0 +1,109 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+# @Author : 陈坤泽
+# @Email  : 877362867@qq.com
+# @Date   : 2022/04/12 08:59
+
+import json
+import sqlite3
+
+import cv2
+
+
+class Connection(sqlite3.Connection):
+    def has_table(self, table_name):
+        res = self.execute(f"SELECT name FROM sqlite_master WHERE type='table' AND name='{table_name}'").fetchone()
+        return bool(res)
+
+    @classmethod
+    def autotype(cls, val):
+        if isinstance(val, str):
+            return 'text'
+        elif isinstance(val, (int, bool)):
+            return 'integer'
+        elif isinstance(val, float):
+            return 'real'
+        else:  # 其他dict、list等类型，可以用json.dumps或str转文本存储
+            return 'text'
+
+    @classmethod
+    def cvt_type(cls, val):
+        if isinstance(val, (dict, list, tuple)):
+            val = json.dumps(val, ensure_ascii=False)
+        return val
+
+    @classmethod
+    def cvt_types(cls, vals):
+        return [cls.cvt_type(v) for v in vals]
+
+    def create_table(self, table_name, column_descs):
+        """
+        :param table_name:
+        :param column_descs:
+            str, 正常的列格式描述，例如 'c1 text, c2 blob'
+            dict, k是列名，v是一个具体的值，供分析参考格式类型
+        :return:
+        """
+        # 1 列数据格式智能分析
+        if not isinstance(column_descs, str):
+            descs = []
+            for k, v in column_descs.items():
+                t = self.autotype(v)
+                descs.append(f'{k} {t}')
+            column_descs = ','.join(descs)
+
+        # 2 新建表格
+        self.execute(f'CREATE TABLE {table_name}({column_descs})')
+
+    def create_index(self, index_name, table_name, cols):
+        if not isinstance(cols, str):
+            cols = ','.join(map(str, cols))
+        self.execute(f'CREATE INDEX {index_name} ON {table_name}(cols)')
+
+    def ensure_column(self, table_name, col_name, col_type='', *, col_ref_val=None):
+        """
+        :param table_name:
+        :param col_name:
+        :param col_type:
+        :param col_ref_val: 可以通过具体的数值，智能判断列数据格式
+        :return:
+        """
+        if col_ref_val:
+            col_type = self.autotype(col_ref_val)
+        if not col_type:
+            col_type = 'text'
+
+        try:
+            self.execute(f'ALTER TABLE {table_name} ADD COLUMN {col_name} {col_type}')
+        except sqlite3.OperationalError as e:
+            # 重复插入不报错
+            if e.args[0] != f'duplicate column name: {col_name}':
+                raise e
+
+    def get_column_names(self, table_name):
+        names = []
+        for item in self.execute(f'PRAGMA table_info({table_name})'):
+            names.append(item[1])
+        return names
+
+    def insert(self, table_name, cols):
+        """
+        :param table_name:
+        :param cols: 一般是用字典表示的要插入的值
+        :return:
+        """
+        ks = ','.join(cols.keys())
+        vs = ','.join('?' * (len(cols.keys())))
+        self.execute(f'INSERT INTO {table_name}({ks}) VALUES ({vs})', self.cvt_types(cols.values()))
+
+    def update(self, table_name, cols, where):
+        """
+        :param table_name:
+        :param dict cols: 要更新的字段及值
+        :param dict where: 怎么匹配到对应记录
+        :return:
+        """
+        kvs = ','.join([f'{k}=?' for k in cols.keys()])
+        ops = ' AND '.join([f'{k}=?' for k in where.keys()])
+        vals = list(cols.values()) + list(where.values())
+        self.execute(f'UPDATE {table_name} SET {kvs} WHERE {ops}', self.cvt_types(vals))
