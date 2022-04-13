@@ -96,7 +96,7 @@ class CocoGtData:
         """
         # 1 两个点要转4个点
         if len(pts) == 2:
-            pts = rect2polygon(pts).tolist()
+            pts = rect2polygon(pts)
         else:
             pts = list(pts)
 
@@ -1070,7 +1070,7 @@ class CocoMatch(CocoParser, CocoMatchBase):
         gt_columns = ['gt_box_id', 'gt_category_id', 'gt_ltrb', 'gt_area']
         ext = set(self.gt_anns.keys()) - set(gt_columns + ['image_id'])
         gt_columns += list(ext)
-        gt_default = [-1, -1, '', 0] + [None]*len(ext)  # 没有配对项时填充的默认值
+        gt_default = [-1, -1, '', 0] + [None] * len(ext)  # 没有配对项时填充的默认值
         if 'label' in self.gt_anns.columns:
             gt_columns.append('label')
             gt_default.append('')
@@ -1078,7 +1078,7 @@ class CocoMatch(CocoParser, CocoMatchBase):
         dt_columns = ['dt_category_id', 'dt_ltrb', 'dt_score', 'dt_segmentation']
         ext = set(self.dt_anns.keys()) - set(dt_columns + ['image_id', 'iscrowd', 'area', 'id'])
         dt_columns += list(ext)
-        dt_default = [-1, '', 0] + [None]*len(ext)
+        dt_default = [-1, '', 0] + [None] * len(ext)
 
         columns = ['image_id'] + gt_columns + ['iou'] + dt_columns
 
