@@ -23,7 +23,7 @@ import six
 
 import paddle
 
-from ppocr.utils.logging import get_logger
+from pyxlpr.ppocr.utils.logging import get_logger
 
 __all__ = ['load_model']
 
@@ -74,7 +74,7 @@ def load_model(config, model, optimizer=None):
             else:
                 logger.warning(
                     "The shape of model params {} {} not matched with loaded params shape {} !".
-                    format(key, value.shape, pre_value.shape))
+                        format(key, value.shape, pre_value.shape))
         model.set_state_dict(new_state_dict)
 
         if optimizer is not None:
@@ -84,7 +84,7 @@ def load_model(config, model, optimizer=None):
             else:
                 logger.warning(
                     "{}.pdopt is not exists, params of optimizer is not loaded".
-                    format(checkpoints))
+                        format(checkpoints))
 
         if os.path.exists(checkpoints + '.states'):
             with open(checkpoints + '.states', 'rb') as f:
@@ -120,7 +120,7 @@ def load_pretrained_params(model, path):
             else:
                 logger.warning(
                     "The shape of model params {} {} not matched with loaded params {} {} !".
-                    format(k1, state_dict[k1].shape, k1, params[k1].shape))
+                        format(k1, state_dict[k1].shape, k1, params[k1].shape))
     model.set_state_dict(new_state_dict)
     logger.info("load pretrain successful from {}".format(path))
     return model

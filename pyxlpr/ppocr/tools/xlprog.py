@@ -12,7 +12,7 @@ import copy
 
 import numpy as np
 
-from ppocr.tools.program import preprocess
+from pyxlpr.ppocr.tools.program import preprocess
 
 from pyxllib.algo.geo import rect_bounds, ltrb2xywh
 from pyxllib.file.specialist import XlPath, ensure_localfile, ensure_localdir
@@ -295,7 +295,7 @@ class PaddleDetConfig(PaddleOCRConfig):
             2，finetune后的模型
         :param kwargs: 可以增加一些检测模型的配置参数，比如常用的 det_db_unclip_ratio=1.5
         """
-        from paddleocr import PaddleOCR
+        from pyxlpr.paddleocr import PaddleOCR
 
         if model_type == 0:
             ppocr = PaddleOCR.build_ppocr(**kwargs)
@@ -311,7 +311,7 @@ class PaddleDetConfig(PaddleOCRConfig):
         return ppocr
 
     def _build_dataset(self, config, logger, dataset_mode='Eval'):
-        from ppocr.data import build_dataset
+        from pyxlpr.ppocr.data import build_dataset
         # 注意这里数据集切换方法跟PaddleOCRConfig.eval有点不太一样，因为部署操作要连transforms一起改掉
         src = config[dataset_mode]['dataset']
         config['Eval']['dataset'] = {'name': src['name'],
@@ -356,7 +356,7 @@ class PaddleDetConfig(PaddleOCRConfig):
             for dataset in ['a、Train', 'b、Eval']:
                 m = eval_func(dataset[2:])  # m, metric
                 m = {k: (round_int(v) if k in ('fps', 'total_frame') else round(v * 100, 2)) for k, v in m.items()}
-                m2 = {'model_type': title,  'dataset': dataset}
+                m2 = {'model_type': title, 'dataset': dataset}
                 m2.update(m)
                 eval_list.append(m2)
 
@@ -432,7 +432,8 @@ class PaddleDetConfig(PaddleOCRConfig):
                 w, h = PIL.Image.open(str(dst_img_path)).size
                 gt['images'].append(CocoGtData.gen_image(img_id, rel_img_path, h, w))
                 for p in x['polys']:
-                    gt['annotations'].append(CocoGtData.gen_annotation(id=k, image_id=img_id, points=p, text=x['texts']))
+                    gt['annotations'].append(
+                        CocoGtData.gen_annotation(id=k, image_id=img_id, points=p, text=x['texts']))
                     k += 1
 
                 # 3 生成dt标注数据

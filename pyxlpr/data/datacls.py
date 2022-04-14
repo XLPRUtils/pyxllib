@@ -7,8 +7,10 @@
 """ 相关数据格式类 """
 
 from pathlib import Path
-from pyxllib.xlai import *
-from pyxlpr.data.imtextline import TextlineShape
+from pyxlpr.ai import *
+from pyxlpr.data import *
+
+# from pyxlpr.data.imtextline import TextlineShape
 
 __1_zcdata = """
 """
