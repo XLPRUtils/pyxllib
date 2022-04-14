@@ -17,6 +17,91 @@ from pyxllib.algo.geo import split_vector_interval
 from pyxllib.algo.disjoint import disjoint_set
 
 
+class TextlineShape:
+    """ 一个文本行标注对象
+
+    这里的基础功能主要是几何关系计算，可以继承类后扩展其他功能
+    """
+
+    def __init__(self, box, *, shrink_bound=False):
+        """
+        :param box: 可以转成Polygon的数据类型
+        :param shrink_bound: 倾斜度过大的文本框，需要特殊处理，把外接矩形缩小会更准确些。
+        """
+        self.polygon = ShapelyPolygon.gen(box)
+        self.bounds = self.polygon.bounds
+        if shrink_bound:
+            b = self.bounds
+            total_area = (b[2] - b[0]) * (b[3] - b[1])
+            # 缩放比例
+            self.bounds = bound_scale(self.bounds, self.polygon.area / total_area)
+
+        self.minx, self.maxx = self.bounds[0], self.bounds[2]
+        self.width = self.maxx - self.minx
+        self.miny, self.maxy = self.bounds[1], self.bounds[3]
+        self.height = self.maxy - self.miny
+        self.centroid = self.polygon.centroid
+
+    def in_the_same_line(self, other):
+        """ 两个框在同一个文本行 """
+        if other.miny < self.centroid.y < other.maxy:
+            return True
+        elif self.miny < other.centroid.y < self.maxy:
+            return True
+        else:
+            return False
+
+    def is_lr_intersect(self, other, gap=5):
+        """ 左右相交
+        """
+        if other.minx - gap <= self.minx <= other.maxx + gap:
+            return True
+        elif other.minx - gap <= self.maxx <= other.maxx + gap:
+            return True
+        else:
+            return False
+
+    def is_tb_intersect(self, other, gap=5):
+        """ 上下相交
+        """
+        # 这个 gap 规则是不动产的，不能放在通用规则里
+        # gap = min(50, self.height / 2, other.height / 2)  # 允许的最大间距，默认按照最小的高，但还要再设置一个50的上限
+        if other.miny - gap <= self.miny <= other.maxy + gap:
+            return True
+        elif other.miny - gap <= self.maxy <= other.maxy + gap:
+            return True
+        else:
+            return False
+
+    def is_intersect(self, other):
+        return self.polygon.intersects(other)
+
+    def __add__(self, other):
+        """ 合并两个文本行 """
+        box = rect2polygon(MultiPolygon([self.polygon, other.polygon]).bounds)
+        return TextlineShape(box)
+
+    def __lt__(self, other):
+        """ 框的排序准则 """
+        if self.in_the_same_line(other):
+            return self.centroid.x < other.centroid.x
+        else:
+            return self.centroid.y < other.centroid.y
+
+    @classmethod
+    def merge(cls, shapes):
+        """ 将同张图片里的多个shape进行合并 """
+        # 1 对文本框分组
+        shape_groups = disjoint_set(shapes, lambda x, y: x.is_intersect(y))
+
+        # 2 合并文本内容
+        new_shapes = []
+        for group in shape_groups:
+            shape = reduce(lambda x, y: x + y, sorted(group))
+            new_shapes.append(shape)
+        return new_shapes
+
+
 def im_textline_split(im, maxsplit=None, minwidth=3):
     """ 这是最基础版本的示例：比较干净，白底黑字，没有太大倾斜的处理情况
 

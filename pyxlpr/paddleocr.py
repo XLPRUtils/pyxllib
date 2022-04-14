@@ -27,15 +27,15 @@ import numpy as np
 from pathlib import Path
 import json
 
-from ppocr.tools.infer import predict_system
-from ppocr.utils.logging import get_logger
+from pyxlpr.ppocr.tools.infer import predict_system
+from pyxlpr.ppocr.utils.logging import get_logger
 
 logger = get_logger()
-from ppocr.utils.utility import check_and_read_gif, get_image_file_list
-from ppocr.utils.network import maybe_download, download_with_progressbar, is_link, confirm_model_dir_url
-from ppocr.tools.infer.utility import draw_ocr, str2bool, check_gpu
-from ppstructure.utility import init_args, draw_structure_result
-from ppstructure.predict_system import OCRSystem, save_structure_res
+from pyxlpr.ppocr.utils.utility import check_and_read_gif, get_image_file_list
+from pyxlpr.ppocr.utils.network import maybe_download, download_with_progressbar, is_link, confirm_model_dir_url
+from pyxlpr.ppocr.tools.infer.utility import draw_ocr, str2bool, check_gpu
+from pyxlpr.ppstructure.utility import init_args, draw_structure_result
+from pyxlpr.ppstructure.predict_system import OCRSystem, save_structure_res
 
 from tqdm import tqdm
 from pyxllib.xl import run_once, round_int, XlPath, Timer

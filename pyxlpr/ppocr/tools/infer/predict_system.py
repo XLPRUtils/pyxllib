@@ -27,13 +27,13 @@ import numpy as np
 import time
 import logging
 from PIL import Image
-import ppocr.tools.infer.utility as utility
-import ppocr.tools.infer.predict_rec as predict_rec
-import ppocr.tools.infer.predict_det as predict_det
-import ppocr.tools.infer.predict_cls as predict_cls
-from ppocr.utils.utility import get_image_file_list, check_and_read_gif
-from ppocr.utils.logging import get_logger
-from ppocr.tools.infer.utility import draw_ocr_box_txt, get_rotate_crop_image
+import pyxlpr.ppocr.tools.infer.utility as utility
+import pyxlpr.ppocr.tools.infer.predict_rec as predict_rec
+import pyxlpr.ppocr.tools.infer.predict_det as predict_det
+import pyxlpr.ppocr.tools.infer.predict_cls as predict_cls
+from pyxlpr.ppocr.utils.utility import get_image_file_list, check_and_read_gif
+from pyxlpr.ppocr.utils.logging import get_logger
+from pyxlpr.ppocr.tools.infer.utility import draw_ocr_box_txt, get_rotate_crop_image
 logger = get_logger()
 
 

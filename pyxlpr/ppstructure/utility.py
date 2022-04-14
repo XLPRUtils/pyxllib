@@ -14,7 +14,7 @@
 
 from PIL import Image
 import numpy as np
-from ppocr.tools.infer.utility import draw_ocr_box_txt, init_args as infer_args
+from pyxlpr.ppocr.tools.infer.utility import draw_ocr_box_txt, init_args as infer_args
 
 
 def init_args():
