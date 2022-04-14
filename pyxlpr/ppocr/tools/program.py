@@ -26,12 +26,12 @@ import paddle.distributed as dist
 from tqdm import tqdm
 from argparse import ArgumentParser, RawDescriptionHelpFormatter
 
-from ppocr.utils.stats import TrainingStats
-from ppocr.utils.save_load import save_model
-from ppocr.utils.utility import print_dict
-from ppocr.utils.logging import get_logger
-from ppocr.utils import profiler
-from ppocr.data import build_dataloader
+from pyxlpr.ppocr.utils.stats import TrainingStats
+from pyxlpr.ppocr.utils.save_load import save_model
+from pyxlpr.ppocr.utils.utility import print_dict
+from pyxlpr.ppocr.utils.logging import get_logger
+from pyxlpr.ppocr.utils import profiler
+from pyxlpr.ppocr.data import build_dataloader
 
 
 class ArgsParser(ArgumentParser):
@@ -590,5 +590,3 @@ def preprocess(is_train=False, *, from_dict=None):
     logger.info('train with paddle {} and device {}'.format(paddle.__version__,
                                                             device))
     return config, device, logger, vdl_writer
-
-

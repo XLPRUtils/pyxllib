@@ -469,7 +469,7 @@ class PaddleOCR(predict_system.TextSystem):
             True，检测后获得识别结果
             False，不执行识别，一般是只需要检测的场合
         """
-        from pyxllib.data.labelme import LabelmeDict
+        from pyxlpr.data.labelme import LabelmeDict
 
         # 1 工具函数
         def det_ocr(f):
