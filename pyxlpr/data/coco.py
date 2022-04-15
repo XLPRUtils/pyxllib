@@ -44,8 +44,8 @@ from pyxllib.algo.geo import rect_bounds, rect2polygon, reshape_coords, ltrb2xyw
 from pyxllib.algo.stat import dataframes_to_excel
 from pyxllib.file.specialist import File, Dir, PathGroups
 from pyxllib.debug.specialist import get_xllog
-from pyxllib.data.icdar import IcdarEval
-from pyxllib.data.labelme import LABEL_COLORMAP7, ToLabelmeJson, LabelmeDataset, LabelmeDict
+from pyxlpr.data.icdar import IcdarEval
+from pyxlpr.data.labelme import LABEL_COLORMAP7, ToLabelmeJson, LabelmeDataset, LabelmeDict
 from xlcocotools.coco import COCO
 from xlcocotools.cocoeval import COCOeval
 

@@ -25,13 +25,13 @@ __dir__ = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(__dir__)
 sys.path.append(os.path.abspath(os.path.join(__dir__, '..')))
 
-from ppocr.data import build_dataloader
-from ppocr.modeling.architectures import build_model
-from ppocr.postprocess import build_post_process
-from ppocr.metrics import build_metric
-from ppocr.utils.save_load import load_model
-from ppocr.utils.utility import print_dict
-import ppocr.tools.program as program
+from pyxlpr.ppocr.data import build_dataloader
+from pyxlpr.ppocr.modeling.architectures import build_model
+from pyxlpr.ppocr.postprocess import build_post_process
+from pyxlpr.ppocr.metrics import build_metric
+from pyxlpr.ppocr.utils.save_load import load_model
+from pyxlpr.ppocr.utils.utility import print_dict
+import pyxlpr.ppocr.tools.program as program
 
 
 def main(config, device, logger):

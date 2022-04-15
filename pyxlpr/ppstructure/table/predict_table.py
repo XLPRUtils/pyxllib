@@ -28,11 +28,11 @@ import numpy as np
 import time
 import tools.infer.predict_rec as predict_rec
 import tools.infer.predict_det as predict_det
-from ppocr.utils.utility import get_image_file_list, check_and_read_gif
-from ppocr.utils.logging import get_logger
-from ppstructure.table.matcher import distance, compute_iou
-from ppstructure.utility import parse_args
-import ppstructure.table.predict_structure as predict_strture
+from pyxlpr.ppocr.utils.utility import get_image_file_list, check_and_read_gif
+from pyxlpr.ppocr.utils.logging import get_logger
+from pyxlpr.ppstructure.table.matcher import distance, compute_iou
+from pyxlpr.ppstructure.utility import parse_args
+import pyxlpr.ppstructure.table.predict_structure as predict_strture
 
 logger = get_logger()
 

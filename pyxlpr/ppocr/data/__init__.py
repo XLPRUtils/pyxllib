@@ -31,13 +31,13 @@ import copy
 from paddle.io import Dataset, DataLoader, BatchSampler, DistributedBatchSampler
 import paddle.distributed as dist
 
-from ppocr.data.imaug import transform, create_operators
+from pyxlpr.ppocr.data.imaug import transform, create_operators
 # 可以在ppocr/data目录下新增脚本，添加自己的数据格式
 # 个人想法，到时候新增的数据格式类，都统一放到一个文件xl_dataset里，方便整理和分享
-from ppocr.data.simple_dataset import *  # 这里扩展了一些自己的基础数据格式
-from ppocr.data.lmdb_dataset import LMDBDataSet
-from ppocr.data.pgnet_dataset import PGDataSet
-from ppocr.data.pubtab_dataset import PubTabDataSet
+from pyxlpr.ppocr.data.simple_dataset import *  # 这里扩展了一些自己的基础数据格式
+from pyxlpr.ppocr.data.lmdb_dataset import LMDBDataSet
+from pyxlpr.ppocr.data.pgnet_dataset import PGDataSet
+from pyxlpr.ppocr.data.pubtab_dataset import PubTabDataSet
 
 # 或者不在ppocr.data这里加也可以，重点是能导入特定接口范式的类，让这里eval能取到即可。
 

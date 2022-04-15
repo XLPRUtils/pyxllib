@@ -383,6 +383,8 @@ class PaddleOCR(predict_system.TextSystem):
         for line in lines:
             pts, [text, score] = line
         """
+        img = xlcv.read(img, 0)
+
         assert isinstance(img, (np.ndarray, list, str))
         if isinstance(img, list) and det == True:
             logger.error('When input a list of images, det must be false')
@@ -425,6 +427,17 @@ class PaddleOCR(predict_system.TextSystem):
                     return cls_res
             rec_res, elapse = self.text_recognizer(img)
             return rec_res
+
+    def ocr2texts(self, img, sort_textline=False):
+        """ 识别后，只返回文本清单
+
+        :param sort_textline: 是否按文本行的几何关系重新排序
+        """
+        from pyxlpr.data.imtextline import TextlineShape
+        lines = self.ocr(img)
+        if sort_textline:
+            lines.sort(key=lambda x: TextlineShape(x[0]))
+        return [x[1][0] for x in lines]
 
     def rec_singleline(self, im):
         """ 只识别一行文本 """
@@ -543,7 +556,7 @@ class PaddleOCR(predict_system.TextSystem):
             但一般还是建议走ppocr框架，里面有很多内置好的数据解析功能，能省很多重复工作
         :param print_mode: 是否输出运行速度信息
         """
-        from ppocr.metrics.eval_det_iou import DetectionIoUEvaluator
+        from pyxlpr.ppocr.metrics.eval_det_iou import DetectionIoUEvaluator
 
         # 1 对所有数据图片进行推断，并计时
         timer = Timer('总共耗时')
@@ -569,7 +582,7 @@ class PaddleOCR(predict_system.TextSystem):
         return metric
 
     def rec_metric_labelme(self, root):
-        from ppocr.metrics.rec_metric import RecMetric
+        from pyxlpr.ppocr.metrics.rec_metric import RecMetric
 
         # 1 读取检测标注、调用self进行检测
         timer1, timer2 = Timer('读图速度'), Timer('总共耗时')

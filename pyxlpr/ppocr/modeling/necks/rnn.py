@@ -18,7 +18,7 @@ from __future__ import print_function
 
 from paddle import nn
 
-from ppocr.modeling.heads.rec_ctc_head import get_para_bias_attr
+from pyxlpr.ppocr.modeling.heads.rec_ctc_head import get_para_bias_attr
 
 
 class Im2Seq(nn.Layer):

@@ -26,11 +26,11 @@ import numpy as np
 import time
 import logging
 
-from ppocr.utils.utility import get_image_file_list, check_and_read_gif
-from ppocr.utils.logging import get_logger
+from pyxlpr.ppocr.utils.utility import get_image_file_list, check_and_read_gif
+from pyxlpr.ppocr.utils.logging import get_logger
 from tools.infer.predict_system import TextSystem
-from ppstructure.table.predict_table import TableSystem, to_excel
-from ppstructure.utility import parse_args, draw_structure_result
+from pyxlpr.ppstructure.table.predict_table import TableSystem, to_excel
+from pyxlpr.ppstructure.utility import parse_args, draw_structure_result
 
 logger = get_logger()
 
@@ -65,7 +65,7 @@ class OCRSystem(object):
             self.use_angle_cls = args.use_angle_cls
             self.drop_score = args.drop_score
         elif self.mode == 'vqa':
-            from ppstructure.vqa.infer_ser_e2e import SerPredictor, draw_ser_results
+            from pyxlpr.ppstructure.vqa.infer_ser_e2e import SerPredictor, draw_ser_results
             self.vqa_engine = SerPredictor(args)
 
     def __call__(self, img):

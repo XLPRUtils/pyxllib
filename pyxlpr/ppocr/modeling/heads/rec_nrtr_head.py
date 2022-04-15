@@ -21,7 +21,7 @@ from paddle.nn import LayerList
 from paddle.nn.initializer import XavierNormal as xavier_uniform_
 from paddle.nn import Dropout, Linear, LayerNorm, Conv2D
 import numpy as np
-from ppocr.modeling.heads.multiheadAttention import MultiheadAttention
+from pyxlpr.ppocr.modeling.heads.multiheadAttention import MultiheadAttention
 from paddle.nn.initializer import Constant as constant_
 from paddle.nn.initializer import XavierNormal as xavier_normal_
 
