@@ -18,8 +18,8 @@ from __future__ import print_function
 
 __all__ = ['E2EMetric']
 
-from ppocr.utils.e2e_metric.Deteval import get_socre_A, get_socre_B, combine_results
-from ppocr.utils.e2e_utils.extract_textpoint_slow import get_dict
+from pyxlpr.ppocr.utils.e2e_metric.Deteval import get_socre_A, get_socre_B, combine_results
+from pyxlpr.ppocr.utils.e2e_utils.extract_textpoint_slow import get_dict
 
 
 class E2EMetric(object):

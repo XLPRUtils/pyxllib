@@ -136,7 +136,7 @@ class PaddleOCRConfig:
         pass
 
     def train(self, resume=False):
-        from ppocr.tools.train import main
+        from pyxlpr.ppocr.tools.train import main
 
         if resume:
             self.resume(True)
@@ -147,7 +147,7 @@ class PaddleOCRConfig:
         """
         :param dataset_mode: 使用的数据集，默认是Eval，也可以用Train
         """
-        from ppocr.tools.eval import main
+        from pyxlpr.ppocr.tools.eval import main
 
         if resume:
             self.resume()
@@ -159,7 +159,7 @@ class PaddleOCRConfig:
         return metric
 
     def infer_det(self, resume=True):
-        from ppocr.tools.infer_det import main
+        from pyxlpr.ppocr.tools.infer_det import main
 
         if resume:
             self.resume()
@@ -167,7 +167,7 @@ class PaddleOCRConfig:
         main(config, logger)
 
     def export_model(self, resume=True):
-        from ppocr.tools.export_model import main
+        from pyxlpr.ppocr.tools.export_model import main
 
         if resume:
             self.resume()

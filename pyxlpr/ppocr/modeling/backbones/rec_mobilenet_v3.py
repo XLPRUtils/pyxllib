@@ -14,7 +14,7 @@
 
 from paddle import nn
 
-from ppocr.modeling.backbones.det_mobilenet_v3 import ResidualUnit, ConvBNLayer, make_divisible
+from pyxlpr.ppocr.modeling.backbones.det_mobilenet_v3 import ResidualUnit, ConvBNLayer, make_divisible
 
 __all__ = ['MobileNetV3']
 

@@ -71,8 +71,8 @@ class BasicLabelDataset:
 
         # 3 读取数据
         for stem, suffixs in tqdm(gs.data.items(), f'{self.__class__.__name__}读取数据', disable=not prt):
-            f = File(stem, suffix=slt)
-            if reads and f:
+            f = File(stem + f'.{slt}')
+            if reads and f.exists():
                 # dprint(f)  # 空json会报错：json.decoder.JSONDecodeError: Expecting value: line 1 column 1 (char 0)
                 relpath2data[f.relpath(self.root)] = f.read()
             else:
@@ -528,8 +528,8 @@ class LabelmeDataset(BasicLabelDataset):
         # 已有的数据已经读取了，这里要补充空labelme标注
         if self.pathgs:
             for stem, suffixs in tqdm(self.pathgs.data.items(), f'{self.__class__.__name__}优化数据', disable=not prt):
-                f = File(stem, suffix=slt)
-                if reads and not f:
+                f = File(stem + f'.{slt}')
+                if reads and not f.exists():
                     self.rp2data[f.relpath(self.root)] = LabelmeDict.gen_data(File(stem, suffix=suffixs[0]))
 
     def reduces(self):
@@ -551,7 +551,7 @@ class LabelmeDataset(BasicLabelDataset):
         这个细节太多，可以 labelme 先转 coco 后，借助 coco 转 excel
             coco 里会给 image、box 编号，能显示一些补充属性
         """
-        from pyxllib.data.coco import CocoParser
+        from pyxlpr.data.coco import CocoParser
         gt_dict = self.to_coco_gt_dict()
         CocoParser(gt_dict).to_excel(savepath)
 
@@ -578,7 +578,7 @@ class LabelmeDataset(BasicLabelDataset):
             注意，如果对文件顺序、ann顺序有需求的，请先自行操作self.data数据后，再调用该to_coco函数
             对image_id、annotation_id有需求的，需要使用CocoData进一步操作
         """
-        from pyxllib.data.coco import CocoGtData
+        from pyxlpr.data.coco import CocoGtData
 
         if not categories:
             if 'categories' in self.extdata:

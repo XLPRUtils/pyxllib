@@ -29,14 +29,14 @@ import paddle.distributed as dist
 
 paddle.seed(2)
 
-from ppocr.data import build_dataloader
-from ppocr.modeling.architectures import build_model
-from ppocr.losses import build_loss
-from ppocr.optimizer import build_optimizer
-from ppocr.postprocess import build_post_process
-from ppocr.metrics import build_metric
-from ppocr.utils.save_load import load_model
-import ppocr.tools.program as program
+from pyxlpr.ppocr.data import build_dataloader
+from pyxlpr.ppocr.modeling.architectures import build_model
+from pyxlpr.ppocr.losses import build_loss
+from pyxlpr.ppocr.optimizer import build_optimizer
+from pyxlpr.ppocr.postprocess import build_post_process
+from pyxlpr.ppocr.metrics import build_metric
+from pyxlpr.ppocr.utils.save_load import load_model
+import pyxlpr.ppocr.tools.program as program
 
 dist.get_world_size()
 

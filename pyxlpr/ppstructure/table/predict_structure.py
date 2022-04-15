@@ -25,11 +25,11 @@ import numpy as np
 import time
 
 import tools.infer.utility as utility
-from ppocr.data import create_operators, transform
-from ppocr.postprocess import build_post_process
-from ppocr.utils.logging import get_logger
-from ppocr.utils.utility import get_image_file_list, check_and_read_gif
-from ppstructure.utility import parse_args
+from pyxlpr.ppocr.data import create_operators, transform
+from pyxlpr.ppocr.postprocess import build_post_process
+from pyxlpr.ppocr.utils.logging import get_logger
+from pyxlpr.ppocr.utils.utility import get_image_file_list, check_and_read_gif
+from pyxlpr.ppstructure.utility import parse_args
 
 logger = get_logger()
 

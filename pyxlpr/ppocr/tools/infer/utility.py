@@ -22,7 +22,7 @@ from PIL import Image, ImageDraw, ImageFont
 import math
 from paddle import inference
 import time
-from ppocr.utils.logging import get_logger
+from pyxlpr.ppocr.utils.logging import get_logger
 
 from pyxllib.xl import get_font_file
 

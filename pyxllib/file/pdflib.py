@@ -23,7 +23,7 @@ from pyxllib.file.specialist import File, Dir, writefile, get_etag
 from pyxllib.debug.pupil import dprint
 from pyxllib.debug.specialist import browser
 from pyxllib.cv.expert import xlcv, xlpil
-from pyxllib.data.labelme import LabelmeDict
+from pyxlpr.data.labelme import LabelmeDict
 
 
 def __fitz():
@@ -153,7 +153,7 @@ class EnchantFitzPage(EnchantBase):
             pix = _self.get_pixmap(matrix=fitz.Matrix(scale, scale))  # 长宽放大到scale倍
         else:
             pix = _self.get_pixmap()
-        return pix.getPNGData()
+        return pix.tobytes()
 
     @staticmethod
     def get_cv_image(_self, scale=1):
@@ -363,7 +363,7 @@ class DemoFitz:
 
         pix = page.getPixmap(fitz.Matrix(2, 2))  # 获得页面的RGBA图像，Pixmap类型；还可以用page.getSVGimage()获得矢量图
         # pix.writePNG('page-0.png')  # 将Pixmal
-        pngdata = pix.getPNGData()  # 获png文件的bytes字节码
+        pngdata = pix.tobytes()  # 获png文件的bytes字节码
         # print(len(pngdata))
         # browser(pngdata, 'a.png')  # 用我的工具函数打开图片
 

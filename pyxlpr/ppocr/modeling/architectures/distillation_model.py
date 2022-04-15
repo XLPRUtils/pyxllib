@@ -16,12 +16,12 @@ from __future__ import division
 from __future__ import print_function
 
 from paddle import nn
-from ppocr.modeling.transforms import build_transform
-from ppocr.modeling.backbones import build_backbone
-from ppocr.modeling.necks import build_neck
-from ppocr.modeling.heads import build_head
+from pyxlpr.ppocr.modeling.transforms import build_transform
+from pyxlpr.ppocr.modeling.backbones import build_backbone
+from pyxlpr.ppocr.modeling.necks import build_neck
+from pyxlpr.ppocr.modeling.heads import build_head
 from .base_model import BaseModel
-from ppocr.utils.save_load import load_pretrained_params
+from pyxlpr.ppocr.utils.save_load import load_pretrained_params
 
 __all__ = ['DistillationModel']
 

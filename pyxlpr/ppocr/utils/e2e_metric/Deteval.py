@@ -14,7 +14,7 @@
 
 import numpy as np
 import scipy.io as io
-from ppocr.utils.e2e_metric.polygon_fast import iod, area_of_intersection, area
+from pyxlpr.ppocr.utils.e2e_metric.polygon_fast import iod, area_of_intersection, area
 
 
 def get_socre_A(gt_dir, pred_dict):

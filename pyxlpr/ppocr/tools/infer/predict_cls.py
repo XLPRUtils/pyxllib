@@ -28,9 +28,9 @@ import time
 import traceback
 
 import tools.infer.utility as utility
-from ppocr.postprocess import build_post_process
-from ppocr.utils.logging import get_logger
-from ppocr.utils.utility import get_image_file_list, check_and_read_gif
+from pyxlpr.ppocr.postprocess import build_post_process
+from pyxlpr.ppocr.utils.logging import get_logger
+from pyxlpr.ppocr.utils.utility import get_image_file_list, check_and_read_gif
 
 logger = get_logger()
 

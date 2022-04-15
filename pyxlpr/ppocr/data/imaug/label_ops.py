@@ -22,7 +22,7 @@ import string
 from shapely.geometry import LineString, Point, Polygon
 import json
 
-from ppocr.utils.logging import get_logger
+from pyxlpr.ppocr.utils.logging import get_logger
 
 
 class ClsLabelEncode(object):
