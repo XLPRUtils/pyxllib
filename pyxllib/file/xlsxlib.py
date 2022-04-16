@@ -156,9 +156,8 @@ class EnchantCell(EnchantBase):
                 r = rng.max_row
             return cell.parent.cell(r + 1, c)
 
-        while count > 0:
+        for _ in range(count):
             cell = _func(cell)
-            count -= 1
         return cell
 
     @staticmethod
@@ -170,9 +169,8 @@ class EnchantCell(EnchantBase):
                 c = rng.max_col
             return cell.parent.cell(r, c + 1)
 
-        while count > 0:
+        for _ in range(count):
             cell = _func(cell)
-            count -= 1
         return cell
 
     @staticmethod
@@ -184,9 +182,8 @@ class EnchantCell(EnchantBase):
                 r = rng.min_row
             return cell.parent.cell(max(r - 1, 1), c)
 
-        while count > 0:
+        for _ in range(count):
             cell = _func(cell)
-            count -= 1
         return cell
 
     @staticmethod
@@ -195,12 +192,11 @@ class EnchantCell(EnchantBase):
             r, c = cell.row, cell.column
             if cell.celltype():
                 rng = cell.in_range()
-                r = rng.min_col
+                r = rng.min_row
             return cell.parent.cell(r, max(c - 1, 1))
 
-        while count > 0:
+        for _ in range(count):
             cell = _func(cell)
-            count -= 1
         return cell
 
 
