@@ -14,9 +14,8 @@ import sys
 import time
 
 from PyQt5.QtCore import pyqtSignal
-from qtpy import QtWidgets
-from qtpy import QtGui
-from qtpy.QtWidgets import QFrame, QInputDialog, QApplication
+from qtpy import QtWidgets, QtGui
+from qtpy.QtWidgets import QFrame, QInputDialog, QApplication, QMainWindow
 
 from pyxllib.prog.newbie import CvtType
 
@@ -338,3 +337,8 @@ def qt_clipboard_monitor(func=None, verbose=1, *, cooldown=0.5):
     clipboard = app.clipboard()
     clipboard.dataChanged.connect(on_clipboard_change)
     app.exec_()
+
+
+class XlMainWindow(QMainWindow):
+    """ 根据自己开发app经验，封装一些常用的功能接口，简化代码量 """
+    pass
