@@ -27,7 +27,7 @@ from pyxllib.algo.shapelylib import ShapelyPolygon
 from pyxllib.file.specialist import File, Dir
 from pyxllib.debug.specialist import TicToc
 from pyxllib.cv.expert import xlcv, xlpil
-from pyxllib.data.labelme import LabelmeDict
+from pyxlpr.data.labelme import LabelmeDict
 
 
 class AutoGuiLabelData:

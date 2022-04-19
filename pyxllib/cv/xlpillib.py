@@ -11,7 +11,7 @@
 
 import base64
 import io
-import itertools
+import random
 
 import cv2
 import numpy as np
@@ -19,7 +19,6 @@ import PIL.ExifTags
 import PIL.Image
 import PIL.ImageOps
 import requests
-
 
 try:
     import accimage
@@ -168,11 +167,17 @@ class xlpil(EnchantBase):
         return im2
 
     @staticmethod
-    def plot_text(im, xy, text, font_size=10, font_type='simfang.ttf', **kwargs):
+    def plot_text(im, text, xy=None, font_size=10, font_type='simfang.ttf', **kwargs):
+        """
+        :param xy: 写入文本的起始坐标，没写入则自动写在垂直居中位置
+        """
         from PIL import ImageFont, ImageDraw
         font_file = get_font_file(font_type)
         font = ImageFont.truetype(font=str(font_file), size=font_size, encoding="utf-8")
         draw = ImageDraw.Draw(im)
+        if xy is None:
+            w, h = font.getsize(text)
+            xy = ((im.size[0] - w) / 2, (im.size[1] - h) / 2)
         draw.text(xy, text, font=font, **kwargs)
         return im
 
@@ -390,3 +395,26 @@ class xlpil(EnchantBase):
         im = xlpil.to_cv2_image(im)
         im = xlcv.keep_subtitles(im, judge_func=judge_func, trim_color=trim_color)
         return xlcv.to_pil_image(im)
+
+
+def create_text_image(text, size=None, *, xy=None, font_size=14, bg_color=None, text_color=None):
+    """ 生成文字图片
+
+    :param size: 注意我这里顺序是 (height, width)
+    :param bg_color: 背景图颜色，如 (0, 0, 0)
+        默认None，随机颜色
+    :param text_color: 文本颜色，如 (255, 255, 255)
+        默认None，随机颜色
+    """
+    if size is None:
+        size = (200, 200)
+    if bg_color is None:
+        bg_color = tuple([random.randint(0, 255) for i in range(3)])
+    if text_color is None:
+        text_color = tuple([random.randint(0, 255) for i in range(3)])
+
+    h, w = size
+    im = PIL.Image.new('RGB', (w, h), tuple(bg_color))
+    im2 = xlpil.plot_text(im, text, xy=xy, font_size=font_size, fill=text_color)
+
+    return im2
