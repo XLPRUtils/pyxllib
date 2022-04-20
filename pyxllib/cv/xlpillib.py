@@ -397,17 +397,24 @@ class xlpil(EnchantBase):
         return xlcv.to_pil_image(im)
 
 
-def create_text_image(text, size=None, *, xy=None, font_size=14, bg_color=None, text_color=None):
+def create_text_image(text, size=None, *, xy=None, font_size=14, bg_color=None, text_color=None, **kwargs):
     """ 生成文字图片
 
     :param size: 注意我这里顺序是 (height, width)
+        默认None，根据写入的文字动态生成图片大小
     :param bg_color: 背景图颜色，如 (0, 0, 0)
         默认None，随机颜色
     :param text_color: 文本颜色，如 (255, 255, 255)
         默认None，随机颜色
     """
     if size is None:
-        size = (200, 200)
+        from PIL import ImageFont, ImageDraw
+        font_file = get_font_file(kwargs.get('font_type', 'simfang.ttf'))
+        font = ImageFont.truetype(font=str(font_file), size=font_size, encoding="utf-8")
+        w, h = font.getsize(text)
+        size = (h + 10, w + 10)
+        xy = (5, 5)  # 自动生成尺寸的情况下，文本从左上角开始写
+
     if bg_color is None:
         bg_color = tuple([random.randint(0, 255) for i in range(3)])
     if text_color is None:
@@ -415,6 +422,6 @@ def create_text_image(text, size=None, *, xy=None, font_size=14, bg_color=None, 
 
     h, w = size
     im = PIL.Image.new('RGB', (w, h), tuple(bg_color))
-    im2 = xlpil.plot_text(im, text, xy=xy, font_size=font_size, fill=text_color)
+    im2 = xlpil.plot_text(im, text, xy=xy, font_size=font_size, fill=text_color, **kwargs)
 
     return im2

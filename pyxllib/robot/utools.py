@@ -219,10 +219,10 @@ class UtoolsFile(UtoolsBase):
 
 
 class UtoolsText(UtoolsBase):
-    """ 目录路径生成工具 """
 
     @clipboard_decorator(copy=False, typing=True)
     def common_dir(self):
+        # 目录路径生成工具
         from pyxlpr.data.datasets import common_path
 
         def func(name, unix_path=False):
@@ -276,6 +276,25 @@ class UtoolsText(UtoolsBase):
 
         file = fire.Fire(rebuild_document_by_word, self.cmds['subinput'], 'browser')
         browser(file)
+
+    def create_text_image(self):
+        from pyxllib.xl import XlPath
+        from pyxllib.xlcv import xlpil, create_text_image
+
+        @clipboard_decorator('html')
+        def func(text, font_size=20, *, size=None, xy=None, bg_color=None, text_color=None):
+            im = create_text_image(text, size, xy=xy, font_size=font_size, bg_color=bg_color, text_color=text_color)
+            # 这种只能语雀里用
+            data = xlpil.to_buffer(im, b64encode=True).decode()
+            res = '<img src="data:image/jpg;base64,' + data + '"/>'
+            # 这种只能onenote、qq、微信里用
+            p = XlPath.tempdir() / 'create_text_image.jpg'
+            im.save(p)
+            res += f'<img src="{p}"/>'
+            # 那么我把两种都复制，就能兼容多种场景了~~
+            return res
+
+        fire.Fire(func, self.cmds['subinput'], 'create_text_image')
 
 
 class UtoolsRegex(UtoolsBase):
