@@ -15,7 +15,7 @@ import time
 
 from PyQt5.QtCore import pyqtSignal
 from qtpy import QtWidgets, QtGui
-from qtpy.QtWidgets import QFrame, QInputDialog, QApplication, QMainWindow
+from qtpy.QtWidgets import QFrame, QInputDialog, QApplication, QMainWindow, QMessageBox
 
 from pyxllib.prog.newbie import CvtType
 
@@ -194,6 +194,10 @@ def get_input_widget(items=None, cur_value=None, *, valcvt=None,
     return w
 
 
+def __action_func():
+    pass
+
+
 def newIcon(icon):
     icons_dir = osp.join(here, "../icons")
     return QtGui.QIcon(osp.join(":/", icons_dir, "%s.png" % icon))
@@ -289,6 +293,10 @@ class GetJsonAction(XlActionFunc):
             self.value = json.loads(inputs[0])
 
 
+def __other():
+    pass
+
+
 def main_qapp(window):
     """ 执行Qt应用 """
     app = QApplication(sys.argv)
@@ -342,3 +350,31 @@ def qt_clipboard_monitor(func=None, verbose=1, *, cooldown=0.5):
 class XlMainWindow(QMainWindow):
     """ 根据自己开发app经验，封装一些常用的功能接口，简化代码量 """
     pass
+
+
+class WaitMessageBox(QMessageBox):
+    """ 在执行需要一定时长的程序时，弹出提示窗，并在执行完功能后自动退出提示窗
+
+    【示例】
+    with WaitMessageBox(self.mainwin, 'PaddleOCR模型初始化中，请稍等一会...'):
+        from pyxlpr.paddleocr import PaddleOCR
+        self.ppocr = PaddleOCR.build_ppocr()
+    """
+    finished = pyqtSignal()
+
+    def __init__(self, parent=None, text=None):
+        super().__init__(parent)
+        if text:
+            self.setText(text)
+        self.setStyleSheet("QLabel{min-width: 350px;}")
+        self.setWindowTitle('WaitMessageBox（任务完成后会自动退出该窗口）')
+        self.setStandardButtons(QMessageBox.NoButton)
+        self.finished.connect(self.accept)
+
+    def __enter__(self):
+        self.show()
+        QApplication.processEvents()
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.finished.emit()
