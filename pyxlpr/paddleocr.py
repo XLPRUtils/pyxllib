@@ -12,6 +12,18 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from pyxllib.prog.pupil import check_install_package
+
+# 没有paddle的时候，默认安装
+check_install_package('paddle', 'paddlepaddle')
+# 可能会遇到这个问题
+# https://blog.csdn.net/qq_47997583/article/details/122430776
+# pip install opencv-python-headless==4.1.2.30
+# 其他依赖库
+check_install_package('pyclipper')
+check_install_package('imgaug')
+check_install_package('lmdb')
+
 import os
 import sys
 
@@ -38,7 +50,7 @@ from pyxlpr.ppstructure.utility import init_args, draw_structure_result
 from pyxlpr.ppstructure.predict_system import OCRSystem, save_structure_res
 
 from tqdm import tqdm
-from pyxllib.xl import run_once, round_int, XlPath, Timer
+from pyxllib.xl import run_once, XlPath, Timer
 from pyxllib.xlcv import xlcv, xlpil
 from pyxllib.algo.geo import rect_bounds
 
