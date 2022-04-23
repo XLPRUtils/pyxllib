@@ -176,7 +176,7 @@ class xlpil(EnchantBase):
         font = ImageFont.truetype(font=str(font_file), size=font_size, encoding="utf-8")
         draw = ImageDraw.Draw(im)
         if xy is None:
-            w, h = font.getsize(text)
+            w, h = font_getsize(font, text)
             xy = ((im.size[0] - w) / 2, (im.size[1] - h) / 2)
         draw.text(xy, text, font=font, **kwargs)
         return im
@@ -397,6 +397,16 @@ class xlpil(EnchantBase):
         return xlcv.to_pil_image(im)
 
 
+def font_getsize(font, text):
+    """ 官方自带的font.getsize遇到换行符的text，计算不准确
+    """
+    texts = text.split('\n')
+    sizes = [font.getsize(t) for t in texts]
+    w = max([w for w, h in sizes])
+    h = sum([h for w, h in sizes])
+    return w, h
+
+
 def create_text_image(text, size=None, *, xy=None, font_size=14, bg_color=None, text_color=None, **kwargs):
     """ 生成文字图片
 
@@ -411,9 +421,9 @@ def create_text_image(text, size=None, *, xy=None, font_size=14, bg_color=None, 
         from PIL import ImageFont, ImageDraw
         font_file = get_font_file(kwargs.get('font_type', 'simfang.ttf'))
         font = ImageFont.truetype(font=str(font_file), size=font_size, encoding="utf-8")
-        w, h = font.getsize(text)
+        w, h = font_getsize(font, text)
         size = (h + 10, w + 10)
-        xy = (5, 5)  # 自动生成尺寸的情况下，文本从左上角开始写
+        xy = (5, 0)  # 自动生成尺寸的情况下，文本从左上角开始写
 
     if bg_color is None:
         bg_color = tuple([random.randint(0, 255) for i in range(3)])
