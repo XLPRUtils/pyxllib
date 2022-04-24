@@ -115,13 +115,17 @@ def im_textline_split(im, maxsplit=None, minwidth=3):
     return split_vector_interval(vec, maxsplit=maxsplit, minwidth=minwidth)
 
 
-def merge_labels_by_widths(labels, widths):
+def merge_labels_by_widths(labels, widths, sep=' '):
     """ 一组数量不少于len(widths)的labels，参照widths给的每一部分权重，合并文本内容
 
     算是和图片分割配套的相关功能，往往文本内容要跟着图片的切割情况进行拆分
 
-    :param labels: 一组字符串 （暂时只支持len(labels)≥len(widths)）
+    这个算法其实也可以用来做拆分，比如要把'abcdefg'拆成[20, 30]的两段，
+        可以用list先把前者变成单字符的list就行了 ['a', 'b', 'c', 'd', 'e', 'f', 'g']
+
+    :param labels: 一组字符串
     :param widths: 一组参考宽度
+    :param sep: 拼接的时候使用的间隔符
     :return: 尽可能拼接出符合参考宽度的一组字符串
 
     >>> merge_labels_by_widths(['aa', 'bbb', 'c', 'ccc'], [10,10,20])
@@ -132,10 +136,16 @@ def merge_labels_by_widths(labels, widths):
     ['a', 'a', 'b b']
     >>> merge_labels_by_widths(['a', 'b', 'c'], [11, 12, 13])
     ['a', 'b', 'c']
+    >>> merge_labels_by_widths(['a'], [10, 12])  # labels比widths少时，后面的统一用''填充
+    ['a', '']
+    >>> merge_labels_by_widths([''], [10, 12])
+    ['', '']
 
     TODO 感觉实现的代码还有点凌乱，可能还有改进空间
     """
     # 1 统一量纲
+    if len(labels) < len(widths):
+        labels += [''] * (len(widths) - len(labels))
     label_widths = [strwidth(x) for x in labels]
     n_label = len(labels)
     assert sum(widths), 'widths必须要有权重值'
@@ -153,7 +163,7 @@ def merge_labels_by_widths(labels, widths):
                 label_width += label_widths[j]
                 j += 1
                 k += 1
-            new_labels.append(' '.join(labels[i:j]))
+            new_labels.append(sep.join(labels[i:j]))
             i = j
         elif k == need_merge:
             new_labels += labels[i:]

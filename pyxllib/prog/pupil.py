@@ -163,11 +163,11 @@ class DictTool:
             str，将原label作为defualt这个键的值来存储
         :return: s为非字典结构时返回空字典
 
-        >>> DictTool.json_loads('123', 'label')
-        {'label': '123'}
-        >>> DictTool.json_loads('[123, 456]', 'label')
-        {'label': '[123, 456]'}
-        >>> DictTool.json_loads('{"a": 123}', 'label')
+        >>> DictTool.json_loads('123', 'text')
+        {'text': '123'}
+        >>> DictTool.json_loads('[123, 456]', 'text')
+        {'text': '[123, 456]'}
+        >>> DictTool.json_loads('{"a": 123}', 'text')
         {'a': 123}
         """
         labelattr = dict()

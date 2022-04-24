@@ -290,7 +290,7 @@ class XlSimpleDataSet(SimpleDataSetExt):
     @run_once('str')
     def from_refineAgree(self, img_dir, json_dir, label_file):
         """ 只需要输入根目录 """
-        from pyxllib.data.labelme import LabelmeDict
+        from pyxlpr.data.labelme import LabelmeDict
 
         data_dir = XlPath(self.data_dir)
         img_dir = data_dir / img_dir
@@ -333,7 +333,7 @@ class XlSimpleDataSet(SimpleDataSetExt):
         json1: labelme的json标注文件
         json2: paddle的SimpleDataSet要传入的json格式
         """
-        from pyxllib.data.labelme import LabelmeDict
+        from pyxlpr.data.labelme import LabelmeDict
 
         data_dir = XlPath(self.data_dir)
         sub_data_dir = data_dir / sub_data_dir

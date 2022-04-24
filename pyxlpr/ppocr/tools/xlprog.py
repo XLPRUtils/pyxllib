@@ -402,7 +402,7 @@ class PaddleDetConfig(PaddleOCRConfig):
         5、生成coco的数据分析表格
         """
         import PIL.Image
-        from pyxllib.data.coco import CocoGtData, CocoMatch
+        from pyxlpr.data.coco import CocoGtData, CocoMatch
 
         ppocr = self.build_ppocr(model_type, **kwargs)
         for dataset_mode in ['Train', 'Eval']:  # 训练集和验证集结果都生成，放在两个不同目录
