@@ -169,7 +169,7 @@ class Document:
             默认会修正目前已知的下划线、颜色偏差问题
             dict类型：以后功能多了，可能要支持自定义搭配，比如只复原unberline，但不管颜色偏差
         """
-        from pyxllib.data.labelme import LabelmeDict
+        from pyxlpr.data.labelme import LabelmeDict
 
         # 1 转成图片，及json标注
         doc = self.to_fitzdoc()

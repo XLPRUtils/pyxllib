@@ -12,7 +12,7 @@
 
 import pandas as pd
 
-from pyxllib.data.coco import *
+from pyxlpr.data.coco import *
 
 
 class KieResParser:

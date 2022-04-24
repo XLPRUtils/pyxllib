@@ -214,7 +214,7 @@ class EnchantFitzPage(EnchantBase):
             origin: 差不多是其所在方格的右上角坐标，同一行文本，其top位置是会对齐的
             c: 字符内容
         """
-        from pyxllib.data.labelme import LabelmeDict
+        from pyxlpr.data.labelme import LabelmeDict
 
         # 1 参数配置
         if isinstance(views, int):
