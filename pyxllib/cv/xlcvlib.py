@@ -48,6 +48,9 @@ class xlcv(EnchantBase):
             -1，按照图像原样读取，保留Alpha通道（第4通道）
             0，将图像转成单通道灰度图像后读取
             1，将图像转换成3通道BGR彩色图像
+
+        220426周二14:20，注，有些图位深不是24而是48，读到的不是uint8而是uint16
+            目前这个接口没做适配，需要下游再除以256后arr.astype('uint8')
         """
         from pyxllib.cv.xlpillib import xlpil
 
@@ -539,7 +542,7 @@ class xlcv(EnchantBase):
         :param pts: 子图位置信息
             只有两个点，认为是矩形的两个对角点
             只有四个点，认为是任意四边形
-            同理，其他点数量，默认为
+            同理，其他点数量，默认为多边形的点集
         :param fill: 支持pts越界选取，此时可以设置fill自动填充的颜色值
             TODO fill填充一个rgb颜色的时候应该会不兼容报错，还要想办法优化
         :param warp_quad: 当pts为四个点时，是否进行仿射变换矫正

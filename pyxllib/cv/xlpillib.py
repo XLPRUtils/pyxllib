@@ -432,6 +432,6 @@ def create_text_image(text, size=None, *, xy=None, font_size=14, bg_color=None, 
 
     h, w = size
     im = PIL.Image.new('RGB', (w, h), tuple(bg_color))
-    im2 = xlpil.plot_text(im, text, xy=xy, font_size=font_size, fill=text_color, **kwargs)
+    im2 = xlpil.plot_text(im, text, xy=xy, font_size=font_size, fill=tuple(text_color), **kwargs)
 
     return im2
