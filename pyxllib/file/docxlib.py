@@ -100,8 +100,8 @@ class Document:
                 还没创建的word文件路径：在个别功能需要的时候，会自动创建
                 None：在临时文件夹生成一个默认的word文件
         """
+        check_install_package('docx', 'python-docx')
         import docx
-        # pip install python-docx
 
         if docx_file is None:
             self.docx_file = File(..., Dir.TEMP, suffix='.docx')
@@ -470,6 +470,7 @@ class EnchantWin32WordDocument(EnchantBase):
         else:
             return outfile
 
+
     # 先暂时不开启 doc.chars
     # @staticmethod
     # def chars(doc):
@@ -495,7 +496,7 @@ class EnchantWin32WordDocument(EnchantBase):
 
     @staticmethod
     def add_section_size(doc, factor=1):
-        """ 增加每节长度的标记
+        """ 显示每节长度的标记
         一般在这里计算比在html计算方便
         """
         from humanfriendly import format_size

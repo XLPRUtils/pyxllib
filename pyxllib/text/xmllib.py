@@ -419,6 +419,8 @@ def html_bitran_template(htmlcontent):
     其实最好的办法，是能调用翻译API，直接给出双语成果的html
     但谷歌的googletrans连不上外网无法使用
     其他公司的翻译接口应该没问题，但我嫌其可能没有google好，以及不是重点，就先暂缓开发
+    ---
+    习惯来说，一般上面是英文，下面是中文，但是我又想使用中文标题~~
     """
     from pyxllib.text.nestenv import NestEnv
 
@@ -437,17 +439,25 @@ def html_bitran_template(htmlcontent):
 
     # 2 每个区间的处理规则
     def func(s):
-        """ 找出p、h后，具体要执行的操作 """
-        # 0 共通操作
-        s1, s2 = s, s  # 分前后两波文本s1，s2
-        bs = BeautifulSoup(s, 'lxml')
+        """ 找出p、h后，具体对每个tag要执行的操作
+
+        分前后两波文本s1（原文），s2（翻译文）
+        """
+
+        # 1 s1 只要加 notranslate
+        s1 = s
+        bs = BeautifulSoup(s1, 'lxml')
+        x = next(bs.body.children)
+        cls_ = x.get('class', None)
+        x['class'] = (cls_ + ['notranslate']) if cls_ else 'notranslate'
+        s1 = x.prettify()
+
+        # 2 s2 可能要做些骚操作
+        s2 = s
+        bs = BeautifulSoup(s2, 'lxml')
         x = next(bs.body.children)
 
-        # 1 s1 可能要做些骚操作
-
         # 比如自定义翻译，这个无伤大雅的，如果搞不定，可以先注释掉，后面再说
-        # bs = BeautifulSoup(s1, 'lxml')
-        # x = list(bs.body.children)[0]
         # if re.match(r'h\d+$', x.name):
         #     for y in x.descendants:
         #         if isinstance(y, NavigableString):
@@ -456,27 +466,21 @@ def html_bitran_template(htmlcontent):
         #             for z in y.strings:
         #                 z.replace_with(re.sub(r'Conclusion', '总结', str(z)))
         #     y.replace_with(re.sub(r'^Abstract$', '摘要', str(y)))
-        # s1 = str(x)
-
-        if x.name in ('div', 'pre'):
-            # 实际使用体验，想了下，代码块还是不如保留原样最方便，不用拷贝翻译
-            s1 = ''
-        # 如果p没有文本字符串，也不拷贝
-        if not x.get_text().strip():
-            s1 = ''
-        # if x.name == 'p' and x.get('style', None) and 'margin-left' in x['style']:
-        #     x['style'] = re.sub(r'(margin-left:)\d+(\.\d+)?', r'\g<1>0', x['style'])
-
-        # 2 s2 只要加 notranslate
-        cls_ = x.get('class', None)
-        x['class'] = (cls_ + ['notranslate']) if cls_ else 'notranslate'
+        # s2 = str(x)
 
         if re.match(r'h\d+$', x.name):
             x.name = 'p'  # 去掉标题格式，统一为段落格式
+            s2 = x.prettify()
+        elif x.name in ('div', 'pre'):
+            # 实际使用体验，想了下，代码块还是不如保留原样最方便，不用拷贝翻译
+            s2 = ''
+        # 如果p没有文本字符串，也不拷贝
+        if not x.get_text().strip():
+            s2 = ''
+        # if x.name == 'p' and x.get('style', None) and 'margin-left' in x['style']:
+        #     x['style'] = re.sub(r'(margin-left:)\d+(\.\d+)?', r'\g<1>0', x['style'])
 
-        s2 = x.prettify()
-
-        return s2 + '\n' + s1
+        return s1 + '\n' + s2
 
     res = ne2.replace(func)
 
