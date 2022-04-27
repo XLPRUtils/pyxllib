@@ -34,7 +34,7 @@ from pyxlpr.ppocr.modeling.architectures import build_model
 from pyxlpr.ppocr.postprocess import build_post_process
 from pyxlpr.ppocr.utils.save_load import load_model
 from pyxlpr.ppocr.utils.utility import get_image_file_list
-import tools.program as program
+import pyxlpr.ppocr.tools.program as program
 
 
 def main():
