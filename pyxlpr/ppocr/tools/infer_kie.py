@@ -34,7 +34,7 @@ import paddle
 from pyxlpr.ppocr.data import create_operators, transform
 from pyxlpr.ppocr.modeling.architectures import build_model
 from pyxlpr.ppocr.utils.save_load import load_model
-import tools.program as program
+import pyxlpr.ppocr.tools.program as program
 import time
 
 

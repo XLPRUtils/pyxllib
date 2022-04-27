@@ -26,8 +26,8 @@ import cv2
 import copy
 import numpy as np
 import time
-import tools.infer.predict_rec as predict_rec
-import tools.infer.predict_det as predict_det
+import pyxlpr.ppocr.tools.infer.predict_rec as predict_rec
+import pyxlpr.ppocr.tools.infer.predict_det as predict_det
 from pyxlpr.ppocr.utils.utility import get_image_file_list, check_and_read_gif
 from pyxlpr.ppocr.utils.logging import get_logger
 from pyxlpr.ppstructure.table.matcher import distance, compute_iou
