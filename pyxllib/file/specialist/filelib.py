@@ -937,6 +937,10 @@ class XlPath(type(pathlib.Path())):
         if not encoding: encoding = get_encoding(bstr)
         s = bstr.decode(encoding=encoding, errors=errors)
 
+        # 如果用\r\n作为换行符会有一些意外不好处理
+        if '\r' in s:
+            s = s.replace('\r\n', '\n')
+
         if return_mode:
             return s, encoding
         else:
