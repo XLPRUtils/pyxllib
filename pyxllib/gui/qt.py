@@ -144,7 +144,7 @@ class XlComboBox(QtWidgets.QComboBox):
                 cnt += 1
 
 
-def get_input_widget(items=None, cur_value=None, *, valcvt=None,
+def get_input_widget(items=None, cur_value=None, *, parent=None, valcvt=None,
                      n_widget=1, enabled=True,
                      correct_changed=None):
     """ 根据items参数情况，智能判断生成对应的widget
@@ -158,7 +158,7 @@ def get_input_widget(items=None, cur_value=None, *, valcvt=None,
             [('福建', [('龙岩', ['连城', '长汀', ...], ...)]), ('北京', ...)]
             这种情况会返回多个widget
     :param cur_value: 当前显示的文本值
-    :param valcvt: 数值类型转换函数，非法时返回ValueError  （未实装）
+    :param valcvt: 数值类型转换函数，非法时返回ValueError
         很多输入框是传入文本，有时需要转为int、float、list等类型
         支持输入常见类型转换的字符串名称，比如int、float
     :param correct_changed: 文本改变时的回调函数
@@ -178,10 +178,10 @@ def get_input_widget(items=None, cur_value=None, *, valcvt=None,
     # 2 正式生成控件
     if isinstance(items, (list, tuple)):
         # 带有 items 的字段支持候选下拉菜单
-        w = XlComboBox(text=cur_value, items=items, valcvt=cvtfunc, editable=isinstance(items, list))
+        w = XlComboBox(parent, text=cur_value, items=items, valcvt=cvtfunc, editable=isinstance(items, list))
     elif items is None:
         # 普通填充框
-        w = XlLineEdit(cur_value, valcvt=cvtfunc)
+        w = XlLineEdit(cur_value, parent=parent, valcvt=cvtfunc)
     else:
         raise ValueError(f'{type(items)}')
 
