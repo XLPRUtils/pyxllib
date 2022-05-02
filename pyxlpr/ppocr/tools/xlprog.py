@@ -4,15 +4,22 @@
 # @Email  : 877362867@qq.com
 # @Date   : 2022/02/21 11:07
 
+"""
+对PaddleOcr进行了更高程度的工程化封装
+"""
+
 import os
 import sys
 import yaml
 import shutil
 import copy
+import inspect
+import math
 
 import numpy as np
 
 from pyxlpr.ppocr.tools.program import preprocess
+from pyxlpr.ppocr.data import build_dataloader
 
 from pyxllib.algo.geo import rect_bounds, ltrb2xywh
 from pyxllib.file.specialist import XlPath, ensure_localfile, ensure_localdir
@@ -20,7 +27,7 @@ from pyxllib.cv.xlcvlib import xlcv
 from pyxllib.prog.newbie import round_int
 
 
-class PaddleOCRConfig:
+class PaddleOcrBaseConfig:
     """ paddle(ocr)标准配置文件的封装，为了简化配置方便自己使用，
     做了一个中间层组件，方便做一些统一的参数设置、修改
     """
@@ -34,12 +41,16 @@ class PaddleOCRConfig:
 
     def autoset(self):
         """ 这个接口方便写一些通用的配置 """
+
         x = self.cfg['Global']
         x['use_visualdl'] = True
-        x['print_batch_step'] = 100  # 这个单位是iter
+        x['print_batch_step'] = 1000  # 这个单位是iter。原本很小2，我改成了100。但epoch很小的时候，每轮epoch也会输出。
         x['pretrained_model'] = None
         # 每隔多少次epoch，保存模型，原本默认是1200，这里故意设置的特别大，相当于不保存模型，需要的话手动设置补充。
+        # 虽然没有固定间隔保存模型，但默认还是会根据eval，保存最优模型的
         x['save_epoch_step'] = 100000
+
+        self.set_save_dir('models/' + inspect.stack()[3].function)
 
     def resume(self, train=False):
         """ 如果没有设置checkpoints，尝试加载best_accuracy或latest模型
@@ -67,7 +78,7 @@ class PaddleOCRConfig:
         """
         :param subpath: 例如 'det/det_mv3_db'
         """
-        f = os.path.join(sys.modules['ppocr'].__path__[0], 'configs', subpath + '.yml')
+        f = os.path.join(sys.modules['pyxlpr.ppocr'].__path__[0], 'configs', subpath + '.yml')
         return self.config_from_content(XlPath(f).read_text())
 
     def set_save_dir(self, save_dir):
@@ -80,18 +91,52 @@ class PaddleOCRConfig:
         # 这个选项暂时还不清楚具体作用，不知道是不是db专有的
         x['save_res_path'] = save_dir / 'predicts.txt'
 
-    def set_dataset(self, mode, data_dir, data_list):
-        """ 设置自己的XlSampleDataSet数据格式 """
+    def set_simpledataset(self, mode, data_dir, label_file_list, ratio_list=None):
+        """ paddle官方标准的SimpleDataset数据格式
+
+        :param str mode: Train or Eval，设置训练集或者验证集
+        :param PathLike data_dir: 数据所在根目录
+        :param list label_file_list: 标注文件清单 [txtfile1, textfile2, ...]
+            每个txtfile文件里的内容，每行是一张图的标注
+            每行第1列是图片相对data_dir的路径，\t隔开，第2列是json.dumps的json标注数据
+            json里有transcription字段存储文本内容，points存储四边形框位置
+        :param list ratio_list: 只有一个label_file_list的时候，可以只输入一个数字，但最好统一按列表输入
+            填写一个0~1.0的小数值，表示所取样本比例数
+            这个paddle官方实现是随机取的，没有顺序规律
+        """
+        # 注意如果在SimpleDataSet、XlSimpleDataSet之间切换的话，有些字段格式是有区别的
+        # 保险起见，就把self.cfg[mode]['dataset']整个重置了
         node = self.cfg[mode]['dataset']
+        x = {'name': 'SimpleDataSet',
+             'data_dir': XlPath(data_dir),
+             'label_file_list': label_file_list}
+        if ratio_list:
+            x['ratio_list'] = ratio_list
+        x['transforms'] = node['transforms']
+        self.cfg[mode]['dataset'] = x
 
-        node['name'] = 'XlSimpleDataSet'
-        node['data_dir'] = XlPath(data_dir)
-        node['data_list'] = data_list
+    def set_xlsimpledataset(self, mode, data_dir, data_list):
+        """ 设置自己的XlSampleDataSet数据格式
 
-        if 'label_file_list' in node:
-            del node['label_file_list']
-        if 'ratio_list' in node:
-            del node['ratio_list']
+        用于对各种源生的格式，在程序运行中将格式直接转为paddle的内存支持格式接口，从而不用重复生成冗余的中间数据文件
+        目前最主要的是扩展了对xllabelme标注格式的支持，如labelme_det
+
+        :param str mode: Train or Eval，设置训练集或者验证集
+        :param PathLike data_dir: 数据所在根目录
+        :param list data_list: 数据具体清单，每个条目都是一个字典
+            [必填]type: 具体的数据格式，目前支持 labelme_det, icdar2015, refineAgree
+                具体支持的方法，可以见XlSimpleDataSet类下前缀为from_的成员方法
+            其他为选填字段，具体见from_定义支持的扩展功能，一般有以下常见参数功能
+            [ratio] 一个小数比例，可以负数代表从后往前取
+                一般用于懒的物理区分Train、Eval数据集的时候，在代码里用算法自动拆分训练、验证集
+
+        """
+        node = self.cfg[mode]['dataset']
+        x = {'name': 'XlSimpleDataSet',
+             'data_dir': XlPath(data_dir),
+             'data_list': data_list}
+        x['transforms'] = node['transforms']
+        self.cfg[mode]['dataset'] = x
 
     @classmethod
     def _rset_posix_path(cls, d):
@@ -130,6 +175,19 @@ class PaddleOCRConfig:
     def add_config_to_cmd_argv(self):
         """ 把配置参数加入命令行的 -c 命令中 """
         sys.argv = sys.argv + ['-c', self.write_cfg_tempfile()]
+
+    def set_iter_num(self, num):
+        """ 按迭代数设置训练长度
+
+        paddle的配置源生并不支持按iter来统计训练长度，
+        要通过batch_size_per_card和数据量，来反推epoch_num需要设置多少
+
+        注意要先设置好数据集，再继续迭代数哦！
+        """
+        config, device, logger, _ = preprocess(from_dict=self.rset_posix_path(), use_visualdl=False)
+        train_dataloader = build_dataloader(config, 'Train', device, logger)
+        per_epoch_iter_num = len(train_dataloader)  # 每个epoch的迭代数
+        self.cfg['Global']['epoch_num'] = math.ceil(num / per_epoch_iter_num)
 
     def __2_main(self):
         """ 一些脚本功能工具 """
@@ -174,6 +232,9 @@ class PaddleOCRConfig:
         config, device, logger, vdl_writer = preprocess(from_dict=self.rset_posix_path())
         main(config, logger)
 
+    def __3_pretrained(self):
+        """ 使用预训练模型相关配置的封装 """
+
     @classmethod
     def get_pretrained_model_backbone(cls, name):
         """ 只拿骨干网络的权重 """
@@ -198,18 +259,44 @@ class PaddleOCRConfig:
         self.cfg['Global']['pretrained_model'] = path
 
     def set_pretrained_infer_model(self, local_dir, url):
+        """ 自己扩展的一个配置参数，metric的时候用 """
         local_dir = XlPath.userdir() / f'.paddleocr/pretrained_infer/{local_dir}'
         path = ensure_localdir(local_dir, url, wrap=-1)
         self.cfg['Global']['pretrained_infer_model'] = path
+
+    def set_pretrained_model(self, pretrained, models):
+        """ 对上述功能进一步封装，简化高层接口配置时的代码复杂度
+
+        :param bool|int pretrained:
+            0 不使用预训练权重
+            1 使用骨干网络权重
+            2 使用完整的ppocr权重
+            3 之前定制训练过的最好的模型
+        :param models: pretrained为1、2时加载的模型
+        """
+        if pretrained == 1:
+            self.set_pretrained_model_backbone(models[0])
+        elif pretrained == 2:
+            self.set_pretrained_model_ppocr(models[1])
+        elif pretrained == 3:
+            self.cfg['Global']['pretrained_model'] = self.cfg['Global']['save_model_dir'] / 'best_accuracy'
 
     def __call__(self, *args, **kwargs):
         # 让fire库配合return self不会报错
         pass
 
 
-class PaddleDetConfig(PaddleOCRConfig):
+class XlDet(PaddleOcrBaseConfig):
     """ 检测模型专用配置
     """
+
+    def autolabel(self, datadir='data', *, model_type=0, **kwargs):
+        """ 预标注检测、识别
+
+        TODO model_type在det1_mobile的时候，默认设为2？
+        """
+        pocr = self.build_ppocr(model_type, **kwargs)
+        pocr.ocr2labelme(datadir, det=True, rec=True)
 
     def set_deploy_args_det(self):
         """ 检测模型在部署时候的参数，不一定跟eval一样
@@ -223,47 +310,44 @@ class PaddleDetConfig(PaddleOCRConfig):
             if 'DetResizeForTest' in x:
                 x['DetResizeForTest'] = {'limit_side_len': 960, 'limit_type': 'max'}
 
-    def det1_mobile(self, *, pretrained=2):
+    def det1_mobile_init(self, *, pretrained=2):
         """
-        :param bool|int pretrained: 0 不适用预训练权重，1 使用骨干网络权重，2 使用完整的ppocr权重
-        :return:
+        官方实验:ic15, train1000+val500张, batch_size_per_card=8, epoch=1200
+            也就是总训练量120w，除batchsize，是15万iter
+            按照核酸的实验，每iter耗时大概是0.4秒，实验总用时15iter/3600*0.4约等于17小时
+
+        batchsize=8，hesuan训练过程占用显存 6.7G
+            以后有其他实验数据，会尝试都覆盖上，但记忆中差不多都是消耗这么多
 
         这个部署文件共 3M
+
+        TODO datalist不只一个的相关功能，还没有进行测试，但问题应该不大
         """
+        # 1 加载基础的配置
         cfg = self.config_from_template('det/ch_ppocr_v2.0/ch_det_mv3_db_v2.0')
-        if pretrained == 1:
-            self.set_pretrained_model_backbone('MobileNetV3_large_x0_5_pretrained')
-        elif pretrained == 2:
-            self.set_pretrained_model_ppocr('ch_ppocr_mobile_v2.0_det_train')
-        elif pretrained == 3:  # 之前定制训练过的最好的模型
-            self.cfg['Global']['pretrained_model'] = self.cfg['Global']['save_model_dir'] / 'best_accuracy'
+        self.set_pretrained_model(pretrained, ['MobileNetV3_large_x0_5_pretrained', 'ch_ppocr_mobile_v2.0_det_train'])
         self.set_deploy_args_det()
 
-        # 预训练权重也提供了一个部署模型
+        # 2 预训练权重也提供一个部署模型，供后续metric分析
         infer_model_url = 'https://paddleocr.bj.bcebos.com/dygraph_v2.0/ch/ch_ppocr_mobile_v2.0_det_infer.tar'
         self.set_pretrained_infer_model('ch_ppocr_mobile_v2.0_det_infer', infer_model_url)
 
-        return self
-
-    def det1_server(self, *, pretrained=2):
+    def det1_server_init(self, *, pretrained=2):
         """
+        训练显存 10.2 G
+
         这个部署文件共 47M
         """
+        # 1 加载基础的配置
         cfg = self.config_from_template('det/ch_ppocr_v2.0/ch_det_res18_db_v2.0')
-        if pretrained == 1:
-            self.set_pretrained_model_backbone('ResNet18_vd_pretrained')
-        elif pretrained == 2:
-            self.set_pretrained_model_ppocr('ch_ppocr_server_v2.0_det_train')
-        elif pretrained == 3:
-            self.cfg['Global']['pretrained_model'] = self.cfg['Global']['save_model_dir'] / 'best_accuracy'
+        self.set_pretrained_model(pretrained, ['ResNet18_vd_pretrained', 'ch_ppocr_server_v2.0_det_train'])
         self.set_deploy_args_det()
 
+        # 2 预训练权重也提供一个部署模型，供后续metric分析
         infer_model_url = 'https://paddleocr.bj.bcebos.com/dygraph_v2.0/ch/ch_ppocr_server_v2.0_det_infer.tar'
         self.set_pretrained_infer_model('ch_ppocr_server_v2.0_det_infer', infer_model_url)
 
-        return self
-
-    def det2(self, *, pretrained=1):
+    def det2_init(self, *, pretrained=1):
         """ 2021.9.7发布的PP-OCRv2
         但是我还没有试跑过，不确定我这样配置是对的
 
@@ -446,8 +530,65 @@ class PaddleDetConfig(PaddleOCRConfig):
             cm.to_labelme_match(out_dir, segmentation=True)
             cm.to_excel(out_dir / 'cocomatch.xlsx')
 
+    def __config_demo(self):
+        """ 常用的配置示例 """
 
-class PaddleRecConfig(PaddleOCRConfig):
+    def det1_mobile_raw(self):
+        """ paddle源生格式的配置示例 """
+        self.det1_mobile_init(pretrained=2)  # 基础配置
+        self.set_save_dir('models/det1_mobile_raw')  # 模型保存位置
+        self.set_simpledataset('Train', 'data', ['data/ppdet_train.txt'])
+        self.set_xlsimpledataset('Eval', 'data', ['data/ppdet_val.txt'])
+        self.set_iter_num(150000)
+        return self
+
+    def det1_mobile(self):
+        """ labelme标注格式的检测训练 """
+        self.det1_mobile_init(pretrained=2)  # 基础配置
+        self.set_save_dir('models/det1_mobile')  # 模型保存位置
+        self.set_xlsimpledataset('Train', 'data', [{'type': 'labelme_det', 'ratio': 0.9}])
+        self.set_xlsimpledataset('Eval', 'data', [{'type': 'labelme_det', 'ratio': -0.1}])
+        self.set_iter_num(150000)
+        return self
+
+    def det1_server(self):
+        self.det1_server_init(pretrained=2)  # 基础配置
+        self.set_save_dir('models/det1_server')  # 模型保存位置
+        self.set_xlsimpledataset('Train', 'data', [{'type': 'labelme_det', 'ratio': 0.9}])
+        self.set_xlsimpledataset('Eval', 'data', [{'type': 'labelme_det', 'ratio': -0.1}])
+        self.set_iter_num(150000)
+        return self
+
+
+class XlRec(PaddleOcrBaseConfig):
     """ 识别模型专用配置
     """
-    pass
+
+    def rec_chinese_lite(self):
+        """ 能识别中文的一个轻量模型
+
+        """
+        cfg = self.config_from_template('rec/ch_ppocr_v2.0/rec_chinese_lite_train_v2.0')
+        # cfg['Global']['pretrained_model'] = Paths.models / 'ch_ppocr_mobile_v2.0_rec_train/best_accuracy'
+        self.cfg['Global']['epoch_num'] = 10000
+        return self
+
+
+class XlCls:
+    """ 分类模型 """
+
+
+class XlOcr:
+    """ 封装了文字技术体系，检测识别的一些标准化处理流程 """
+
+    def __init__(self, root):
+        self.root = XlPath(root)  # 项目根目录
+
+    def step1_autolabel(self):
+        """ 预标注检测、识别 """
+
+    def step2_refinelabel(self):
+        """ 人工手动优化label标注 """
+
+    def step3_det(self):
+        """ 训练检测模型 """

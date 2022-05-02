@@ -502,8 +502,12 @@ def get_center(model, eval_dataloader, post_process_class):
     return char_center
 
 
-def preprocess(is_train=False, *, from_dict=None):
-    """ 用于获取配置、设备、日志、visualdl相关对象工具 """
+def preprocess(is_train=False, *, use_visualdl=True, from_dict=None):
+    """ 用于获取配置、设备、日志、visualdl相关对象工具
+
+    :param use_visualdl: 除了检查配置文件是否开启vdl，这个参数同时也为True时才会开启
+        在有时候需要preprocess获得前三者，但并不需要重复开一个vdl时使用
+    """
 
     # 1 config
     if from_dict:
@@ -576,7 +580,7 @@ def preprocess(is_train=False, *, from_dict=None):
 
     # 4 vdl_write，如果开启了可视化功能
     # 在save_model_dir目录下，会再建立一个vdl目录，返回一个vdl_writer对象
-    if config['Global']['use_visualdl']:
+    if config['Global']['use_visualdl'] and use_visualdl:
         from visualdl import LogWriter
         save_model_dir = config['Global']['save_model_dir']
         vdl_writer_path = '{}/vdl/'.format(save_model_dir)

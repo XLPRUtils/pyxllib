@@ -216,9 +216,27 @@ def first_nonnone(args, judge=None):
     return args[-1]  # 全部都不满足，返回最后一个值
 
 
-def round_int(x):
-    """ 先四舍五入，再取整 """
-    return int(round(x, 0))
+def round_int(x, *, ndim=0):
+    """ 先四舍五入，再取整
+
+    :param x: 一个数值，或者多维数组
+    :param ndim: x是数值是默认0，否则指定数组维度，批量处理
+        比如ndim=1是一维数组
+        ndim=2是二维数组
+
+    >>> round_int(1.5)
+    2
+    >>> round_int(1.4)
+    1
+    >>> round_int([2.3, 1.42], ndim=1)
+    [2, 1]
+    >>> round_int([[2.3, 1.42], [3.6]], ndim=2)
+    [[2, 1], [4]]
+    """
+    if ndim:
+        return [round_int(a, ndim=ndim - 1) for a in x]
+    else:
+        return int(round(x, 0))
 
 
 class CvtType:

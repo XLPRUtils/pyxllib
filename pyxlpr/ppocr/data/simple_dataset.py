@@ -251,9 +251,9 @@ class XlSimpleDataSet(SimpleDataSetExt):
         return data
 
     @run_once('str')  # 这个标注格式是固定的，不用每次重复生成，可以使用run_once限定
-    def from_icdar2015(self, img_dir, label_dir, ratio=None):
+    def from_icdar2015(self, subdir, label_dir, ratio=None):
         data_dir = XlPath(self.data_dir)
-        img_dir = data_dir / img_dir
+        subdir = data_dir / subdir
         label_dir = data_dir / label_dir
 
         data_lines = []
@@ -279,7 +279,7 @@ class XlSimpleDataSet(SimpleDataSetExt):
 
         for f in txt_files:
             # stem[3:]是去掉标注文件名多出的'gt_'的前缀
-            impath = (img_dir / (f.stem[3:] + '.jpg')).relative_to(data_dir).as_posix()
+            impath = (subdir / (f.stem[3:] + '.jpg')).relative_to(data_dir).as_posix()
             # icdar的标注文件，有的是utf8，有的是utf-8-sig，这里使用我的自动识别功能
             json_label = label2json(f.read_text(encoding=None))
             label = json.dumps(json_label, ensure_ascii=False)
@@ -288,12 +288,12 @@ class XlSimpleDataSet(SimpleDataSetExt):
         return data_lines
 
     @run_once('str')
-    def from_refineAgree(self, img_dir, json_dir, label_file):
+    def from_refineAgree(self, subdir, json_dir, label_file):
         """ 只需要输入根目录 """
         from pyxlpr.data.labelme import LabelmeDict
 
         data_dir = XlPath(self.data_dir)
-        img_dir = data_dir / img_dir
+        subdir = data_dir / subdir
         json_dir = data_dir / json_dir
         label_file = data_dir / label_file
 
@@ -314,7 +314,7 @@ class XlSimpleDataSet(SimpleDataSetExt):
         sample_list = label_file.read_text().splitlines()
         for x in sample_list:
             if not x: continue  # 忽略空行
-            impath = (img_dir / (x + '.jpg')).relative_to(data_dir).as_posix()
+            impath = (subdir / (x + '.jpg')).relative_to(data_dir).as_posix()
             f = json_dir / (x + '.json')
             json_label = labelme2json(f.read_json())
             label = json.dumps(json_label, ensure_ascii=False)
@@ -323,11 +323,11 @@ class XlSimpleDataSet(SimpleDataSetExt):
         return data_lines
 
     @run_once('str')
-    def from_labelme_det(self, sub_data_dir='.', ratio=None, transcription_field=None):
+    def from_labelme_det(self, subdir='.', ratio=None, transcription_field='text'):
         """ 读取sub_data_dir目录（含子目录）下所有的json文件为标注文件
 
         :param transcription_field: 对于检测任务这个值一般没什么用，主要是一些特殊数据，标记"#"的会记为难样本，跳过不检测
-            默认不设置取sp['label']为文本值
+            None, 不设置则取sp['label']为文本值
             若设置，则按字典解析label并取对应名称的键值
 
         json1: labelme的json标注文件
@@ -336,7 +336,7 @@ class XlSimpleDataSet(SimpleDataSetExt):
         from pyxlpr.data.labelme import LabelmeDict
 
         data_dir = XlPath(self.data_dir)
-        sub_data_dir = data_dir / sub_data_dir
+        subdir = data_dir / subdir
         data_lines = []
 
         def json1_to_json2(d):
@@ -352,12 +352,15 @@ class XlSimpleDataSet(SimpleDataSetExt):
                 res.append(result)
             return res
 
-        json1_files = list(sub_data_dir.rglob('*.json'))
+        json1_files = list(subdir.rglob('*.json'))
         if ratio is not None:
             json1_files = self._select_ratio(json1_files, ratio)
 
         for json1_file in json1_files:
             data = json1_file.read_json()
+            # 比较简单的检查是否为合法labelme的规则
+            if 'imagePath' not in data:
+                continue
             img_file = json1_file.parent / data['imagePath']  # 不确定关联的图片格式，所以直接从labelme里取比较准
             json2_data = json1_to_json2(data)
             json2_str = json.dumps(json2_data, ensure_ascii=False)

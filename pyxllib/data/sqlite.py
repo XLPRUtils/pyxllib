@@ -107,10 +107,12 @@ class Connection(sqlite3.Connection):
         :param table_name:
         :param cols: 一般是用字典表示的要插入的值
         :return:
+
+        注意加了 OR IGNORE，支持重复数据自动忽略插入
         """
         ks = ','.join(cols.keys())
         vs = ','.join('?' * (len(cols.keys())))
-        self.execute(f'INSERT INTO {table_name}({ks}) VALUES ({vs})', self.cvt_types(cols.values()))
+        self.execute(f'INSERT OR IGNORE INTO {table_name}({ks}) VALUES ({vs})', self.cvt_types(cols.values()))
 
     def update(self, table_name, cols, where):
         """ 【改】更新数据
@@ -141,3 +143,20 @@ class Connection(sqlite3.Connection):
         """
         for x in self.execute(f'SELECT {col} FROM {table_name}'):
             yield x[0]
+
+    def exec_nametuple(self, *args, **kwargs):
+        cur = self.cursor()
+        cur.row_factory = sqlite3.Row
+        return cur.execute(*args, **kwargs)
+
+    def exec_dict(self, *args, **kwargs):
+        """ execute基础上，改成返回值为dict类型 """
+        def dict_factory(cursor, row):
+            d = {}
+            for idx, col in enumerate(cursor.description):
+                d[col[0]] = row[idx]
+            return d
+
+        cur = self.cursor()
+        cur.row_factory = dict_factory
+        return cur.execute(*args, **kwargs)
