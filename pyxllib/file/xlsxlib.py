@@ -692,7 +692,10 @@ class EnchantWorksheet(EnchantBase):
             column = self.findcol(column)
 
         # 3 单元格
-        cell = self.cell(row, column, value)
+        # cell = self.cell(row, column, value)  # 这种写法好像有bug，写长文本的时候，后丢掉后半部分
+        cell = self.cell(row, column)
+        if value is not None:
+            cell.value = value
         return cell
 
     @staticmethod

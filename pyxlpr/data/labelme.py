@@ -4,25 +4,27 @@
 # @Email  : 877362867@qq.com
 # @Date   : 2020/08/15 00:59
 
-
+import os
 from tqdm import tqdm
 import json
 import ujson
 import copy
+from collections import Counter
 
 from pyxllib.prog.deprecatedlib import deprecated
 import numpy as np
 
+from pyxllib.prog.newbie import round_int
 from pyxllib.prog.pupil import DictTool
 from pyxllib.debug.specialist import get_xllog, Iterate, dprint
-from pyxllib.file.specialist import File, Dir, PathGroups, get_encoding
+from pyxllib.file.specialist import File, Dir, PathGroups, get_encoding, XlPath
 from pyxllib.prog.specialist import mtqdm
 from pyxllib.cv.expert import xlpil
 from pyxllib.algo.geo import ltrb2xywh, rect_bounds, warp_points, resort_quad_points, rect2polygon, get_warp_mat
 
-__0_basic = """
-这里可以写每个模块注释
-"""
+
+def __0_basic():
+    """ 这里可以写每个模块注释 """
 
 
 class BasicLabelDataset:
@@ -120,8 +122,9 @@ class BasicLabelDataset:
               max_workers=max_workers, disable=not prt)
 
 
-__1_labelme = """
-"""
+def __1_labelme():
+    """ """
+
 
 # 我自己按照“红橙黄绿蓝靛紫”的顺序展示
 LABEL_COLORMAP7 = [(0, 0, 0), (255, 0, 0), (255, 125, 0), (255, 255, 0),
@@ -658,3 +661,77 @@ class LabelmeDataset(BasicLabelDataset):
         # 3 result
         gt_dict = CocoGtData.gen_gt_dict(images, annotations, categories)
         return gt_dict
+
+    def to_ppdet(self, outfile=None, print_mode=True):
+        """ 转paddle的文本检测格式
+
+        图片要存相对目录，默认就按self的root参数设置
+        """
+        lines = []
+
+        # 1 转成一行行标注数据
+        for jsonfile, lmdict in tqdm(self.rp2data.items(), disable=not print_mode):
+            shapes = []  # pp格式的标注清单
+
+            for sp in lmdict['shapes']:
+                attrs = DictTool.json_loads(sp['label'], 'text')
+                d = {'transcription': attrs['text'],
+                     'points': round_int(LabelmeDict.to_quad_pts(sp), ndim=2)}
+                shapes.append(d)
+            imfile = os.path.split(jsonfile)[0] + f'/{lmdict["imagePath"]}'
+            lines.append(f'{imfile}\t{json.dumps(shapes, ensure_ascii=False)}')
+
+        # 2 输出
+        content = '\n'.join(lines)
+        if outfile:
+            XlPath(outfile).write_text(content)
+        return content
+
+    def get_char_count_dict(self):
+        """ 文本识别需要用到的功能，检查字符集出现情况
+
+        return dict: 返回一个字典，k是出现的字符，v是各字符出现的次数，按顺序从多到少排序
+            差不多是Counter的结构
+        """
+        texts = []
+        for lmdict in self.rp2data.values():
+            for sp in lmdict['shapes']:
+                text = DictTool.json_loads(sp['label'], 'text')['text']
+                texts.append(text)
+        ct = Counter(''.join(texts))
+        return {k: v for k, v in ct.most_common()}
+
+    def check_char_set(self, refdict=None):
+        """ 检查本套labelme数据集里，text字符集出现情况，和paddleocr的识别字典是否有额外新增字符
+        """
+        from pyxllib.algo.specialist import DictCmper
+        from pyxlpr.ppocr.utils import get_dict_content
+
+        # 0 计算字典
+        if refdict is None:
+            d1 = get_dict_content('ppocr_keys_v1.txt')
+            refdict = {k: 1 for k in d1.split('\n')}
+
+        d2 = self.get_char_count_dict()
+
+        print('1 整体统计信息')
+        dc = DictCmper({'refdict': refdict, 'chars': d2})
+        print(dc.pair_summary())
+
+        print('2 新增字符及出现数量（如果只是多出空白字符，可以统一转空格处理）')
+        keys = set(list(d2.keys())) - set(list(refdict.keys()))
+        sorted(keys, key=lambda k: -d2[k])
+        for k in keys:
+            print(repr(k), d2[k])
+
+        # 3 返回所有新增的非空字符
+        return {k for k in keys if k.strip()}
+
+    def to_pprec(self, image_dir, txt_path, *, reset=False):
+        """ 转paddle的文本识别格式
+
+        :param image_dir: 要导出文本行数据所在的目录
+        :param txt_path: 标注文件的路径
+        :param reset: 目标目录存在则重置
+        """
+        pass
