@@ -451,9 +451,9 @@ class PaddleOCR(predict_system.TextSystem):
             lines.sort(key=lambda x: TextlineShape(x[0]))
         return [x[1][0] for x in lines]
 
-    def rec_singleline(self, im):
+    def rec_singleline(self, im, cls=False):
         """ 只识别一行文本 """
-        lines = self.ocr(im, det=False)
+        lines = self.ocr(im, det=False, cls=cls)
         text = ' '.join([line[0] for line in lines])
         score = round(float(sum([line[1] for line in lines])) / len(lines), 4)
         return text, score
