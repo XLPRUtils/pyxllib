@@ -593,14 +593,19 @@ class PaddleOCR(predict_system.TextSystem):
         metric['fps'] = metric['total_frame'] / sum(timer.data)
         return metric
 
-    def rec_metric_labelme(self, root):
+    def rec_metric_labelme(self, root, *, cls=False, bc=False, print_mode=True):
+        """
+        :param bc: 是否打开bcompare比较所有识别错误的内容
+        """
+        from pyxllib.debug.specialist import bcompare
         from pyxlpr.ppocr.metrics.rec_metric import RecMetric
+        from pyxllib.prog.pupil import DictTool
 
         # 1 读取检测标注、调用self进行检测
         timer1, timer2 = Timer('读图速度'), Timer('总共耗时')
         # 有json文件才算有标注，空图最好也能对应一份空shapes的json文件才会进行判断
         files = list(XlPath(root).rglob_files('*.json'))
-        gts, preds = [], []
+        tags, gts, preds = [], [], []
         for f in tqdm(files):
             data = f.read_json()
 
@@ -608,26 +613,40 @@ class PaddleOCR(predict_system.TextSystem):
             img = xlcv.read(f.parent / data['imagePath'])
             timer1.stop()
 
-            for sp in data['shapes']:
+            for i, sp in enumerate(data['shapes']):
+                attr = DictTool.json_loads(sp['label'], 'text')
+                # if attr.get('content_class') == '其它类':
+                #     continue
+
+                tags.append(f'{f.stem}_{i:03}')  # 这里并不是要真的生成图片，所以有一定重复没有关系
                 subimg = xlcv.get_sub(img, sp['points'])
                 timer2.start()
-                texts = self.ocr(subimg, det=False, cls=True)
-                preds.append(' '.join([x[0] for x in texts]))
+                text, score = self.rec_singleline(subimg, cls=cls)
                 timer2.stop()
-                gts.append(json.loads(sp['label'])['text'])
-                # break
-            # break
+                preds.append(text)
+                gts.append(attr['text'])
 
         # 2 精度测评及测速
-        # print(preds, gts)
         metrics = RecMetric.eval(preds, gts)
         for k, v in metrics.items():
             metrics[k] = round(v, 4)
-        timer1.report()
-        timer2.report()
-        print(metrics)
+        if print_mode:
+            timer1.report()
+            timer2.report()
+            print(metrics)
+            print('fps={:.2f}'.format(1 / np.mean(timer2.data)))
 
-        print('fps={:.2f}'.format(1 / np.mean(timer2.data)))
+        # 3 bc可视化比较
+        if bc:
+            left = '\n'.join([f'{t}\t{x}' for t, x, y in zip(tags, gts, preds) if x != y])
+            right = '\n'.join([f'{t}\t{y}' for t, x, y in zip(tags, gts, preds) if x != y])
+            bcompare(left, right)
+
+    def rec_bc_labelme(self, root):
+        """ 用bc可视化显示识别模型效果
+
+        :param root: labelme格式数据所在的根目录
+        """
 
 
 build_paddleocr = PaddleOCR.build_ppocr

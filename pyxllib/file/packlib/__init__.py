@@ -25,8 +25,6 @@ from pyxllib.prog.pupil import EnchantBase, run_once
 def unpack_zipfile(filename, extract_dir):
     """ 为了修复zipfile底层的中文解压乱码问题，修改了shutil._UNPACK_FORMATS的底层功能
     """
-
-    from pyxllib.xl import Dir, File
     from shutil import ReadError
 
     zip = zipfile.ZipFile(filename)
@@ -44,7 +42,7 @@ def unpack_zipfile(filename, extract_dir):
             if not target:
                 continue
 
-            Dir(File(target).parent).ensure_dir()
+            os.makedirs(XlPath(target).parent, exist_ok=True)
             if not name.endswith('/'):
                 # file
                 data = zip.read(info.filename)
