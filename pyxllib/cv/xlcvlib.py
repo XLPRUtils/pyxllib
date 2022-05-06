@@ -401,7 +401,7 @@ class xlcv(EnchantBase):
         return cv2.resize(im, dsize[::-1], **kwargs)
 
     @staticmethod
-    def __6_warp():
+    def __5_warp():
         pass
 
     @staticmethod
@@ -669,6 +669,34 @@ class xlcv(EnchantBase):
         if isinstance(images[0], list):
             images = [hstack(imgs) for imgs in images]
         return vstack(images)
+
+    def __6_other(self):
+        pass
+
+    @staticmethod
+    def count_pixels(im):
+        """ 统计image中各种rgb出现的次数 """
+        colors, counts = np.unique(im.reshape(-1, 3), axis=0, return_counts=True)
+        colors = [[tuple(c), cnt] for c, cnt in zip(colors, counts)]
+        colors.sort(key=lambda x: -x[1])
+        return colors
+
+    @staticmethod
+    def color_desc(im, color_num=10):
+        """ 描述一张图的颜色分布，这个速度还特别慢，没有优化 """
+        from collections import Counter
+        from pyxllib.cv.rgbfmt import RgbFormatter
+
+        colors = xlcv.count_pixels(im)
+        total = sum([cnt for _, cnt in colors])
+        colors2 = Counter()
+        for c, cnt in colors[:10000]:
+            c0 = RgbFormatter(*c).find_similar_std_color()
+            colors2[c0.to_tuple()] += cnt
+
+        for c, cnt in colors2.most_common(color_num):
+            desc = RgbFormatter(*c).relative_color_desc()
+            print(desc, f'{cnt / total:.2%}')
 
 
 class CvImg(np.ndarray):

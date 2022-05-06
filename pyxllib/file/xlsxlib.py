@@ -15,6 +15,7 @@ check_install_package('premailer')
 check_install_package('xlrd2')
 check_install_package('yattag')
 
+import datetime
 import re
 
 import openpyxl
@@ -199,6 +200,17 @@ class EnchantCell(EnchantBase):
             cell = _func(cell)
         return cell
 
+    @staticmethod
+    def fill_color(cell, color, fill_type="solid", **kwargs):
+        """ 封装一些我自己常用的填色方案 """
+        from openpyxl.styles import PatternFill
+        from pyxllib.cv.rgbfmt import RgbFormatter
+        if isinstance(color, str):
+            color = RgbFormatter.from_name(color)
+        elif isinstance(color, (list, tuple)):
+            color = RgbFormatter(*color)
+        cell.fill = PatternFill(fgColor=color.to_hex()[1:], fill_type=fill_type, **kwargs)
+
 
 EnchantCell.enchant()
 
@@ -254,6 +266,7 @@ class EnchantWorksheet(EnchantBase):
 
         :param pattern: 正则匹配式，可以输入re.complier对象
             会将每个单元格的值转成str，然后进行字符串规则search匹配
+                注意日期的本质是一个数字，pattern支持输入一个datetime.date类型，会自动转为excel的日期值
             支持多层嵌套 ['模块一', '属性1']
         :param direction: 只有在 pattern 为数组的时候有用
             pattern有多组时，会嵌套找单元格
@@ -272,6 +285,9 @@ class EnchantWorksheet(EnchantBase):
         y1, y2 = max(min_col or 1, 1), min(max_col or _self.max_column, _self.max_column)
 
         # 2 遍历
+        if isinstance(pattern, datetime.date):
+            pattern = f'^{(pattern - datetime.date(1899, 12, 30)).days}$'
+
         if isinstance(pattern, (list, tuple)):
             cel = None
             for p in pattern:

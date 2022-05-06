@@ -652,6 +652,27 @@ def set_clipboard_content(content, *, rich=False):
         klembord.set_text(content)
 
 
+def grab_pixel_color(radius=0):
+    """
+    :param radius: 以中心像素为例，计算矩阵范围内的颜色分布情况（未实装）
+    """
+    from pyxllib.cv.rgbfmt import RgbFormatter
+    last_pos = None
+    print('精确全体/精确中文')
+
+    while True:
+        pos = pyautogui.position()
+        if pos == last_pos:
+            continue
+        else:
+            last_pos = pos
+
+        color = RgbFormatter(*pyautogui.pixel(*pos))
+        desc = color.relative_color_desc(color_range=2, precise_mode=True)
+        print('\r' + f'{color.to_hex()} {desc}', end='', flush=True)
+        time.sleep(0.1)
+
+
 if __name__ == '__main__':
     with TicToc(__name__):
         agld = AutoGuiLabelData(r'D:\slns\py4101\py4101\touhou\label')
