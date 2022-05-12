@@ -7,6 +7,7 @@
 from pyxllib.prog.pupil import check_install_package
 
 check_install_package('win32com', 'pypiwin32')
+check_install_package('docx', 'python-docx')
 
 import json
 import os
@@ -15,6 +16,9 @@ import re
 import pythoncom
 from win32com.client import constants
 import win32com.client as win32
+import docx
+import docx.table
+import docx.enum
 
 from pyxllib.prog.pupil import DictTool, EnchantBase, EnchantCvt, run_once
 from pyxllib.text.pupil import strwidth
@@ -100,9 +104,6 @@ class Document:
                 还没创建的word文件路径：在个别功能需要的时候，会自动创建
                 None：在临时文件夹生成一个默认的word文件
         """
-        check_install_package('docx', 'python-docx')
-        import docx
-
         if docx_file is None:
             self.docx_file = File(..., Dir.TEMP, suffix='.docx')
         else:
@@ -246,6 +247,44 @@ class Document:
         # add_table
         # save
         return getattr(self.doc, item)
+
+
+class EnchantDocxTable(EnchantBase):
+    @classmethod
+    @run_once
+    def enchant(cls):
+        names = cls.check_enchant_names([docx.table.Table])
+        cls._enchant(docx.table.Table, names)
+
+    @staticmethod
+    def merge_samevalue_in_col(table, col, start_row=1):
+        """ 定义合并单元格的函数
+
+        :param table: 需要操作的表格
+        :param col: 需要处理数据的列，0开始编号
+        :param start_row: 起始行，即表格中开始比对数据的行（其实标题排不排除一般无所谓~默认是排除了）
+        """
+
+        def merge_cells(start, end):
+            if end > start:
+                c = table.cell(start, col)
+                c.merge(table.cell(end, col))
+                c.text = table.cell(start, col).text.strip()
+                c.vertical_alignment = docx.enum.table.WD_ALIGN_VERTICAL.CENTER
+                c.paragraphs[0].alignment = docx.enum.text.WD_ALIGN_PARAGRAPH.CENTER
+
+        ref, start = None, start_row
+        for i in range(start_row, len(table.rows)):
+            v = table.cell(i, col).text
+            if v != ref:
+                merge_cells(start, i - 1)
+                ref, start = v, i
+            else:
+                table.cell(i, col).text = ''
+        merge_cells(start, i)
+
+
+EnchantDocxTable.enchant()
 
 
 def __win32_word():
@@ -469,7 +508,6 @@ class EnchantWin32WordDocument(EnchantBase):
             return outfile, doc
         else:
             return outfile
-
 
     # 先暂时不开启 doc.chars
     # @staticmethod

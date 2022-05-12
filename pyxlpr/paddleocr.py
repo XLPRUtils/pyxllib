@@ -593,9 +593,11 @@ class PaddleOCR(predict_system.TextSystem):
         metric['fps'] = metric['total_frame'] / sum(timer.data)
         return metric
 
-    def rec_metric_labelme(self, root, *, cls=False, bc=False, print_mode=True):
+    def rec_metric_labelme(self, root, *, cls=False, bc=False, print_mode=True, ignores=None):
         """
         :param bc: 是否打开bcompare比较所有识别错误的内容
+        :param dict ignores: 不处理的特殊标记
+            比如 ignores={'content_class': '其它类'}
         """
         from pyxllib.debug.specialist import bcompare
         from pyxlpr.ppocr.metrics.rec_metric import RecMetric
@@ -615,8 +617,12 @@ class PaddleOCR(predict_system.TextSystem):
 
             for i, sp in enumerate(data['shapes']):
                 attr = DictTool.json_loads(sp['label'], 'text')
-                # if attr.get('content_class') == '其它类':
-                #     continue
+
+
+                # if ignores:
+                #     for k, v in ignores.items():
+                #         if attr.get(k) == v:
+                #             continue
 
                 tags.append(f'{f.stem}_{i:03}')  # 这里并不是要真的生成图片，所以有一定重复没有关系
                 subimg = xlcv.get_sub(img, sp['points'])
