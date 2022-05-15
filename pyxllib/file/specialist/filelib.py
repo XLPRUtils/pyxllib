@@ -1067,39 +1067,39 @@ class XlPath(type(pathlib.Path())):
             return chain(*ls)
 
     def is_image(self):
-        suffixs = {'png', 'jpg', 'jpeg', 'bmp'}
+        suffixs = {'png', 'jpg', 'jpeg', 'bmp', 'webp'}
         return self.suffix[1:].lower() in suffixs
 
     def _glob_images(self, glob_func, pattern):
         """ 在满足glob规则基础上，后缀还必须是合法的图片格式后缀
         """
-        suffixs = {'png', 'jpg', 'jpeg', 'bmp'}
+        suffixs = {'png', 'jpg', 'jpeg', 'bmp', 'webp'}
         for f in glob_func(pattern):
             if f.is_file() and f.suffix[1:].lower() in suffixs:
                 yield f
 
-    def glob_images(self, pattern):
+    def glob_images(self, pattern='*'):
         return self._glob_images(self.glob, pattern)
 
-    def rglob_images(self, pattern):
+    def rglob_images(self, pattern='*'):
         return self._glob_images(self.rglob, pattern)
 
-    def glob_files(self, pattern):
+    def glob_files(self, pattern='*'):
         for f in self.glob(pattern):
             if f.is_file():
                 yield f
 
-    def rglob_files(self, pattern):
+    def rglob_files(self, pattern='*'):
         for f in self.rglob(pattern):
             if f.is_file():
                 yield f
 
-    def glob_dirs(self, pattern):
+    def glob_dirs(self, pattern='*'):
         for f in self.glob(pattern):
             if f.is_dir():
                 yield f
 
-    def rglob_dirs(self, pattern):
+    def rglob_dirs(self, pattern='*'):
         for f in self.rglob(pattern):
             if f.is_dir():
                 yield f
