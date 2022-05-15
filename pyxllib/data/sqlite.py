@@ -102,17 +102,20 @@ class Connection(sqlite3.Connection):
             names.append(item[1])
         return names
 
-    def insert(self, table_name, cols):
+    def insert(self, table_name, cols, if_exists='IGNORE'):
         """ 【增】插入新数据
         :param table_name:
         :param cols: 一般是用字典表示的要插入的值
+        :param if_exists: 如果已存在的处理策略
+            IGNORE，跳过
+            REPLACE，替换
         :return:
 
         注意加了 OR IGNORE，支持重复数据自动忽略插入
         """
         ks = ','.join(cols.keys())
         vs = ','.join('?' * (len(cols.keys())))
-        self.execute(f'INSERT OR IGNORE INTO {table_name}({ks}) VALUES ({vs})', self.cvt_types(cols.values()))
+        self.execute(f'INSERT OR {if_exists} INTO {table_name}({ks}) VALUES ({vs})', self.cvt_types(cols.values()))
 
     def update(self, table_name, cols, where):
         """ 【改】更新数据
