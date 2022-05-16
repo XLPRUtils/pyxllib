@@ -400,8 +400,10 @@ class LabelmeDict:
         label = kwargs.get('label', '')
         points = kwargs['points']  # 这个是必须要有的字段
         kw = copy.deepcopy(kwargs)
-        del kw['label']
-        del kw['points']
+        if 'label' in kw:
+            del kw['label']
+        if 'points' in kw:
+            del kw['points']
         return cls.gen_shape(label, points, **kw)
 
     @classmethod

@@ -9,6 +9,10 @@
 specialist级别
 """
 
+from pyxllib.prog.pupil import check_install_package
+
+check_install_package('cv2', 'opencv-python')
+
 import copy
 
 import numpy as np
