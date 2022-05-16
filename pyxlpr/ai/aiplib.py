@@ -83,7 +83,7 @@ class AipOcr(aip.AipOcr):
 
         # 3 数据库存储已识别过的结果
         if db:
-            self.db = XlprDb()  # 数据库
+            self.db = XlprDb(check_same_thread=False)  # 数据库
             self.db.init_jpgimages_table()
             self.db.init_aipocr_table()
         else:
@@ -187,14 +187,14 @@ class AipOcr(aip.AipOcr):
             shapes = []
             for x in ls:
                 # assert len(x['text']) == 1, '取到的文本list长度大于1'
-                shapes.append({'label': {'text': ','.join(x['text']), 'class': x['type']}})
+                shapes.append({'label': {'text': ','.join(x['text']), 'category': x['type']}})
             return shapes
 
         @extend_args
         def dict_word(d):
             shapes = []
             for k, w in d.items():
-                shape = {'label': {'class': k}}
+                shape = {'label': {'category': k}}
                 if 'location' in w:
                     shape.update(loc2points(w['location']))
                 if 'words' in w:
@@ -204,17 +204,17 @@ class AipOcr(aip.AipOcr):
 
         @extend_args
         def dict_str(d):
-            return [{'label': {'text': v, 'class': k}} for k, v in d.items()]
+            return [{'label': {'text': v, 'category': k}} for k, v in d.items()]
 
         @extend_args
         def dict_strs(d):
             shapes = []
             for k, texts in d.items():
-                shapes.append({'label': {'class': k, 'text': ','.join(texts)}})
+                shapes.append({'label': {'category': k, 'text': ','.join(texts)}})
             return shapes
 
         def key_words2shapes(keys):
-            return [{'label': {'text': v['words'], 'class': k}} for k, v in keys.items()]
+            return [{'label': {'text': v['words'], 'category': k}} for k, v in keys.items()]
 
         # 2 主体功能
         if mode in {'basicGeneral', 'general', 'basicAccurate', 'accurate', 'webImage', 'webimageLoc',
@@ -249,7 +249,7 @@ class AipOcr(aip.AipOcr):
             for x in data['results']:
                 shape = loc2points(x['words']['words_location'])
                 # 有line_probability字段，但实际并没有返回置信度~
-                shape['label'] = {'class': x['words_type'], 'text': x['words']['word']}
+                shape['label'] = {'category': x['words_type'], 'text': x['words']['word']}
                 shapes.append(shape)
             data['shapes'] = shapes
             del data['results']
@@ -333,7 +333,7 @@ class AipOcr(aip.AipOcr):
 
         # TODO 给百度的图，可能会进行一定的缩放，返回的结果如果有points需要批量放大
 
-        pprint.pprint(res)
+        # pprint.pprint(res)
 
         return self.to_labelme_like(mode, res)
 
