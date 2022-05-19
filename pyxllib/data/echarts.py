@@ -18,7 +18,7 @@ import pyecharts
 from pyecharts import options as opts
 from pyecharts.globals import ChartType
 from pyecharts.commons.utils import JsCode
-from pyecharts.charts import Line
+from pyecharts.charts import Line, Scatter, Bar
 
 from pyxllib.prog.pupil import run_once
 from pyxllib.prog.pupil import EnchantBase, EnchantCvt
