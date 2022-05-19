@@ -9,9 +9,12 @@
 主要是pandas、表格运算
 """
 
+import sys
 from collections import defaultdict
+
 import pandas as pd
 
+from pyxllib.prog.newbie import round_int
 from pyxllib.debug.pupil import dprint
 
 
@@ -265,3 +268,64 @@ def count_key_combinations(df, col_names, count_col_name='count'):
         ls.append([*k, v])
     df2 = pd.DataFrame.from_records(ls, columns=list(col_names) + [count_col_name])
     return df2
+
+
+def pareto_accumulate(weights, accuracy=0.01, *, print_mode=False):
+    """ 帕累托累计
+
+    可以用来分析主要出现的权重、频次
+    二八法则，往往20%的数据，就能解决80%的问题
+
+    :param weights: 一组权重数据
+    :param accuracy: 累计精度，当统计到末尾时，可能有大量权重过小的数值
+        此时不频繁进行累计权重计算，而是但更新权重累计达到accuracy，才会更新一个记录点
+    :param print_mode: 是否直接展示可视化结果
+    :return: [(累计数量, ≥当前阈值, 累计权重), ...]
+
+    >>> pareto_accumulate([1, 2, 3, 9, 8, 7, 4, 6, 5])
+    [(1, 9, 9), (2, 8, 17), (3, 7, 24), (4, 6, 30), (5, 5, 35), (6, 4, 39), (7, 3, 42), (8, 2, 44), (9, 1, 45)]
+    >>> pareto_accumulate([1, 2, 3, 9, 8, 7, 4, 6, 5], 0.1)
+    [(1, 9, 9), (2, 8, 17), (3, 7, 24), (4, 6, 30), (5, 5, 35), (7, 3, 42), (9, 1, 45)]
+    """
+    # 1 基础数据计算
+    points = []
+    weights = sorted(weights, reverse=True)
+
+    total = sum(weights)
+    accuracy = total * accuracy
+
+    acc = 0
+    delta = 0
+    for i, w in enumerate(weights, start=1):
+        acc += w
+        delta += w
+        if delta >= accuracy:
+            points.append((i, w, acc))
+            delta = 0
+    if delta:
+        points.append((len(weights), weights[-1], acc))
+
+    # 2 结果展示
+    def fmt(p):
+        from pyxllib.text.newbie import format_big_decimal
+        ls = [f'{p[0]}it≥{format_big_decimal(p[1])}',
+              f'{format_big_decimal(p[2])}({p[2] / total_size:.0%})']
+        return '，'.join(map(str, ls))
+
+    total_size = points[-1][2]
+    labels = [fmt(p) for p in points]
+
+    pts = [[p[0], p[2]] for p in points]
+
+    if print_mode:
+        if sys.platform == 'win32':
+            from pyxllib.data.echarts import Line
+            from pyxllib.debug.specialist import browser
+
+            x = Line()
+            x.add_series('帕累托累积权重', pts, labels=labels, label={'position': 'right'})
+            browser(x)
+        else:
+            print(*labels, sep='\n')
+
+    return pts, labels
