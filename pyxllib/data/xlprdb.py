@@ -8,9 +8,13 @@ import base64
 import datetime
 import io
 import json
+import sys
 
 import PIL.Image
+import humanfriendly
+import numpy as np
 
+from pyxllib.prog.newbie import round_int
 from pyxllib.prog.pupil import get_hostname
 from pyxllib.data.sqlite import Connection
 from pyxllib.file.specialist import get_etag, XlPath
@@ -34,6 +38,9 @@ class XlprDb(Connection):
         if self.in_tp10:
             d += datetime.timedelta(hours=8)
         return d.strftime('%Y-%m-%d %H:%M:%S')
+
+    def __1_jpg_images(self):
+        """ 图片相关功能 """
 
     def init_jpgimages_table(self):
         """ 存储图片数据的表
@@ -80,6 +87,34 @@ class XlprDb(Connection):
         self.insert('jpgimages', kwargs)
         self.commit()
 
+    def check_jpgimage_size(self):
+        """ 检查图片文件尺寸所占比例
+
+        请在windows平台运行，获得可视化最佳体验
+        """
+        from pyxllib.algo.stat import pareto_accumulate
+        from pyxllib.data.echarts import Line
+        from pyxllib.debug.specialist import browser
+
+        filesizes = list(self.select_col('jpgimages', 'filesize'))
+        recordsizes = [len(x) for x in self.select_col('aipocr', 'result')]
+
+        x = Line()
+        pts, labels = pareto_accumulate(filesizes, 0.1)
+        x.add_series('图片', pts, labels=labels, label={'position': 'right'})
+        x.add_series('json', pareto_accumulate(recordsizes, 0.1)[0])
+        browser(x)
+
+    def extract_jpgimage(self, size_threshold=50 * 1024):
+        """ 将数据库中较大的图片数据，提取存储到文件中
+
+        :param size_threshold: 尺寸大于阈值的数据，备份到子目录data里
+        """
+        pass
+
+    def __2_api(self):
+        """ api调用记录相关功能 """
+
     def init_aipocr_table(self):
         """ 存储百度识别接口结果
 
@@ -107,7 +142,7 @@ class XlprDb(Connection):
     def insert_aipocr_record(self, mode, im_etag, options, result, *, if_exists='IGNORE', **kwargs):
         """ 往数据库记录当前操作内容
 
-        :param replace: 如果已存在，是否强制替换掉
+        :param if_exists: 如果已存在，是否强制替换掉
         :return:
             True, 更新成功
             False, 未更新
@@ -151,3 +186,8 @@ class XlprDb(Connection):
         kw.update(kwargs)
         self.insert('xlprapi', kw, if_exists=if_exists)
         self.commit()
+
+
+if __name__ == '__main__':
+    db = XlprDb()
+    db.check_jpgimage_size()
