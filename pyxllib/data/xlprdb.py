@@ -5,17 +5,17 @@
 # @Date   : 2022/05/14 10:02
 
 import base64
+from collections import defaultdict, Counter
 import datetime
 import io
 import json
 import sys
 
 import PIL.Image
-import humanfriendly
-import numpy as np
+from tqdm import tqdm
 
 from pyxllib.prog.newbie import round_int
-from pyxllib.prog.pupil import get_hostname
+from pyxllib.prog.pupil import get_hostname, DictTool
 from pyxllib.data.sqlite import Connection
 from pyxllib.file.specialist import get_etag, XlPath
 
@@ -27,6 +27,7 @@ class XlprDb(Connection):
         if dbfile is None:
             dbfile = XlPath.userdir() / '.xlpr/xlpr.db'
 
+        self.directory = XlPath(dbfile).parent
         super().__init__(dbfile, *args, **kwargs)
 
         # 在十卡环境当前时间要加8小时
@@ -87,7 +88,7 @@ class XlprDb(Connection):
         self.insert('jpgimages', kwargs)
         self.commit()
 
-    def check_jpgimage_size(self):
+    def check_jpgimages_size(self):
         """ 检查图片文件尺寸所占比例
 
         请在windows平台运行，获得可视化最佳体验
@@ -105,12 +106,21 @@ class XlprDb(Connection):
         x.add_series('json', pareto_accumulate(recordsizes, 0.1)[0])
         browser(x)
 
-    def extract_jpgimage(self, size_threshold=50 * 1024):
+    def extract_jpgimages(self, size_threshold=50 * 1024):
         """ 将数据库中较大的图片数据，提取存储到文件中
 
         :param size_threshold: 尺寸大于阈值的数据，备份到子目录data里
+            默认以50kb为阈值，用20%的图片能清出80%的空间
         """
-        pass
+        from pyxllib.cv.xlcvlib import xlcv
+        for x in tqdm(self.exec_nametuple(f'SELECT * FROM jpgimages WHERE filesize>{size_threshold}')):
+            if x['base64_content']:
+                im = xlcv.read_from_buffer(x['base64_content'], b64decode=True)
+                xlcv.write(im, self.directory / 'data' / (x['etag'] + '.jpg'))
+            self.update('jpgimages', {'base64_content': None}, {'etag': x['etag']})
+            self.commit()
+        self.execute('vacuum')  # 执行这句才会重新整理sqlite文件空间
+        self.commit()
 
     def __2_api(self):
         """ api调用记录相关功能 """
@@ -187,7 +197,42 @@ class XlprDb(Connection):
         self.insert('xlprapi', kw, if_exists=if_exists)
         self.commit()
 
+    def check_api_useage(self):
+        """ 检查接口调用量 """
+        from pyxllib.data.echarts import Line
+        from pyxllib.debug.specialist import browser
+
+        # 1 调用量计算
+        ct = defaultdict(Counter)
+        for x in self.exec_nametuple('SELECT route, request_json, update_time FROM xlprapi'):
+            d = datetime.datetime.fromisoformat(x['update_time']).date().toordinal()
+            ct['total'][d] += 1
+            if 'basicGeneral' in x['request_json']:
+                ct['basicGeneral'][d] += 1
+            if x['route'] == 'api/aipocr':
+                ct['aipocr'][d] += 1
+
+        # + 辅助函数
+        min_day, max_day = min(ct['total'].keys()), max(ct['total'].keys())
+
+        def to_list(ct):
+            """ Counter转日期清单
+            因为有的天数可能出现次数0，需要补充些特殊操作
+            """
+            return [(datetime.date.fromordinal(i), ct.get(i, 0)) for i in range(min_day, max_day + 1)]
+
+        # 2 画图表
+        chart = Line()
+        chart.add_series('total', to_list(ct['total']), label={'show': True}, areaStyle={})
+        chart.add_series('aipocr', to_list(ct['aipocr']), areaStyle={})
+        chart.add_series('basicGeneral', to_list(ct['basicGeneral']), areaStyle={})
+
+        DictTool.ior(chart.options['xAxis'][0], {'min': datetime.date.fromordinal(min_day), 'type': 'time'})
+        browser(chart)
+
 
 if __name__ == '__main__':
-    db = XlprDb()
-    db.check_jpgimage_size()
+    db = XlprDb(check_same_thread=False)
+    # db.check_jpgimages_size()
+    # db.extract_jpgimages()
+    db.check_api_useage()

@@ -303,8 +303,8 @@ def format_big_decimal(value):
             zetta- = 1e21  = Z-
             yotta- = 1e24  = Y-
     """
-    x, i, unit = int(value), 0, 'KMGTPEZY'
+    x, i, unit = int(value), 0, [''] + list('KMGTPEZY')
     while x > 1000:
         i += 1
         x = round_int(x / 1000)
-    return f'{x}{unit[i - 1]}'
+    return f'{x}{unit[i]}'
