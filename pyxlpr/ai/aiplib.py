@@ -22,7 +22,7 @@ import datetime
 from pyxllib.prog.pupil import is_url
 from pyxllib.prog.specialist import XlOsEnv
 from pyxllib.debug.specialist import TicToc
-from pyxllib.algo.geo import xywh2ltrb
+from pyxllib.algo.geo import xywh2ltrb, rect_bounds
 from pyxllib.cv.expert import xlcv
 from pyxllib.data.xlprdb import XlprDb
 from pyxllib.file.specialist import get_etag, XlPath
@@ -143,6 +143,10 @@ class AipOcr(aip.AipOcr):
             return {'points': [[l, t], [r, b]],
                     'shape_type': 'rectangle'}
 
+        def polygon2rect(pts):
+            l, t, r, b = rect_bounds(pts)
+            return [[l, t], [r, b]]
+
         def extend_args(func):
             """ 扩展 func 函数，支持一些通用上下游切面功能
 
@@ -161,6 +165,8 @@ class AipOcr(aip.AipOcr):
                 # 2 删除不需要的键值
                 if remove_keys is None:
                     remove_keys = set()
+                elif not isinstance(remove_keys, (list, tuple, set)):
+                    remove_keys = [remove_keys]
                 for k in (set(main_keys) | set(remove_keys)):
                     if k in data:
                         del data[k]
@@ -179,6 +185,16 @@ class AipOcr(aip.AipOcr):
                 if 'words' in w:
                     # shape['label'] = json.dumps({'text': x['words']}, ensure_ascii=False)
                     shape['label'] = {'text': w['words']}  # 不转字符串
+                shapes.append(shape)
+            return shapes
+
+        @extend_args
+        def list_word2(ls):
+            shapes = []
+            for w in ls:
+                shape = {}
+                shape.update(loc2points(w['words']['words_location']))
+                shape['label'] = {'text': w['words']['word'], 'category': w['words_type']}
                 shapes.append(shape)
             return shapes
 
@@ -213,47 +229,154 @@ class AipOcr(aip.AipOcr):
                 shapes.append({'label': {'category': k, 'text': ','.join(texts)}})
             return shapes
 
-        def key_words2shapes(keys):
-            return [{'label': {'text': v['words'], 'category': k}} for k, v in keys.items()]
-
-        # 2 主体功能
-        if mode in {'basicGeneral', 'general', 'basicAccurate', 'accurate', 'webImage', 'webimageLoc',
-                    'handwriting', 'numbers', 'vinCode', 'receipt', 'formula', 'meter'}:
-            list_word(['words_result'], ['words_result_num'])
-        elif mode in {'qrcode'}:
-            list_texts('codes_result', 'codes_result_num')
-        elif mode in {'idcard', 'businessLicense', 'passport',
-                      'HKMacauExitentrypermit', 'taiwanExitentrypermit', 'householdRegister', 'birthCertificate',
-                      'vehicleLicense', 'drivingLicense'}:
-            # TODO key要排序？
-            dict_word('words_result', ['words_result_num'])
-        elif mode in {'bankcard', 'quotaInvoice', 'vehicleInvoice', 'vehicleCertificate',
-                      'trainTicket', 'taxiReceipt', 'airTicket'}:
-            dict_str(['result', 'words_result'], ['words_result_num'])
-        elif mode in {'businessCard'}:
-            dict_strs('words_result')
-        elif mode == 'licensePlate':
+        @extend_args
+        def licensePlate(d):
             # 近似key_text，但有点不太一样
             # 已测试过 车牌 只能识别一个
-            x = data['words_result']
-            label = {'text': x['number'],
-                     'color': x['color']}
+            label = {'text': d['number'],
+                     'color': d['color']}
             shape = {'label': label,
-                     'score': sum(x['probability']) / len(x['probability']),
-                     'points': [(p['x'], p['y']) for p in x['vertexes_location']],
+                     'score': sum(d['probability']) / len(d['probability']),
+                     'points': [(p['x'], p['y']) for p in d['vertexes_location']],
                      'shape_type': 'polygon'}
-            data['shapes'] = [shape]
-            del data['words_result']
-        elif mode == 'docAnalysis':
+            return [shape]
+
+        @extend_args
+        def docAnalysis(d):
             shapes = []
-            for x in data['results']:
+            for x in d:
                 shape = loc2points(x['words']['words_location'])
                 # 有line_probability字段，但实际并没有返回置信度~
                 shape['label'] = {'category': x['words_type'], 'text': x['words']['word']}
                 shapes.append(shape)
-            data['shapes'] = shapes
-            del data['results']
-            del data['results_num']
+            return shapes
+
+        @extend_args
+        def form(d):
+            # 这个表格暂时转labelme格式，但泛用来说，其实不应该转labelme，它有其特殊性
+            shapes = []
+            for table in d:
+                # location虽然给的是四边形，但看目前数据其实就是矩形
+                for k, xs in table.items():
+                    if k == 'vertexes_location':
+                        sp = {'label': {'text': '', 'category': 'table'},
+                              'points': polygon2rect([(p['x'], p['y']) for p in table['vertexes_location']]),
+                              'shape_type': 'rectangle'}
+                        shapes.append(sp)
+                    else:
+                        for x in xs:
+                            sp = {'label': {'text': x['words'], 'row': x['row'], 'column': x['column'],
+                                            'probability': x['probability'], 'category': k},
+                                  'points': polygon2rect([(p['x'], p['y']) for p in x['vertexes_location']]),
+                                  'shape_type': 'rectangle'}
+                            shapes.append(sp)
+            return shapes
+
+        @extend_args
+        def seal(ls):
+            shapes = []
+            for x in ls:
+                shape = {'label': {}}
+                shape.update(loc2points(x['location']))
+                shape['label']['text'] = x['major']['words']
+                shape['label']['minor'] = ','.join(x['minor'])
+                shape['label']['category'] = x['type']
+                shapes.append(shape)
+            return shapes
+
+        @extend_args
+        def mixed_multi_vehicle(ls):
+            shapes = []
+            for x in ls:
+                shape = {'label': {}}
+                shape.update(loc2points(x['location']))
+                shape['label']['text'] = json.dumps({w['word_name']: w['word'] for w in x['license_info']},
+                                                    ensure_ascii=False)
+                shape['label']['category'] = x['card_type']
+                shape['label']['score'] = x['probability']
+                shapes.append(shape)
+            return shapes
+
+        @extend_args
+        def weightNote(ls):
+            shapes = []
+            for x in ls:
+                for k, vs in x.items():
+                    shape = {'category': k,
+                             'label': ''.join([v['word'] for v in vs])}
+                    shapes.append(shape)
+            return shapes
+
+        @extend_args
+        def multipleInvoice(ls):
+            shapes = []
+            for x in ls:
+                shape = {'category': x['type'], 'label': {'text': ''}}
+                shape.update(loc2points(x))
+                shapes.append(shape)
+            return shapes
+
+        @extend_args
+        def invoice(d):
+            shapes = []
+            for k, v in d.items():
+                shape = {'label': {}, 'category': k}
+                if isinstance(v, list):
+                    shape['label']['text'] = '\n'.join([w['word'] for w in v])
+                else:
+                    shape['label']['text'] = v
+                    shapes.append(shape)
+            return shapes
+
+        @extend_args
+        def onlineTaxiItinerary(d):
+            shapes = []
+            for k, v in d.items():
+                if k == 'items':
+                    shape = {'label': {'category': 'item'}}
+                    shape['label']['text'] = json.dumps(v, ensure_ascii=False)
+                else:
+                    shape = {'label': {'category': k}}
+                    shape['label']['text'] = v
+                shapes.append(shape)
+            return shapes
+
+        # 2 主体功能
+        if mode in {'basicGeneral', 'general', 'basicAccurate', 'accurate', 'webImage', 'webimageLoc',
+                    'handwriting', 'numbers', 'vinCode', 'receipt', 'formula', 'meter'}:
+            list_word('words_result', 'words_result_num')
+        elif mode in {'qrcode'}:
+            list_texts('codes_result', 'codes_result_num')
+        elif mode in {'idcard', 'businessLicense', 'passport',
+                      'HKMacauExitentrypermit', 'taiwanExitentrypermit', 'householdRegister', 'birthCertificate',
+                      'vehicleLicense', 'drivingLicense', 'vehicle_registration_certificate'}:
+            # TODO key要排序？
+            dict_word('words_result', 'words_result_num')
+        elif mode in {'bankcard', 'quotaInvoice', 'vehicleInvoice', 'vehicleCertificate',
+                      'trainTicket', 'taxiReceipt', 'airTicket'}:
+            dict_str(['result', 'words_result'], 'words_result_num')
+        elif mode in {'businessCard'}:
+            dict_strs('words_result')
+        elif mode == 'licensePlate':
+            licensePlate('words_result')
+        elif mode == 'docAnalysis':
+            docAnalysis('results', 'results_num')
+        elif mode == 'form':
+            form('forms_result', 'forms_result_num')
+        elif mode == 'doc_analysis_office':
+            list_word2('results', 'results_num')
+        elif mode == 'seal':
+            seal('result', 'result_num')
+        elif mode == 'mixed_multi_vehicle':
+            mixed_multi_vehicle('words_result', 'words_result_num')
+        elif mode == 'weightNote':
+            weightNote('words_result', 'words_result_num')
+        elif mode == 'multipleInvoice':
+            multipleInvoice('words_result', 'words_result_num')
+        elif mode == 'invoice':
+            invoice('words_result', 'words_result_num')
+        elif mode == 'onlineTaxiItinerary':
+            onlineTaxiItinerary('words_result', 'words_result_num')
 
         return data
 
@@ -381,19 +504,47 @@ class AipOcr(aip.AipOcr):
     #
     #     return self._request(self.__doc_analysis_office, data)
 
+    def __B0_api_util(self):
+        """ 百度接口，封装统一
+
+        使用文档：https://cloud.baidu.com/doc/OCR/s/Ek3h7xypm
+        调用次数：https://console.bce.baidu.com/ai/?_=1653139065257#/ai/ocr/overview/index
+        """
+
+    def __B1_general(self):
+        """ 通用 """
+
+    def __B2_card(self):
+        """ 卡证 """
+
+    def __B3_traffic(self):
+        """ 交通 """
+
+    def __B4_invoice(self):
+        """ 财务 """
+
+    def __B5_medical(self):
+        """ 医疗 """
+
+    def __B6_education(self):
+        """ 教育 """
+
 
 def demo_aipocr():
     from tqdm import tqdm
     import pprint
 
+    from pyxlpr.data.labelme import LabelmeDict
+
     mode = 'facade'
 
     aipocr = AipOcr('ckz', db=True)
+
     dir_ = XlPath("/home/chenkunze/data/aipocr_test")
 
     files = dir_.glob_images(f'*/{mode}/**/*')
     for f in list(files):
-        # if f.stem != '73ccf4826f1371980a3daa79dca887e9':
+        # if f.stem != '824ef2b9a5f05422199107721d299f30':
         #     continue
 
         print(f)
@@ -405,6 +556,12 @@ def demo_aipocr():
         if 'error_code' in d:
             f.delete()
         elif d.get('shapes', 1):
+            # tolabelme
+            lmdata = LabelmeDict.gen_data(f)
+            lmdata['shapes'] = d['shapes']
+            for sp in lmdata['shapes']:
+                sp['label'] = json.dumps(sp['label'], ensure_ascii=False)
+            f.with_suffix('.json').write_json(lmdata)
             break
 
 
