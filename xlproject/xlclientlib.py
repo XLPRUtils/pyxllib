@@ -16,7 +16,7 @@ import cv2
 from pyxllib.cv.xlcvlib import xlcv
 
 
-class XlServer:
+class XlClient:
     def __init__(self, host='172.16.170.134', port=5003, token='token'):
         """ 这里默认设了局域网的host，但是token依然是错的，需要拿到正确的token才能运行 """
         self.host = f'http://{host}:{port}'
@@ -38,8 +38,10 @@ class XlServer:
         r = requests.post(f'{self.host}/api/hesuan_layout', json.dumps(data), headers=self.headers)
         return json.loads(r.text)
 
-    def aipocr(self, im, mode='general'):
+    def aipocr(self, im, mode='general', options=None):
         data = {'image': self._read_image(im), 'mode': mode}
+        if options:
+            data['options'] = options
         r = requests.post(f'{self.host}/api/aipocr', json.dumps(data), headers=self.headers)
         return json.loads(r.text)
 
