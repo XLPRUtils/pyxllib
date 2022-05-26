@@ -390,6 +390,38 @@ class xlcv(EnchantBase):
         return im
 
     @staticmethod
+    def adjust_shape(im, min_length=None, max_length=None):
+        """ 限制图片的最小边，最长边
+
+        >>> a = np.zeros((100, 200,3), np.uint8)
+        >>> xlcv.adjust_shape(a, 101).shape
+        (101, 202, 3)
+        >>> xlcv.adjust_shape(a, max_length=150).shape
+        (75, 150, 3)
+        """
+        # 1 参数预计算
+        h, w = im.shape[:2]
+        x, y = min(h, w), max(h, w)  # 短边记为x, 长边记为y
+        a, b = min_length, max_length  # 小阈值记为a, 大阈值记为b
+        r = 1  # 需要进行的缩放比例
+
+        # 2 判断缩放系数r
+        if a and b:  # 同时考虑放大缩小，不可能真的放大和缩小的，要计算逻辑，调整a、b值
+            if y * a > x * b:
+                raise ValueError(f'无法满足缩放要求 {x}x{y} limit {a} {b}')
+
+        if a and x < a:
+            r = a / x  # 我在想有没可能有四舍五入误差，导致最终resize后获得的边长小了？
+        elif b and y > b:
+            r = b / y
+
+        # 3 缩放图片
+        if r != 1:
+            im = cv2.resize(im, None, fx=r, fy=r)
+
+        return im
+
+    @staticmethod
     def resize2(im, dsize, **kwargs):
         """
         :param dsize: (h, w)

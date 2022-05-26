@@ -4,9 +4,11 @@
 # @Email  : 877362867@qq.com
 # @Date   : 2020/05/30 20:37
 
+from pyxllib.prog.pupil import check_install_package
+
+check_install_package('filetype')
 
 from typing import Callable, Any
-import datetime
 import io
 import json
 import os
@@ -17,6 +19,7 @@ import shutil
 import subprocess
 import tempfile
 import ujson
+from collections import defaultdict
 
 import chardet
 import qiniu
@@ -24,14 +27,16 @@ import requests
 import yaml
 import humanfriendly
 from more_itertools import chunked
+import filetype
+from tqdm import tqdm
 
 from pyxllib.algo.pupil import Groups
 from pyxllib.file.pupil import struct_unpack, gen_file_filter
-from pyxllib.prog.newbie import RunOnlyOnce
-from pyxllib.prog.pupil import is_url, is_file, DictTool, EnchantBase
+from pyxllib.prog.pupil import is_url, is_file, DictTool
 
-____judge = """
-"""
+
+def __1_judge():
+    pass
 
 
 def is_url_connect(url, timeout=5):
@@ -43,12 +48,12 @@ def is_url_connect(url, timeout=5):
     return False
 
 
-____qiniu = """
-"""
+def __2_qiniu():
+    pass
 
 
 def get_etag(arg):
-    """七牛原有etag功能基础上做封装
+    """ 七牛原有etag功能基础上做封装
 
     :param arg: 支持bytes二进制、文件、url地址
 
@@ -69,7 +74,7 @@ def get_etag(arg):
 
 
 def is_etag(s):
-    """字母、数字和-、_共64种字符构成的长度28的字符串"""
+    """ 字母、数字和-、_共64种字符构成的长度28的字符串 """
     return re.match(r'[a-zA-Z0-9\-_]{28}$', s)
 
 
@@ -94,8 +99,8 @@ def test_etag2():
     # FkAD2McB6ugxTiniE8ebhlNHdHh9
 
 
-____chardet = """
-"""
+def __3_chardet():
+    pass
 
 
 def get_encoding_old(bstr):
@@ -191,18 +196,19 @@ def get_encoding(bstr, *, maxn=1000):
         raise ValueError(f"{enc}: Can't get file encoding")
 
 
-____file = """
-路径、文件、目录相关操作功能
+def __4_file():
+    """
+    路径、文件、目录相关操作功能
 
-主要是为了提供readfile、wrritefile函数
-与普通的读写文件相比，有以下优点：
-1、智能识别pkl等特殊格式文件的处理
-2、智能处理编码
-3、目录不存在自动创建
-4、自动备份旧文件，而不是强制覆盖写入
+    主要是为了提供readfile、wrritefile函数
+    与普通的读写文件相比，有以下优点：
+    1、智能识别pkl等特殊格式文件的处理
+    2、智能处理编码
+    3、目录不存在自动创建
+    4、自动备份旧文件，而不是强制覆盖写入
 
-其他相关文件处理组件：isfile、get_encoding、ensure_folders
-"""
+    其他相关文件处理组件：isfile、get_encoding、ensure_folders
+    """
 
 
 class PathBase:
@@ -418,7 +424,7 @@ class PathBase:
         """ 这个实际上是在做copy等操作前，如果目标文件已存在，需要预先删除等的预处理
         并返回判断，是否需要执行下一步操作
 
-        有时候情况比较复杂，process无法满足需求时，可以用preprocess这个底层函数协助
+        有时候情况比较复杂，process无法满足需求时，可以用exist_preprcs这个底层函数协助
 
         :param if_exists:
             None: 不做任何处理，直接运行，依赖于功能本身是否有覆盖写入机制
@@ -1017,23 +1023,9 @@ class XlPath(type(pathlib.Path())):
         with open(self, 'w', encoding=encoding) as f:
             yaml.dump(data, f, sort_keys=sort_keys, **kwargs)
 
-    def read_bib(self, encoding='utf8'):
-        import bibtexparser
-
-        with open(self, encoding=encoding) as bibtex_file:
-            bib_database = bibtexparser.load(bibtex_file)
-
-        return bib_database
-
-    def write_bib(self, bibtex_database, encoding='utf8'):
-        import bibtexparser
-
-        with open(self, 'w', encoding=encoding) as f:
-            bibtexparser.dump(bibtex_database, f)
-
     def read_auto(self, *args, **kwargs):
         """ 根据文件后缀自动识别读取函数 """
-        if self.isfile():  # 如果存在这样的文件，那就读取文件内容
+        if self.is_file():  # 如果存在这样的文件，那就读取文件内容
             # 获得文件扩展名，并统一转成小写
             mode = self.suffix.lower()[1:]
             read_func = getattr(self, 'read_' + mode, None)
@@ -1057,32 +1049,25 @@ class XlPath(type(pathlib.Path())):
         """ 类型判断、glob系列 """
         pass
 
+    def ____1_常用glob(self):
+        pass
+
     def glob(self, pattern):
+        # TODO 加正则匹配模式
         if isinstance(pattern, str):
             return super(XlPath, self).glob(pattern)
         elif isinstance(pattern, (list, tuple)):
-            # TODO 有重复这么办？要去重
             from itertools import chain
             ls = [super(XlPath, self).glob(x) for x in pattern]
-            return chain(*ls)
-
-    def is_image(self):
-        suffixs = {'png', 'jpg', 'jpeg', 'bmp', 'webp'}
-        return self.suffix[1:].lower() in suffixs
-
-    def _glob_images(self, glob_func, pattern):
-        """ 在满足glob规则基础上，后缀还必须是合法的图片格式后缀
-        """
-        suffixs = {'png', 'jpg', 'jpeg', 'bmp', 'webp'}
-        for f in glob_func(pattern):
-            if f.is_file() and f.suffix[1:].lower() in suffixs:
-                yield f
-
-    def glob_images(self, pattern='*'):
-        return self._glob_images(self.glob, pattern)
-
-    def rglob_images(self, pattern='*'):
-        return self._glob_images(self.rglob, pattern)
+            # 去重
+            exists = set()
+            files = []
+            for f in chain(*ls):
+                k = f.as_posix()
+                if k not in exists:
+                    exists.add(k)
+                    files.append(f)
+            return files
 
     def glob_files(self, pattern='*'):
         for f in self.glob(pattern):
@@ -1104,15 +1089,194 @@ class XlPath(type(pathlib.Path())):
             if f.is_dir():
                 yield f
 
-    def __3_delete(self):
+    def ____2_定制glob(self):
+        pass
+
+    def is_image(self):
+        return self.is_file() and filetype.is_image(self)
+
+    def _glob_images(self, glob_func, pattern):
+        """ 在满足glob规则基础上，后缀还必须是合法的图片格式后缀
+        """
+        suffixs = {'png', 'jpg', 'jpeg', 'bmp', 'webp', 'gif'}
+        for f in glob_func(pattern):
+            if f.is_file() and f.suffix[1:].lower() in suffixs:
+                yield f
+
+    def glob_images(self, pattern='*'):
+        """ 按照文件后缀，获取所有图片文件 """
+        return self._glob_images(self.glob, pattern)
+
+    def rglob_images(self, pattern='*'):
+        return self._glob_images(self.rglob, pattern)
+
+    def ____3_xglob(self):
+        """ xglob系列，都是按照文件的实际内容，进行类型检索遍历的 """
+
+    def xglob_images(self, pattern='*'):
+        """ 按照文件实际内容，获取所有图片文件 """
+        for f in self.glob(pattern):
+            if f.is_file() and filetype.is_image(f):
+                yield f
+
+    def xglob_videos(self, pattern='*'):
+        """ 按照文件实际内容，获取所有图片文件 """
+        for f in self.glob(pattern):
+            if f.is_file() and filetype.is_video(f):
+                yield f
+
+    def xglob_archives(self, pattern='*'):
+        """ 找出所有压缩文件
+
+        只找通用意义上的压缩包，不找docx等这种形式的文件
+        """
+        for f in self.glob(pattern):
+            if f.is_file() and filetype.is_archive(f):
+                if f.suffix in {'.pdf', '.docx', '.xlsx', '.pptx'}:
+                    continue
+                yield f
+
+    def __3_文件基础操作(self):
         """ 复制、删除、移动等操作 """
         pass
+
+    def rename2(self, dst, *, if_exists=None):
+        """ 相比原版的reanme，搞了更多骚操作，但性能也会略微下降，所以重写一个功能名 """
+        if not self.exists():
+            return
+
+        dst = XlPath(dst)
+        if self == dst:
+            # 同一个文件，可能是调整了大小写名称
+            if self.as_posix() != dst.as_posix():
+                tmp = self.tempfile(dir=self.parent)  # self不一定是file，也可能是dir，但这个名称通用
+                self.rename(tmp)
+                self.delete()
+                tmp.rename(dst)
+        elif dst.exists():
+            if if_exists is None:
+                self.rename(dst)
+            elif if_exists == 'error':
+                raise FileExistsError(f'{dst}')
+            elif if_exists == 'replace':
+                dst.delete()
+                self.rename(dst)
+            elif if_exists == 'skip':
+                pass
+            else:
+                raise ValueError(f'{if_exists}')
+        else:
+            self.rename(dst)
 
     def delete(self):
         if self.is_file():
             os.remove(self)
         elif self.is_dir():
             shutil.rmtree(self)
+
+    def __4_重复文件相关功能(self):
+        """ 检查目录里的各种文件情况 """
+
+    def glob_repeat_files(self, pattern='*', *, sort_mode='count', print_mode=False):
+        """ 返回重复的文件组
+
+        :param sort_mode:
+            count: 按照重复的文件数量从多到少排序
+            size: 按照空间总占用量从大到小排序
+        :return: [(etag, files, per_file_size), ...]
+        """
+        # 1 获取所有etag，这一步比较费时
+        etag2files = defaultdict(list)
+        for f in tqdm(self.glob_files(pattern), desc='get etags', disable=not print_mode):
+            etag = get_etag(str(f))
+            etag2files[etag].append(f)
+
+        # 2 转格式，排序
+        etag2files = [(k, vs, vs[0].size()) for k, vs in etag2files.items() if len(vs) > 1]
+        if sort_mode == 'count':
+            etag2files.sort(key=lambda x: (-len(x[1]), -len(x[1]) * x[2]))
+        elif sort_mode == 'size':
+            etag2files.sort(key=lambda x: (-len(x[1]) * x[2], -len(x[1])))
+
+        # 3 返回每一组数据
+        return etag2files
+
+    def delete_repeat_files(self, pattern='*', *, sort_mode='count', print_mode=True, debug=False):
+        """
+        :param debug:
+            True，只是输出检查清单，不做操作
+            False, 保留第1个文件，删除其他文件
+            TODO，添加其他删除模式
+        :param print_mode:
+            TODO 支持html富文本显示，带超链接
+        """
+        from humanfriendly import format_size
+
+        def printf(*args, **kwargs):
+            if print_mode:
+                print(*args, **kwargs)
+
+        files = self.glob_repeat_files(pattern, sort_mode=sort_mode, print_mode=print_mode)
+        for i, (etag, files, _size) in enumerate(files, start=1):
+            n = len(files)
+            printf(f'{i}、{etag}\t{format_size(_size)} × {n} ≈ {format_size(_size * n)}')
+
+            for j, f in enumerate(files, start=1):
+                if debug:
+                    printf(f'\t{f}')
+                else:
+                    if j == 1:
+                        printf(f'\t{f}')
+                    else:
+                        f.delete()
+                        printf(f'\t{f}\tdelete')
+            if print_mode:
+                printf()
+
+    def __5_文件后缀相关功能(self):
+        """ 检查目录里的各种文件情况 """
+
+    def refine_files_suffix(self, pattern='*', *, print_mode=True, if_exists=None, debug=False):
+        """ 优化文件的后缀名 """
+        j = 1
+        for i, f1 in enumerate(self.glob_files(pattern), start=1):
+            suffix1 = f1.suffix
+
+            suffix2 = suffix1.lower()
+            if suffix2 == '.jpeg':
+                suffix2 = '.jpg'
+
+            if suffix1 != suffix2:
+                f2 = f1.with_suffix(suffix2)
+
+                if print_mode:
+                    print(f'{i}/{j} {f1} -> {suffix2}')
+
+                if not debug:
+                    f1.rename2(f2, if_exists=if_exists)
+                j += 1
+
+    def xglob_faker_suffix_files(self, pattern='*'):
+        """ 检查文件扩展名是不是跟实际内容不匹配，有问题
+
+        注：推荐先运行 refine_files_suffix，本函数是大小写敏感，并且不会区分jpeg和jpg
+        """
+        for f in self.glob_files(pattern):
+            t = filetype.guess(f)
+            if not t:
+                continue
+            ext = '.' + t.extension
+            if ext != f.suffix:
+                yield f, ext  # 原文件名，实际解析出的文件格式
+
+    def rename_faker_suffix_files(self, pattern='*', *, print_mode=True, if_exists=None, debug=False):
+        for i, (f1, suffix2) in enumerate(self.xglob_faker_suffix_files(pattern), start=1):
+            if print_mode:
+                print(f'{i}、{f1} -> {suffix2}')
+
+            if not debug:
+                f2 = f1.with_suffix(suffix2)
+                f1.rename2(f2, if_exists=if_exists)
 
 
 def demo_file():
@@ -1342,9 +1506,10 @@ class UsedRecords:
         return '\n'.join(res)
 
 
-__filedfs = """
-对目录的遍历查看目录结构
-"""
+def __5_filedfs():
+    """
+    对目录的遍历查看目录结构
+    """
 
 
 def file_generator(f):

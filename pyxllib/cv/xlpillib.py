@@ -219,7 +219,7 @@ class xlpil(EnchantBase):
         return im.resize(size[::-1], **kwargs)
 
     @staticmethod
-    def reduce_filesize(im, filesize=None, suffix='jpeg'):
+    def reduce_filesize(im, filesize=None, suffix='.jpeg'):
         """ 按照保存后的文件大小来压缩im
 
         :param filesize: 单位Bytes
@@ -231,6 +231,8 @@ class xlpil(EnchantBase):
         """
         # 1 工具
         # save接口不支持jpg参数
+        if suffix[0] == '.':
+            suffix = suffix[1:]
         if suffix == 'jpg':
             suffix = 'jpeg'
 

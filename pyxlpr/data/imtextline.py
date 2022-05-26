@@ -15,6 +15,7 @@ from shapely.geometry import MultiPolygon
 
 from pyxllib.algo.geo import split_vector_interval
 from pyxllib.algo.disjoint import disjoint_set
+from pyxllib.algo.shapelylib import ShapelyPolygon
 
 
 class TextlineShape:
@@ -340,10 +341,10 @@ class TextlineSpliter:
 
     @classmethod
     def show_spliter_imgs(cls, dir_state, *, save=None, show=True):
-        debug_images(dir_state,  # 随机抽取10张图片
-                     lambda img_file: cls.spliter_img(img_file, maxsplit=None, minwidth=3),  # 执行功能
-                     save=save,  # 结果保存位置
-                     show=show)  # 是否imshow结果图
+        ImagesDir.debug_func(dir_state,  # 随机抽取10张图片
+                             lambda img_file: cls.spliter_img(img_file, maxsplit=None, minwidth=3),  # 执行功能
+                             save=save,  # 结果保存位置
+                             show=show)  # 是否imshow结果图
 
     @classmethod
     def relabel_labelfile(cls, p, maxsplit=None, minwidth=3, imgdir='images'):
