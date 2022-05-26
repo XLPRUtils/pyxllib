@@ -108,40 +108,35 @@ def polygon2rect(pts):
 
 
 def labelmelike_extend_args(core_func):
-    """ 装饰器的装饰器，扩展 main_func 函数，支持一些通用上下游切面功能
+    """ 扩展 main_func 函数，支持一些通用上下游切面功能
 
-    支持批量的 main_keys，主要识别条目数据可能存储在多种不同的名称
+    支持 main_keys，主要数据字段名称
     支持 remove_keys，批量移除一些不需要的参数值
     """
 
-    def wrapper(main_keys, remove_keys=None, *, clear_empty_shape=False):
-        def subdecorator(main_func):
-            def subwrapper(*args, **kwargs):
-                data = main_func(*args, **kwargs)
+    def wrapper(data, main_keys, remove_keys=None, *, clear_empty_shape=False):
+        """
+        :param clear_empty_shape: 在考虑要不要把清除空shape，四边形转矩形等功能写到这里，暂时还未写对应功能
+        """
+        # 1 转主要的数据结构
+        _main_keys = main_keys if isinstance(main_keys, (list, tuple, set)) else [main_keys]
+        for k in _main_keys:
+            if k in data:
+                data['shapes'] = core_func(data[k])
+                break
 
-                # 1 转主要的数据结构
-                _main_keys = main_keys if isinstance(main_keys, (list, tuple, set)) else [main_keys]
-                for k in _main_keys:
-                    if k in data:
-                        data['shapes'] = core_func(data[k])
-                        break
+        # 2 删除不需要的键值
+        if remove_keys is None:
+            _remove_keys = set()
+        elif not isinstance(remove_keys, (list, tuple, set)):
+            _remove_keys = [remove_keys]
+        else:
+            _remove_keys = remove_keys
+        for k in (set(_main_keys) | set(_remove_keys)):
+            if k in data:
+                del data[k]
 
-                # 2 删除不需要的键值
-                if remove_keys is None:
-                    _remove_keys = set()
-                elif not isinstance(remove_keys, (list, tuple, set)):
-                    _remove_keys = [remove_keys]
-                else:
-                    _remove_keys = remove_keys
-                for k in (set(_main_keys) | set(_remove_keys)):
-                    if k in data:
-                        del data[k]
-
-                return data
-
-            return subwrapper
-
-        return subdecorator
+        return data
 
     return wrapper
 
@@ -386,51 +381,47 @@ class AipOcr(_AipOcrClient):
     def __B1_通用(self):
         pass
 
-    # def raw_general(self, im, options=None):
-    #     result_dict = self._ocr(im, options, 'general')
-    #     return result_dict
-
-    @ToLabelmeLike.list_word('words_result', 'words_result_num')
     def general(self, im, options=None):
         """
         TODO 返回值示例：...
         """
         result_dict = self._ocr(im, options, 'general')
+        result_dict = ToLabelmeLike.list_word(result_dict, 'words_result', 'words_result_num')
         return result_dict
 
-    @ToLabelmeLike.list_word('words_result', 'words_result_num')
     def basicGeneral(self, im, options=None):
         result_dict = self._ocr(im, options, 'basicGeneral')
+        result_dict = ToLabelmeLike.list_word(result_dict, 'words_result', 'words_result_num')
         return result_dict
 
-    @ToLabelmeLike.list_word('words_result', 'words_result_num')
     def accurate(self, im, options=None):
         result_dict = self._ocr(im, options, 'accurate')
+        result_dict = ToLabelmeLike.list_word(result_dict, 'words_result', 'words_result_num')
         return result_dict
 
-    @ToLabelmeLike.list_word('words_result', 'words_result_num')
     def basicAccurate(self, im, options=None):
         result_dict = self._ocr(im, options, 'basicAccurate')
+        result_dict = ToLabelmeLike.list_word(result_dict, 'words_result', 'words_result_num')
         return result_dict
 
-    @ToLabelmeLike.list_word('words_result', 'words_result_num')
     def webimageLoc(self, im, options=None):
         result_dict = self._ocr(im, options, 'webimageLoc')
+        result_dict = ToLabelmeLike.list_word(result_dict, 'words_result', 'words_result_num')
         return result_dict
 
-    @ToLabelmeLike.list_word('words_result', 'words_result_num')
     def webImage(self, im, options=None):
         result_dict = self._ocr(im, options, 'webImage')
+        result_dict = ToLabelmeLike.list_word(result_dict, 'words_result', 'words_result_num')
         return result_dict
 
-    @ToLabelmeLike.list_word('words_result', 'words_result_num')
     def handwriting(self, im, options=None):
         result_dict = self._ocr(im, options, 'handwriting')
+        result_dict = ToLabelmeLike.list_word(result_dict, 'words_result', 'words_result_num')
         return result_dict
 
-    @ToLabelmeLike.list_word('words_result', 'words_result_num')
     def numbers(self, im, options=None):
         result_dict = self._ocr(im, options, 'numbers')
+        result_dict = ToLabelmeLike.list_word(result_dict, 'words_result', 'words_result_num')
         return result_dict
 
     def qrcode(self, im, options=None):
@@ -473,9 +464,9 @@ class AipOcr(_AipOcrClient):
         del result_dict['forms_result_num']
         return result_dict
 
-    @ToLabelmeLike.list_word2('results', 'results_num')
     def doc_analysis_office(self, im, options=None):
         result_dict = self._ocr(im, options, 'doc_analysis_office')
+        result_dict = ToLabelmeLike.list_word2(result_dict, 'results', 'results_num')
         return result_dict
 
     def seal(self, im, options=None):
@@ -498,67 +489,67 @@ class AipOcr(_AipOcrClient):
     def __B2_卡证(self):
         pass
 
-    @ToLabelmeLike.dict_word('words_result', 'words_result_num')
     def idcard(self, im, options=None):
         result_dict = self._ocr(im, options, 'idcard')
+        result_dict = ToLabelmeLike.dict_word(result_dict, 'words_result', 'words_result_num')
         return result_dict
 
-    @ToLabelmeLike.dict_word('words_result', 'words_result_num')
     def idcard_back(self, im, options=None):
         result_dict = self._ocr(im, options, 'idcard_back')
+        result_dict = ToLabelmeLike.dict_word(result_dict, 'words_result', 'words_result_num')
         return result_dict
 
-    @ToLabelmeLike.dict_str(['result', 'words_result'], 'words_result_num')
     def bankcard(self, im, options=None):
         result_dict = self._ocr(im, options, 'bankcard')
+        result_dict = ToLabelmeLike.dict_str(result_dict, ['result', 'words_result'], 'words_result_num')
         return result_dict
 
-    @ToLabelmeLike.dict_word('words_result', 'words_result_num')
     def businessLicense(self, im, options=None):
         result_dict = self._ocr(im, options, 'businessLicense')
+        result_dict = ToLabelmeLike.dict_word(result_dict, 'words_result', 'words_result_num')
         return result_dict
 
-    @ToLabelmeLike.dict_strs('words_result')
     def businessCard(self, im, options=None):
         result_dict = self._ocr(im, options, 'businessCard')
+        result_dict = ToLabelmeLike.dict_strs(result_dict, 'words_result')
         return result_dict
 
-    @ToLabelmeLike.dict_word('words_result', 'words_result_num')
     def passport(self, im, options=None):
         result_dict = self._ocr(im, options, 'passport')
+        result_dict = ToLabelmeLike.dict_word(result_dict, 'words_result', 'words_result_num')
         return result_dict
 
-    @ToLabelmeLike.dict_word('words_result', 'words_result_num')
     def HKMacauExitentrypermit(self, im, options=None):
         result_dict = self._ocr(im, options, 'HKMacauExitentrypermit')
+        result_dict = ToLabelmeLike.dict_word(result_dict, 'words_result', 'words_result_num')
         return result_dict
 
-    @ToLabelmeLike.dict_word('words_result', 'words_result_num')
     def taiwanExitentrypermit(self, im, options=None):
         result_dict = self._ocr(im, options, 'taiwanExitentrypermit')
+        result_dict = ToLabelmeLike.dict_word(result_dict, 'words_result', 'words_result_num')
         return result_dict
 
-    @ToLabelmeLike.dict_word('words_result', 'words_result_num')
     def householdRegister(self, im, options=None):
         result_dict = self._ocr(im, options, 'householdRegister')
+        result_dict = ToLabelmeLike.dict_word(result_dict, 'words_result', 'words_result_num')
         return result_dict
 
-    @ToLabelmeLike.dict_word('words_result', 'words_result_num')
     def birthCertificate(self, im, options=None):
         result_dict = self._ocr(im, options, 'birthCertificate')
+        result_dict = ToLabelmeLike.dict_word(result_dict, 'words_result', 'words_result_num')
         return result_dict
 
     def __B3_交通(self):
         pass
 
-    @ToLabelmeLike.dict_word('words_result', 'words_result_num')
     def vehicleLicense(self, im, options=None):
         result_dict = self._ocr(im, options, 'vehicleLicense')
+        result_dict = ToLabelmeLike.dict_word(result_dict, 'words_result', 'words_result_num')
         return result_dict
 
-    @ToLabelmeLike.dict_word('words_result', 'words_result_num')
     def drivingLicense(self, im, options=None):
         result_dict = self._ocr(im, options, 'drivingLicense')
+        result_dict = ToLabelmeLike.dict_word(result_dict, 'words_result', 'words_result_num')
         return result_dict
 
     def licensePlate(self, im, options=None):
@@ -579,19 +570,19 @@ class AipOcr(_AipOcrClient):
         del result_dict['words_result']
         return result_dict
 
-    @ToLabelmeLike.list_word('words_result', 'words_result_num')
     def vinCode(self, im, options=None):
         result_dict = self._ocr(im, options, 'vinCode')
+        result_dict = ToLabelmeLike.list_word(result_dict, 'words_result', 'words_result_num')
         return result_dict
 
-    @ToLabelmeLike.dict_str(['result', 'words_result'], 'words_result_num')
     def vehicleInvoice(self, im, options=None):
         result_dict = self._ocr(im, options, 'vehicleInvoice')
+        result_dict = ToLabelmeLike.dict_str(result_dict, ['result', 'words_result'], 'words_result_num')
         return result_dict
 
-    @ToLabelmeLike.dict_str(['result', 'words_result'], 'words_result_num')
     def vehicleCertificate(self, im, options=None):
         result_dict = self._ocr(im, options, 'vehicleCertificate')
+        result_dict = ToLabelmeLike.dict_str(result_dict, ['result', 'words_result'], 'words_result_num')
         return result_dict
 
     def raw_mixed_multi_vehicle(self, im, options=None):
@@ -616,9 +607,9 @@ class AipOcr(_AipOcrClient):
         del result_dict['words_result_num']
         return result_dict
 
-    @ToLabelmeLike.dict_word('words_result', 'words_result_num')
     def vehicle_registration_certificate(self, im, options=None):
         result_dict = self._ocr(im, options, 'vehicle_registration_certificate')
+        result_dict = ToLabelmeLike.dict_word(result_dict, 'words_result', 'words_result_num')
         return result_dict
 
     def weightNote(self, im, options=None):
@@ -657,9 +648,9 @@ class AipOcr(_AipOcrClient):
         result_dict = self._ocr(im, options, 'vat_invoice_verification')
         return result_dict
 
-    @ToLabelmeLike.dict_str(['result', 'words_result'], 'words_result_num')
     def quotaInvoice(self, im, options=None):
         result_dict = self._ocr(im, options, 'quotaInvoice')
+        result_dict = ToLabelmeLike.dict_str(result_dict, ['result', 'words_result'], 'words_result_num')
         return result_dict
 
     def invoice(self, im, options=None):
@@ -679,19 +670,19 @@ class AipOcr(_AipOcrClient):
         del result_dict['words_result_num']
         return result_dict
 
-    @ToLabelmeLike.dict_str(['result', 'words_result'], 'words_result_num')
     def trainTicket(self, im, options=None):
         result_dict = self._ocr(im, options, 'trainTicket')
+        result_dict = ToLabelmeLike.dict_str(result_dict, ['result', 'words_result'], 'words_result_num')
         return result_dict
 
-    @ToLabelmeLike.dict_str(['result', 'words_result'], 'words_result_num')
     def taxiReceipt(self, im, options=None):
         result_dict = self._ocr(im, options, 'taxiReceipt')
+        result_dict = ToLabelmeLike.dict_str(result_dict, ['result', 'words_result'], 'words_result_num')
         return result_dict
 
-    @ToLabelmeLike.dict_str(['result', 'words_result'], 'words_result_num')
     def airTicket(self, im, options=None):
         result_dict = self._ocr(im, options, 'airTicket')
+        result_dict = ToLabelmeLike.dict_str(result_dict, ['result', 'words_result'], 'words_result_num')
         return result_dict
 
     def onlineTaxiItinerary(self, im, options=None):
@@ -712,9 +703,9 @@ class AipOcr(_AipOcrClient):
         del result_dict['words_result_num']
         return result_dict
 
-    @ToLabelmeLike.list_word('words_result', 'words_result_num')
     def receipt(self, im, options=None):
         result_dict = self._ocr(im, options, 'receipt')
+        result_dict = ToLabelmeLike.list_word(result_dict, 'words_result', 'words_result_num')
         return result_dict
 
     def __B5_医疗(self):
@@ -750,17 +741,17 @@ class AipOcr(_AipOcrClient):
         del result_dict['results_num']
         return result_dict
 
-    @ToLabelmeLike.list_word('words_result', 'words_result_num')
     def formula(self, im, options=None):
         result_dict = self._ocr(im, options, 'formula')
+        result_dict = ToLabelmeLike.list_word(result_dict, 'words_result', 'words_result_num')
         return result_dict
 
     def __B7_其他(self):
         pass
 
-    @ToLabelmeLike.list_word('words_result', 'words_result_num')
     def meter(self, im, options=None):
         result_dict = self._ocr(im, options, 'meter')
+        result_dict = ToLabelmeLike.list_word(result_dict, 'words_result', 'words_result_num')
         return result_dict
 
     def raw_lottery(self, im, options=None):
@@ -788,36 +779,49 @@ class AipOcr(_AipOcrClient):
 def demo_aipocr():
     from tqdm import tqdm
     import pprint
+    import re
 
     from pyxlpr.data.labelme import LabelmeDict
 
-    mode = 'raw_lottery'
-    fmode = mode.replace('raw_', '')
-
     aipocr = AipOcr('ckz', db=True)
 
-    dir_ = XlPath("/home/chenkunze/data/aipocr_test")
+    mode = 'general'
 
+    dir_ = XlPath("/home/chenkunze/data/aipocr_test")
+    fmode = re.sub(r'^raw_', r'', mode)
+    fmode = {'basicAccurate': 'accurate',
+             'basicGeneral': 'general',
+             'webimageLoc': 'webImage',
+             'idcard_back': 'idcard',
+             'medicalDetail': 'medicalInvoice',
+             'vat_invoice_verification': 'vatInvoice',
+             }.get(fmode, fmode)
     files = dir_.glob_images(f'*/{fmode}/**/*')
+
     for f in list(files):
+        # 1 处理指定图片
         # if f.stem != '824ef2b9a5f05422199107721d299f30':
         #     continue
 
+        # 2 检查字典
         print(f)
         d = getattr(aipocr, mode)(f.as_posix())
         print()
         pprint.pprint(d)
         print('- ' * 20)
 
+        # 3 前置的错误图可以删除；有shapes的可以转labelme；非labelme格式上面print后直接退出
         if 'error_code' in d:
             f.delete()
-        elif d.get('shapes', 1):
+        elif d.get('shapes', 0):
             # tolabelme
             lmdata = LabelmeDict.gen_data(f)
             lmdata['shapes'] = d['shapes']
             for sp in lmdata['shapes']:
                 sp['label'] = json.dumps(sp['label'], ensure_ascii=False)
             f.with_suffix('.json').write_json(lmdata)
+            break
+        else:
             break
 
 

@@ -22,9 +22,11 @@ from pyxllib.text.pupil import strfind
 from pyxllib.file.specialist import get_etag, PathBase, File, XlPath
 from pyxllib.prog.newbie import first_nonnone
 
-____dir = """
-支持文件或文件夹的对比复制删除等操作的函数：filescmp、filesdel、filescopy
-"""
+
+def __1_Dir类():
+    """
+    支持文件或文件夹的对比复制删除等操作的函数：filescmp、filesdel、filescopy
+    """
 
 
 class Dir(PathBase):
@@ -373,11 +375,12 @@ class Dir(PathBase):
         os.chdir(self._origin_wkdir)
 
 
-____filesxxx = """
-本来Path、File是能同时处理文件、目录的
-改版后，files底层因为有用到File，现在却不能支持目录的操作了
-可能会有些bug，尽量不要用这些旧功能，或者尽早移除
-"""
+def __2_filesxxx():
+    """
+    本来Path、File是能同时处理文件、目录的
+    改版后，files底层因为有用到File，现在却不能支持目录的操作了
+    可能会有些bug，尽量不要用这些旧功能，或者尽早移除
+    """
 
 
 def filescmp(f1, f2, shallow=True):
