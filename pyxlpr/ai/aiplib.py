@@ -36,7 +36,9 @@ import base64
 import cv2
 import json
 import datetime
+import statistics
 
+from pyxllib.prog.newbie import round_int
 from pyxllib.prog.pupil import is_url
 from pyxllib.prog.specialist import XlOsEnv
 from pyxllib.debug.specialist import TicToc
@@ -439,11 +441,45 @@ class AipOcr(_AipOcrClient):
         return result_dict
 
     def form(self, im, options=None):
-        result_dict = self._ocr(im, options, 'form')
+        from bisect import bisect_left
+        from pyxllib.file.xlsxlib import Workbook
 
-        # 这个表格暂时转labelme格式，但泛用来说，其实不应该转labelme，它有其特殊性
-        shapes = []
-        for table in result_dict['forms_result']:
+        # 1 单表处理功能
+        def parse_split_points(cells, cls='row', name='y'):
+            # 计算行列数量，初始化空list
+            n = max([x[cls] for x in cells]) + 2
+            spans = [[] for i in range(n)]
+            # 加入所有行列数据
+            for x in cells:
+                spans[x[cls]].append(x['vertexes_location'][0][name])
+            spans[-1].append(table['vertexes_location'][2][name])
+            # 计算平均行列位置
+            spans = [statistics.mean(vs) for vs in spans]
+            # 合并临近的行列
+            min_gap = 3  # 两行/列间距小余min_gap像素，合并为1行/列
+            spans = [v for a, v in zip([0] + spans, spans) if v - a > min_gap]
+            # 计算分割线（以中间为准）
+            spans = [round_int((a + b) / 2) for a, b in zip(spans, spans[1:])]
+            return spans
+
+        def location2rowcol(loc, rowspan, colspan):
+            p1, p2 = loc[0], loc[2]
+            pos = {
+                'row': bisect_left(rowspan, p1['y']) + 1,  # 我的数据改成从1开始编号了
+                'column': bisect_left(colspan, p1['x']) + 1,
+                'end_row': bisect_left(rowspan, p2['y']),
+                'end_column': bisect_left(colspan, p2['x']),
+            }
+            return pos
+
+        def parse_table(table):
+            # 0 计算行、列分界线
+            rowspan = parse_split_points(table['body'], 'row', 'y')
+            colspan = parse_split_points(table['body'], 'column', 'x')
+
+            # 1 shapes
+            shapes = []
+            # 这个表格暂时转labelme格式，但泛用来说，其实不应该转labelme，它有其特殊性
             # location虽然给的是四边形，但看目前数据其实就是矩形
             for k, xs in table.items():
                 if k == 'vertexes_location':
@@ -453,13 +489,52 @@ class AipOcr(_AipOcrClient):
                     shapes.append(sp)
                 else:
                     for x in xs:
-                        sp = {'label': {'text': x['words'], 'row': x['row'], 'column': x['column'],
-                                        'probability': x['probability'], 'category': k},
+                        label = {'text': x['words'], 'probability': x['probability'], 'category': k}
+                        label.update(location2rowcol(x['vertexes_location'], rowspan, colspan))
+                        sp = {'label': label,
                               'points': polygon2rect([(p['x'], p['y']) for p in x['vertexes_location']]),
                               'shape_type': 'rectangle'}
                         shapes.append(sp)
 
+            # 2 tables
+            # 2.1 表格主体内容
+            wb = Workbook()
+            ws = wb.active
+            for sp in shapes:
+                x = sp['label']
+                if x['category'] != 'body':
+                    continue
+                ws.cell(x['row'], x['column'], x['text'])
+                if x['end_row'] - x['row'] + x['end_column'] - x['column'] > 0:
+                    ws.merge_cells(start_row=x['row'], start_column=x['column'],
+                                   end_row=x['end_row'], end_column=x['end_column'])
+            # wb.save('/home/chenkunze/data/aipocr_test/a.xlsx')  # debug: 保存中间结果查看
+
+            # 2.2 其他内容整体性拼接
+            htmltable = ['<div>']
+            header = '<br/>'.join([x['words'] for x in table['header']])
+            footer = '<br/>'.join([x['words'] for x in table['footer']])
+            if header:
+                htmltable.append(f'<p>{header}</p>')
+            htmltable.append(ws.to_html())
+            if footer:
+                htmltable.append(f'<p>{footer}</p>')
+            htmltable.append('</div>')
+
+            return shapes, '\n'.join(htmltable)
+
+        # 2 主体解析功能
+        result_dict = self._ocr(im, options, 'form')
+        shapes = []
+        htmltables = []
+        for table in result_dict['forms_result']:
+            _shapes, htmltable = parse_table(table)
+            shapes += _shapes
+            htmltables.append(htmltable)
+
+        # 3 收尾
         result_dict['shapes'] = shapes
+        result_dict['htmltables'] = htmltables
         del result_dict['forms_result']
         del result_dict['forms_result_num']
         return result_dict
@@ -735,8 +810,8 @@ class AipOcr(_AipOcrClient):
             # 有line_probability字段，但实际并没有返回置信度~
             shape['label'] = {'category': x['words_type'], 'text': x['words']['word']}
             shapes.append(shape)
-        result_dict['shapes'] = shapes
 
+        result_dict['shapes'] = shapes
         del result_dict['results']
         del result_dict['results_num']
         return result_dict
@@ -782,21 +857,22 @@ def demo_aipocr():
     import re
 
     from pyxlpr.data.labelme import LabelmeDict
+    from pyxllib.xl import browser
 
     aipocr = AipOcr('ckz', db=True)
 
-    mode = 'general'
+    mode = 'form'
 
-    dir_ = XlPath("/home/chenkunze/data/aipocr_test")
+    _dir = XlPath("/home/chenkunze/data/aipocr_test")
     fmode = re.sub(r'^raw_', r'', mode)
     fmode = {'basicAccurate': 'accurate',
              'basicGeneral': 'general',
              'webimageLoc': 'webImage',
              'idcard_back': 'idcard',
-             'medicalDetail': 'medicalInvoice',
              'vat_invoice_verification': 'vatInvoice',
+             'form2htmltables': 'form',
              }.get(fmode, fmode)
-    files = dir_.glob_images(f'*/{fmode}/**/*')
+    files = _dir.glob_images(f'*/{fmode}/**/*')
 
     for f in list(files):
         # 1 处理指定图片
@@ -806,6 +882,7 @@ def demo_aipocr():
         # 2 检查字典
         print(f)
         d = getattr(aipocr, mode)(f.as_posix())
+        browser.html(d['htmltables'][0])
         print()
         pprint.pprint(d)
         print('- ' * 20)

@@ -431,7 +431,7 @@ class EnchantWorksheet(EnchantBase):
 
     @staticmethod
     def to_html(ws, *, border=1,
-                style='border-collapse:collapse; text-indent:0; margin:0 auto;') -> str:
+                style='border-collapse:collapse; text-indent:0; margin:0;') -> str:
         r"""
         .from_latex(r'''\begin{tabular}{|c|c|c|c|}
                       \hline
@@ -481,7 +481,9 @@ class EnchantWorksheet(EnchantBase):
                         celltype = cell.celltype()
                         if celltype == 1:  # 合并单元格的衍生单元格
                             continue
-                        elif cell.isnone():
+                        elif cell.isnone():  # 其他正常的空单元格
+                            with tag('td'):
+                                doc.asis('')
                             continue
                         # ② 对齐等格式控制
                         params = {}
@@ -496,7 +498,7 @@ class EnchantWorksheet(EnchantBase):
                         with tag('td', **params):
                             v = str(cell.value)
                             # if not v: v = '&nbsp;'  # 200424周五15:40，空值直接上平台表格会被折叠，就加了个空格
-                            doc.asis(v, )  # 不能用text，html特殊字符不用逃逸
+                            doc.asis(v)  # 不能用text，html特殊字符不用逃逸
         # res = indent(doc.getvalue(), indent_text=True)  # 美化输出模式。但是这句在某些场景会有bug。
         res = doc.getvalue()  # 紧凑模式
 
