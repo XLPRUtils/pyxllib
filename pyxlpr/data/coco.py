@@ -947,7 +947,7 @@ class CocoParser(CocoEval):
             if dst_dir:
                 imfile = imfile.copy(dst_dir, if_exists='skip')
             lm = Coco2Labelme(imfile)
-            height, width = lm.img.size  # 也可以用image['height'], image['width']获取
+            width, height = lm.img.size  # 也可以用image['height'], image['width']获取
             # 注意df取出来的image_id默认是int64类型，要转成int，否则json会保存不了int64类型
             lm.add_shape('', [0, 0, 10, 0], shape_type='line', shape_color=[0, 0, 0],
                          n_gt_box=len(df), image_id=int(image_id),
