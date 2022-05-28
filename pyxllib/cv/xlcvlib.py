@@ -8,12 +8,13 @@ import base64
 import itertools
 
 import cv2
+import humanfriendly
 import numpy as np
 import PIL.Image
 import requests
 
 from pyxllib.prog.newbie import round_int, RunOnlyOnce
-from pyxllib.prog.pupil import EnchantBase, EnchantCvt
+from pyxllib.prog.pupil import EnchantBase, EnchantCvt, is_url
 from pyxllib.algo.geo import rect_bounds, warp_points, reshape_coords, quad_warp_wh, get_warp_mat, rect2polygon
 from pyxllib.file.specialist import File
 
@@ -234,6 +235,43 @@ class xlcv(EnchantBase):
         return buffer
 
     @staticmethod
+    def to_buffer2(in_, flags=1, *, b64decode=True, b64encode=False,
+                   min_length=None, max_length=None,
+                   limit_b64buffer_size=None):
+        """ 获取in_代表的图片的二进制数据，一般是用在网络图片传输，API调用等场景
+
+        :param in_: 可以是本地文件，也可以是图片url地址，也可以是Image对象
+            注意这个函数，输入是url，也会获取重置图片数据上传
+            如果为了效率明确只传url，可以用aip.AipOcr原生的相关url函数
+        :param b64decode: 如果输入是bytes类型，是否要用b64解码，默认需要
+        :param b64encode: 返回的结果，是否需要b64编码，默认不需要
+        :return: 返回图片文件二进制值的buffer, 缩放系数(小余1是缩小，大于1是放大)
+        """
+        # 1 取不同来源的数据
+        # 下面应该是比较通用的一套操作，如果有特殊接口，可以另外处理，不一定要通过该接口处理图片
+        if isinstance(in_, bytes):
+            im = xlcv.read_from_buffer(in_, flags, b64decode=b64decode)
+        elif is_url(in_):
+            im = xlcv.read_from_url(in_, flags)
+        else:
+            im = xlcv.read(in_, flags)
+        origin_height = im.shape[0]
+
+        # 2 图片尺寸不符合要求，要缩放
+        if min_length or max_length:
+            im = xlcv.adjust_shape(im, min_length, max_length)
+
+        # 3 图片文件不能过大，要调整
+        if limit_b64buffer_size:
+            # b64后大小固定会变4/3，所以留给原文件的大小是要缩水，只有0.75；再以防万一总不能卡得刚刚好，所以设为0.74
+            im = xlcv.reduce_filesize(im, limit_b64buffer_size * 0.74)
+        current_height = im.shape[0]
+
+        buffer = xlcv.to_buffer(im, b64encode=b64encode)
+        ratio = current_height / origin_height
+        return buffer, ratio
+
+    @staticmethod
     def imshow2(im, winname=None, flags=1):
         """ 展示窗口
     
@@ -431,6 +469,34 @@ class xlcv(EnchantBase):
         # if 'interpolation' not in kwargs:
         #     kwargs['interpolation'] = cv2.INTER_CUBIC
         return cv2.resize(im, dsize[::-1], **kwargs)
+
+    @staticmethod
+    def reduce_filesize(im, filesize=None, suffix='.jpg'):
+        """ 按照保存后的文件大小来压缩im
+
+        :param filesize: 单位Bytes
+            可以用 300*1024 来表示 300KB
+            可以不输入，默认读取后按原尺寸返回，这样看似没变化，其实图片一读一写，是会对手机拍照的很多大图进行压缩的
+        :param suffix: 使用的图片类型
+
+        >> reduce_filesize(im, 300*1024, 'jpg')
+        """
+
+        # 1 工具
+        def get_file_size(im):
+            success, buffer = cv2.imencode(suffix, im)
+            return len(buffer)
+
+        # 2 然后开始循环处理
+        while filesize:
+            r = get_file_size(im) / filesize
+            if r <= 1:
+                break
+
+            # 假设图片面积和文件大小成正比，如果r=4，表示长宽要各减小至1/(r**0.5)才能到目标文件大小
+            rate = min(1 / (r ** 0.5), 0.95)  # 并且限制每轮至少要缩小至95%，避免可能会迭代太多轮
+            im = cv2.resize(im, (int(im.shape[0] * rate), int(im.shape[1] * rate)))
+        return im
 
     @staticmethod
     def __5_warp():
@@ -816,3 +882,12 @@ class CvImg(np.ndarray):
             return res
 
         return warp_func
+
+
+if __name__ == '__main__':
+    im = xlcv.read(r"C:\home\chenkunze\data\aipocr_test\01通用\accurate\3e99d47940bf9fae942c733dcdf5dbe7.jpg")
+    im = xlcv.reduce_filesize(im, 20 * 1024)
+    xlcv.write(im, 'code4101.jpg')
+    a = xlcv.to_buffer(im)
+    b = xlcv.to_buffer(im, b64encode=True)
+    print(humanfriendly.format_size(len(a)), humanfriendly.format_size(len(b)), len(b) / len(a))
