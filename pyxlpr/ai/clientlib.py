@@ -934,18 +934,43 @@ class XlAiClient:
     def __D_福建省模式识别与图像理解重点实验室(self):
         pass
 
+    def _priu_read_image(self, im):
+        # 不进行尺寸、文件大小压缩，这样会由平台上负责进行ratio缩放计算
+        buffer, ratio = xlcv.to_buffer2(im, b64encode=True)
+        return buffer.decode()
+
     def priu_api(self, mode, im, options=None):
         """ 借助服务器来调用该类中含有的其他函数接口
 
         使用该接口的时候，因为服务器一般会有图片等的备份，所以本接口默认不对图片进行备份
         另外因为可能会调用自定义的模型功能，自定义的模型可能迭代较快，不适合在数据库缓存结果，所以也不记录json结果
         """
-        buffer, ratio = xlcv.to_buffer2(im, b64encode=True)  # 不进行尺寸、文件大小压缩，这样会由平台上负责进行ratio缩放计算
-        data = {'mode': mode, 'image': buffer.decode()}
+        data = {'mode': mode, 'image': self._priu_read_image(im)}
         if options:
             data['options'] = options
         r = requests.post(f'http://{self._priu_host}/api/priu_api', json.dumps(data), headers=self._priu_header)
         return json.loads(r.text)
+
+    def common_ocr(self, im):
+        data = {'image': self._priu_read_image(im)}
+        r = requests.post(f'http://{self._priu_host}/api/common_ocr', json.dumps(data), headers=self._priu_header)
+        return json.loads(r.text)
+
+    def hesuan_layout(self, im):
+        data = {'image': self._priu_read_image(im)}
+        r = requests.post(f'http://{self._priu_host}/api/hesuan_layout', json.dumps(data), headers=self._priu_header)
+        return json.loads(r.text)
+
+    def rec_singleline(self, im, mode='general'):
+        """ 通用的识别一张图的所有文本，并拼接到一起 """
+        text = ''  # 因图片太小等各种原因，没有识别到结果，默认就设空值
+        try:
+            d = self.priu_api(mode, im)
+            if 'shapes' in d:
+                text = ' '.join([sp['label']['text'] for sp in d['shapes']])
+        except requests.exceptions.ConnectionError:
+            pass
+        return text
 
 
 def demo_aipocr():
@@ -957,7 +982,8 @@ def demo_aipocr():
     from pyxllib.debug.specialist import browser
 
     xlapi = XlAiClient()
-    xlapi.setup_database()
+    # xlapi.setup_database()
+    xlapi._priu_host = 'localhost:5003'
 
     mode = 'general'
 
@@ -980,8 +1006,7 @@ def demo_aipocr():
 
         # 2 检查字典
         print(f.as_posix())
-        # d = getattr(xlapi, mode)(f.as_posix())
-        d = xlapi.priu_api(mode, f.as_posix())
+        d = getattr(xlapi, mode)(f.as_posix())
 
         # browser.html(d['htmltables'][0])
         print()
@@ -1003,6 +1028,19 @@ def demo_aipocr():
             break
 
 
+def demo_priu():
+    xlapi = XlAiClient()
+    # xlapi._priu_host = 'localhost:5003'
+
+    # d = xlapi.common_ocr('/home/chenkunze/data/aipocr_test/01通用/general/1.jpg')
+    # d = xlapi.hesuan_layout('/home/chenkunze/data/hesuan/data/test.jpg')
+    # d = xlapi.priu_api('general', '/home/chenkunze/data/aipocr_test/01通用/general/1.jpg')
+    d = xlapi.rec_singleline('/home/chenkunze/data/aipocr_test/01通用/general/1.jpg')
+
+    pprint.pprint(d)
+
+
 if __name__ == '__main__':
     with TicToc(__name__):
-        demo_aipocr()
+        # demo_aipocr()
+        demo_priu()
