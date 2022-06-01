@@ -14,7 +14,7 @@ import PIL.Image
 import requests
 
 from pyxllib.prog.newbie import round_int, RunOnlyOnce
-from pyxllib.prog.pupil import EnchantBase, EnchantCvt, is_url
+from pyxllib.prog.pupil import EnchantBase, EnchantCvt
 from pyxllib.algo.geo import rect_bounds, warp_points, reshape_coords, quad_warp_wh, get_warp_mat, rect2polygon
 from pyxllib.file.specialist import File
 
@@ -233,43 +233,6 @@ class xlcv(EnchantBase):
         if b64encode:
             buffer = base64.b64encode(buffer)
         return buffer
-
-    @staticmethod
-    def to_buffer2(in_, flags=1, *, b64decode=True, b64encode=False,
-                   min_length=None, max_length=None,
-                   limit_b64buffer_size=None):
-        """ 获取in_代表的图片的二进制数据，一般是用在网络图片传输，API调用等场景
-
-        :param in_: 可以是本地文件，也可以是图片url地址，也可以是Image对象
-            注意这个函数，输入是url，也会获取重置图片数据上传
-            如果为了效率明确只传url，可以用aip.AipOcr原生的相关url函数
-        :param b64decode: 如果输入是bytes类型，是否要用b64解码，默认需要
-        :param b64encode: 返回的结果，是否需要b64编码，默认不需要
-        :return: 返回图片文件二进制值的buffer, 缩放系数(小余1是缩小，大于1是放大)
-        """
-        # 1 取不同来源的数据
-        # 下面应该是比较通用的一套操作，如果有特殊接口，可以另外处理，不一定要通过该接口处理图片
-        if isinstance(in_, bytes):
-            im = xlcv.read_from_buffer(in_, flags, b64decode=b64decode)
-        elif is_url(in_):
-            im = xlcv.read_from_url(in_, flags)
-        else:
-            im = xlcv.read(in_, flags)
-        origin_height = im.shape[0]
-
-        # 2 图片尺寸不符合要求，要缩放
-        if min_length or max_length:
-            im = xlcv.adjust_shape(im, min_length, max_length)
-
-        # 3 图片文件不能过大，要调整
-        if limit_b64buffer_size:
-            # b64后大小固定会变4/3，所以留给原文件的大小是要缩水，只有0.75；再以防万一总不能卡得刚刚好，所以设为0.74
-            im = xlcv.reduce_filesize(im, limit_b64buffer_size * 0.74)
-        current_height = im.shape[0]
-
-        buffer = xlcv.to_buffer(im, b64encode=b64encode)
-        ratio = current_height / origin_height
-        return buffer, ratio
 
     @staticmethod
     def imshow2(im, winname=None, flags=1):
