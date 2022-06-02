@@ -199,15 +199,19 @@ class DictTool:
         """ 合并到第1个字典
 
         :return: dict_ |= (args[0] | args[1] | ... | args[-1]).
+
+        220601周三15:45，默认已有对应key的话，值是不覆盖的，如果要覆盖，直接用update就行了，不需要这个接口
+            所以把3.9的|=功能关掉
         """
-        if sys.version_info.major == 3 and sys.version_info.minor >= 9:
-            for x in args:
-                dict_ |= x
-        else:  # 旧版本py手动实现一个兼容功能
-            for x in args:
-                for k, v in x.items():
-                    if k not in dict_:
-                        dict_[k] = v
+        # if sys.version_info.major == 3 and sys.version_info.minor >= 9:
+        #     for x in args:
+        #         dict_ |= x
+        # else:  # 旧版本py手动实现一个兼容功能
+        for x in args:
+            for k, v in x.items():
+                # if k not in dict_:
+                #     dict_[k] = v
+                dict_[k] = v
 
     @classmethod
     def sub(cls, dict_, keys):

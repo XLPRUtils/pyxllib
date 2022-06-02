@@ -12,10 +12,10 @@ import json
 import sys
 
 import PIL.Image
+import pandas as pd
 from tqdm import tqdm
 
-from pyxllib.prog.newbie import round_int
-from pyxllib.prog.pupil import get_hostname, DictTool
+from pyxllib.prog.pupil import get_hostname
 from pyxllib.data.sqlite import Connection
 from pyxllib.file.specialist import get_etag, XlPath
 
@@ -28,6 +28,7 @@ class XlprDb(Connection):
             dbfile = XlPath.userdir() / '.xlpr/xlpr.db'
 
         self.directory = XlPath(dbfile).parent
+        self.dbfile = dbfile
         super().__init__(dbfile, *args, **kwargs)
 
         # 在十卡环境当前时间要加8小时
@@ -39,6 +40,18 @@ class XlprDb(Connection):
         if self.in_tp10:
             d += datetime.timedelta(hours=8)
         return d.strftime('%Y-%m-%d %H:%M:%S')
+
+    def _render_chart(self, chart):
+        from pyxllib.debug.specialist import browser
+
+        # if sys.platform == 'win32':
+        #     browser(chart)
+
+        file = XlPath.tempfile(suffix='.html')
+        chart.render(path=str(file))
+        res = file.read_text()
+        file.delete()
+        return res
 
     def __1_jpg_images(self):
         """ 图片相关功能 """
@@ -87,24 +100,6 @@ class XlprDb(Connection):
 
         self.insert('jpgimages', kwargs)
         self.commit()
-
-    def check_jpgimages_size(self):
-        """ 检查图片文件尺寸所占比例
-
-        请在windows平台运行，获得可视化最佳体验
-        """
-        from pyxllib.algo.stat import pareto_accumulate
-        from pyxllib.data.echarts import Line
-        from pyxllib.debug.specialist import browser
-
-        filesizes = list(self.select_col('jpgimages', 'filesize'))
-        recordsizes = [len(x) for x in self.select_col('aipocr', 'result')]
-
-        x = Line()
-        pts, labels = pareto_accumulate(filesizes, 0.1)
-        x.add_series('图片', pts, labels=labels, label={'position': 'right'})
-        x.add_series('json', pareto_accumulate(recordsizes, 0.1)[0])
-        browser(x)
 
     def extract_jpgimages(self, size_threshold=50 * 1024):
         """ 将数据库中较大的图片数据，提取存储到文件中
@@ -197,42 +192,103 @@ class XlprDb(Connection):
         self.insert('xlprapi', kw, if_exists=if_exists)
         self.commit()
 
-    def check_api_useage(self):
-        """ 检查接口调用量 """
-        from pyxllib.data.echarts import Line
-        from pyxllib.debug.specialist import browser
+    def __3_检查数据库使用情况(self):
+        pass
 
-        # 1 调用量计算
-        ct = defaultdict(Counter)
-        for x in self.exec_nametuple('SELECT route, request_json, update_time FROM xlprapi'):
-            d = datetime.datetime.fromisoformat(x['update_time']).date().toordinal()
-            ct['total'][d] += 1
-            if 'basicGeneral' in x['request_json']:
-                ct['basicGeneral'][d] += 1
-            if x['route'] == 'api/aipocr':
-                ct['aipocr'][d] += 1
+    def check_database_useage(self):
+        """ 查看数据库一些统计情况 """
+        from pyxllib.text.nestenv import NestEnv
+        from pyxllib.text.xmllib import render_echart_html
 
-        # + 辅助函数
-        min_day, max_day = min(ct['total'].keys()), max(ct['total'].keys())
+        def check_api_useage():
+            """ 检查接口调用量 """
+            from pyxllib.data.echarts import Line
 
-        def to_list(ct):
-            """ Counter转日期清单
-            因为有的天数可能出现次数0，需要补充些特殊操作
+            # 1 调用量计算
+            ct = defaultdict(Counter)
+            for x in self.exec_nametuple('SELECT route, request_json, update_time FROM xlprapi'):
+                d = datetime.datetime.fromisoformat(x['update_time']).date().toordinal()
+                ct['total'][d] += 1
+                if 'basicGeneral' in x['request_json']:
+                    ct['basicGeneral'][d] += 1
+                if x['route'] == 'api/aipocr':
+                    ct['aipocr'][d] += 1
+
+            # + 辅助函数
+            min_day, max_day = min(ct['total'].keys()), max(ct['total'].keys())
+
+            def to_list(ct):
+                """ Counter转日期清单
+                因为有的天数可能出现次数0，需要补充些特殊操作
+                """
+                return [(datetime.date.fromordinal(i), ct.get(i, 0)) for i in range(min_day, max_day + 1)]
+
+            # 2 画图表
+            chart = Line()
+            chart.add_series('total', to_list(ct['total']), label={'show': True}, areaStyle={})
+            chart.add_series('aipocr', to_list(ct['aipocr']), areaStyle={})
+            chart.add_series('basicGeneral', to_list(ct['basicGeneral']), areaStyle={})
+
+            chart.options['xAxis'][0].update({'min': datetime.date.fromordinal(min_day), 'type': 'time'})
+
+            # 3 展示
+            return self._render_chart(chart)
+
+        def check_jpgimages_size():
+            """ 检查图片文件尺寸所占比例
+
+            请在windows平台运行，获得可视化最佳体验
             """
-            return [(datetime.date.fromordinal(i), ct.get(i, 0)) for i in range(min_day, max_day + 1)]
+            from pyxllib.algo.stat import pareto_accumulate
+            from pyxllib.data.echarts import Line
 
-        # 2 画图表
-        chart = Line()
-        chart.add_series('total', to_list(ct['total']), label={'show': True}, areaStyle={})
-        chart.add_series('aipocr', to_list(ct['aipocr']), areaStyle={})
-        chart.add_series('basicGeneral', to_list(ct['basicGeneral']), areaStyle={})
+            filesizes = list(self.select_col('jpgimages', 'filesize'))
+            recordsizes = [len(x) for x in self.select_col('aipocr', 'result')]
 
-        DictTool.ior(chart.options['xAxis'][0], {'min': datetime.date.fromordinal(min_day), 'type': 'time'})
-        browser(chart)
+            x = Line()
+            pts, labels = pareto_accumulate(filesizes, 0.1)
+            x.add_series('图片', pts, labels=labels, label={'position': 'right'})
+            x.add_series('json', pareto_accumulate(recordsizes, 0.1)[0])
+
+            return self._render_chart(x)
+
+        res = ['1、每个token调用量']
+        ls = self.exec_dict('SELECT token, COUNT(*) cnt FROM xlprapi GROUP BY token ORDER BY cnt DESC').fetchall()
+        df = pd.DataFrame.from_records(ls)
+        res.append(df.to_html())
+
+        res.append('<br/>2、每日API调用量')
+        res.append(NestEnv(check_api_useage()).xmltag('body', inner=True).string())
+        res.append('<br/>3、图片存储情况')
+        res.append(NestEnv(check_jpgimages_size()).xmltag('body', inner=True).string())
+        res.append('<br/>当前数据库大小：' + self.dbfile.size(human_readable=True))
+
+        res = '<br/>'.join(res)
+
+        return render_echart_html(title='check_user_useage', body=res)
+
+    def recently_api_record(self):
+        """ 最近调用的几条API记录 """
+        # 其实这里没有echart表格，但反正都通用的，就直接用了
+        from pyxllib.text.xmllib import render_echart_html
+
+        import pandas as pd
+
+        res = ['1、最近10条调用记录 xlprapi']
+        sql = 'SELECT * FROM (SELECT * FROM xlprapi ORDER BY update_time DESC LIMIT 10)'
+        df = pd.DataFrame.from_dict(self.exec_dict(sql).fetchall())
+        res.append('<br/>' + df.to_html())
+
+        res.append('2、最近10条识别内容 aipocr')
+        sql = 'SELECT * FROM (SELECT * FROM aipocr ORDER BY update_time DESC LIMIT 10)'
+        df = pd.DataFrame.from_dict(self.exec_dict(sql).fetchall())
+        res.append('<br/>' + df.to_html())
+
+        return render_echart_html(title='recently_api_record', body='<br/>'.join(res))
 
 
 if __name__ == '__main__':
+    from pyxllib.debug.specialist import browser
+
     db = XlprDb(check_same_thread=False)
-    # db.check_jpgimages_size()
-    # db.extract_jpgimages()
-    db.check_api_useage()
+    browser.html(db.check_database_useage())
