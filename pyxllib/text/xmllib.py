@@ -621,3 +621,15 @@ class HtmlParser:
             x = self.root.get_nonempty_children(*idxs)
             # 自动执行函数
             getattr(self, method)(x)
+
+
+def get_jinja_template(name, **kwargs):
+    from jinja2 import Environment
+    from pyxllib.file.specialist import XlPath
+
+    template = Environment(**kwargs).from_string((XlPath(__file__).parent / f'templates/{name}').read_text())
+    return template
+
+
+def render_echart_html(title='Awesome-pyecharts', body=''):
+    return get_jinja_template('echart_base.html').render(title=title, body=body)

@@ -327,7 +327,7 @@ class XlAiClient:
     def webimageLoc(self, im, options=None):
         """ 网络图片文字识别（含位置版）: https://cloud.baidu.com/doc/OCR/s/Nkaz574we """
         buffer, ratio = self.adjust_image(im)
-        result_dict = self.run_with_db(self._aipocr.webimageLoc, buffer, options, save_buffer_threshold_size=sz)
+        result_dict = self.run_with_db(self._aipocr.webimageLoc, buffer, options)
         result_dict = ToLabelmeLike.list_word(result_dict, 1 / ratio, 'words_result', 'words_result_num')
         return result_dict
 

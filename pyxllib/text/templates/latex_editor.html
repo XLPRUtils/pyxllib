@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <style>
+        body {
+            background-color: #A4C0A7;
+        }
+
+        topic {
+            display: block;
+            border-style: solid;
+            border-color: gray;
+            padding: 9px;
+            margin: 3px;
+            zoom: 1.5
+        }
+
+        textarea {
+            display: block;
+            border-style: solid;
+            background-color: #A4C0A7;
+            margin: 3px;
+            width: 99%;
+            border-color: gray;
+            zoom: 2
+        }
+    </style>
+ <title>LaTeX公式草稿 </title>
+ <script type="text/javascript" src="https://tr.histudy.com/static/js/load-mathjax.js"></script>
+</head>
+<body id="oliga">
+
+<textarea id="mID1" rows="9" autofocus="autofocus" >
+{{ text }}
+</textarea>
+
+<button  accesskey="`" onclick="rTeX('mID1')" >
+    按【Alt + `】刷新渲染
+</button>
+<button  accesskey="A" onclick="混合渲染()" >
+    按【Alt + A】 或 【F1】 刷新渲染混杂模式
+</button>
+按 【F4】 开启/关闭时时渲染，按 【F5】 刷新重置
+
+<topic id="mID1renderer">
+</topic>
+
+</body>
+
+<script>
+
+function 公式渲染(s){ return ' ' + MathJax.tex2svg(s.replace(/\$/g, '')).firstChild.outerHTML + ' '}
+
+function tabular转html(s){
+	s = s.replace(/\\begin\{tabular\}.+?}/g, '<table border=1 >\n<tr><td>').replace(/(\\hline|\\cline\{.+?\})/g, ' ')
+	s = s.replace(/\\\\\s*\\end\{tabular\}/g, '\\end\{tabular\}')
+	s = s.replace(/\\end\{tabular\}/g, '</td></tr>\n</table>')
+	s = s.replace(/\\\\/g, '</td></tr>\n <tr><td>').replace(/&/g, '</td><td>')
+	return s
+}
+
+function 混合渲染(){
+	t = document.getElementById('mID1').value
+	// t = t.replace(/\$.+?\$/g, 公式渲染).replace(/\n\n+/g, '\n<p/>')
+	t = t.replace(/\$\n?([^\n\$]+\n?)+\$/g, 公式渲染).replace(/\n\n+/g, '\n<p/>')
+	t = t.replace(/\\begin\{tabular\}[\S\s]+?\\end\{tabular\}/gm, tabular转html)
+	t = t.replace(/\\ce\{.+?\}/g, 公式渲染) // 不严谨
+	document.getElementById("mID1renderer").innerHTML = t
+	document.getElementById('mID1').focus()
+}
+
+时时渲染 = false
+function relax(){console.log('休息')}
+document.onkeyup = 混合渲染
+
+document.onkeydown = function hotkey(keyboardPressed) {
+    var theKeyPressed = window.event.keyCode;
+    if (theKeyPressed == 112){console.log('按了F1，一次渲染'); 混合渲染() ; keyboardPressed.preventDefault(); return false;}
+    else if (theKeyPressed == 115){console.log('按了F4，开启动态渲染');
+    	if (时时渲染) {时时渲染 = false; document.onkeyup = relax } else {时时渲染 = true; document.onkeyup = 混合渲染; 混合渲染()} ;
+    	keyboardPressed.preventDefault(); return false;}
+}
+
+
+function rTeX(MathID) {
+    if (document.getElementById(MathID).value.includes('$')) {混合渲染(); alert('不用手工加美元符，会自动加，\n\n你加了美元符我就认为是《混合》型【公式+文本】'); return false}
+    document.getElementById(MathID + "renderer").innerHTML = MathJax.tex2svg(document.getElementById(MathID).value).firstChild.outerHTML
+    <!--let mathTopic = document.getElementById("da");-->
+    <!--MathJax.Hub.queue(["Typeset", MathJax.Hub]);-->
+    <!--MathJax.Hub.Typeset(["da"]);-->
+    document.getElementById(MathID).focus()
+    console.log('可以考虑用前后兄弟节点：previousSibling、nextSibling，相对节点')
+}
+
+function enableMathType() {
+	document.getElementById("MathLoader").src="https://tr.histudy.com/static/js/load-mathjax.js";
+	}
+</script>
+
+<script type="text/javascript" ID="MathLoader"></script>
+
+</html>

@@ -516,9 +516,9 @@ class NestEnv(__NestEnvBase):
 
     def xmltag(self, head, inner=False, invert=False, symmetry=True):
         r"""
-        # >>> s = 'a\n<p class="clearfix">\nbb\n</p>c<p a="2"/>cc'
-        # >>> NestEnv(s).inside('<p').replace('x')
-        # 'a\nxc'
+        >>> s = 'a\n<p class="clearfix">\nbb\n</p>c<p a="2"/>cc'
+        >>> NestEnv(s).xmltag('p').replace('x')
+        'a\nxc<p a="2"/>cc'
 
         陷阱备忘：
             1、百分注就那么几种格式，所以写的稍微不太严谨也么关系的，比如不会出现自闭合标签
