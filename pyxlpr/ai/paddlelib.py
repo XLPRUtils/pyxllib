@@ -21,7 +21,7 @@ import paddle
 
 import pyxllib.xl
 from pyxllib.xl import XlPath, browser
-from pyxllib.ai.specialist import ClasEvaluater, show_feature_map
+from pyxlpr.ai.specialist import ClasEvaluater, show_feature_map
 
 
 class SequenceDataset(paddle.io.Dataset):
@@ -231,7 +231,7 @@ def model_state_dict_df(model, *, browser=False):
         # b msg
         msg = [k]
         for col_name in columns[1:]:
-            msg.append(getattr(v, col_name))
+            msg.append(getattr(v, col_name, None))
         ls.append(msg)
     df = pd.DataFrame.from_records(ls, columns=columns)
 

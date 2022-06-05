@@ -209,10 +209,9 @@ class XlprDb(Connection):
             for x in self.exec_nametuple('SELECT route, request_json, update_time FROM xlprapi'):
                 d = datetime.datetime.fromisoformat(x['update_time']).date().toordinal()
                 ct['total'][d] += 1
-                if 'basicGeneral' in x['request_json']:
+                if 'basicGeneral' in x['route'] or 'basicGeneral' in x['request_json']:
+                    # 新版都在route了，旧版是在request_json
                     ct['basicGeneral'][d] += 1
-                if x['route'] == 'api/aipocr':
-                    ct['aipocr'][d] += 1
 
             # + 辅助函数
             min_day, max_day = min(ct['total'].keys()), max(ct['total'].keys())
@@ -226,7 +225,6 @@ class XlprDb(Connection):
             # 2 画图表
             chart = Line()
             chart.add_series('total', to_list(ct['total']), label={'show': True}, areaStyle={})
-            chart.add_series('aipocr', to_list(ct['aipocr']), areaStyle={})
             chart.add_series('basicGeneral', to_list(ct['basicGeneral']), areaStyle={})
 
             chart.options['xAxis'][0].update({'min': datetime.date.fromordinal(min_day), 'type': 'time'})
