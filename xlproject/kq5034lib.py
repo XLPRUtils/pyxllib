@@ -10,25 +10,26 @@
 1、使用中文命名
 2、牺牲了一定的工程、扩展灵活性，用了尽可能多的自动推导，而不是参数配置
 """
-
 from pyxllib.prog.pupil import check_install_package
 
 check_install_package('fire')  # 自动安装依赖包
 
-import os
 from collections import Counter
 from datetime import date
 import datetime
 import math
+import os
 import re
 
 import fire
 import pandas as pd
+from tqdm import tqdm
 
 from pyxllib.text.pupil import chinese2digits, grp_chinese_char
-from pyxllib.xl import XlPath, TicToc, parse_datetime, browser, tqdm
-from pyxllib.cv.rgbfmt import RgbFormatter
 from pyxllib.file.xlsxlib import openpyxl
+from pyxllib.file.specialist import XlPath
+from pyxllib.debug.specialist import TicToc, parse_datetime, browser
+from pyxllib.cv.rgbfmt import RgbFormatter
 from pyxllib.data.sqlite import Connection
 
 
@@ -300,7 +301,7 @@ class 网课考勤:
             title = f'第{回放课次}课回放'
             msg.append('【' + title + '名单】')
             if 回放课次 == 1:
-                msg[-1] += '（第1课仍有4天可以回放）'
+                msg[-1] += f'（第1课仍有{len(self.视频返款) - 4}天可以回放）'
             d = {'第1天回放': [], '第2天回放': [], '第3天回放': [], '未完成学习': []}
 
             col = _col + 回放课次

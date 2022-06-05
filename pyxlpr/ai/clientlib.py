@@ -292,6 +292,7 @@ class XlAiClient:
 
     def general(self, im, options=None):
         """ 通用文字识别（标准含位置版）: https://cloud.baidu.com/doc/OCR/s/vk3h7y58v
+        500次/天赠送 + 超出按量计费
 
         注意只要ratio!=1涉及到缩放的，偏移误差是会变大的~~
         """
@@ -302,6 +303,7 @@ class XlAiClient:
 
     def basicGeneral(self, im, options=None):
         """ 通用文字识别（标准版）: https://cloud.baidu.com/doc/OCR/s/zk3h7xz52
+        5万次/天赠送 + 超出按量计费
         """
         buffer, ratio = self.adjust_image(im)
         result_dict = self.run_with_db(self._aipocr.basicGeneral, buffer, options)
@@ -957,7 +959,7 @@ class XlAiClient:
         r = requests.post(f'http://{self._priu_host}/api/hesuan_layout', json.dumps(data), headers=self._priu_header)
         return json.loads(r.text)
 
-    def rec_singleline(self, im, mode='general'):
+    def rec_singleline(self, im, mode='basicGeneral'):
         """ 通用的识别一张图的所有文本，并拼接到一起 """
         text = ''  # 因图片太小等各种原因，没有识别到结果，默认就设空值
         try:
@@ -990,7 +992,6 @@ def demo_aipocr():
              'webimageLoc': 'webImage',
              'idcard_back': 'idcard',
              'vat_invoice_verification': 'vatInvoice',
-             'form2htmltables': 'form',
              'mathpix_latex': 'formula',
              }.get(fmode, fmode)
     files = _dir.glob_images(f'*/{fmode}/**/*')

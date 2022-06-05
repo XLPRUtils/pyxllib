@@ -618,7 +618,6 @@ class PaddleOCR(predict_system.TextSystem):
             for i, sp in enumerate(data['shapes']):
                 attr = DictTool.json_loads(sp['label'], 'text')
 
-
                 # if ignores:
                 #     for k, v in ignores.items():
                 #         if attr.get(k) == v:
