@@ -190,12 +190,16 @@ def check_os_status():
     import time
     import psutil
 
+    brief_str = []  # 简化显示
+
     # 1
     print(f'1 逻辑cpu数量：{psutil.cpu_count()}  \t{psutil.cpu_percent(1) / 100:-3.0%}')
+    brief_str.append(f'{psutil.cpu_count()}({psutil.cpu_percent(1) / 100:.0%})')
 
     # 2
     m = psutil.virtual_memory()
     print(f'2 内存大小：{m.total / (1024 ** 3):.0f} GB \t{m.percent / 100:-3.0%}')
+    brief_str.append(f'{m.total / (1024 ** 3):.0f}GB({m.percent / 100:.0%})')
 
     # 3
     disks = psutil.disk_partitions()
@@ -207,6 +211,8 @@ def check_os_status():
     used /= 1024 ** 4
     total /= 1024 ** 4
     print(f'3 磁盘空间：{total:.2f} TB\t{used / total:-3.0%}')
+    brief_str.append(f'{total:.2f}TB({used / total:.0%})')
+    print('/'.join(brief_str))
 
     # 4
     msg1 = psutil.disk_io_counters()

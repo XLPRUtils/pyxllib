@@ -14,6 +14,7 @@ check_install_package('scp')
 import os
 import re
 import pathlib
+import shutil
 
 import paramiko
 from tqdm import tqdm
@@ -23,6 +24,7 @@ import humanfriendly
 from pyxllib.algo.pupil import natural_sort
 from pyxllib.file.specialist import XlPath
 from pyxllib.debug.specialist import get_xllog
+from pyxllib.prog.specialist import XlOsEnv
 
 logger = get_xllog('location')
 
@@ -162,6 +164,67 @@ class XlSSHClient(paramiko.SSHClient):
 
         self.Path = Path
 
+    @classmethod
+    def log_in(cls, host_name, user_name, *, map_path=None):
+        r""" 使用XlSshAccounts里存储的服务器、账号信息，进行登录
+        推荐的XlSSHClient初始化方法，可以隐藏IP、账号密码
+
+        使用该功能，需要提前存储如下格式的环境变量
+        def 存储服务器信息():
+            import textwrap
+            from pyxllib.prog.specialist import XlOsEnv
+
+            xl_ssh_accounts = textwrap.dedent('''\
+            xlpr0 172.16.170.110:22
+                root,123456
+            titan1 172.16.170.119:22, g_titan1 172.16.170.120:6001
+                root,123456
+                ckz,654321
+            ''')
+
+            XlOsEnv.persist_set('XlSshAccounts', xl_ssh_accounts, encoding=True)
+
+        存写格式说明：
+        xlpr0 172.16.170.110:22   # 设置一个主机昵称 ip:port
+            root,123456 # tab或空格缩进，每行填写一个账号名、账号密码
+        titan1 172.16.170.119:22, g_titan1 172.16.170.120:6001  # 可以逗号隔开设置多台主机，常用于同一个机器的局域网、公网不同连接
+            root,123456
+            ckz,654321  # 可以写多个账号
+
+        """
+        # 1 找主机信息
+        # 获得的是一个格式化的字符串，还没有做结构化解析
+        xl_ssh_accounts = XlOsEnv.get('XlSshAccounts', decoding=True)
+        lines = xl_ssh_accounts.splitlines()
+        idx, ip_port = None, None
+        for i, line in enumerate(lines):
+            if not re.match(r'\s', line):  # 服务器信息
+                hosts = line.split(',')
+                for host in hosts:
+                    m = re.match(rf'{host_name}\s+(.+)', host.strip())
+                    if m:
+                        idx, ip_port = i, m.group(1)
+                        break
+                if ip_port is not None:
+                    break
+
+        if idx is None:
+            raise ValueError(f'host_name={host_name} not found!')
+        host_ip, host_port = ip_port.split(':')
+
+        # 2 找账户信息
+        for i in range(idx + 1, len(lines)):
+            if re.match(r'\s', lines[i]):
+                # 一般应该没人会在密码以空格为后缀，所以这里使用strip，排除右边误输入空格的情况
+                # 更人性化，但是不严谨，遇到空格后缀的密码本套功能会处理不了
+                name, passwd = lines[i].strip().split(',')
+                if name == user_name:
+                    return cls(host_ip, host_port, name, passwd, map_path=map_path)
+            else:
+                break
+
+        raise ValueError(f'user_name={user_name} not found!')
+
     def exec(self, command, *args, **kwargs):
         """ exec_command的简化版
 
@@ -174,6 +237,35 @@ class XlSSHClient(paramiko.SSHClient):
             print(''.join(stderr))
             raise SshCommandError(f'服务器执行命令报错: {command}')
         return '\n'.join([f.strip() for f in list(stdout)])
+
+    def exec_script(self, main_cmd, script='', *, file=None):
+        """ 执行批量、脚本命令
+
+        :paramn main_cmd: 主命令
+        :param script: 用字符串表达的一套命令
+        :param file: 也可以直接传入一个文件
+        """
+        # 1 将脚本转成文件，上传到服务器
+        scp = scplib.SCPClient(self.get_transport())
+
+        # 虽然是基于本地的情况生成随机名称脚本，但一般在服务器也不会冲突，概率特别小
+        local_file = XlPath.tempfile()
+        host_file = '/tmp/' + local_file.name
+
+        if file is not None:
+            shutil.copy2(XlPath(file), local_file)
+        elif script:
+            local_file.write_text(script)
+        else:
+            raise ValueError(f'没有待执行的脚本')
+
+        scp.put(local_file, host_file)
+        local_file.delete()
+
+        # 2 执行程序
+        res = self.exec(f'{main_cmd} {host_file}')
+        self.exec(f'rm {host_file}')
+        return res
 
     def __scp(self):
         """ 以下是为scp准备的功能 """
