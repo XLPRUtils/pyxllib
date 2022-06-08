@@ -88,6 +88,9 @@ class ScpProgress:
 
 
 class XlSSHClient(paramiko.SSHClient):
+    def __1_初始化和执行(self):
+        pass
+
     def __init__(self, server, port, user, passwd, *, map_path=None):
         """
         Args:
@@ -267,7 +270,7 @@ class XlSSHClient(paramiko.SSHClient):
         self.exec(f'rm {host_file}')
         return res
 
-    def __scp(self):
+    def __2_scp(self):
         """ 以下是为scp准备的功能 """
         pass
 
@@ -494,3 +497,30 @@ class XlSSHClient(paramiko.SSHClient):
         """
         self.scp_get(local_path=local_path, info=info, limit_bytes=limit_bytes, if_exists='mtime')
         self.scp_put(local_path, mkdir=mkdir, info=info, limit_bytes=limit_bytes, if_exists='mtime')
+
+    def __3_其他封装的功能(self):
+        pass
+
+    def set_user_passwd(self, name, passwd):
+        """ 修改账号密码
+
+        How to set user passwords using passwd without a prompt? - Ask Ubuntu:
+        https://askubuntu.com/questions/80444/how-to-set-user-passwords-using-passwd-without-a-prompt
+        """
+        self.exec(f'usermod --password $(echo {passwd} | openssl passwd -1 -stdin) {name}')
+
+    def add_user(self, name, passwd, sudo=False):
+        """ 添加新用户
+
+        :param name: 用户名
+        :param passwd: 密码
+        :param sudo: 是否开sudo权限
+        """
+        exists_user = self.exec("awk -F: '{ print $1}' /etc/passwd").splitlines()
+        if name in exists_user:
+            raise ValueError(f'{name} already exists')
+
+        self.exec(f'useradd -d /home/{name} -s /bin/bash -m {name}')
+        self.set_user_passwd(name, passwd)
+        if sudo:
+            self.exec(f'usermod -aG sudo {name}')
