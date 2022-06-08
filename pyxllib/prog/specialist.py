@@ -154,7 +154,7 @@ class XlOsEnv:
         try:
             return json.loads(value)
         except json.decoder.JSONDecodeError:
-            return value
+            return value.decode()
 
     @classmethod
     def set(cls, name, value, encoding=False):

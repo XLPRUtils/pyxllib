@@ -106,6 +106,8 @@ class XlprDb(Connection):
 
         :param size_threshold: 尺寸大于阈值的数据，备份到子目录data里
             默认以50kb为阈值，用20%的图片能清出80%的空间
+
+        TODO 当data目录下图片太多时，可以按照etag首字母为前缀，拆成多个不同的目录存储
         """
         from pyxllib.cv.xlcvlib import xlcv
         for x in tqdm(self.exec_nametuple(f'SELECT * FROM jpgimages WHERE filesize>{size_threshold}')):
