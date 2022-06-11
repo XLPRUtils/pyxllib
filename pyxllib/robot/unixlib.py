@@ -3,6 +3,7 @@
 # @Author : 陈坤泽
 # @Email  : 877362867@qq.com
 # @Date   : 2021/06/03 20:41
+import time
 
 from pyxllib.prog.pupil import check_install_package
 
@@ -11,6 +12,7 @@ check_install_package('scp')
 # 对 paramiko 进一步封装的库
 # check_install_package('fabric')
 
+from collections import defaultdict
 import os
 import re
 import pathlib
@@ -168,9 +170,13 @@ class XlSSHClient(paramiko.SSHClient):
         self.Path = Path
 
     @classmethod
-    def log_in(cls, host_name, user_name, *, map_path=None):
+    def log_in(cls, host_name, user_name, *, relogin=0, relogin_interval=1, map_path=None):
         r""" 使用XlSshAccounts里存储的服务器、账号信息，进行登录
         推荐的XlSSHClient初始化方法，可以隐藏IP、账号密码
+
+        :param int relogin: 当连接失败的时候，可能只是某种特殊原因，可以尝试重新连接
+            该参数设置重连的次数
+        :param int|float relogin_interval: 每次重连的间隔秒数
 
         使用该功能，需要提前存储如下格式的环境变量
         def 存储服务器信息():
@@ -222,7 +228,13 @@ class XlSSHClient(paramiko.SSHClient):
                 # 更人性化，但是不严谨，遇到空格后缀的密码本套功能会处理不了
                 name, passwd = lines[i].strip().split(',')
                 if name == user_name:
-                    return cls(host_ip, host_port, name, passwd, map_path=map_path)
+                    for k in range(relogin + 1):
+                        try:
+                            ssh = cls(host_ip, host_port, name, passwd, map_path=map_path)
+                            return ssh
+                        except paramiko.ssh_exception.SSHException:
+                            if k < relogin:
+                                time.sleep(relogin_interval)
             else:
                 break
 
@@ -242,11 +254,19 @@ class XlSSHClient(paramiko.SSHClient):
         return '\n'.join([f.strip() for f in list(stdout)])
 
     def exec_script(self, main_cmd, script='', *, file=None):
-        """ 执行批量、脚本命令
+        r""" 执行批量、脚本命令
 
         :paramn main_cmd: 主命令
         :param script: 用字符串表达的一套命令
         :param file: 也可以直接传入一个文件
+
+        【使用示例】
+        ssh = XlSSHClient.log_in('xlpr10', 'chenkunze')
+        text = textwrap.dedent('''\
+        import os
+        print(len(os.listdir()))
+        ''')
+        print(ssh.exec_script('python3', text))
         """
         # 1 将脚本转成文件，上传到服务器
         scp = scplib.SCPClient(self.get_transport())
@@ -524,3 +544,64 @@ class XlSSHClient(paramiko.SSHClient):
         self.set_user_passwd(name, passwd)
         if sudo:
             self.exec(f'usermod -aG sudo {name}')
+
+    def check_gpu_usage(self, *, print_mode=False):
+        """ 检查(每个用户)显存使用量
+
+        使用这个命令，必须要求远程服务器安装了pip install gpustat
+        """
+
+        def printf(*args, **kwargs):
+            if print_mode:
+                print(*args, **kwargs)
+
+        ls = self.exec('gpustat')
+        printf(ls)
+
+        total_memory = 0
+        user_usage = defaultdict(float)
+        for line in ls.splitlines()[1:]:
+            name, temperature, capacity, uses = line.split('|')
+            used, total = map(int, re.findall(r'\d+', capacity))
+            user_usage['other'] += used / 1024
+            total_memory += total / 1024
+            for x in uses.split():
+                user, used = re.search(r'(.+?)\((\d+)M\)', x).groups()
+                user_usage[user] += int(used) / 1024
+                user_usage['other'] -= int(used) / 1024
+
+        # 使用量从多到少排序。但注意如果转存到PG，jsonb会重新排序。
+        user_usage = {k: round(user_usage[k], 2) for k in sorted(user_usage, key=lambda k: -user_usage[k])}
+        if user_usage['other'] < 0.01:
+            del user_usage['other']
+
+        return total_memory, user_usage
+
+    def check_disk_usage(self):
+        """ 检查(每个用户)磁盘空间使用量
+
+        :return: total 总字节MBytes数, msg 所有用户、包括其他非/home目录的使用MBytes数
+        """
+        GB = 1024 ** 2  # df、du本身默认单位已经是KB，所以2次方后，就是GB了
+        # 1 整体情况
+        used, total_memory = 0, 0
+        for line in self.exec('df').splitlines()[1:]:
+            if not line.startswith('/dev/sda'):
+                continue
+            # 为了避免遇到路径中有空格的问题，用正则做了较复杂的判断、切割
+            _total, _used = map(int, re.search(r'\s+(\d+)\s+(\d+)\s+\d+\s+\d+', line).groups())
+            used += _used
+            total_memory += _total
+
+        # 2 /home目录下每个占用情况
+        user_usage = defaultdict(int)
+        for line in self.exec('du -d 1 /home').splitlines():
+            _bytes, _dir = line.split(maxsplit=1)
+            _dir = _dir[6:]
+            if _dir and int(_bytes) > GB:  # 达到1GB的才记录
+                user_usage[_dir] += int(_bytes)
+
+        user_usage['other'] = used - sum(user_usage.values())
+        user_usage = {k: (v // GB) for k, v in user_usage.items()}
+
+        return total_memory // GB, user_usage
