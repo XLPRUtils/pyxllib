@@ -7,6 +7,7 @@
 
 """ 封装一些代码开发中常用的功能，工程组件 """
 from collections import defaultdict
+import datetime
 import io
 import itertools
 import json
@@ -472,3 +473,13 @@ def set_default_args(*d_args, **d_kwargs):
         return wrapper
 
     return decorator
+
+
+def utc_now(offset_hours=8):
+    """ 有的机器可能本地时间设成了utc0，可以用这个方式，获得准确的utc8时间 """
+    return datetime.datetime.utcnow() + datetime.timedelta(hours=offset_hours)
+
+
+def utc_timestamp(offset_hours=8):
+    """ mysql等数据库支持的日期格式 """
+    return utc_now(offset_hours).isoformat(timespec='seconds')

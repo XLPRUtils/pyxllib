@@ -8,6 +8,7 @@
 https://www.yuque.com/xlpr/pyxllib/depend
 """
 
+from pathlib import Path
 from setuptools import setup, find_packages
 
 xlcv = """
@@ -25,15 +26,17 @@ xlcocotools
 """
 # fvcore
 
+_dir = Path(__file__).parent
+
 setup(
     name='pyxllib',  # pip 安装时用的名字
-    version='0.2.27',  # 当前版本，每次更新上传到pypi都需要修改; 第4位版本号一般是修紧急bug
+    version='0.2.28',  # 当前版本，每次更新上传到pypi都需要修改; 第4位版本号一般是修紧急bug
     author='code4101',
     author_email='877362867@qq.com',
     url='https://github.com/XLPRUtils/pyxllib',
     keywords=['pyxllib', 'pyxlpr', 'xlproject'],
     description='厦门理工模式识别团队通用python代码工具库',
-    long_description=open('README.md', encoding='utf8').read(),  # 偷懒，就不创建f然后close了~~
+    long_description=(_dir / 'README.md').read_text(),  # 偷懒，就不创建f然后close了~~
     long_description_content_type='text/markdown',
     packages=find_packages(exclude=('tests', 'tests.*', '*account.pkl')),
     include_package_data=True,
@@ -48,7 +51,7 @@ setup(
     # 必须安装的模块，本库最常用的接口模式为 from pyxllib.xl import *，安装其必须的组件
     # ①如需要打包生成exe，尽量避免install多余的包，可以额外写脚本把这些依赖卸载
     # ②对运算性能速度有极致要求的场景，可以不使用pyxllib.xl接口，尽量避免import任何多余的无用代码
-    install_requires=open('requirements.txt').readlines(),
+    install_requires=(_dir / 'requirements.txt').read_text().splitlines(),
     # xlcv的安装
     # ①静态版：pip install pyxllib[xlcv]
     # ②开发版：python setup.py develop easy_install pyxllib[xlcv]

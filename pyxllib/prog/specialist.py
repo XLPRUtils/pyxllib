@@ -186,10 +186,14 @@ class XlOsEnv:
         return value
 
     @classmethod
-    def persist_set(cls, name, value, encoding=False):
+    def persist_set(cls, name, value, encoding=False, *, cfgfile=None):
         """ python里默认是改不了系统变量的，需要使用一些特殊手段
-
         https://stackoverflow.com/questions/17657686/is-it-possible-to-set-an-environment-variable-from-python-permanently/17657905
+
+        :param cfgfile: 在linux系统时，可以使用该参数
+            默认是把环境变量写入 ~/.bashrc，可以考虑写到
+            TODO 有这个设想，但很不好实现，不是很关键的功能，所以还未开发
+
         """
         # 写入环境变量这里是有点小麻烦的，要考虑unix和windows不同平台，以及怎么持久化存储的问题，这里直接调用一个三方库来解决
         from envariable import setenv
@@ -201,6 +205,6 @@ class XlOsEnv:
 
     @classmethod
     def unset(cls, name):
-        """ 删除 """
+        """ 删除环境变量 """
         from envariable import unsetenv
         unsetenv(name)

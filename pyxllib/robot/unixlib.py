@@ -236,7 +236,7 @@ class XlSSHClient(paramiko.SSHClient):
         """
         stdin, stdout, stderr = self.exec_command(command, *args, **kwargs)
         stderr = list(stderr)
-        if stderr:
+        if stderr:  # TODO 目前警告也会报错，其实警告没关系
             print(''.join(stderr))
             raise SshCommandError(f'服务器执行命令报错: {command}')
         return '\n'.join([f.strip() for f in list(stdout)])
@@ -431,7 +431,7 @@ class XlSSHClient(paramiko.SSHClient):
         except ScpLimitError:
             pass
 
-    def scp_put(self, local_path, remote_dir=None, *, mkdir=True, info=True, limit_bytes=None, if_exists=None):
+    def scp_put(self, local_path, remote_dir=None, *, mkdir=True, print_mode=True, limit_bytes=None, if_exists=None):
         """ 将本地的local_path上传到服务器的remote_path
 
         差不多是标准的scp接口，可以强制上传一个文件，或者一个目录
@@ -445,7 +445,7 @@ class XlSSHClient(paramiko.SSHClient):
             因为DataSync侧重数据同步，所以上传的文件或目录默认同名
                 如果要改名字，建议使用底层的scp接口实现
         :param mkdir: remote_dir可能不存在，为了避免出错，是否执行下mkdir
-        :param bool|int info:
+        :param bool|int print_mode:
             0: 不显示进度
             1: 显示整体上传进度（字节）
             2: 显示每个文件上传进度  （这个功能好像不常用没那么重要，暂未实现）
@@ -466,11 +466,11 @@ class XlSSHClient(paramiko.SSHClient):
         if mkdir:  # 判断服务器remote_dir存不存在，也要用命令，还不如直接用mkdir了
             self.exec(f'mkdir -p {remote_dir}')  # remote如果不存在父目录则建立
 
-        if info == 0:
+        if print_mode == 0:
             # 虽然不显示运行信息，但也要记录已上传了多少流量
-            progress = ScpProgress(info, limit_bytes=limit_bytes)
-        elif info == 1:
-            progress = ScpProgress(info, desc=f'↑{remote_path}',
+            progress = ScpProgress(print_mode, limit_bytes=limit_bytes)
+        elif print_mode == 1:
+            progress = ScpProgress(print_mode, desc=f'↑{remote_path}',
                                    total=local_path.size(),
                                    limit_bytes=limit_bytes)
         else:
@@ -496,7 +496,7 @@ class XlSSHClient(paramiko.SSHClient):
         及没有if_exists参数，默认都通过mtime时间戳来更新
         """
         self.scp_get(local_path=local_path, info=info, limit_bytes=limit_bytes, if_exists='mtime')
-        self.scp_put(local_path, mkdir=mkdir, info=info, limit_bytes=limit_bytes, if_exists='mtime')
+        self.scp_put(local_path, mkdir=mkdir, print_mode=info, limit_bytes=limit_bytes, if_exists='mtime')
 
     def __3_其他封装的功能(self):
         pass

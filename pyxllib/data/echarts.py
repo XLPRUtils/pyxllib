@@ -20,9 +20,9 @@ from pyecharts.globals import ChartType
 from pyecharts.commons.utils import JsCode
 from pyecharts.charts import Line, Scatter, Bar
 
-from pyxllib.prog.pupil import run_once
-from pyxllib.prog.pupil import EnchantBase, EnchantCvt
+from pyxllib.prog.pupil import run_once, EnchantBase, EnchantCvt
 from pyxllib.debug.specialist import TicToc, browser
+from pyxllib.file.specialist import XlPath
 
 
 class EnchantChart(EnchantBase):
@@ -116,6 +116,27 @@ class EnchantBar(EnchantBase):
         >> browser(pyecharts.charts.Bar.from_list(numbers))
         """
         return cls.from_dict({'value': list(yaxis)}, xaxis=xaxis, title=title)
+
+
+def get_render_body(chart):
+    """ 得到渲染后的核心html内容 """
+    from pyxllib.text.nestenv import NestEnv
+
+    # 1 得到完整的html内容
+    file = XlPath.tempfile(suffix='.html')
+    chart.render(path=str(file))
+    res = file.read_text()
+    file.delete()
+
+    # 2 得到body核心内容
+    res = NestEnv(res).xmltag('body', inner=True).string()
+
+    return res
+
+
+def render_echart_html(title='Awesome-pyecharts', body=''):
+    from pyxllib.text.xmllib import get_jinja_template
+    return get_jinja_template('echart_base.html').render(title=title, body=body)
 
 
 if __name__ == '__main__':

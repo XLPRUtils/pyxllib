@@ -629,7 +629,3 @@ def get_jinja_template(name, **kwargs):
 
     template = Environment(**kwargs).from_string((XlPath(__file__).parent / f'templates/{name}').read_text())
     return template
-
-
-def render_echart_html(title='Awesome-pyecharts', body=''):
-    return get_jinja_template('echart_base.html').render(title=title, body=body)
