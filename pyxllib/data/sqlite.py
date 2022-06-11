@@ -7,7 +7,6 @@
 import json
 import sqlite3
 
-import cv2
 import pandas as pd
 
 
@@ -154,6 +153,7 @@ class Connection(sqlite3.Connection):
 
     def exec_dict(self, *args, **kwargs):
         """ execute基础上，改成返回值为dict类型 """
+
         def dict_factory(cursor, row):
             d = {}
             for idx, col in enumerate(cursor.description):

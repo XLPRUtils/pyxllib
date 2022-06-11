@@ -238,8 +238,3 @@ class PrettifyStrDecorator:
     def __call__(self, *args, **kwargs):
         self.last_raw_res = self.func(*args, **kwargs)
         return prettifystr(self.last_raw_res)
-
-
-def timetag():
-    """ mysql支持的日期格式 """
-    return datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
