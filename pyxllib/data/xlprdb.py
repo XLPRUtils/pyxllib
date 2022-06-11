@@ -36,7 +36,10 @@ class XlprDb(Connection):
                                          context=context, **kwargs)
         return con
 
-    def view_gpu_usaged_statistics(self, days=7):
+    def __dbtool(self):
+        pass
+
+    def dbview_gpustat(self, days=7):
         """ 查看gpu近一周使用情况
 
         TODO 这里有可以并行处理的地方，但这个方法不是很重要，不需要特地去做加速占用cpu资源
@@ -83,23 +86,23 @@ class XlprDb(Connection):
 
         def get_total(title):
             ls = self.execute(textwrap.dedent(f"""\
-            -- CREATE INDEX ON gpu_stat (update_time);  -- update_time最好建个索引
+            -- CREATE INDEX ON gpu_trace (update_time);  -- update_time最好建个索引
             WITH cte1 AS (  -- 筛选一周内的数据，并且时间只精确到小时
                 SELECT host_name, total_memory, used_memory, date_trunc('hour', update_time) htime
-                FROM gpu_stat
+                FROM gpu_trace
                 WHERE update_time > (date_trunc('day', now() - interval '{days} days' + interval '8 hours'))
             ), cte2 AS (  -- 每小时每个服务器只保留一条记录
                 SELECT DISTINCT ON (htime, host_name) *
                 FROM cte1
-            )
+            ) -- count>6，是允许一台宕机的情况下仍能统计展示
             SELECT htime, sum(total_memory) total_memory, jsonb_deep_sum(used_memory) used_memory
-            FROM cte2 GROUP BY htime HAVING COUNT(host_name)=8;""")).fetchall()
+            FROM cte2 GROUP BY htime HAVING COUNT(host_name)>6;""")).fetchall()
             return create_chart(ls, title)
 
         def get_host(hostname, title):
             ls = self.execute(textwrap.dedent(f"""\
             SELECT update_time, total_memory, used_memory
-            FROM gpu_stat
+            FROM gpu_trace
             WHERE host_name='{hostname}' AND
                 update_time > (date_trunc('day', now() - interval '{days} days' + interval '8 hours'));""")).fetchall()
             return create_chart(ls, title)
@@ -115,5 +118,5 @@ class XlprDb(Connection):
         host_stats.sort(key=lambda x: -x[1])  # 按使用量，从多到少排序
         htmltexts += [x[0] for x in host_stats]
 
-        h = render_echart_html('gpu_stat', body='<br/>'.join(htmltexts))
+        h = render_echart_html('gpustat', body='<br/>'.join(htmltexts))
         return h
