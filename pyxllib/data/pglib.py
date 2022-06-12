@@ -13,9 +13,11 @@ from pyxllib.prog.pupil import check_install_package
 check_install_package('psycopg')
 
 import psycopg
+
+
 # import psycopg2
 # psycopg2.extensions.connection
 
 
-class Connection(psycopg.connection):
+class Connection(psycopg.Connection):
     pass
