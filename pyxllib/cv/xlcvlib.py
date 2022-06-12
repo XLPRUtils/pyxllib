@@ -21,6 +21,17 @@ from pyxllib.file.specialist import File
 _show_win_num = 0
 
 
+def _rgb_to_bgr_list(a):
+    # 类型转为list
+    if isinstance(a, np.ndarray):
+        a = a.tolist()
+    elif not isinstance(a, (list, tuple)):
+        a = [a]
+    if len(a) > 2:
+        a[:3] = [a[2], a[1], a[0]]
+    return a
+
+
 class xlcv(EnchantBase):
 
     @classmethod
@@ -197,21 +208,17 @@ class xlcv(EnchantBase):
     def cvt_channel(im, flags=None):
         """ 确保图片目前是flags指示的通道情况
 
-        1. 通道互转功能适用于RGBA情况
-        2. RGBA转RGB默认是黑底填充。如果需要白底填充，可以使用xlpil.rgba2rgb等专门的特殊处理策略。
+        :param flags:
+            0, 强制转为黑白图
+            1，强制转为BGR三通道图 （BGRA转BGR默认黑底填充？）
+            2，强制转为BGRA四通道图
         """
         if flags is None: return im
         n_c = xlcv.n_channels(im)
-        if flags == 0 and n_c > 1:
-            if n_c == 3:
-                im = cv2.cvtColor(im, cv2.COLOR_BGR2GRAY)
-            elif n_c == 4:
-                im = cv2.cvtColor(im, cv2.COLOR_BGRA2GRAY)
-        elif flags == 1 and n_c != 3:
-            if n_c == 1:
-                im = cv2.cvtColor(im, cv2.COLOR_GRAY2BGR)
-            elif n_c == 4:
-                im = cv2.cvtColor(im, cv2.COLOR_BGRA2BGR)
+        tags = ['GRAY', 'BGR', 'BGRA']
+        im_flag = {1: 0, 3: 1, 4: 2}[n_c]
+        if im_flag != flags:
+            im = cv2.cvtColor(im, getattr(cv2, f'COLOR_{tags[im_flag]}2{tags[flags]}'))
         return im
 
     @staticmethod
@@ -282,7 +289,7 @@ class xlcv(EnchantBase):
 
         # 1 获得二值图，区分前背景
         if binary_img is None:
-            gray_img = cv2.cvtColor(im, cv2.COLOR_BGR2GRAY) if im.ndim == 3 else im
+            gray_img = xlcv.read(im, 0)
             _, binary_img = cv2.threshold(gray_img, np.mean(gray_img), 255, cv2.THRESH_BINARY)
 
         # 2 分别存储点集
@@ -731,7 +738,118 @@ class xlcv(EnchantBase):
             images = [hstack(imgs) for imgs in images]
         return vstack(images)
 
-    def __6_other(self):
+    def __6_替换颜色(self):
+        pass
+
+    @staticmethod
+    def replace_color_by_mask(im, dst_color, mask):
+        c = _rgb_to_bgr_list(dst_color)
+        if len(c) == 1:
+            im2 = xlcv.read(im, 0)
+            im2[np.where((mask == [255]))] = c[0]
+        elif len(c) == 3:
+            if xlcv.n_channels(im) == 4:
+                x, y = im[:, :, :3].copy(), im[:, :, 3:4]
+                x[np.where((mask == [255]))] = c
+                im2 = np.concatenate([x, y], axis=2)
+            else:
+                im2 = xlcv.read(im, 1)
+                im2[np.where((mask == [255]))] = c
+        elif len(c) == 4:
+            im2 = xlcv.read(im, 2)
+            im2[np.where((mask == [255]))] = c
+        else:
+            raise ValueError(f'dst_color参数值有问题 {dst_color}')
+
+        return im2
+
+    @staticmethod
+    def replace_color(im, src_color, dst_color, *, tolerate=5):
+        """ 替换图片中的颜色
+
+        :param src_color: 原本颜色 (r, g, b)
+        :param dst_color: 目标颜色 (r, g, b)
+            可以设为None，表示删除颜色，即设置透明底，此时返回格式默认为BGRA
+        :param tolerate: 查找原本颜色的时候，容许的误差距离，在误差距离内的像素，仍然进行替换
+            这里的距离指单个数值允许的绝对距离
+
+        这个算法有几个比较麻烦的考虑点
+        1、原始格式不确定，对输入src_color是1个值、3个值、4个值等，处理逻辑不一样
+        2、cv2默认是bgr格式，但人的使用习惯，src_color习惯用rgb格式
+
+        为了工程化实现简洁，内部统一转成BGRA格式处理了
+
+        【使用示例】
+        # 1 原始图是单通道灰度图
+        im1 = xlcv.read('1.png', 0)
+        im2 = xlcv.replace_color(im1, 50, 255)  # 找到灰度为50的部分，变成白色
+        im2 = xlcv.replace_color(im1, 50, [0, 0, 255])  # 变成蓝色（图片自动升为3通道彩图）
+        # 变成白色，并且设置A=0，完全透明（透明色一般设为白色，但不一定要白色，只是完全透明时，设什么颜色其实都不太所谓）
+        im2 = xlcv.replace_color(im1, 50, [255, 255, 255, 0])
+
+        # 虽然原始图是单通道，但也可以用RGB、RGBA的机制检索位置，然后dst_color三种范式都支持
+        im2 = xlcv.replace_color(im1, [50, 50, 50], 255)
+        # src_color使用RGBA格式时，原图最后一个值是255，不透明
+        im2 = xlcv.replace_color(im1, [50, 50, 50, 255], 255)
+
+        # 2 原始图是RGB三通道彩色图
+        im1 = xlcv.read('1.png', 1)
+        im2 = xlcv.replace_color(im1, 40, 255, tolerate=20)  # 原图是彩图，依然可以用40±20的灰度机制检索mask
+        im2 = xlcv.replace_color(im1, [32, 60, 47], [0, 0, 255])  # 变成蓝色（最常见、正常用法）
+
+        # 效果类似，全部枚举有3*3*3=27种组合，都是支持的
+        # 其实src_color指定了匹配模式，dst_color指定了目标值，是相互独立的两种功能指定
+
+        # 3 原始图是RGBA四通道图
+        im1 = xlcv.read('1.png', 2)
+        # 注意RGBA在目标值指定为RGB模式时，不会自动降级，这个比较特殊，不会改变原有的A通道情况
+        im2 = xlcv.replace_color(im1, [32, 60, 47], [0, 0, 255])
+        """
+
+        def set_color(a):
+            a = _rgb_to_bgr_list(a)
+            # 确定有4个值
+            if len(a) == 1:
+                a = a * 3
+            if len(a) == 3:
+                a.append(255)  # A通道默认255，不透明
+            return np.array(a, dtype='uint8')
+
+        def set_range_color(arr, tolerate):
+            arr = arr.astype('int16')
+            a = (arr - tolerate).clip(0, 255)
+            b = (arr + tolerate).clip(0, 255)
+            return a.astype('uint8'), b.astype('uint8')
+
+        im1 = xlcv.read(im, 2)
+        a, b = set_range_color(set_color(src_color), tolerate)
+        mask = cv2.inRange(im1, a, b)
+        return xlcv.replace_color_by_mask(im, dst_color, mask)
+
+    @staticmethod
+    def replace_background_color(im, dst_color):
+        gray_img = xlcv.read(im, 0)
+        _, binary_img = cv2.threshold(gray_img, np.mean(gray_img), 255, cv2.THRESH_BINARY)
+        return xlcv.replace_color_by_mask(im, dst_color, 255 - binary_img)
+
+    @staticmethod
+    def replace_foreground_color(im, dst_color):
+        gray_img = xlcv.read(im, 0)
+        _, binary_img = cv2.threshold(gray_img, np.mean(gray_img), 255, cv2.THRESH_BINARY)
+        return xlcv.replace_color_by_mask(im, dst_color, binary_img)
+
+    @staticmethod
+    def replace_ground_color(im, foreground_color, background_color):
+        """ 替换前景、背景色
+        使用了二值图的方式来做mask
+        """
+        gray_img = xlcv.read(im, 0)
+        _, binary_img = cv2.threshold(gray_img, np.mean(gray_img), 255, cv2.THRESH_BINARY)
+        im = xlcv.replace_color_by_mask(im, background_color, 255 - binary_img)
+        im = xlcv.replace_color_by_mask(im, foreground_color, binary_img)
+        return im
+
+    def __7_other(self):
         pass
 
     @staticmethod
