@@ -6,15 +6,18 @@
 
 from collections import Counter
 import textwrap
+import json
 
+from pyxllib.prog.pupil import utc_timestamp
 from pyxllib.prog.specialist import XlOsEnv
 from pyxllib.file.specialist import XlPath
-
 from pyxllib.data.pglib import Connection
 
 
 class XlprDb(Connection):
     """ xlpr统一集中管理的一个数据库 """
+
+
 
     @classmethod
     def set_conninfo(cls, conninfo):
@@ -35,6 +38,19 @@ class XlprDb(Connection):
                                          autocommit=autocommit, row_factory=row_factory,
                                          context=context, **kwargs)
         return con
+
+    def __已有表格封装的一些操作(self):
+        pass
+
+    def insert_gpu_trace(self, host_name, total_memory, user_usage):
+        data = (host_name, round(total_memory, 2), json.dumps(user_usage, ensure_ascii=False), utc_timestamp(8))
+        self.execute("""INSERT INTO gpu_trace(host_name, total_memory, used_memory, update_time)"""
+                     """VALUES(%s, %s, %s, %s)""", data)
+
+    def insert_disk_trace(self, host_name, total_memory, user_usage):
+        data = (host_name, round(total_memory, 2), json.dumps(user_usage, ensure_ascii=False), utc_timestamp(8))
+        self.execute("""INSERT INTO disk_trace(host_name, total_memory, used_memory, update_time)"""
+                     """VALUES(%s, %s, %s, %s)""", data)
 
     def __dbtool(self):
         pass
@@ -85,8 +101,8 @@ class XlprDb(Connection):
             return get_render_body(chart), sum(all_users_usaged.values())
 
         def get_total(title):
+            # CREATE INDEX ON gpu_trace (update_time);  -- update_time最好建个索引
             ls = self.execute(textwrap.dedent(f"""\
-            -- CREATE INDEX ON gpu_trace (update_time);  -- update_time最好建个索引
             WITH cte1 AS (  -- 筛选一周内的数据，并且时间只精确到小时
                 SELECT host_name, total_memory, used_memory, date_trunc('hour', update_time) htime
                 FROM gpu_trace
@@ -94,9 +110,10 @@ class XlprDb(Connection):
             ), cte2 AS (  -- 每小时每个服务器只保留一条记录
                 SELECT DISTINCT ON (htime, host_name) *
                 FROM cte1
-            ) -- count>6，是允许一台宕机的情况下仍能统计展示
+            )
             SELECT htime, sum(total_memory) total_memory, jsonb_deep_sum(used_memory) used_memory
-            FROM cte2 GROUP BY htime HAVING COUNT(host_name)>6;""")).fetchall()
+            FROM cte2 GROUP BY htime HAVING (COUNT(host_name)=8 OR htime > '2022-06-12');""")).fetchall()
+            # 6月12日以前，脚本鲁棒性不够，只有完整统计了8台的才展示，6月12日后有兼容了，没取到的服务器就是宕机了，可以显示剩余服务器总情况
             return create_chart(ls, title)
 
         def get_host(hostname, title):
