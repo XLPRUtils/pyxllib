@@ -17,8 +17,6 @@ from pyxllib.data.pglib import Connection
 class XlprDb(Connection):
     """ xlpr统一集中管理的一个数据库 """
 
-
-
     @classmethod
     def set_conninfo(cls, conninfo):
         """ 提前将登录信息加密写到环境变量中，这样代码中就没有明文的账号密码信息
@@ -29,15 +27,6 @@ class XlprDb(Connection):
         # TODO 目前只设一个账号，后续可以扩展支持多个账号指定配置
         # conninfo = 'postgresql://postgres:yourpassword@172.16.170.110/xlpr'
         XlOsEnv.persist_set('XlprDbAccount', conninfo, encoding=True)
-
-    @classmethod
-    def connect(cls, conninfo='', *, autocommit=False, row_factory=None, context=None, **kwargs):
-        if conninfo == '':
-            conninfo = XlOsEnv.get('XlprDbAccount', decoding=True)
-        con = super(XlprDb, cls).connect(conninfo,
-                                         autocommit=autocommit, row_factory=row_factory,
-                                         context=context, **kwargs)
-        return con
 
     def __已有表格封装的一些操作(self):
         pass
@@ -137,3 +126,15 @@ class XlprDb(Connection):
 
         h = render_echart_html('gpustat', body='<br/>'.join(htmltexts))
         return h
+
+
+def connect_xlprdb(conninfo='', *, autocommit=False, row_factory=None, context=None, **kwargs) -> XlprDb:
+    """ 因为要标记 -> XlprDb，IDE才会识别出类别，有自动补全功能
+    但在类中写@classmethod，无法标记 -> XlprDb，所以就放外面单独写一个方法了
+    """
+    if conninfo == '':
+        conninfo = XlOsEnv.get('XlprDbAccount', decoding=True)
+    con = super(XlprDb, XlprDb).connect(conninfo,
+                                        autocommit=autocommit, row_factory=row_factory,
+                                        context=context, **kwargs)
+    return con

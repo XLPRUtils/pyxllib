@@ -586,7 +586,7 @@ class XlSSHClient(paramiko.SSHClient):
         # 1 整体情况
         used, total_memory = 0, 0
         for line in self.exec('df').splitlines()[1:]:
-            if not line.startswith('/dev/sda'):
+            if not line.startswith('/dev/'):
                 continue
             # 为了避免遇到路径中有空格的问题，用正则做了较复杂的判断、切割
             _total, _used = map(int, re.search(r'\s+(\d+)\s+(\d+)\s+\d+\s+\d+', line).groups())
