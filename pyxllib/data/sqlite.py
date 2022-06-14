@@ -10,7 +10,46 @@ import sqlite3
 import pandas as pd
 
 
-class Connection(sqlite3.Connection):
+class SqlBase:
+    """ Sql语法通用的功能 """
+
+    def __改(self):
+        pass
+
+    def create_index(self, index_name, table_name, cols):
+        if not isinstance(cols, str):
+            cols = ','.join(map(str, cols))
+        self.execute(f'CREATE INDEX {index_name} ON {table_name}(cols)')
+
+    def __查(self):
+        pass
+
+    def select_col(self, table_name, col):
+        """ 【查】获取一个表的一列数据
+
+        这个功能其实可以封装在更底层的Cursor，类似fetchone、fetchall的接口，但每次获取会自动去掉外层的tuple
+        """
+        for x in self.execute(f'SELECT {col} FROM {table_name}'):
+            yield x[0]
+
+    def group_count(self, table_name, cols, count_column_name='cnt'):
+        """ 【查】分组统计各组值组合出现次数
+        分析{table}表中，{cols}出现的种类和次数，按照出现次数从多到少排序
+
+        :param str|list cols: 输入逗号','隔开的字符串，比如
+            con.group_count('gpu_trace', 'host_name,total_memory')
+            后记：写list也行，会自动join为字符串
+        """
+        if not isinstance(cols, str):
+            cols = ','.join(map(str, cols))
+        sql = f'SELECT {cols}, COUNT(*) {count_column_name} FROM {table_name} ' \
+              f'GROUP BY {cols} ORDER BY {count_column_name} DESC'
+        records = self.execute(sql).fetchall()
+        df = pd.DataFrame.from_records(records, columns=cols.split(',') + [count_column_name])
+        return df
+
+
+class Connection(sqlite3.Connection, SqlBase):
     """
     DDL - 数据定义语言
         CREATE	创建一个新的表，一个表的视图，或者数据库中的其他对象。
@@ -68,11 +107,6 @@ class Connection(sqlite3.Connection):
         # 2 新建表格
         self.execute(f'CREATE TABLE {table_name}({column_descs})')
 
-    def create_index(self, index_name, table_name, cols):
-        if not isinstance(cols, str):
-            cols = ','.join(map(str, cols))
-        self.execute(f'CREATE INDEX {index_name} ON {table_name}(cols)')
-
     def ensure_column(self, table_name, col_name, col_type='', *, col_ref_val=None):
         """ 【DDL改】添加字段
         :param table_name:
@@ -127,24 +161,6 @@ class Connection(sqlite3.Connection):
         ops = ' AND '.join([f'{k}=?' for k in where.keys()])
         vals = list(cols.values()) + list(where.values())
         self.execute(f'UPDATE {table_name} SET {kvs} WHERE {ops}', self.cvt_types(vals))
-
-    def group_count(self, table_name, cols, count_column_name='cnt'):
-        """ 【查】分组统计各组值组合出现次数
-        分析{table}表中，{cols}出现的种类和次数，按照出现次数从多到少排序
-        """
-        sql = f'SELECT {cols}, COUNT(*) {count_column_name} FROM {table_name} ' \
-              f'GROUP BY {cols} ORDER BY {count_column_name} DESC'
-        records = self.execute(sql).fetchall()
-        df = pd.DataFrame.from_records(records, columns=cols.split(',') + [count_column_name])
-        return df
-
-    def select_col(self, table_name, col):
-        """ 【查】获取一个表的一列数据
-
-        这个功能其实可以封装在更底层的Cursor，类似fetchone、fetchall的接口，但每次获取会自动去掉外层的tuple
-        """
-        for x in self.execute(f'SELECT {col} FROM {table_name}'):
-            yield x[0]
 
     def exec_nametuple(self, *args, **kwargs):
         cur = self.cursor()
