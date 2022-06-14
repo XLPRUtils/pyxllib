@@ -18,15 +18,18 @@ class XlprDb(Connection):
     """ xlpr统一集中管理的一个数据库 """
 
     @classmethod
-    def set_conninfo(cls, conninfo):
+    def set_conninfo(cls, conninfo, seckey=''):
         """ 提前将登录信息加密写到环境变量中，这样代码中就没有明文的账号密码信息
+
+        :param conninfo:
+        :param seckey: 如果要获得数据库里较重要的密码等信息，需要配置key值，否则默认可以不设
 
         使用后，需要重启IDE重新加载环境变量
         并且本句明文代码需要删除
         """
         # TODO 目前只设一个账号，后续可以扩展支持多个账号指定配置
         # conninfo = 'postgresql://postgres:yourpassword@172.16.170.110/xlpr'
-        XlOsEnv.persist_set('XlprDbAccount', conninfo, encoding=True)
+        XlOsEnv.persist_set('XlprDbAccount', {'conninfo': conninfo, 'seckey': seckey}, encoding=True)
 
     def __已有表格封装的一些操作(self):
         pass
@@ -128,13 +131,17 @@ class XlprDb(Connection):
         return h
 
 
-def connect_xlprdb(conninfo='', *, autocommit=False, row_factory=None, context=None, **kwargs) -> XlprDb:
+def connect_xlprdb(conninfo='', seckey='', *, autocommit=False, row_factory=None, context=None, **kwargs) -> XlprDb:
     """ 因为要标记 -> XlprDb，IDE才会识别出类别，有自动补全功能
     但在类中写@classmethod，无法标记 -> XlprDb，所以就放外面单独写一个方法了
     """
+    d = XlOsEnv.get('XlprDbAccount', decoding=True)
     if conninfo == '':
-        conninfo = XlOsEnv.get('XlprDbAccount', decoding=True)
+        conninfo = d['conninfo']
+    if seckey == '':
+        seckey = d['seckey']
     con = super(XlprDb, XlprDb).connect(conninfo,
                                         autocommit=autocommit, row_factory=row_factory,
                                         context=context, **kwargs)
+    con.seckey = seckey
     return con

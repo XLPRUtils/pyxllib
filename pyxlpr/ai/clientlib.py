@@ -25,7 +25,7 @@ from pyxllib.prog.specialist import XlOsEnv
 from pyxllib.debug.specialist import TicToc
 from pyxllib.algo.geo import xywh2ltrb, rect_bounds
 from pyxllib.cv.expert import xlcv
-from pyxllib.data.xlprdb import XlprDb
+from pyxllib.data.xlprdb_ import XlprDb
 from pyxllib.file.specialist import get_etag, XlPath
 
 
