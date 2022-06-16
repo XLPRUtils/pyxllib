@@ -22,6 +22,7 @@ import paramiko
 from tqdm import tqdm
 import scp as scplib
 import humanfriendly
+import pandas as pd
 
 from pyxllib.algo.pupil import natural_sort
 from pyxllib.file.specialist import XlPath
@@ -117,6 +118,8 @@ class XlSSHClient(paramiko.SSHClient):
             except paramiko.ssh_exception.SSHException:
                 if k < relogin:
                     time.sleep(relogin_interval)
+        else:
+            raise paramiko.ssh_exception.SSHException
 
         self.map_path = map_path
 
@@ -504,39 +507,75 @@ class XlSSHClient(paramiko.SSHClient):
         if sudo:
             self.exec(f'usermod -aG sudo {name}')
 
+    def check_cpu_usage(self, *, print_mode=False):
+        # 1 获取原始信息
+        cmds = ['ps --no-headers -eo "pcpu,pmem,user"',  # 列出所有程序情况
+                # 使用awk，按用户分组统计cpu（百分比）、内存总使用量（绝对量）
+                """awk 'BEGIN{FS=OFS=" "}{a0[$3]+=$1; a1[$3]+=$2}END {for (i in a0) print i,a0[i],a1[i]}'""",
+                'sort -rn -k1,2 -k2,3'  # 按cpu、内存使用量从大到小排序，不是必须的
+                ]
+        lines = self.exec('|'.join(cmds)).splitlines()
+
+        # 2 按用户分组统计
+        def f(v):
+            return round(float(v), 2)
+
+        user_usage = {}
+        for line in lines:
+            user, cpu, mem = line.split()
+            cpu, mem = f(cpu), f(mem)
+            if cpu + mem > 0.0:
+                user_usage[user] = [cpu, mem]
+        _total = [f(sum([v[0] for v in user_usage.values()])), f(sum([v[1] for v in user_usage.values()]))]
+        user_usage['_total'] = _total
+
+        # 3 输出
+        if print_mode:
+            df = pd.DataFrame.from_records([[k, v[0], v[1]] for k, v in user_usage.items()],
+                                           columns=['user', '%cpu', '%mem'])
+            print(df)
+
+        return user_usage
+
     def check_gpu_usage(self, *, print_mode=False):
         """ 检查(每个用户)显存使用量
 
         使用这个命令，必须要求远程服务器安装了pip install gpustat
+
+        TODO 加上记录最高显卡温度？
         """
+        # 1 获取原始信息
+        lines = self.exec('gpustat').splitlines()[1:]
+        if print_mode:
+            print('\n'.join(lines))
 
-        def printf(*args, **kwargs):
-            if print_mode:
-                print(*args, **kwargs)
-
-        ls = self.exec('gpustat')
-        printf(ls)
-
-        total_memory = 0
+        # 2 按用户分组统计
         user_usage = defaultdict(float)
-        for line in ls.splitlines()[1:]:
+        for line in lines:
             name, temperature, capacity, uses = line.split('|')
             used, total = map(int, re.findall(r'\d+', capacity))
-            user_usage['other'] += used / 1024
-            total_memory += total / 1024
+            user_usage['_other'] += used / 1024  # 会有些没有用户操作的僵尸显存占用
             for x in uses.split():
-                user, used = re.search(r'(.+?)\((\d+)M\)', x).groups()
-                user_usage[user] += int(used) / 1024
-                user_usage['other'] -= int(used) / 1024
+                user, one_used = re.search(r'(.+?)\((\d+)M\)', x).groups()
+                one_used = int(one_used) / 1024
+                user_usage[user] += one_used
+                user_usage['_other'] -= one_used
 
         # 使用量从多到少排序。但注意如果转存到PG，jsonb会重新排序。
         user_usage = {k: round(user_usage[k], 2) for k in sorted(user_usage, key=lambda k: -user_usage[k])}
-        if user_usage['other'] < 0.01:
-            del user_usage['other']
+        if user_usage['_other'] < 0.01:
+            del user_usage['_other']
 
-        return total_memory, user_usage
+        user_usage['_total'] = round(sum(user_usage.values()), 2)
 
-    def check_disk_usage(self):
+        # 3 输出
+        if print_mode:
+            df = pd.DataFrame.from_records([[k, v] for k, v in user_usage.items()], columns=['user', 'gpu_mem_GB'])
+            print(df)
+
+        return user_usage
+
+    def check_disk_usage(self, *, print_mode=False, timeout=1200):
         """ 检查(每个用户)磁盘空间使用量
 
         :return: total 总字节MBytes数, msg 所有用户、包括其他非/home目录的使用MBytes数
@@ -554,13 +593,20 @@ class XlSSHClient(paramiko.SSHClient):
 
         # 2 /home目录下每个占用情况
         user_usage = defaultdict(int)
-        for line in self.exec('du -d 1 /home').splitlines():
+        for line in self.exec('du -d 1 /home', timeout=timeout).splitlines():  # 这个要限时，默认20分钟
             _bytes, _dir = line.split(maxsplit=1)
             _dir = _dir[6:]
             if _dir and int(_bytes) > GB:  # 达到1GB的才记录
                 user_usage[_dir] += int(_bytes)
 
-        user_usage['other'] = used - sum(user_usage.values())
+        user_usage['_other'] = used - sum(user_usage.values())
         user_usage = {k: (v // GB) for k, v in user_usage.items()}
+        user_usage = {k: round(user_usage[k], 2) for k in sorted(user_usage, key=lambda k: -user_usage[k])}
+        user_usage['_total'] = total_memory // GB
 
-        return total_memory // GB, user_usage
+        # 3 展示
+        if print_mode:
+            df = pd.DataFrame.from_records([[k, v] for k, v in user_usage.items()], columns=['user', 'disk_mem_GB'])
+            print(df)
+
+        return user_usage
