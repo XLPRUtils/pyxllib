@@ -93,21 +93,31 @@ class XlSSHClient(paramiko.SSHClient):
     def __1_初始化和执行(self):
         pass
 
-    def __init__(self, server, port, user, passwd, *, map_path=None):
+    def __init__(self, server, port, user, passwd, *, map_path=None,
+                 relogin=0, relogin_interval=1):
         """
-        Args:
-            server:
-            port:
-            user:
-            passwd:
-            map_path: 主要在上传、下载文件的时候，可以用来自动定位路径
-                参考写法：{'D:/': '/'}  # 将D盘映射到服务器位置
+
+        :param map_path: 主要在上传、下载文件的时候，可以用来自动定位路径
+            参考写法：{'D:/': '/'}  # 将D盘映射到服务器位置
+        :param int relogin: 当连接失败的时候，可能只是某种特殊原因，可以尝试重新连接
+            该参数设置重连的次数
+        :param int|float relogin_interval: 每次重连的间隔秒数
+
         """
 
         super().__init__()
         self.load_system_host_keys()
         self.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-        self.connect(server, port, user, passwd)
+
+        # 重试登录
+        for k in range(relogin + 1):
+            try:
+                self.connect(server, port, user, passwd)
+                break
+            except paramiko.ssh_exception.SSHException:
+                if k < relogin:
+                    time.sleep(relogin_interval)
+
         self.map_path = map_path
 
         class Path(pathlib.PurePosixPath):
@@ -170,76 +180,24 @@ class XlSSHClient(paramiko.SSHClient):
         self.Path = Path
 
     @classmethod
-    def log_in(cls, host_name, user_name, *, relogin=0, relogin_interval=1, map_path=None):
-        r""" 使用XlSshAccounts里存储的服务器、账号信息，进行登录
-        推荐的XlSSHClient初始化方法，可以隐藏IP、账号密码
-
-        :param int relogin: 当连接失败的时候，可能只是某种特殊原因，可以尝试重新连接
-            该参数设置重连的次数
-        :param int|float relogin_interval: 每次重连的间隔秒数
-
-        使用该功能，需要提前存储如下格式的环境变量
-        def 存储服务器信息():
-            import textwrap
-            from pyxllib.prog.specialist import XlOsEnv
-
-            xl_ssh_accounts = textwrap.dedent('''\
-            xlpr0 172.16.170.110:22
-                root,123456
-            titan1 172.16.170.119:22, g_titan1 172.16.170.120:6001
-                root,123456
-                ckz,654321
-            ''')
-
-            XlOsEnv.persist_set('XlSshAccounts', xl_ssh_accounts, encoding=True)
-
-        存写格式说明：
-        xlpr0 172.16.170.110:22   # 设置一个主机昵称 ip:port
-            root,123456 # tab或空格缩进，每行填写一个账号名、账号密码
-        titan1 172.16.170.119:22, g_titan1 172.16.170.120:6001  # 可以逗号隔开设置多台主机，常用于同一个机器的局域网、公网不同连接
-            root,123456
-            ckz,654321  # 可以写多个账号
-
-        220615周三17:45，这套机制略麻烦，后续弃用，改用XlprDb数据库的机制自动登录
+    def log_in(cls, host_name, user_name, **kwargs):
+        r""" 使用XlprDb里存储的服务器、账号信息，进行登录
         """
-        # 1 找主机信息
-        # 获得的是一个格式化的字符串，还没有做结构化解析
-        xl_ssh_accounts = XlOsEnv.get('XlSshAccounts', decoding=True)
-        lines = xl_ssh_accounts.splitlines()
-        idx, ip_port = None, None
-        for i, line in enumerate(lines):
-            if not re.match(r'\s', line):  # 服务器信息
-                hosts = line.split(',')
-                for host in hosts:
-                    m = re.match(rf'{host_name}\s+(.+)', host.strip())
-                    if m:
-                        idx, ip_port = i, m.group(1)
-                        break
-                if ip_port is not None:
-                    break
+        from pyxllib.data.pglib import connect_xlprdb
 
-        if idx is None:
-            raise ValueError(f'host_name={host_name} not found!')
-        host_ip, host_port = ip_port.split(':')
-
-        # 2 找账户信息
-        for i in range(idx + 1, len(lines)):
-            if re.match(r'\s', lines[i]):
-                # 一般应该没人会在密码以空格为后缀，所以这里使用strip，排除右边误输入空格的情况
-                # 更人性化，但是不严谨，遇到空格后缀的密码本套功能会处理不了
-                name, passwd = lines[i].strip().split(',')
-                if name == user_name:
-                    for k in range(relogin + 1):
-                        try:
-                            ssh = cls(host_ip, host_port, name, passwd, map_path=map_path)
-                            return ssh
-                        except paramiko.ssh_exception.SSHException:
-                            if k < relogin:
-                                time.sleep(relogin_interval)
+        with connect_xlprdb() as con:
+            if host_name.startswith('g_'):
+                host_ip = con.execute("SELECT host_ip FROM hosts WHERE host_name='xlpr0'").fetchone()[0]
+                pw, port = con.execute('SELECT (pgp_sym_decrypt(accounts, %s)::jsonb)[%s]::text, frpc_port'
+                                       ' FROM hosts WHERE host_name=%s',
+                                       (con.seckey, user_name, host_name[2:])).fetchone()
             else:
-                break
+                port = 22
+                host_ip, pw = con.execute('SELECT host_ip, (pgp_sym_decrypt(accounts, %s)::jsonb)[%s]::text'
+                                          ' FROM hosts WHERE host_name=%s',
+                                          (con.seckey, user_name, host_name)).fetchone()
 
-        raise ValueError(f'user_name={user_name} not found!')
+        return cls(host_ip, port, user_name, pw[1:-1], **kwargs)
 
     def exec(self, command, *args, **kwargs):
         """ exec_command的简化版

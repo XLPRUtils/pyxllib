@@ -203,6 +203,8 @@ class XlOsEnv:
             value = '\\' + value + '\\'
         setenv(name, value)
 
+        return value
+
     @classmethod
     def unset(cls, name):
         """ 删除环境变量 """
