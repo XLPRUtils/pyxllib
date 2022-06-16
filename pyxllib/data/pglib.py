@@ -8,8 +8,15 @@
 针对PostgreSQL封装的工具
 """
 
+import os
+import sys
+
 from pyxllib.prog.pupil import check_install_package
 
+if sys.platform == 'win32':
+    # windows系统中pg的默认安装位置
+    # TODO 更好的办法还是检查没有后，自动下载，这个得等新版的后端，从我们自己服务器下载
+    os.environ['PATH'] += r";C:/Program Files/PostgreSQL/14/bin"
 check_install_package('psycopg')
 
 from collections import Counter
@@ -160,6 +167,10 @@ class XlprDb(Connection):
     为了一些基础的数据库功能操作干净，尽量不要在全局导入过于复杂的包，可以在每个特定功能里导特定包
     """
 
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.seckey = ''
+
     @classmethod
     def set_conninfo(cls, conninfo, seckey=''):
         """ 提前将登录信息加密写到环境变量中，这样代码中就没有明文的账号密码信息
@@ -172,7 +183,7 @@ class XlprDb(Connection):
         """
         # TODO 目前只设一个账号，后续可以扩展支持多个账号指定配置
         # conninfo = 'postgresql://postgres:yourpassword@172.16.170.110/xlpr'
-        XlOsEnv.persist_set('XlprDbAccount', {'conninfo': conninfo, 'seckey': seckey}, encoding=True)
+        return XlOsEnv.persist_set('XlprDbAccount', {'conninfo': conninfo, 'seckey': seckey}, encoding=True)
 
     def update_host(self, host_name, accounts=None, **kwargs):
         """ 更新一台服务器的信息
@@ -189,7 +200,10 @@ class XlprDb(Connection):
                          (json.dumps(accounts, ensure_ascii=False), self.seckey, host_name))
         self.commit()
 
-    def get_host_account(self, host_name, user_name):
+    def get_ssh_client(self, host_name, user_name):
+        """ 获得服务器特定账户的ssh类 """
+        from pyxllib.robot.unixlib import XlSSHClient
+
         pw = self.execute(f'SELECT (pgp_sym_decrypt(accounts, %s)::jsonb)[%s]::text FROM hosts WHERE host_name=%s',
                           (self.seckey, user_name, host_name)).fetchone()[0]
         return pw[1:-1]
