@@ -200,26 +200,8 @@ class XlprDb(Connection):
                          (json.dumps(accounts, ensure_ascii=False), self.seckey, host_name))
         self.commit()
 
-    def get_ssh_client(self, host_name, user_name):
-        """ 获得服务器特定账户的ssh类 """
-        from pyxllib.robot.unixlib import XlSSHClient
-
-        pw = self.execute(f'SELECT (pgp_sym_decrypt(accounts, %s)::jsonb)[%s]::text FROM hosts WHERE host_name=%s',
-                          (self.seckey, user_name, host_name)).fetchone()[0]
-        return pw[1:-1]
-
     def __已有表格封装的一些操作(self):
         pass
-
-    def insert_gpu_trace(self, host_name, total_memory, user_usage):
-        data = (host_name, round(total_memory, 2), json.dumps(user_usage, ensure_ascii=False), utc_timestamp(8))
-        self.execute("""INSERT INTO gpu_trace(host_name, total_memory, used_memory, update_time)"""
-                     """VALUES(%s, %s, %s, %s)""", data)
-
-    def insert_disk_trace(self, host_name, total_memory, user_usage):
-        data = (host_name, round(total_memory, 2), json.dumps(user_usage, ensure_ascii=False), utc_timestamp(8))
-        self.execute("""INSERT INTO disk_trace(host_name, total_memory, used_memory, update_time)"""
-                     """VALUES(%s, %s, %s, %s)""", data)
 
     def __dbtool(self):
         pass
