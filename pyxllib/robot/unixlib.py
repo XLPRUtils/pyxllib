@@ -535,6 +535,7 @@ class XlSSHClient(paramiko.SSHClient):
                                            columns=['user', '%cpu', '%mem'])
             print(df)
 
+        del user_usage['_total']
         return user_usage
 
     def check_gpu_usage(self, *, print_mode=False):
@@ -573,6 +574,7 @@ class XlSSHClient(paramiko.SSHClient):
             df = pd.DataFrame.from_records([[k, v] for k, v in user_usage.items()], columns=['user', 'gpu_mem_GB'])
             print(df)
 
+        del user_usage['_total']
         return user_usage
 
     def check_disk_usage(self, *, print_mode=False, timeout=1200):
@@ -609,4 +611,5 @@ class XlSSHClient(paramiko.SSHClient):
             df = pd.DataFrame.from_records([[k, v] for k, v in user_usage.items()], columns=['user', 'disk_mem_GB'])
             print(df)
 
+        del user_usage['_total']
         return user_usage
