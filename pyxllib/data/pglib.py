@@ -23,11 +23,13 @@ from collections import Counter
 import json
 import json
 import textwrap
+import datetime
 
 import psycopg
 import psycopg.rows
 
-from pyxllib.prog.pupil import utc_timestamp
+from pyxllib.prog.newbie import round_int
+from pyxllib.prog.pupil import utc_now, utc_timestamp
 from pyxllib.prog.specialist import XlOsEnv
 from pyxllib.file.specialist import XlPath
 from pyxllib.data.sqlite import SqlBase
@@ -206,90 +208,170 @@ class XlprDb(Connection):
     def __dbtool(self):
         pass
 
-    def dbview_gpustat(self, days=7):
-        """ 查看gpu近一周使用情况
+    def _get_host_trace_total(self, mode, title, yaxis_name, date_trunc, recent, host_attr):
+        # CREATE INDEX ON gpu_trace (update_time);  -- update_time最好建个索引
+        ls = self.execute(textwrap.dedent(f"""\
+        WITH cte1 AS (  -- 筛选近期内的数据，并且时间做trunc处理
+            SELECT host_name, (status)['{mode}'], date_trunc('{date_trunc}', update_time) ttime
+            FROM host_trace WHERE update_time > %s AND (status ? '{mode}')
+        ), cte2 AS (  -- 每个时间里每个服务器的多条记录取平均
+            SELECT ttime, cte1.host_name, jsonb_div(jsonb_deep_sum(status), count(*)) status
+            FROM cte1 GROUP BY ttime, cte1.host_name
+        )  -- 接上每台服务器显存总值，并且分组得到每个时刻总情况
+        SELECT ttime, {host_attr}, jsonb_deep_sum(status)
+        FROM cte2 JOIN hosts ON cte2.host_name = hosts.host_name
+        GROUP BY ttime ORDER BY ttime"""), ((utc_now(8) - recent).isoformat(timespec='seconds'),)).fetchall()
+        return self._create_stack_chart(title, ls, yaxis_name=yaxis_name)
 
-        TODO 这里有可以并行处理的地方，但这个方法不是很重要，不需要特地去做加速占用cpu资源
+    def _get_host_trace_per_host(self, hostname, mode, title, yaxis_name, date_trunc, recent, host_attr):
+        ls = self.execute(textwrap.dedent(f"""\
+        WITH cte1 AS (
+            SELECT (status)['{mode}'], date_trunc('{date_trunc}', update_time) ttime
+            FROM host_trace WHERE host_name='{hostname}' AND update_time > %s AND (status ? '{mode}')
+        ), cte2 AS (
+            SELECT ttime, jsonb_div(jsonb_deep_sum(status), count(*)) status
+            FROM cte1 GROUP BY ttime
+        )
+        SELECT ttime, {host_attr}, jsonb_deep_sum(status)
+        FROM cte2 JOIN hosts ON hosts.host_name='{hostname}'
+        GROUP BY ttime ORDER BY ttime"""), ((utc_now(8) - recent).isoformat(timespec='seconds'),)).fetchall()
+        if not ls:  # 有的服务器可能数据是空的
+            return '', 0
+        return self._create_stack_chart(title, ls, yaxis_name=yaxis_name)
+
+    def _create_stack_chart(self, title, ls, *, yaxis_name=''):
+        """ 创建展示表
+
+        :param title: 表格标题
+        :param list ls: n*3，第1列是时间，第2列是总值，第3列是每个用户具体的数据
         """
-        from pyxllib.data.echarts import Line, render_echart_html, get_render_body
+        from pyxllib.data.echarts import Line, get_render_body
 
         map_user_name = {x[0]: x[1] for x in self.execute('SELECT account_name, name FROM users')}
 
-        def create_chart(ls, title):
-            # 1 计算涉及的所有用户以及使用总量
-            all_users_usaged = Counter()
-            last_time = None
-            for x in ls:
-                hours = 0 if last_time is None else ((x[0] - last_time).total_seconds() / 3600)
-                last_time = x[0]
-                for k, v in x[2].items():
-                    all_users_usaged[k] += v * hours
+        # 1 计算涉及的所有用户以及使用总量
+        all_users_usaged = Counter()
+        last_time = None
+        for x in ls:
+            hours = 0 if last_time is None else ((x[0] - last_time).total_seconds() / 3600)
+            last_time = x[0]
+            for k, v in x[2].items():
+                if k == '_total':
+                    continue
+                all_users_usaged[k] += v * hours
 
-            # print(all_users_usaged.most_common())
+        # 2 转图表可视化
+        def to_list(values):
+            return [(x[0], v) for x, v in zip(ls, values)]
 
-            # 2 转图表可视化
-            def to_list(values):
-                return [(x[0], v) for x, v in zip(ls, values)]
+        def pretty_val(v):
+            return round_int(v) if v > 100 else round(v, 2)
 
-            chart = Line()
-            chart.set_title(title)
-            chart.options['xAxis'][0].update({'min': ls[0][0], 'type': 'time',
-                                              # 'minInterval': 3600 * 1000 * 24,
-                                              'name': '时间', 'nameGap': 50, 'nameLocation': 'middle'})
-            chart.options['yAxis'][0].update({'name': '显存（单位：GB）', 'nameGap': 50, 'nameLocation': 'middle'})
-            # 目前是比较暴力的方法调整排版，后续要研究是不是能更自动灵活些
-            chart.options['legend'][0].update({'top': '6%', 'icon': 'pin'})
-            chart.options['grid'] = [{'top': 100, 'containLabel': True}]
-            chart.options['tooltip'].opts.update({'axisPointer': {'type': 'cross'}, 'trigger': 'item'})
+        chart = Line()
+        chart.set_title(title)
+        chart.options['xAxis'][0].update({'min': ls[0][0], 'type': 'time',
+                                          # 'minInterval': 3600 * 1000 * 24,
+                                          'name': '时间', 'nameGap': 50, 'nameLocation': 'middle'})
+        chart.options['yAxis'][0].update({'name': yaxis_name, 'nameGap': 50, 'nameLocation': 'middle'})
+        # 目前是比较暴力的方法调整排版，后续要研究是不是能更自动灵活些
+        chart.options['legend'][0].update({'top': '6%', 'icon': 'pin'})
+        chart.options['grid'] = [{'top': 55 + len(all_users_usaged) * 4, 'containLabel': True}]
+        chart.options['tooltip'].opts.update({'axisPointer': {'type': 'cross'}, 'trigger': 'item'})
 
-            chart.add_series(f'total{ls[0][1]:.2f}', to_list([x[1] for x in ls]), areaStyle={})
-            for user, usaged in all_users_usaged.most_common():
-                usaged = usaged / ((ls[-1][0] - ls[0][0]).total_seconds() / 3600)
-                chart.add_series(f'{map_user_name.get(user, user)}{usaged:.2f}',
-                                 to_list([x[2].get(user, 0) for x in ls]),
-                                 areaStyle={}, stack='Total', emphasis={'focus': 'series'})
+        chart.add_series(f'total{pretty_val(ls[0][1]):g}', to_list([x[1] for x in ls]), areaStyle={})
+        for user, usaged in all_users_usaged.most_common():
+            usaged = usaged / ((ls[-1][0] - ls[0][0]).total_seconds() / 3600)
+            chart.add_series(f'{map_user_name.get(user, user)}{pretty_val(usaged):g}',
+                             to_list([x[2].get(user, 0) for x in ls]),
+                             areaStyle={}, stack='Total', emphasis={'focus': 'series'})
 
-            return get_render_body(chart), sum(all_users_usaged.values())
+        return get_render_body(chart), sum(all_users_usaged.values())
 
-        def get_total(title):
-            # CREATE INDEX ON gpu_trace (update_time);  -- update_time最好建个索引
-            ls = self.execute(textwrap.dedent(f"""\
-            WITH cte1 AS (  -- 筛选一周内的数据，并且时间只精确到小时
-                SELECT host_name, total_memory, used_memory, date_trunc('hour', update_time) htime
-                FROM gpu_trace
-                WHERE update_time > (date_trunc('day', now() - interval '{days} days' + interval '8 hours'))
-            ), cte2 AS (  -- 每小时每个服务器只保留一条记录
-                SELECT DISTINCT ON (htime, host_name) *
-                FROM cte1
-            )
-            SELECT htime, sum(total_memory) total_memory, jsonb_deep_sum(used_memory) used_memory
-            FROM cte2 GROUP BY htime HAVING (COUNT(host_name)=8 OR htime > '2022-06-12')
-            ORDER BY htime""")).fetchall()
-            # 6月12日以前，脚本鲁棒性不够，只有完整统计了8台的才展示，6月12日后有兼容了，没取到的服务器就是宕机了，可以显示剩余服务器总情况
-            return create_chart(ls, title)
+    def dbview_cpu(self, recent=datetime.timedelta(days=1), date_trunc='hour'):
+        from pyxllib.data.echarts import render_echart_html
 
-        def get_host(hostname, title):
-            ls = self.execute(textwrap.dedent(f"""\
-            SELECT update_time, total_memory, used_memory
-            FROM gpu_trace
-            WHERE host_name='{hostname}' AND
-                update_time > (date_trunc('day', now() - interval '{days} days' + interval '8 hours'))
-            ORDER BY update_time""")).fetchall()
-            return create_chart(ls, title)
+        args = ['CPU核心数（比如4核显示是400%）', date_trunc, recent, 'sum(hosts.cpu_number)*100']
 
         htmltexts = []
-        htmltexts.append(get_total('XLPR八台服务器GPU显存资源最近使用情况')[0])
+        res = self._get_host_trace_total('cpu', 'XLPR服务器 CPU 使用近况', *args)
+        htmltexts.append(res[0])
 
-        hosts = self.execute('SELECT host_name, nick_name FROM hosts WHERE id > 1').fetchall()
-        self.commit()
+        hosts = self.execute('SELECT host_name, nick_name FROM hosts WHERE gpu_gb > 0').fetchall()
         host_stats = []
         for i, (hn, nick_name) in enumerate(hosts, start=1):
             name = f'{hn}，{nick_name}' if nick_name else hn
-            host_stats.append(get_host(hn, f'{name}'))
+            host_stats.append(self._get_host_trace_per_host(hn, 'cpu', f'{name}', *args))
         host_stats.sort(key=lambda x: -x[1])  # 按使用量，从多到少排序
         htmltexts += [x[0] for x in host_stats]
 
-        h = render_echart_html('gpustat', body='<br/>'.join(htmltexts))
+        h = render_echart_html('cpu', body='<br/>'.join(htmltexts))
+        return h
+
+    def dbview_cpu_memory(self, recent=datetime.timedelta(days=1), date_trunc='hour'):
+        from pyxllib.data.echarts import render_echart_html
+
+        args = ['内存（单位：GB）', date_trunc, recent, 'sum(hosts.cpu_gb)']
+
+        htmltexts = []
+        res = self._get_host_trace_total('cpu_memory', 'XLPR服务器 内存 使用近况', *args)
+        htmltexts.append(res[0])
+
+        hosts = self.execute('SELECT host_name, nick_name FROM hosts WHERE gpu_gb > 0').fetchall()
+        host_stats = []
+        for i, (hn, nick_name) in enumerate(hosts, start=1):
+            name = f'{hn}，{nick_name}' if nick_name else hn
+            host_stats.append(self._get_host_trace_per_host(hn, 'cpu_memory', f'{name}', *args))
+        host_stats.sort(key=lambda x: -x[1])  # 按使用量，从多到少排序
+        htmltexts += [x[0] for x in host_stats]
+
+        h = render_echart_html('cpu_memory', body='<br/>'.join(htmltexts))
+        return h
+
+    def dbview_disk_memory(self, recent=datetime.timedelta(days=30), date_trunc='hour'):
+        """ 查看disk硬盘使用近况
+        """
+        from pyxllib.data.echarts import render_echart_html
+
+        args = ['硬盘（单位：GB）', date_trunc, recent, 'sum(hosts.disk_gb)']
+
+        htmltexts = []
+        res = self._get_host_trace_total('disk_memory', 'XLPR服务器 DISK硬盘 使用近况', *args)
+        htmltexts.append(res[0])
+        htmltexts.append('注：xlpr4（四卡）服务器使用du计算/home大小有问题，未统计在列<br/>')
+
+        hosts = self.execute('SELECT host_name, nick_name FROM hosts WHERE gpu_gb > 0').fetchall()
+        host_stats = []
+        for i, (hn, nick_name) in enumerate(hosts, start=1):
+            name = f'{hn}，{nick_name}' if nick_name else hn
+            host_stats.append(self._get_host_trace_per_host(hn, 'disk_memory', f'{name}', *args))
+        host_stats.sort(key=lambda x: -x[1])  # 按使用量，从多到少排序
+        htmltexts += [x[0] for x in host_stats]
+
+        h = render_echart_html('disk_memory', body='<br/>'.join(htmltexts))
+        return h
+
+    def dbview_gpu_memory(self, recent=datetime.timedelta(days=30), date_trunc='day'):
+        """ 查看gpu近使用近况
+
+        TODO 这里有可以并行处理的地方，但这个方法不是很重要，不需要特地去做加速占用cpu资源
+        """
+        from pyxllib.data.echarts import render_echart_html
+
+        args = ['显存（单位：GB）', date_trunc, recent, 'sum(hosts.gpu_gb)']
+
+        htmltexts = []
+        res = self._get_host_trace_total('gpu_memory', 'XLPR八台服务器 GPU显存 使用近况', *args)
+        htmltexts.append(res[0])
+
+        hosts = self.execute('SELECT host_name, nick_name FROM hosts WHERE gpu_gb > 0').fetchall()
+        host_stats = []
+        for i, (hn, nick_name) in enumerate(hosts, start=1):
+            name = f'{hn}，{nick_name}' if nick_name else hn
+            host_stats.append(self._get_host_trace_per_host(hn, 'gpu_memory', f'{name}', *args))
+        host_stats.sort(key=lambda x: -x[1])  # 按使用量，从多到少排序
+        htmltexts += [x[0] for x in host_stats]
+
+        h = render_echart_html('gpu_memory', body='<br/>'.join(htmltexts))
         return h
 
 
