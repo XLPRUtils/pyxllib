@@ -203,6 +203,7 @@ class XlprDb(Connection):
         self.commit()
 
     def __已有表格封装的一些操作(self):
+        """ TODO dbview 改名 host_trace """
         pass
 
     def __dbtool(self):
@@ -247,7 +248,10 @@ class XlprDb(Connection):
         """
         from pyxllib.data.echarts import Line, get_render_body
 
-        map_user_name = {x[0]: x[1] for x in self.execute('SELECT account_name, name FROM users')}
+        map_user_name = {}
+        for ks, v in self.execute('SELECT account_names, name FROM users'):
+            for k in ks:
+                map_user_name[k] = v
 
         # 1 计算涉及的所有用户以及使用总量
         all_users_usaged = Counter()
@@ -258,7 +262,14 @@ class XlprDb(Connection):
             for k, v in x[2].items():
                 if k == '_total':
                     continue
-                all_users_usaged[k] += v * hours
+                all_users_usaged[map_user_name.get(k, k)] += v * hours
+
+        # ls里的姓名也要跟着更新
+        for i, x in enumerate(ls):
+            ct = Counter()
+            for k, v in x[2].items():
+                ct[map_user_name.get(k, k)] += v
+            ls[i] = (x[0], x[1], ct)
 
         # 2 转图表可视化
         def to_list(values):
@@ -280,8 +291,8 @@ class XlprDb(Connection):
 
         chart.add_series(f'total{pretty_val(ls[0][1]):g}', to_list([x[1] for x in ls]), areaStyle={})
         for user, usaged in all_users_usaged.most_common():
-            usaged = usaged / ((ls[-1][0] - ls[0][0]).total_seconds() / 3600)
-            chart.add_series(f'{map_user_name.get(user, user)}{pretty_val(usaged):g}',
+            usaged = usaged / ((ls[-1][0] - ls[0][0]).total_seconds() / 3600 + 1e-9)
+            chart.add_series(f'{user}{pretty_val(usaged):g}',
                              to_list([x[2].get(user, 0) for x in ls]),
                              areaStyle={}, stack='Total', emphasis={'focus': 'series'})
 
