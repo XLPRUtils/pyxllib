@@ -99,7 +99,7 @@ class XlSSHClient(paramiko.SSHClient):
         """
 
         :param map_path: 主要在上传、下载文件的时候，可以用来自动定位路径
-            参考写法：{'D:/': '/'}  # 将D盘映射到服务器位置
+            参考写法：{'C:/': '/'}  # 将D盘映射到服务器位置
         :param int relogin: 当连接失败的时候，可能只是某种特殊原因，可以尝试重新连接
             该参数设置重连的次数
         :param int|float relogin_interval: 每次重连的间隔秒数
@@ -183,7 +183,7 @@ class XlSSHClient(paramiko.SSHClient):
         self.Path = Path
 
     @classmethod
-    def log_in(cls, host_name, user_name, **kwargs):
+    def log_in(cls, host_name, user_name, map_path=None, **kwargs):
         r""" 使用XlprDb里存储的服务器、账号信息，进行登录
         """
         from pyxllib.data.pglib import connect_xlprdb
@@ -200,7 +200,9 @@ class XlSSHClient(paramiko.SSHClient):
                                           ' FROM hosts WHERE host_name=%s',
                                           (con.seckey, user_name, host_name)).fetchone()
 
-        return cls(host_ip, port, user_name, pw[1:-1], **kwargs)
+        if map_path is None:
+            map_path = {'C:/': '/'}
+        return cls(host_ip, port, user_name, pw[1:-1], map_path=map_path, **kwargs)
 
     def exec(self, command, *args, **kwargs):
         """ exec_command的简化版
@@ -466,6 +468,19 @@ class XlSSHClient(paramiko.SSHClient):
         except ScpLimitError:
             pass
 
+    def scp_put_brief(self, _dir):
+        """ 过滤一些一般不同步的文件 """
+        for p in XlPath(_dir).glob('*'):
+            if p.name in ('.git', '.idea') or p.suffix == '.pyc':
+                continue
+
+            if p.is_dir():
+                # 如果是目录，继续递归规则处理
+                self.scp_put_brief(p)
+            else:
+                # 否则是没被过滤的文件，直接上传
+                self.scp_put(p)
+
     def scp_sync(self, local_path, *, mkdir=True, info=True, limit_bytes=None):
         """ 服务器和本地目录的数据同步
 
@@ -480,7 +495,7 @@ class XlSSHClient(paramiko.SSHClient):
         self.scp_get(local_path=local_path, info=info, limit_bytes=limit_bytes, if_exists='mtime')
         self.scp_put(local_path, mkdir=mkdir, print_mode=info, limit_bytes=limit_bytes, if_exists='mtime')
 
-    def __3_其他封装的功能(self):
+    def __3_host_trace(self):
         pass
 
     def set_user_passwd(self, name, passwd):
@@ -613,3 +628,20 @@ class XlSSHClient(paramiko.SSHClient):
 
         del user_usage['_total']
         return user_usage
+
+    def __4_其他(self):
+        pass
+
+    def restart_frpc(self, frp_dir='/root/frp_0.37.0_linux_amd64'):
+        """ 因为service不一定有效，这里通过暴力找frpc的方式来设置
+
+        :param frp_dir: frp文件所在目录
+        """
+        cmds = [
+            # 找到已有的 ./frpc 关闭
+            r"for i in $(ps -eo 'args,pid' | awk '/^.\/frpc / {print $2}'); do kill ${i}; done",
+            # 重新启动 frpc
+            f"cd {frp_dir}; nohup ./frpc > /dev/null 2>&1 &"
+        ]
+        # 注意关闭和重启需要同时操作，不然在外网穿刺连接ssh，执行第1句后就断开连接了
+        self.exec('; '.join(cmds))

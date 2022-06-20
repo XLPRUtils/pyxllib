@@ -14,11 +14,16 @@ import sys
 from pyxllib.prog.pupil import check_install_package
 
 if sys.platform == 'win32':
+    # https://www.yuque.com/xlpr/pyxllib/install_psycopg
+
     # windows系统中pg的默认安装位置
     # TODO 更好的办法还是检查没有后，自动下载，这个得等新版的后端，从我们自己服务器下载
-    os.environ['PATH'] += r";C:/Program Files/PostgreSQL/14/bin"
+    # os.environ['PATH'] += r";C:/Program Files/PostgreSQL/14/bin"
+    os.environ['PATH'] += r";C:/Program Files/PostgreSQL"
+
 check_install_package('psycopg')
 
+import io
 from collections import Counter
 import json
 import json
@@ -31,7 +36,7 @@ import psycopg.rows
 from pyxllib.prog.newbie import round_int
 from pyxllib.prog.pupil import utc_now, utc_timestamp
 from pyxllib.prog.specialist import XlOsEnv
-from pyxllib.file.specialist import XlPath
+from pyxllib.file.specialist import XlPath, get_etag
 from pyxllib.data.sqlite import SqlBase
 
 
@@ -202,7 +207,80 @@ class XlprDb(Connection):
                          (json.dumps(accounts, ensure_ascii=False), self.seckey, host_name))
         self.commit()
 
-    def __已有表格封装的一些操作(self):
+    def __1_xlapi相关数据表操作(self):
+        """
+        files，存储二进制文件的表
+            etag，文件、二进制对应的etag值
+            meta，可以存储不同数据类型一些特殊的属性，比如图片可以存储高、宽
+                但因为用户使用中，为了提高速度，以及减少PIL等依赖，执行中不做计算
+                可以其他途径使用定期脚本自动处理
+        xlapi，底层api调用的记录统计
+            input，所有输入的参数
+                mode，使用的算法接口
+                etag，涉及到大文件数据的，以打包后的文件的etag做记录
+            output，运行结果
+            elapse_ms，调用函数的用时，不含后处理转换格式的时间
+        xlserver，服务端记录的使用情况
+        """
+        pass
+
+    def insert_row2files(self, buffer, *, etag=None, **kwargs):
+        """
+
+        为了运算效率考虑，除了etag需要用于去重，是必填字段
+        其他字段默认先不填充计算
+        """
+        # 1 已经有的不重复存储
+        if etag is None:
+            etag = get_etag(buffer)
+
+        res = self.execute('SELECT etag FROM files WHERE etag=%s', (etag,)).fetchone()
+        if res:
+            return
+
+        # 2 没有的图，做个备份
+        kwargs['etag'] = etag
+        kwargs['data'] = buffer
+        kwargs['fsize_kb'] = round_int(len(buffer) / 1024)
+
+        self.insert_row('files', kwargs)
+        self.commit()
+
+    def get_xlapi_record(self, **input):
+        if 'options' in input and not input['options']:
+            del input['options']
+        res = self.execute('SELECT id, output FROM xlapi WHERE input=%s', (self.cvt_type(input),)).fetchone()
+        if res:
+            _id, output = res
+            output['xlapi_id'] = _id
+            return output
+
+    def insert_row2xlapi(self, input, output, elapse_ms, *, on_conflict='(input) DO NOTHING'):
+        """ 往数据库记录当前操作内容
+
+        :return: 这个函数比较特殊，需要返回插入的条目的id值
+        """
+        if on_conflict == 'REPLACE':
+            on_conflict = "(input) DO UPDATE " \
+                          "SET output=EXCLUDED.output, elapse_ms=EXCLUDED.elapse_ms, update_time=EXCLUDED.update_time"
+
+        input = json.dumps(input, ensure_ascii=False)
+        self.insert_row('xlapi', {'input': input, 'output': output,
+                                  'elapse_ms': elapse_ms, 'update_time': utc_timestamp(8)},
+                        on_conflict=on_conflict)
+
+        return self.execute('SELECT id FROM xlapi WHERE input=%s', (input,)).fetchone()[0]
+
+    def insert_row2xlserver(self, request, xlapi_id=0):
+        kw = {'remote_addr': request.remote_addr,
+              'token': request.headers.get('Token', None),
+              'route': '/'.join(request.base_url.split('/')[3:]),
+              'update_time': utc_timestamp(8),
+              'xlapi_id': xlapi_id}
+        print(kw)
+        self.insert_row('xlserver', kw)
+
+    def __2_host_trace相关可视化(self):
         """ TODO dbview 改名 host_trace """
         pass
 
