@@ -18,6 +18,7 @@ import json
 import statistics
 import requests
 import cv2
+import time
 
 from pyxllib.prog.newbie import round_int
 from pyxllib.prog.pupil import check_install_package, is_url
@@ -25,7 +26,8 @@ from pyxllib.prog.specialist import XlOsEnv
 from pyxllib.debug.specialist import TicToc
 from pyxllib.algo.geo import xywh2ltrb, rect_bounds
 from pyxllib.cv.expert import xlcv
-from pyxllib.data.xlprdb_ import XlprDb
+# from pyxllib.data.xlprdb_ import XlprDb
+from pyxllib.data.pglib import XlprDb
 from pyxllib.file.specialist import get_etag, XlPath
 
 
@@ -173,15 +175,10 @@ class XlAiClient:
             if 'priu' in accounts:
                 self.setup_priu(**accounts['priu'])
 
-    def setup_database(self, dbfile=XlPath.userdir() / '.xlpr/xlpr.db',
-                       check_same_thread=False):
+    def setup_database(self, db: XlprDb):
         """ 是否将运行结果存储到数据库中
-
-        :param check_same_thread: 如果可能有多个线程同时操作数据库，特别是用flask做前端时，需要关闭
         """
-        self.db = XlprDb(dbfile, check_same_thread=check_same_thread)
-        self.db.init_jpgimages_table()
-        self.db.init_aipocr_table()
+        self.db = db
 
     def setup_aipocr(self, app_id, api_key, secret_key):
         """
@@ -268,7 +265,7 @@ class XlAiClient:
             # 如果数据库里有处理过的记录，直接引用
             im_etag = get_etag(buffer)
             if use_exists_record:
-                res = self.db.get_aipocr_result(mode_name, im_etag, options)
+                res = self.db.get_xlapi_record(mode=mode_name, etag=im_etag, options=options)
             else:
                 res = None
 
@@ -277,11 +274,21 @@ class XlAiClient:
             #   使用多线程测试了并没有更快，也发现主要耗时是post，数据库不会花太多时间，就先不改动了
             #   等以后数据库大了，看运行是否会慢，可以再测试是否有必要弄协程
             if res is None or 'error_code' in res:
+                tt = time.time()
                 res = func(buffer, options)
+                elapse_ms = round_int(1000*(time.time() - tt))
+
                 if len(buffer) < save_buffer_threshold_size:
-                    self.db.insert_jpgimage_from_buffer(buffer, etag=im_etag)
+                    self.db.insert_row2files(buffer, etag=im_etag, name='.jpg')
                 if update_record:
-                    self.db.insert_aipocr_record(mode_name, im_etag, options, res, if_exists='REPLACE')
+                    input = {'mode': mode_name, 'etag': im_etag}
+                    if options:
+                        input['options'] = options
+                    xlapi_id = self.db.insert_row2xlapi(input, res, elapse_ms, on_conflict='REPLACE')
+                    res['xlapi_id'] = xlapi_id
+
+            if 'log_id' in res:  # 有xlapi_id的标记，就不用百度原本的log_id了
+                del res['log_id']
         else:
             res = func(buffer, options)
 
