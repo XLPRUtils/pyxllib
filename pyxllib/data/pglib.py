@@ -18,8 +18,7 @@ if sys.platform == 'win32':
 
     # windows系统中pg的默认安装位置
     # TODO 更好的办法还是检查没有后，自动下载，这个得等新版的后端，从我们自己服务器下载
-    # os.environ['PATH'] += r";C:/Program Files/PostgreSQL/14/bin"
-    os.environ['PATH'] += r";C:/Program Files/PostgreSQL"
+    os.environ['PATH'] += r";C:/Program Files/PostgreSQL/14/bin"
 
 check_install_package('psycopg')
 
