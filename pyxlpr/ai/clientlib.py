@@ -26,8 +26,6 @@ from pyxllib.prog.specialist import XlOsEnv
 from pyxllib.debug.specialist import TicToc
 from pyxllib.algo.geo import xywh2ltrb, rect_bounds
 from pyxllib.cv.expert import xlcv
-# from pyxllib.data.xlprdb_ import XlprDb
-from pyxllib.data.pglib import XlprDb
 from pyxllib.file.specialist import get_etag, XlPath
 
 
@@ -175,8 +173,12 @@ class XlAiClient:
             if 'priu' in accounts:
                 self.setup_priu(**accounts['priu'])
 
-    def setup_database(self, db: XlprDb):
+    def setup_database(self, db):
         """ 是否将运行结果存储到数据库中
+
+        from pyxllib.data.pglib import connect_xlprdb
+        db = connect_xlprdb()
+        self.setup_database(db)
         """
         self.db = db
 
@@ -276,7 +278,7 @@ class XlAiClient:
             if res is None or 'error_code' in res:
                 tt = time.time()
                 res = func(buffer, options)
-                elapse_ms = round_int(1000*(time.time() - tt))
+                elapse_ms = round_int(1000 * (time.time() - tt))
 
                 if len(buffer) < save_buffer_threshold_size:
                     self.db.insert_row2files(buffer, etag=im_etag, name='.jpg')
