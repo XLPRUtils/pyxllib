@@ -11,22 +11,23 @@
 
 
 """
-import pprint
-
 import base64
 import json
-import statistics
-import requests
-import cv2
+import pprint
 import time
+import urllib3
+
+import cv2
+import requests
+import statistics
 
 from pyxllib.prog.newbie import round_int
 from pyxllib.prog.pupil import check_install_package, is_url
 from pyxllib.prog.specialist import XlOsEnv
-from pyxllib.debug.specialist import TicToc
 from pyxllib.algo.geo import xywh2ltrb, rect_bounds
-from pyxllib.cv.expert import xlcv
 from pyxllib.file.specialist import get_etag, XlPath
+from pyxllib.debug.specialist import TicToc
+from pyxllib.cv.expert import xlcv
 
 
 def __1_转类labelme标注():
@@ -195,14 +196,16 @@ class XlAiClient:
         self._mathpix_header = {'Content-type': 'application/json'}
         self._mathpix_header.update({'app_id': app_id, 'app_key': app_key})
 
-    def setup_priu(self, token, host='118.195.202.82', check=False):
+    def setup_priu(self, token, host='118.195.202.82'):
         """ 福建省模式识别与图像理解重点实验室 """
         self._priu_header = {'Content-type': 'application/json'}
         self._priu_header.update({'Token': token})
         self._priu_host = host
 
-        if check:
+        try:
             return '欢迎来到 厦门理工' in requests.get(f'http://{host}/home').text
+        except requests.exceptions.ConnectionError:
+            return False
 
     @classmethod
     def adjust_image(cls, in_, flags=1, *, b64decode=True, to_buffer=True, b64encode=False,
