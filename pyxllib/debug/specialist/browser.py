@@ -145,7 +145,6 @@ class Browser(Explorer):
             在找没有的情况下，默认使用 'explorer'
         :param shell:
         """
-
         if app is None:
             # 智能判断环境变量，选择存在的浏览器，我的偏好 chrome > msedge
             paths = os.environ['PATH']

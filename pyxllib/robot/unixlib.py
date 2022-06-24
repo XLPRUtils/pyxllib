@@ -209,6 +209,9 @@ class XlSSHClient(paramiko.SSHClient):
 
         如果stderr出错，则抛出异常
         否则返回运行结果的文本数据
+
+        【备忘】
+        nginx -t的两句返回，虽然是正确状态，默认是放在stderr的
         """
         stdin, stdout, stderr = self.exec_command(command, *args, **kwargs)
         stderr = list(stderr)

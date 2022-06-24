@@ -195,11 +195,14 @@ class XlAiClient:
         self._mathpix_header = {'Content-type': 'application/json'}
         self._mathpix_header.update({'app_id': app_id, 'app_key': app_key})
 
-    def setup_priu(self, token, host='118.195.202.82:5010'):
+    def setup_priu(self, token, host='118.195.202.82', check=False):
         """ 福建省模式识别与图像理解重点实验室 """
         self._priu_header = {'Content-type': 'application/json'}
         self._priu_header.update({'Token': token})
         self._priu_host = host
+
+        if check:
+            return '欢迎来到 厦门理工' in requests.get(f'http://{host}/home').text
 
     @classmethod
     def adjust_image(cls, in_, flags=1, *, b64decode=True, to_buffer=True, b64encode=False,
