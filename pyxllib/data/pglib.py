@@ -392,6 +392,8 @@ class XlprDb(Connection):
         host_stats.sort(key=lambda x: -x[1])  # 按使用量，从多到少排序
         htmltexts += [x[0] for x in host_stats]
 
+        self.commit()
+
         h = render_echart_html('cpu', body='<br/>'.join(htmltexts))
         return h
 
@@ -411,6 +413,8 @@ class XlprDb(Connection):
             host_stats.append(self._get_host_trace_per_host(hn, 'cpu_memory', f'{name}', *args))
         host_stats.sort(key=lambda x: -x[1])  # 按使用量，从多到少排序
         htmltexts += [x[0] for x in host_stats]
+
+        self.commit()
 
         h = render_echart_html('cpu_memory', body='<br/>'.join(htmltexts))
         return h
@@ -435,6 +439,8 @@ class XlprDb(Connection):
         host_stats.sort(key=lambda x: -x[1])  # 按使用量，从多到少排序
         htmltexts += [x[0] for x in host_stats]
 
+        self.commit()
+
         h = render_echart_html('disk_memory', body='<br/>'.join(htmltexts))
         return h
 
@@ -458,6 +464,8 @@ class XlprDb(Connection):
             host_stats.append(self._get_host_trace_per_host(hn, 'gpu_memory', f'{name}', *args))
         host_stats.sort(key=lambda x: -x[1])  # 按使用量，从多到少排序
         htmltexts += [x[0] for x in host_stats]
+
+        self.commit()
 
         h = render_echart_html('gpu_memory', body='<br/>'.join(htmltexts))
         return h
