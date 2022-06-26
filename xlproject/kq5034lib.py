@@ -509,6 +509,9 @@ class 网课考勤:
             c1.fill = PatternFill(fgColor=color.hex[-6:], fill_type="solid")
             c2.fill = PatternFill(fgColor=color.hex[-6:], fill_type="solid")
 
+        if ls:
+            ls = [x for x in ls if '无订单号' not in x]
+
         # 4 生成通知，及返款文件
         desc = '/'.join(map(str, self.打卡返款))
         if self.结束课次 == 20:
