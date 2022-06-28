@@ -381,6 +381,7 @@ class EnchantBs4Tag(EnchantBase):
 
     @staticmethod
     def get_nonempty_children(self, *args):
+        """ 输入args下标，指定获得某一个非空子结点 """
         if len(args):
             ls = self.get_nonempty_childrens(*args[:-1])
             return ls[args[-1]]
