@@ -6,18 +6,21 @@
 
 
 """ 封装一些代码开发中常用的功能，工程组件 """
-from collections import defaultdict
 import datetime
+import functools
 import io
 import itertools
 import json
 import math
 import os
 import queue
+import signal
 import socket
 import subprocess
 import sys
 import tempfile
+import threading
+from threading import Thread
 import time
 from urllib.parse import urlparse
 
@@ -483,3 +486,64 @@ def utc_now(offset_hours=8):
 def utc_timestamp(offset_hours=8):
     """ mysql等数据库支持的日期格式 """
     return utc_now(offset_hours).isoformat(timespec='seconds')
+
+
+class Timeout:
+    """ 对函数等待执行的功能，限制运行时间
+
+    【实现思路】
+    1、最简单的方式是用signal.SIGALRM实现
+        https://stackoverflow.com/questions/2281850/timeout-function-if-it-takes-too-long-to-finish
+        但是这个不支持windows系统~~
+    2、那windows和linux通用的做法，就是把原执行函数变成一个子线程来运行
+        https://stackoverflow.com/questions/21827874/timeout-a-function-windows
+        但是，又在onenote的win32com发现，有些功能没办法丢到子线程里，会出问题
+        而且使用子线程，也没法做出支持with上下文语法的功能了
+    3、于是就有了当前我自己搞出的一套机制
+        是用一个Timer计时器子线程计时，当timeout超时，使用信号机制给主线程抛出一个异常
+            ① 注意，不能子线程直接抛出异常，这样影响不了主线程
+            ② 也不能直接抛出错误signal，这样会强制直接中断程序。应该抛出TimeoutError，让后续程序进行超时逻辑的处理
+    """
+
+    def __init__(self, seconds):
+        self.seconds = seconds
+        self.alarm = None
+
+    def __call__(self, func):
+        @functools.wraps(func)
+        def wrapper(*args, **kwargs):
+            # 1 如果超时，主线程收到信号会执行的功能
+            def overtime(signum, frame):
+                raise TimeoutError(f'function [{func.__name__}] timeout [{self.seconds} seconds] exceeded!')
+
+            signal.signal(signal.SIGABRT, overtime)
+
+            # 2 开一个子线程计时器，超时的时候发送信号
+            def send_signal():
+                signal.raise_signal(signal.SIGABRT)
+
+            alarm = threading.Timer(self.seconds, send_signal)
+            alarm.start()
+
+            # 3 执行主线程功能
+            res = func(*args, **kwargs)
+            alarm.cancel()  # 正常执行完则关闭计时器
+
+            return res
+
+        return wrapper
+
+    def __enter__(self):
+        def overtime(signum, frame):
+            raise TimeoutError(f'with 上下文代码块运行超时 > [{self.seconds} 秒]')
+
+        signal.signal(signal.SIGABRT, overtime)
+
+        def send_signal():
+            signal.raise_signal(signal.SIGABRT)
+
+        self.alarm = threading.Timer(self.seconds, send_signal)
+        self.alarm.start()
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.alarm.cancel()

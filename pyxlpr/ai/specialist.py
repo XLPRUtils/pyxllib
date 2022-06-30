@@ -3,9 +3,16 @@
 # @Author : 陈坤泽
 # @Email  : 877362867@qq.com
 # @Date   : 2021/11/07 14:04
+from pyxllib.prog.pupil import check_install_package
+
+check_install_package('fire')
+
 import os
 import re
+import time
 
+from humanfriendly import format_size
+import fire
 import pandas as pd
 import numpy as np
 
@@ -224,3 +231,52 @@ def auto_set_visible_device(reverse=False):
             os.environ[name] = str(gpu_id)
     if name in os.environ:
         print('{}={}'.format(name, os.environ[name]))
+
+
+def get_current_gpu_useage(card_id=None):
+    """ 查当前gpu最大使用率
+
+    :param card_id:
+        int, 查单卡
+        list|tuple, 查多张卡
+        None, 查所有卡
+    """
+    import pynvml
+
+    # 需要初始化
+    pynvml.nvmlInit()
+
+    # 1 要检查哪些卡
+    if isinstance(card_id, int):
+        idxs = [card_id]
+    elif isinstance(card_id, (list, tuple)):
+        idxs = card_id
+    else:
+        cuda_num = pynvml.nvmlDeviceGetCount()
+        idxs = list(range(cuda_num))  # 如果不限定，则获得所有卡的信息
+
+    # 2 获取每张候选gpu卡的显存使用情况
+    cur_max_memory = 0
+    for i in idxs:
+        handle = pynvml.nvmlDeviceGetHandleByIndex(i)
+        meminfo = pynvml.nvmlDeviceGetMemoryInfo(handle)
+        cur_max_memory = max(cur_max_memory, meminfo.used)
+    return cur_max_memory
+
+
+def watch_gpu_maximun(card_id=None, interval_seconds=0.1):
+    """ 查gpu使用峰值
+
+    :param interval_seconds: 查询间隔
+    """
+    max_memory = 0
+    while True:
+        cur = get_current_gpu_useage(card_id)
+        max_memory = max(max_memory, cur)
+        print(f'\rmax_memory={format_size(max_memory, binary=True)} '
+              f'current_memory={format_size(cur, binary=True)}', end='')
+        time.sleep(interval_seconds)
+
+
+if __name__ == '__main__':
+    fire.Fire()

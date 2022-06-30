@@ -5,12 +5,15 @@
 # @Date   : 2022/06/28 21:40
 
 import datetime
+import logging
 import re
 import warnings
+import os
 
 import bs4
 import pytz
 from xml.etree import ElementTree
+from tqdm import tqdm
 
 # 过滤这类警告
 warnings.filterwarnings("ignore", category=bs4.MarkupResemblesLocatorWarning, module='bs4')
@@ -22,6 +25,9 @@ if win32com.client.gencache.is_readonly:
     win32com.client.gencache.Rebuild()
 
 from pyxllib.prog.newbie import SingletonForEveryClass
+from pyxllib.prog.pupil import Timeout
+from pyxllib.file.specialist import XlPath
+from pyxllib.algo.treelib import Node
 
 """
 参考了onepy的实现，做了重构。OnePy：Provides pythonic wrappers around OneNote COM interfaces
@@ -29,31 +35,49 @@ from pyxllib.prog.newbie import SingletonForEveryClass
 
 namespace = "{http://schemas.microsoft.com/office/onenote/2013/onenote}"
 
+# 缓存文件地址
+CACHE_DIR = XlPath.tempdir() / 'OneNote/SearchCache'
+os.makedirs(CACHE_DIR, exist_ok=True)
+
 
 class ONProcess(metaclass=SingletonForEveryClass):
     """ onenote 底层win32的接口 """
 
-    def __init__(self, version=16):
+    def __init__(self, timeout=30):
         """ onenote的win32接口方法是驼峰命名，这个ONProcess做了一层功能封装
         而且估计理论上对所有可以获得的接口都做了封装了
-        """
 
-        try:
-            if version == 16:
-                self.process = win32com.client.gencache.EnsureDispatch('OneNote.Application')
-                self.namespace = "{http://schemas.microsoft.com/office/onenote/2013/onenote}"
-            if version == 15:
-                self.process = win32com.client.gencache.EnsureDispatch('OneNote.Application.15')
-                self.namespace = "{http://schemas.microsoft.com/office/onenote/2013/onenote}"
-            if version == 14:
-                self.process = win32com.client.gencache.EnsureDispatch('OneNote.Application.14')
-                self.namespace = "{http://schemas.microsoft.com/office/onenote/2010/onenote}"
-        except Exception as e:
-            print(e)
-            print("error starting onenote {}".format(version))
+        :param timeout: 读取单个页面的时候，限制用时，单位：秒
+            本来只想限制5秒，但发现会有一些页面特别长，需要多一些时间~
+            再后来发现还有更慢的页面，半分钟的都有，就再改成30秒了
+        """
+        # TODO 这里需要针对不同的OneNote版本做自动化兼容，不要让用户填版本
+        #   因为让用户填版本，会存在多个实例化对象，使用getxml会有各种问题
+        # 目前是支持onenote2016的，但不知道其他版本onenote会怎样
+        self.process = win32com.client.gencache.EnsureDispatch('OneNote.Application')
+        self.namespace = "{http://schemas.microsoft.com/office/onenote/2013/onenote}"
+
+        # 官方原版的实现，但我觉得可以去掉版本号
+        # try:
+        #     if version == 16:
+        #         self.process = win32com.client.gencache.EnsureDispatch('OneNote.Application')
+        #         self.namespace = "{http://schemas.microsoft.com/office/onenote/2013/onenote}"
+        #     if version == 15:
+        #         self.process = win32com.client.gencache.EnsureDispatch('OneNote.Application.15')
+        #         self.namespace = "{http://schemas.microsoft.com/office/onenote/2013/onenote}"
+        #     if version == 14:
+        #         self.process = win32com.client.gencache.EnsureDispatch('OneNote.Application.14')
+        #         self.namespace = "{http://schemas.microsoft.com/office/onenote/2010/onenote}"
+        # except Exception as e:
+        #     # pywintypes.com_error: (-2147221005, '无效的类字符串', None, None)
+        #     # pywintypes.com_error: (-2147221005, '无效的类字符串', None, None)
+        #     print(e)
+        #     print("error starting onenote {}".format(version))
 
         global namespace
         namespace = self.namespace
+
+        self.timeout_seconds = timeout
 
     def get_hierarchy(self, start_node_id="", hierarchy_scope=4):
         """
@@ -117,10 +141,8 @@ class ONProcess(metaclass=SingletonForEveryClass):
           2 - Returns page content with selection markup, but no binary data.
           3 - Returns page content with selection markup and all binary data.
         """
-        try:
+        with Timeout(self.timeout_seconds):
             return self.process.GetPageContent(page_id, "", page_info)
-        except Exception as e:
-            print("Could not get Page Content")
 
     def update_page_content(self, page_changes_xml_in, excpect_last_modified=0):
         try:
@@ -195,24 +217,102 @@ class ONProcess(metaclass=SingletonForEveryClass):
             print("Could not retreive special location")
 
 
-class OneNote(ONProcess, metaclass=SingletonForEveryClass):
-    """ OneNote软件，这是一个单例类 """
+class _CommonMethods:
+    """ 笔记本、分区组、分区、页面 共有的一些成员方法 """
 
-    def __init__(self, version=2016):
+    @property
+    def ancestors(self):
+        """ 获得所有父结点 """
+        parents = []
+        p = self
+        while getattr(p, 'parent', False):
+            parents.append(p.parent)
+            p = p.parent
+        return reversed(parents)
+
+    @property
+    def abspath_name(self):
+        names = [x.name for x in self.ancestors]
+        names.append(self.name)
+        return '/'.join(names)
+
+    def search(self, pattern, child_depth=1, *, return_mode='text', padding_mode=0):
+        """ 查找内容
+
+        Page、Section、SectionGroup等实际所用的search方法
+
+        :param pattern:
+            text, 检索出现该关键词的node，并展示其相关的上下文内容
+            func, 可以输入自定义函数 check_node(node)->bool，True表示符合检索条件的node
+            re.compile，可以输入编译的正则模式，会使用re.search进行匹配
+        :param int child_depth: 对于检索到的node，向下展开几层子结点
+            -1，表示全部展开
+            0，表示不展开子结点
+            1，只展开直接子结点
+            ...
+        :param return_mode:
+            text，文本展示
+            html，网页富文本
         """
-        :param version: onenote版本号，写2010、2013、2016
-            目前不确定支不支持win10自带的onenote、2019、office365
+        # 1 按照规则检索内容
+        if isinstance(pattern, str):
+            def check_node(node):
+                # 纯文本部分
+                if pattern in node.name:
+                    return True
+                # 如果纯文本找不到，也会在富文本格式里尝试匹配
+                html_text = getattr(node, '_html_content', '')
+                if html_text and pattern in html_text:
+                    return True
+                return False
 
+        elif isinstance(pattern, re.Pattern):
+            def check_node(node):
+                if pattern.search(node.name):
+                    return True
+                html_text = getattr(node, '_html_content', '')
+                if html_text and pattern.search(html_text):
+                    return True
+                return False
+        else:
+            check_node = pattern
+
+        root = self._search(print_mode=True)  # 显示进度条
+        root.sign_node(check_node, flag_name='_flag', child_depth=child_depth)
+
+        # 2 展示内容
+        if return_mode == 'text':
+            return root.render(filter_=lambda x: getattr(x, '_flag', 0))
+        elif return_mode == 'html':
+            return root.render_html('_html_content',
+                                    filter_=lambda x: getattr(x, '_flag', 0),
+                                    padding_mode=padding_mode)
+        else:
+            raise ValueError
+
+
+class OneNote(ONProcess, _CommonMethods):
+    """ OneNote软件，这是一个单例类
+
+    注意，从ONProcess继承的OneNote也是单例类
+    但从ONProcess、OneNote生成的是不同的两个对象
+    """
+
+    def __init__(self, timeout=30):
+        """
         如果出现这个错误：This COM object can not automate the makepy process - please run makepy manually for this object
             可以照 https://github.com/varunsrin/one-py 文章末尾的方式操作
             把 HKEY_CLASSES_ROOT\TypeLib\{0EA692EE-BB50-4E3C-AEF0-356D91732725} 的 1.0 删掉
             （这个 KEY ID 值大家电脑上都是一样的）
         """
-        super().__init__({2010: 14, 2013: 15, 2016: 16}.get(version, 16))
+        # trick: 这里有跟单例类有关的一些问题，导致ONProcess需要提前初始化一次
+        super().__init__(timeout)
 
         self.xml = self.get_hierarchy("", 4)
         self.object_tree = ElementTree.fromstring(self.xml)
         self.hierarchy = Hierarchy(self.object_tree)
+        self._children = list(self.hierarchy)
+        self.name = 'onenote'
 
     def get_page_content(self, page_id):
         page_content_xml = ElementTree.fromstring(super(OneNote, self).get_page_content(page_id))
@@ -245,6 +345,14 @@ class OneNote(ONProcess, metaclass=SingletonForEveryClass):
     def __getitem__(self, item):
         """ 通过编号或名称索引获得笔记本 """
         return self.hierarchy[item]
+
+    def _search(self, *, print_mode=False):
+        root = Node('Notebook：' + self.name)
+        for x in tqdm(self._children, desc='解析笔记本中', smoothing=0, disable=not print_mode):
+            cur_node = x._search()
+            cur_node.parent = root
+
+        return root
 
 
 class Hierarchy:
@@ -289,62 +397,7 @@ class HierarchyNode:
         self.last_modified_time = xml.get("lastModifiedTime")
 
 
-def widget_search(self, pattern, child_depth=1, *, return_mode='text', padding_mode=0):
-    """ 查找内容
-
-    Page、Section、SectionGroup等实际所用的search方法
-
-    :param pattern:
-        text, 检索出现该关键词的node，并展示其相关的上下文内容
-        func, 可以输入自定义函数 check_node(node)->bool，True表示符合检索条件的node
-        re.compile，可以输入编译的正则模式，会使用re.search进行匹配
-    :param int child_depth: 对于检索到的node，向下展开几层子结点
-        -1，表示全部展开
-        0，表示不展开子结点
-        1，只展开直接子结点
-        ...
-    :param return_mode:
-        text，文本展示
-        html，网页富文本
-    """
-    # 1 按照规则检索内容
-    if isinstance(pattern, str):
-        def check_node(node):
-            # 纯文本部分
-            if pattern in node.name:
-                return True
-            # 如果纯文本找不到，也会在富文本格式里尝试匹配
-            html_text = getattr(node, '_html_content', '')
-            if html_text and pattern in html_text:
-                return True
-            return False
-
-    elif isinstance(pattern, re.Pattern):
-        def check_node(node):
-            if pattern.search(node.name):
-                return True
-            html_text = getattr(node, '_html_content', '')
-            if html_text and pattern.search(html_text):
-                return True
-            return False
-    else:
-        check_node = pattern
-
-    root = self._search()
-    root.sign_node(check_node, flag_name='_flag', child_depth=child_depth)
-
-    # 2 展示内容
-    if return_mode == 'text':
-        return root.render(filter_=lambda x: getattr(x, '_flag', 0))
-    elif return_mode == 'html':
-        return root.render_html('_html_content',
-                                filter_=lambda x: getattr(x, '_flag', 0),
-                                padding_mode=padding_mode)
-    else:
-        raise ValueError
-
-
-class Notebook(HierarchyNode):
+class Notebook(HierarchyNode, _CommonMethods):
 
     def __init__(self, xml=None):
         self.xml = xml
@@ -390,21 +443,16 @@ class Notebook(HierarchyNode):
                     return nb
         return None
 
-    def _search(self):
-        from pyxllib.algo.treelib import Node
-
+    def _search(self, *, print_mode=False):
         root = Node('Notebook：' + self.name)
-        for x in self._children:
+        for x in tqdm(self._children, desc='解析分区(组)中', smoothing=0, disable=not print_mode):
             cur_node = x._search()
             cur_node.parent = root
 
         return root
 
-    def search(self, *args, **kwargs):
-        return widget_search(self, *args, **kwargs)
 
-
-class SectionGroup(HierarchyNode):
+class SectionGroup(HierarchyNode, _CommonMethods):
     """ 分区组 """
 
     def __init__(self, xml=None, parent_node=None):
@@ -447,21 +495,18 @@ class SectionGroup(HierarchyNode):
                     return nb
         return None
 
-    def _search(self):
-        from pyxllib.algo.treelib import Node
+    def get_page_num(self):
+        return sum([x.get_page_num() for x in self._children])
 
+    def _search(self, *, print_mode=False):
         root = Node('SectionGroup：' + self.name)
-        for x in self._children:
+        for x in tqdm(self._children, desc='解析分区(组)中', smoothing=0, disable=not print_mode):
             cur_node = x._search()
             cur_node.parent = root
-
         return root
 
-    def search(self, *args, **kwargs):
-        return widget_search(self, *args, **kwargs)
 
-
-class Section(HierarchyNode):
+class Section(HierarchyNode, _CommonMethods):
     """ 分区 """
 
     def __init__(self, xml=None, parent_node=None):
@@ -506,12 +551,15 @@ class Section(HierarchyNode):
                     return nb
         return None
 
-    def _search(self):
-        from pyxllib.algo.treelib import Node
+    def get_page_num(self):
+        return len(self._children)
 
+    def _search(self, *, print_mode=False):
         root = Node('Section：' + self.name)
         page_lv1, page_lv2 = root, root
-        for x in self._children:
+
+        for x in tqdm(self._children, desc='解析页面中', smoothing=0, disable=not print_mode):
+            # print(x.name)
             cur_page = x._search()
             if x.page_level == '1':
                 cur_page.parent = root
@@ -524,11 +572,8 @@ class Section(HierarchyNode):
 
         return root
 
-    def search(self, *args, **kwargs):
-        return widget_search(self, *args, **kwargs)
 
-
-class Page:
+class Page(_CommonMethods):
     """ 页面 """
 
     def __init__(self, xml=None, parent_node=None):
@@ -553,6 +598,13 @@ class Page:
 
         # Get / Set Meta
 
+    @property
+    def root(self):
+        p = self
+        while getattr(p, 'parent', False):
+            p = p.parent
+        return p
+
     def __deserialize_from_xml(self, xml):
         self.xml = xml
         self.name = xml.get("name")
@@ -563,10 +615,19 @@ class Page:
         self.is_currently_viewed = xml.get("isCurrentlyViewed")
         self._children = [Meta(node) for node in xml]
 
-    def getxml(self):
-        """获得页面的"""
-        # 这里 ONProcess() 改成 OneNote 好像有些问题~~
-        return ONProcess().get_page_content(self.id)
+    def getxml(self, page_info=0):
+        """ 获得页面的xml内容 """
+        try:
+            res = super(OneNote, onenote).get_page_content(self.id, page_info)
+        except TimeoutError as e:
+            e.args = [e.args[0] + f'\n\t{self.abspath_name} 页面获取失败，请检查可能包含的office公式并删除。' \
+                                  f'并且看下您的OneNote可能无响应了，请重启OneNote。']
+            raise e
+
+        if res is None:
+            logging.warning(f'{self.abspath_name} 未成功提取页面内容')
+
+        return res
 
     def browser_xml(self):
         from pyxllib.debug.specialist import browser, XlPath
@@ -584,11 +645,10 @@ class Page:
             比如在遍历tag.contents的时候，因为[层次结构C]的原因，会出现 parent = dfs_parse_node(y, parent) 的较奇怪的写法
             在parse_oe中，parent的层次实现规则，也会较复杂，有些trick
         """
-        from pyxllib.algo.treelib import Node
         from pyxllib.text.xmllib import BeautifulSoup
 
         xml = self.getxml()
-        soup = BeautifulSoup(xml, 'xml')
+        soup = BeautifulSoup(xml or '', 'xml')
 
         # self.browser_xml()  # 可以用这个查原始的xml内容
 
@@ -659,7 +719,10 @@ class Page:
                     # 处理层次结构A
                     nonlocal outline_cnt
                     if outline_cnt:
-                        parent = Node(f'Outline{outline_cnt}', parent)
+                        if outline_cnt == 1:
+                            parent = Node(f'Outline{outline_cnt}', parent)
+                        else:
+                            parent = Node(f'Outline{outline_cnt}', parent.parent)
                         outline_cnt += 1
                     for y in x.contents:
                         parent = dfs_parse_node(y, parent)
@@ -678,15 +741,30 @@ class Page:
         dfs_parse_node(soup, root)
         return root
 
-    def _search(self):
-        """ 先生成所有结点
-        """
-        root = self.parse_oe_tree()
-        root.name = self.name
-        return root
+    def get_page_num(self):
+        return 1
 
-    def search(self, *args, **kwargs):
-        return widget_search(self, *args, **kwargs)
+    def _search(self, *, print_mode=False):
+        """ 先生成所有结点
+
+        :param print_mode: 统一所有的_search定义范式，虽然在Page这里其实没用~
+
+        """
+        file = CACHE_DIR / (self.id + self.last_modified_time.replace(':', '') + '.pkl')
+
+        if file.is_file() and False:
+            root = file.read_pkl()
+        else:
+            root = self.parse_oe_tree()
+            root.name = self.name
+
+            if not root.is_leaf:
+                # 删除旧时间点的缓存文件，存储新的缓存文件
+                for f in CACHE_DIR.glob(f'{self.id}*.pkl'):
+                    f.delete()
+                file.write_pkl(root)
+
+        return root
 
 
 class Meta:
@@ -707,7 +785,7 @@ class Meta:
 
     def getxml(self):
         """获得页面的"""
-        return ONProcess().get_page_content(self.id)
+        return super(OneNote, onenote).get_page_content(self.id)
 
 
 class PageContent:
@@ -1019,3 +1097,4 @@ class Image:
 
 
 onenote = OneNote()
+onenote2 = OneNote()

@@ -15,6 +15,7 @@ def typename(c):
 
 
 class SingletonForEveryClass(type):
+    """ 注意如果A是单例类，B从A继承，那么实际有且仅有A、B两个不同的实例对象 """
     _instances = {}
 
     def __call__(cls, *args, **kwargs):
