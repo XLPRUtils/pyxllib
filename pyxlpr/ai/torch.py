@@ -19,7 +19,7 @@ from easydict import EasyDict
 import torch.utils.data
 from torchvision.datasets import VisionDataset
 
-from pyxllib.ai.specialist import ClasEvaluater, NvmDevice
+from pyxlpr.ai.specialist import ClasEvaluater, NvmDevice
 
 __base = """
 """

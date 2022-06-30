@@ -27,33 +27,6 @@ class EnchantNode(EnchantBase):
         cls._enchant(Node, names)
 
     @staticmethod
-    def render(self, *, childiter=list, maxlevel=None, filter_=None):
-        """
-
-        也可以这样可视化：
-        >> from anytree import RenderTree
-        >> print(RenderTree(root))
-        """
-        from anytree import RenderTree
-
-        def fold_text(s):
-            return s.replace('\n', ' ')[:150]
-
-        ls = []
-        for pre, fill, node in RenderTree(self, childiter=childiter, maxlevel=maxlevel):
-            if filter_:
-                if not filter_(node):
-                    continue
-                # 使用filter_参数时，前缀统一成空格
-                pre = (len(pre) // 4) * '\t'
-
-            msg = re.search(r',\s*(.+?)\)', str(node))  # 显示node的属性值
-            msg = ('\t' + msg.group(1)) if msg else ''
-            ls.append(fold_text(f'{pre}{node.name}{msg}'))
-
-        return '\n'.join(ls)
-
-    @staticmethod
     def sign_node(self, check_func, *, flag_name='_flag', child_depth=-1):
         """ 遍历所有结点
 
@@ -81,7 +54,36 @@ class EnchantNode(EnchantBase):
                 set_flag(y, 1)
 
     @staticmethod
-    def render_html(self, html_attr_name='name', *, childiter=list, maxlevel=None, filter_=None, padding_mode=0):
+    def render(self, *, childiter=list, maxlevel=None, filter_=None, dedent=0):
+        """
+
+        也可以这样可视化：
+        >> from anytree import RenderTree
+        >> print(RenderTree(root))
+        """
+        from anytree import RenderTree
+
+        def fold_text(s):
+            return s.replace('\n', ' ')[:150]
+
+        ls = []
+        for pre, fill, node in RenderTree(self, childiter=childiter, maxlevel=maxlevel):
+            if filter_:
+                if not filter_(node):
+                    continue
+                # 使用filter_参数时，前缀统一成空格
+                pre = (len(pre) // 4 - dedent) * '\t'
+
+            msg = re.search(r',\s*(.+?)\)', str(node))  # 显示node的属性值
+            msg = ('\t' + msg.group(1)) if msg else ''
+            ls.append(fold_text(f'{pre}{node.name}{msg}'))
+
+        return '\n'.join(ls)
+
+    @staticmethod
+    def render_html(self, html_attr_name='name', *,
+                    childiter=list, maxlevel=None, filter_=None, padding_mode=0,
+                    dedent=0):
         """ 渲染成html页面内容
 
         :param html_attr_name: 最好原node有一个字段存储需要渲染的html内容
@@ -89,6 +91,7 @@ class EnchantNode(EnchantBase):
         :param padding_mode:
             0，默认配置，使用html自带的悬挂缩进功能。这种展示效果最好，但复制内容的时候不带缩进。
             1，使用空格缩进。长文本折行显示效果不好。但是方便复制。
+        :param dedent: 统一减少缩进层级
 
         也可以这样可视化：
         >> from anytree import RenderTree
@@ -100,7 +103,7 @@ class EnchantNode(EnchantBase):
         for pre, fill, node in RenderTree(self, childiter=childiter, maxlevel=maxlevel):
             if filter_ and not filter_(node):
                 continue
-            pre_len = len(pre)
+            pre_len = len(pre) - dedent * 4
 
             msg = re.search(r',\s*(.+?)\)', str(node))  # 显示node的属性值
             msg = ('\t' + msg.group(1)) if msg else ''
