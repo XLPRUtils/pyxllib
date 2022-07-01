@@ -7,13 +7,19 @@
 import datetime
 import logging
 import re
+import time
 import warnings
 import os
+from threading import Thread
+import copy
+from functools import reduce
 
 import bs4
 import pytz
 from xml.etree import ElementTree
-from tqdm import tqdm
+from humanfriendly import format_size
+from anytree.importer import DictImporter
+from anytree.exporter import DictExporter
 
 # 过滤这类警告
 warnings.filterwarnings("ignore", category=bs4.MarkupResemblesLocatorWarning, module='bs4')
@@ -26,7 +32,8 @@ if win32com.client.gencache.is_readonly:
 
 from pyxllib.prog.newbie import SingletonForEveryClass
 from pyxllib.prog.pupil import Timeout
-from pyxllib.file.specialist import XlPath
+from pyxllib.prog.specialist import tqdm
+from pyxllib.file.specialist import XlPath, get_etag
 from pyxllib.algo.treelib import Node
 
 """
@@ -35,9 +42,22 @@ from pyxllib.algo.treelib import Node
 
 namespace = "{http://schemas.microsoft.com/office/onenote/2013/onenote}"
 
+# 还未绑定父结点的游离page node，用于进度条子线程
+_free_page_nodes = []
+
 # 缓存文件地址
 CACHE_DIR = XlPath.tempdir() / 'OneNote/SearchCache'
 os.makedirs(CACHE_DIR, exist_ok=True)
+
+# 页面解析结果的缓存，用于解析加速
+_page_parsed_cache = {}
+_page_parsed_cache_file = CACHE_DIR / 'page_parsed_cache_file.pkl'
+if _page_parsed_cache_file.is_file():
+    _page_parsed_cache = _page_parsed_cache_file.read_pkl()
+
+# 用来读取、保存序列化的node数据
+importer = DictImporter()
+exporter = DictExporter()
 
 
 class ONProcess(metaclass=SingletonForEveryClass):
@@ -220,6 +240,9 @@ class ONProcess(metaclass=SingletonForEveryClass):
 class _CommonMethods:
     """ 笔记本、分区组、分区、页面 共有的一些成员方法 """
 
+    def init_node(self):
+        return Node(self.name, _category=type(self).__name__)
+
     @property
     def ancestors(self):
         """ 获得所有父结点 """
@@ -236,7 +259,92 @@ class _CommonMethods:
         names.append(self.name)
         return '/'.join(names)
 
-    def search(self, pattern, child_depth=1, *, return_mode='text', padding_mode=0):
+    def get_page_num(self):
+        return sum([x.get_page_num() for x in self._children])
+
+    def get_search_tree(self, *, print_mode=True, use_node_cache=True, reparse=False):
+        """ 获得检索树的根节点
+
+        :param print_mode: 输出所包含页面解析进度
+        :param use_node_cache: 检查xml是否有更新
+            默认可以不检查，如果一个widget有_node结点可以直接使用
+        :param reparse: 使用旧的解析过xml的持久化文件数据
+            这个好处是速度快，坏处是如果解析代码功能有更新，这样提取到的是错误的旧的解析数据
+            这个缓存文件的处理规则，为了一些细节优化，也稍复杂~~
+        """
+        global _page_parsed_cache
+
+        # 1 进度条工具，开一个子线程，每秒监控页面解析进度
+        def timer_progress():
+            """ 为了实现这个进度条，还有点技术含量呢，用了子线程和一些trick """
+            global _free_page_nodes
+
+            def dfs(x):
+                cnt = 0
+
+                _category = getattr(x, '_category', '')
+                if _category == 'Page':
+                    cnt += 1
+                elif _category == '':
+                    return cnt
+
+                for y in x.children:
+                    cnt += dfs(y)
+                return cnt
+
+            total = self.get_page_num()
+            _tqdm = tqdm(desc='OneNote解析页面', disable=False, total=total)
+            while not stop_flag:
+                num = dfs(self._node)  # 只读取，不修改self._node，而且进度条稍微有些错没关系，所以不加锁
+                _free_page_nodes = list(filter(lambda x: x.root != self._node, _free_page_nodes))
+                num += len(_free_page_nodes)
+                _tqdm.n = num
+                _tqdm.refresh()
+
+                time.sleep(1)
+
+            # 最后统计一轮
+            num = dfs(self._node)
+            _free_page_nodes = []
+            _tqdm.total = _tqdm.n = num
+            _tqdm.refresh()
+
+            # print(f'一共{total}个页面，实际解析出{num}个页面')
+            # 实际解析成功的页面数
+            return num
+
+        # 2 主线程解析页面的过程，子线程每秒钟展示一次进度情况
+        if reparse and type(self).__name__ == 'OneNote':  # 如果是OneNote层面reparse，直接重置整个缓存文件
+            _page_parsed_cache = {}
+        cache_num = len(_page_parsed_cache)
+
+        if print_mode:
+            stop_flag = False
+            timer_thread = Thread(target=timer_progress)
+            timer_thread.start()
+            root = self._search(use_node_cache=use_node_cache, reparse=reparse)
+            stop_flag = True  # 使用进程里的共享变量，进行主线程和子线程之间的通信
+            timer_thread.join()
+        else:
+            root = self._search(use_node_cache=use_node_cache, reparse=reparse)
+
+        def save_cache():
+            if cache_num != len(_page_parsed_cache):
+                # 如果前后数量不一致，表示有更新内容，重新写入一份缓存文件
+                _page_parsed_cache_file.write_pkl(_page_parsed_cache)
+
+        savefile_thread = Thread(target=save_cache)
+        savefile_thread.start()  # 开子线程去保存文件，和后面的拷贝副本并行处理
+
+        # 3 拷贝副本，并等待保存文件的子线程也执行完
+        root.parent = None
+        savefile_thread.join()
+        return root
+
+    def search(self, pattern, child_depth=0, *,
+               edits=None, reparse=False,
+               return_mode='text', padding_mode=0,
+               print_mode=False, dedent=1):
         """ 查找内容
 
         Page、Section、SectionGroup等实际所用的search方法
@@ -255,7 +363,7 @@ class _CommonMethods:
             html，网页富文本
         """
         # 1 按照规则检索内容
-        if isinstance(pattern, str):
+        if isinstance(pattern, str):  # 文本关键词检索
             def check_node(node):
                 # 纯文本部分
                 if pattern in node.name:
@@ -266,7 +374,7 @@ class _CommonMethods:
                     return True
                 return False
 
-        elif isinstance(pattern, re.Pattern):
+        elif isinstance(pattern, re.Pattern):  # 正则检索
             def check_node(node):
                 if pattern.search(node.name):
                     return True
@@ -274,19 +382,40 @@ class _CommonMethods:
                 if html_text and pattern.search(html_text):
                     return True
                 return False
-        else:
+        else:  # 自定义检索
             check_node = pattern
 
-        root = self._search(print_mode=True)  # 显示进度条
-        root.sign_node(check_node, flag_name='_flag', child_depth=child_depth)
+        # 2 更新索引并获得解析树
+        start_time = time.time()
+        edits = edits or []
+        edits = [list(name.split('/')) for name in edits]
+        # 更新易变数据的检索树
+        for path in edits:
+            node = reduce(lambda x, name: x[name], [self] + path)
+            print(node.abspath_name)
+            node.get_search_tree(print_mode=False, use_node_cache=False, reparse=reparse)
+        root = self.get_search_tree(print_mode=print_mode, use_node_cache=True, reparse=reparse)
+        elapsed1 = time.time() - start_time
 
-        # 2 展示内容
+        # 3 检索内容
+        start_time = time.time()
+        n = root.sign_node(check_node, flag_name='_flag', child_depth=child_depth, reset_flag=True)
+        elapsed2 = time.time() - start_time
+
+        # 4 展示内容
+        texts = [f'更新及获得索引副本：{elapsed1:.2f}秒，内容检索：{elapsed2:.2f}秒，匹配条目数：{n}']
         if return_mode == 'text':
-            return root.render(filter_=lambda x: getattr(x, '_flag', 0))
+            body = root.render(filter_=lambda x: getattr(x, '_flag', 0), dedent=dedent)
+            texts[0] += f'，内容大小：{format_size(len(body.encode()), binary=True)}\n'
+            texts.append(body)
+            return '\n'.join(texts)
         elif return_mode == 'html':
-            return root.render_html('_html_content',
+            body = root.render_html('_html_content',
                                     filter_=lambda x: getattr(x, '_flag', 0),
-                                    padding_mode=padding_mode)
+                                    padding_mode=padding_mode, dedent=dedent)
+            texts[0] += f'，内容大小：{format_size(len(body.encode()), binary=True)}<br/>'
+            texts.append(body)
+            return '<br/>'.join(texts)
         else:
             raise ValueError
 
@@ -313,6 +442,7 @@ class OneNote(ONProcess, _CommonMethods):
         self.hierarchy = Hierarchy(self.object_tree)
         self._children = list(self.hierarchy)
         self.name = 'onenote'
+        self._node = self.init_node()
 
     def get_page_content(self, page_id):
         page_content_xml = ElementTree.fromstring(super(OneNote, self).get_page_content(page_id))
@@ -346,13 +476,17 @@ class OneNote(ONProcess, _CommonMethods):
         """ 通过编号或名称索引获得笔记本 """
         return self.hierarchy[item]
 
-    def _search(self, *, print_mode=False):
-        root = Node('Notebook：' + self.name)
-        for x in tqdm(self._children, desc='解析笔记本中', smoothing=0, disable=not print_mode):
-            cur_node = x._search()
-            cur_node.parent = root
+    def _search(self, *, use_node_cache=True, reparse=False):
+        if not self._node.is_leaf and use_node_cache:
+            return self._node
+        else:
+            self._node = self.init_node()
 
-        return root
+        for x in self._children:
+            cur_node = x._search(use_node_cache=use_node_cache, reparse=reparse)
+            cur_node.parent = self._node
+
+        return self._node
 
 
 class Hierarchy:
@@ -410,6 +544,8 @@ class Notebook(HierarchyNode, _CommonMethods):
         if xml is not None:
             self.__deserialize_from_xml(xml)
 
+        self._node = self.init_node()
+
     def __deserialize_from_xml(self, xml):
         HierarchyNode.deserialize_from_xml(self, xml)
         self.nickname = xml.get("nickname")
@@ -443,13 +579,17 @@ class Notebook(HierarchyNode, _CommonMethods):
                     return nb
         return None
 
-    def _search(self, *, print_mode=False):
-        root = Node('Notebook：' + self.name)
-        for x in tqdm(self._children, desc='解析分区(组)中', smoothing=0, disable=not print_mode):
-            cur_node = x._search()
-            cur_node.parent = root
+    def _search(self, *, use_node_cache=True, reparse=False):
+        if not self._node.is_leaf and use_node_cache:
+            return self._node
+        else:
+            self._node = self.init_node()
 
-        return root
+        for x in self._children:
+            cur_node = x._search(use_node_cache=use_node_cache, reparse=reparse)
+            cur_node.parent = self._node
+
+        return self._node
 
 
 class SectionGroup(HierarchyNode, _CommonMethods):
@@ -463,6 +603,8 @@ class SectionGroup(HierarchyNode, _CommonMethods):
         self.parent = parent_node
         if xml is not None:
             self.__deserialize_from_xml(xml)
+
+        self._node = self.init_node()
 
     def __iter__(self):
         # ckz: 这个遍历的时候，就是OneNote里看到的从左到右的顺序：先所有分区，然后所有分区组
@@ -495,15 +637,23 @@ class SectionGroup(HierarchyNode, _CommonMethods):
                     return nb
         return None
 
-    def get_page_num(self):
-        return sum([x.get_page_num() for x in self._children])
+    def _search(self, *, use_node_cache=True, reparse=False):
+        if not self._node.is_leaf and use_node_cache:
+            return self._node
+        else:
+            self._node = self.init_node()
 
-    def _search(self, *, print_mode=False):
-        root = Node('SectionGroup：' + self.name)
-        for x in tqdm(self._children, desc='解析分区(组)中', smoothing=0, disable=not print_mode):
-            cur_node = x._search()
-            cur_node.parent = root
-        return root
+        for x in self._children:
+            cur_node = x._search(use_node_cache=use_node_cache, reparse=reparse)
+            cur_node.parent = self._node
+
+        # 这里多线程效率几乎没差，就不开了
+        # def run_unit(x):
+        #     cur_node = x._search(reset=reset)
+        #     cur_node.parent = self._node
+        # mtqdm(run_unit, self._children, max_workers=2, disable=True)
+
+        return self._node
 
 
 class Section(HierarchyNode, _CommonMethods):
@@ -519,6 +669,8 @@ class Section(HierarchyNode, _CommonMethods):
         self.parent = parent_node
         if xml is not None:
             self.__deserialize_from_xml(xml)
+
+        self._node = self.init_node()
 
     def __iter__(self):
         for c in self._children:
@@ -554,15 +706,19 @@ class Section(HierarchyNode, _CommonMethods):
     def get_page_num(self):
         return len(self._children)
 
-    def _search(self, *, print_mode=False):
-        root = Node('Section：' + self.name)
-        page_lv1, page_lv2 = root, root
+    def _search(self, *, use_node_cache=True, reparse=False):
+        if not self._node.is_leaf and use_node_cache:
+            return self._node
+        else:
+            self._node = self.init_node()
 
-        for x in tqdm(self._children, desc='解析页面中', smoothing=0, disable=not print_mode):
+        page_lv1, page_lv2 = self._node, self._node
+
+        for x in self._children:
             # print(x.name)
-            cur_page = x._search()
+            cur_page = x._search(use_node_cache=use_node_cache, reparse=reparse)
             if x.page_level == '1':
-                cur_page.parent = root
+                cur_page.parent = self._node
                 page_lv1 = cur_page
             elif x.page_level == '2':
                 cur_page.parent = page_lv1
@@ -570,7 +726,7 @@ class Section(HierarchyNode, _CommonMethods):
             else:
                 cur_page.parent = page_lv2
 
-        return root
+        return self._node
 
 
 class Page(_CommonMethods):
@@ -588,6 +744,8 @@ class Page(_CommonMethods):
         self.parent = parent_node
         if xml is not None:  # != None is required here, since this can return false
             self.__deserialize_from_xml(xml)
+
+        self._node = self.init_node()  # 供全文检索的树形结点
 
     def __iter__(self):
         for c in self._children:
@@ -615,8 +773,16 @@ class Page(_CommonMethods):
         self.is_currently_viewed = xml.get("isCurrentlyViewed")
         self._children = [Meta(node) for node in xml]
 
-    def getxml(self, page_info=0):
+    def get_xml(self, page_info=0):
         """ 获得页面的xml内容 """
+        # 1 有缓存的文件直接读取
+        prefix = f'{self.id}_{page_info}_'
+        file = CACHE_DIR / (prefix + self.last_modified_time.replace(':', '') + f'.xml')
+
+        if file.is_file():
+            return file.read_text()
+
+        # 2 否则没有缓存，或者文件不是最新，则使用onenote的接口获得文件内容
         try:
             res = super(OneNote, onenote).get_page_content(self.id, page_info)
         except TimeoutError as e:
@@ -626,16 +792,23 @@ class Page(_CommonMethods):
 
         if res is None:
             logging.warning(f'{self.abspath_name} 未成功提取页面内容')
+        else:
+            # 删除旧时间点的缓存文件，存储新的缓存文件
+            for f in CACHE_DIR.glob(f'{prefix}*.xml'):
+                f.delete()
+            file.write_text(res)
 
         return res
 
     def browser_xml(self):
         from pyxllib.debug.specialist import browser, XlPath
-        xml = self.getxml()
+        xml = self.get_xml()
         browser(xml, file=XlPath.tempfile('.xml'))
 
-    def parse_oe_tree(self, root=None):
+    def parse_xml(self, root=None, *, page_info=0, reparse=False):
         """ 获得本Page页面的树形结构，返回一个Node根节点
+
+        :param reparse: 默认直接使用缓存里的解析结果，如果设置了reparse则强制重新解析
 
         因为层次结构有多种不同的表现形式
             层次结构A：Outline 文本框
@@ -647,7 +820,18 @@ class Page(_CommonMethods):
         """
         from pyxllib.text.xmllib import BeautifulSoup
 
-        xml = self.getxml()
+        if root is None:
+            root = Node('root')
+
+        # 1 在一次程序执行中，相同的xml内容解析出的树也是一样的，可以做个缓存
+        xml = self.get_xml(page_info=page_info)
+        etag = get_etag(xml)
+
+        if etag in _page_parsed_cache and not reparse:
+            root.children = importer.import_(_page_parsed_cache[etag]).children
+            return root
+
+        # 2 否则进入正常解析流程
         soup = BeautifulSoup(xml or '', 'xml')
 
         # self.browser_xml()  # 可以用这个查原始的xml内容
@@ -714,7 +898,8 @@ class Page(_CommonMethods):
                 if x.name == 'QuickStyleDef':
                     style_defs[x['index']] = x['name']
                 elif x.name == 'Title':
-                    parent.root.name = BeautifulSoup(x.T.text, 'lxml').text
+                    # parent.root.name = BeautifulSoup(x.T.text, 'lxml').text
+                    pass
                 elif x.name == 'Outline':
                     # 处理层次结构A
                     nonlocal outline_cnt
@@ -733,38 +918,28 @@ class Page(_CommonMethods):
                         parent = dfs_parse_node(y, parent)
             return parent  # parent有可能会更新
 
-        if root is None:
-            root = Node('root')
         style_defs = {}
         # trick: outline_cnt不仅用来标记是否有多个Outline需要设中介结点。也记录了当前Outline的编号。
         outline_cnt = 1 if len(soup.find_all('Outline')) > 1 else 0
         dfs_parse_node(soup, root)
+        _page_parsed_cache[etag] = exporter.export(root)
         return root
 
     def get_page_num(self):
         return 1
 
-    def _search(self, *, print_mode=False):
+    def _search(self, *, use_node_cache=True, reparse=False):
         """ 先生成所有结点
-
-        :param print_mode: 统一所有的_search定义范式，虽然在Page这里其实没用~
-
         """
-        file = CACHE_DIR / (self.id + self.last_modified_time.replace(':', '') + '.pkl')
-
-        if file.is_file() and False:
-            root = file.read_pkl()
+        if not self._node.is_leaf and use_node_cache:
+            # 首先要有孩子结点，不是叶子结点，才表示可能解析过的node，此时开启use_node_cache的话，则不重复解析
+            return self._node
         else:
-            root = self.parse_oe_tree()
-            root.name = self.name
+            self._node = self.init_node()
 
-            if not root.is_leaf:
-                # 删除旧时间点的缓存文件，存储新的缓存文件
-                for f in CACHE_DIR.glob(f'{self.id}*.pkl'):
-                    f.delete()
-                file.write_pkl(root)
-
-        return root
+        self.parse_xml(self._node, reparse=reparse)
+        _free_page_nodes.append(self._node)
+        return self._node
 
 
 class Meta:
@@ -1097,4 +1272,64 @@ class Image:
 
 
 onenote = OneNote()
-onenote2 = OneNote()
+
+
+def start_server(root=None, edits=None, *, port=80):
+    """ 在本地开启一个onenote搜索服务
+
+    :param str root: 要检索的onenote根目录，未设置时默认初始化所有OneNote笔记
+        所有的路径一律用反斜杠/隔开
+        注意这样写是会降低灵活性的
+            一方面本来是可以使用数字直接引用下标的，这种模式下出现的数字会直接判定为是页面名称
+            另一方面路径中本来就可能存在/
+        但这些情况是小概率事件，一般遇到有问题的子目录，改到大目录里定位就好
+            实在不行，读者可以自己复制这个函数自行扩展
+    :param str|list[str] edits: 每次检索前要强制更新检索树的目录
+        str, 用英文逗号隔开多个条目
+        list[str]里的str，统一只要写在root下的相对路径
+
+    >> search_server('核心', ['2022ch4'])
+    >> search_server('共享/陈坤泽', ['杂项', 'CF', '吃土乡/大家的幻想乡'])
+    """
+    from flask import Flask
+    from flask import request
+
+    # 1 初始化检索数据
+    if root:
+        parent = reduce(lambda x, name: x[name], [onenote] + list(root.split('/')))
+    else:
+        parent = onenote
+    parent.get_search_tree(print_mode=True)
+
+    if isinstance(edits, str):
+        # 如果输入是字符串，可能使用命令行启动的，需要转义为list
+        edits = edits.split(',')  # 英文逗号隔开多个参数
+
+    # 2 开服务接口
+    app = Flask(__name__)
+
+    @app.route('/search/onenote', methods=['GET'])
+    def search_onenote():
+        def get_args(key, default=None):
+            return request.args.get(key, default)
+
+        pattern = get_args('pattern')
+        if pattern:
+            # 解析功能细节
+            res = parent.search(pattern, edits=edits,
+                                child_depth=int(get_args('child_depth', 0)),
+                                return_mode=get_args('return_mode', 'html'),
+                                padding_mode=int(get_args('padding_mode', 0)),
+                                dedent=int(get_args('dedent', 1)))
+        else:
+            ref_url = 'http://localhost/search/onenote?pattern=test'
+            return f'请输入检索内容，例如 <a href={ref_url}>{ref_url}</a>'
+        return res
+
+    app.run(host='0.0.0.0', port=port)
+
+
+if __name__ == '__main__':
+    import fire
+
+    fire.Fire()

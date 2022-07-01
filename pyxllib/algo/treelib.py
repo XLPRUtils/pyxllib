@@ -27,7 +27,7 @@ class EnchantNode(EnchantBase):
         cls._enchant(Node, names)
 
     @staticmethod
-    def sign_node(self, check_func, *, flag_name='_flag', child_depth=-1):
+    def sign_node(self, check_func, *, flag_name='_flag', child_depth=-1, reset_flag=False):
         """ 遍历所有结点
 
         :param check_func: 检查node是否符合要求
@@ -40,22 +40,31 @@ class EnchantNode(EnchantBase):
         else:
             child_depth += 1
 
+        if reset_flag:
+            for x in PreOrderIter(self):
+                setattr(x, flag_name, 0)
+
         def set_flag(node, flag):
             # 结点没有值或者flag小余当前值时，才标记更新为当前flag
             setattr(node, flag_name, max(flag, getattr(node, flag_name, 0)))
 
+        cnt = 0
         for x in PreOrderIter(self, filter_=check_func):
             # 对找到的结点标记2
+            cnt += 1
             set_flag(x, 2)
             # 其父结点、子结点标记1
             for y in x.ancestors:
                 set_flag(y, 1)
             for y in PreOrderIter(x, maxlevel=child_depth):
                 set_flag(y, 1)
+        return cnt
 
     @staticmethod
     def render(self, *, childiter=list, maxlevel=None, filter_=None, dedent=0):
         """
+
+        :param dedent: 统一减少缩进层级
 
         也可以这样可视化：
         >> from anytree import RenderTree
@@ -72,11 +81,17 @@ class EnchantNode(EnchantBase):
                 if not filter_(node):
                     continue
                 # 使用filter_参数时，前缀统一成空格
-                pre = (len(pre) // 4 - dedent) * '\t'
+                pre_len = (len(pre) // 4 - dedent)
+            else:
+                pre_len = len(pre)
 
-            msg = re.search(r',\s*(.+?)\)', str(node))  # 显示node的属性值
-            msg = ('\t' + msg.group(1)) if msg else ''
-            ls.append(fold_text(f'{pre}{node.name}{msg}'))
+            if pre_len < 0:
+                ls.append('')  # 加入一个空行
+            else:
+                pre = pre_len * '\t'
+                msg = re.search(r',\s*(.+?)\)', str(node))  # 显示node的属性值
+                msg = ('\t' + msg.group(1)) if msg else ''
+                ls.append(fold_text(f'{pre}{node.name}{msg}'))
 
         return '\n'.join(ls)
 
@@ -92,6 +107,7 @@ class EnchantNode(EnchantBase):
             0，默认配置，使用html自带的悬挂缩进功能。这种展示效果最好，但复制内容的时候不带缩进。
             1，使用空格缩进。长文本折行显示效果不好。但是方便复制。
         :param dedent: 统一减少缩进层级
+            根据这里的实现原理，这个其实也可以是负数，表示增加缩进层级~
 
         也可以这样可视化：
         >> from anytree import RenderTree
@@ -105,15 +121,18 @@ class EnchantNode(EnchantBase):
                 continue
             pre_len = len(pre) - dedent * 4
 
-            msg = re.search(r',\s*(.+?)\)', str(node))  # 显示node的属性值
-            msg = ('\t' + msg.group(1)) if msg else ''
-            content = f'{getattr(node, html_attr_name, node.name)}{msg}'
-            if not content.strip():
-                content = '<br/>'
-            if padding_mode == 1:
-                ls.append(f'<div>{"&nbsp;" * pre_len}{content}</div>')
+            if pre_len < 0:
+                ls.append('<br/>')
             else:
-                ls.append(f'<div style="padding-left:{pre_len // 2 + 1}em;text-indent:-1em">{content}</div>')
+                msg = re.search(r',\s*(.+?)\)', str(node))  # 显示node的属性值
+                msg = ('\t' + msg.group(1)) if msg else ''
+                content = f'{getattr(node, html_attr_name, node.name)}{msg}'
+                if not content.strip():
+                    content = '<br/>'
+                if padding_mode == 1:
+                    ls.append(f'<div>{"&nbsp;" * pre_len}{content}</div>')
+                else:
+                    ls.append(f'<div style="padding-left:{pre_len // 2 + 1}em;text-indent:-1em">{content}</div>')
 
         return '\n'.join(ls)
 

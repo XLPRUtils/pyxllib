@@ -238,3 +238,9 @@ def check_os_status():
         value = getattr(msg2, name) - getattr(msg1, name)
         print(f'{name}={value / (1024 ** 2) / sec:.0f}MB/s', end=' ')
     print()
+
+
+if __name__ == '__main__':
+    import fire
+
+    fire.Fire()

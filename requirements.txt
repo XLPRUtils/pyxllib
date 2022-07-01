@@ -12,6 +12,7 @@ pyperclip
 envariable
 decorator
 more-itertools
+fire
 
 pympler
 lxml
