@@ -3,20 +3,16 @@
 # @Author : 陈坤泽
 # @Email  : 877362867@qq.com
 # @Date   : 2021/11/07 14:04
-from pyxllib.prog.pupil import check_install_package
-
-check_install_package('fire')
 
 import os
 import re
 import time
 
 from humanfriendly import format_size
-import fire
 import pandas as pd
 import numpy as np
 
-from pyxllib.prog.pupil import check_install_package
+from pyxllib.prog.pupil import check_install_package, run_once
 
 
 class ClasEvaluater:
@@ -146,6 +142,14 @@ def show_feature_map(feature_map, show=True, *, pading=5):
     return a
 
 
+@run_once
+def _nvml_init():
+    check_install_package('pynvml')
+
+    import pynvml
+    pynvml.nvmlInit()
+
+
 class NvmDevice:
     """
     TODO 增加获得多张卡的接口
@@ -156,8 +160,7 @@ class NvmDevice:
 
         :param set_cuda_visible: 是否根据 环境变量 CUDA_VISIBLE_DEVICES 重新计算gpu的相对编号
         """
-        from pyxllib.prog.pupil import check_install_package
-        check_install_package('pynvml')
+        _nvml_init()
 
         import pynvml
 
@@ -168,9 +171,6 @@ class NvmDevice:
                    'free']  # 剩余空间
 
         try:
-            # 1 初始化
-            pynvml.nvmlInit()
-
             # 2 每张gpu卡的绝对、相对编号
             if set_cuda_visible and 'CUDA_VISIBLE_DEVICES' in os.environ:
                 idxs = re.findall(r'\d+', os.environ['CUDA_VISIBLE_DEVICES'])
@@ -238,17 +238,19 @@ def get_current_gpu_useage(card_id=None):
 
     :param card_id:
         int, 查单卡
+        str, 逗号隔开的多张卡
         list|tuple, 查多张卡
         None, 查所有卡
     """
-    import pynvml
+    _nvml_init()
 
-    # 需要初始化
-    pynvml.nvmlInit()
+    import pynvml
 
     # 1 要检查哪些卡
     if isinstance(card_id, int):
         idxs = [card_id]
+    elif isinstance(card_id, str):
+        idxs = card_id.split(',')
     elif isinstance(card_id, (list, tuple)):
         idxs = card_id
     else:
@@ -279,4 +281,6 @@ def watch_gpu_maximun(card_id=None, interval_seconds=0.1):
 
 
 if __name__ == '__main__':
+    import fire
+
     fire.Fire()
