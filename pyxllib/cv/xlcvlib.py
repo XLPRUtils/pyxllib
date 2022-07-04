@@ -5,18 +5,17 @@
 # @Date   : 2021/08/25 15:57
 
 import base64
-import itertools
 
+import PIL.Image
 import cv2
 import humanfriendly
 import numpy as np
-import PIL.Image
 import requests
 
-from pyxllib.prog.newbie import round_int, RunOnlyOnce
-from pyxllib.prog.pupil import EnchantBase, EnchantCvt
 from pyxllib.algo.geo import rect_bounds, warp_points, reshape_coords, quad_warp_wh, get_warp_mat, rect2polygon
 from pyxllib.file.specialist import File
+from pyxllib.prog.newbie import round_int, RunOnlyOnce
+from pyxllib.prog.pupil import EnchantBase, EnchantCvt
 
 _show_win_num = 0
 
@@ -51,7 +50,7 @@ class xlcv(EnchantBase):
         pass
 
     @staticmethod
-    def read(file, flags=None, **kwargs):
+    def read(file, flags=None, **kwargs) -> np.ndarray:
         """
         :param file: 支持非文件路径参数，会做类型转换
             因为这个接口的灵活性，要判断file参数类型等，速度会慢一点点
@@ -743,6 +742,7 @@ class xlcv(EnchantBase):
 
     @staticmethod
     def replace_color_by_mask(im, dst_color, mask):
+        # TODO mask可以设置权重，从而产生类似渐变的效果？
         c = _rgb_to_bgr_list(dst_color)
         if len(c) == 1:
             im2 = xlcv.read(im, 0)
@@ -845,6 +845,9 @@ class xlcv(EnchantBase):
         """
         gray_img = xlcv.read(im, 0)
         _, binary_img = cv2.threshold(gray_img, np.mean(gray_img), 255, cv2.THRESH_BINARY)
+        if binary_img.mean() > 128:  # 背景色应该比前景多的多，如果平均值大于128，说明黑底白字的模式反了
+            binary_img = ~binary_img
+        # 0作为背景，255作为前景
         im = xlcv.replace_color_by_mask(im, background_color, 255 - binary_img)
         im = xlcv.replace_color_by_mask(im, foreground_color, binary_img)
         return im
