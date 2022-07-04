@@ -388,6 +388,32 @@ class EnchantBs4Tag(EnchantBase):
         else:
             return self
 
+    @staticmethod
+    def next_preorder_node(self, iter_child=True):
+        """ 自己写的先序遍历
+
+        主要应用在xml、bs4相关遍历检索时，有时候遇到特殊结点
+            可能子结点不需要解析
+            或者整个cur_node和子结点已经被解析完了，不需要再按照通常的先序遍历继续进入子结点
+        此时可以 iter_child=False，进入下一个兄弟结点
+        """
+        # 传入的不一定是一个Tag结点~~
+        if not isinstance(self, bs4.element.Tag):
+            return None
+
+        if iter_child and self.contents:
+            return self.contents[0]
+        else:
+            cur_node = self
+            while True:
+                parent = cur_node.parent
+                if parent is None:
+                    return None
+                sibing = cur_node.find_next_sibling()
+                if sibing:
+                    return sibing
+                cur_node = parent
+
 
 EnchantBs4Tag.enchant()
 

@@ -13,6 +13,7 @@ import os
 from threading import Thread
 import copy
 from functools import reduce
+import urllib.parse
 
 import bs4
 import pytz
@@ -34,7 +35,8 @@ from pyxllib.prog.newbie import SingletonForEveryClass
 from pyxllib.prog.pupil import Timeout
 from pyxllib.prog.specialist import tqdm
 from pyxllib.file.specialist import XlPath, get_etag
-from pyxllib.algo.treelib import Node
+from pyxllib.algo.treelib import Node, XlNode
+from pyxllib.text.xmllib import BeautifulSoup, EnchantBs4Tag
 
 """
 参考了onepy的实现，做了重构。OnePy：Provides pythonic wrappers around OneNote COM interfaces
@@ -61,7 +63,12 @@ exporter = DictExporter()
 
 
 class ONProcess(metaclass=SingletonForEveryClass):
-    """ onenote 底层win32的接口 """
+    """ onenote 底层win32的接口
+
+    详细功能可以查官方文档：
+        Application interface (OneNote) | Microsoft Docs:
+        https://docs.microsoft.com/en-us/office/client-developer/onenote/application-interface-onenote
+    """
 
     def __init__(self, timeout=30):
         """ onenote的win32接口方法是驼峰命名，这个ONProcess做了一层功能封装
@@ -72,7 +79,7 @@ class ONProcess(metaclass=SingletonForEveryClass):
             再后来发现还有更慢的页面，半分钟的都有，就再改成30秒了
         """
         # TODO 这里需要针对不同的OneNote版本做自动化兼容，不要让用户填版本
-        #   因为让用户填版本，会存在多个实例化对象，使用getxml会有各种问题
+        #   因为让用户填版本，会存在多个实例化对象，使用get_xml会有各种问题
         # 目前是支持onenote2016的，但不知道其他版本onenote会怎样
         self.process = win32com.client.gencache.EnsureDispatch('OneNote.Application')
         self.namespace = "{http://schemas.microsoft.com/office/onenote/2013/onenote}"
@@ -184,9 +191,9 @@ class ONProcess(metaclass=SingletonForEveryClass):
 
     # Actions
 
-    def navigate_to(self, object_id, new_window=False):
+    def navigate_to(self, page_id, object_id='', new_window=False):
         try:
-            self.process.NavigateTo(object_id, "", new_window)
+            self.process.NavigateTo(page_id, object_id, new_window)
         except Exception as e:
             print("Could not Navigate To")
 
@@ -212,9 +219,15 @@ class ONProcess(metaclass=SingletonForEveryClass):
         except Exception as e:
             print("Could not Open Package")
 
-    def get_hyperlink_to_object(self, hierarchy_id, target_file_path=""):
+    def get_hyperlink_to_object(self, page_id, object_id=""):
+        """
+
+        :param str page_id:
+            The OneNote ID for the notebook, section group, section, or page for which you want a hyperlink.
+        :param str object_id: The OneNote ID for the object within the page for which you want a hyperlink.
+        """
         try:
-            return self.process.GetHyperlinkToObject(hierarchy_id, target_file_path)
+            return self.process.GetHyperlinkToObject(page_id, object_id)
         except Exception as e:
             print("Could not Get Hyperlink")
 
@@ -241,7 +254,10 @@ class _CommonMethods:
     """ 笔记本、分区组、分区、页面 共有的一些成员方法 """
 
     def init_node(self):
-        return Node(self.name, _category=type(self).__name__)
+        node = Node(self.name, _category=type(self).__name__)
+        # if type(self).__name__ != 'Page':
+        node._html_content = f'<a href="onenote/linkid?id={self.id}" target="_blank">{self.name}</a>'
+        return node
 
     @property
     def ancestors(self):
@@ -329,8 +345,8 @@ class _CommonMethods:
             root = self._search(use_node_cache=use_node_cache, reparse=reparse)
 
         def save_cache():
-            if cache_num != len(_page_parsed_cache):
-                # 如果前后数量不一致，表示有更新内容，重新写入一份缓存文件
+            if cache_num != len(_page_parsed_cache) or reparse:
+                # 如果前后数量不一致，表示有更新内容，重新写入一份缓存文件。或者明确使用了reparse了也要保存。
                 _page_parsed_cache_file.write_pkl(_page_parsed_cache)
 
         savefile_thread = Thread(target=save_cache)
@@ -343,8 +359,8 @@ class _CommonMethods:
 
     def search(self, pattern, child_depth=0, *,
                edits=None, reparse=False,
-               return_mode='text', padding_mode=0,
-               print_mode=False, dedent=1):
+               print_mode=False, return_mode='text',
+               padding_mode=0, dedent=1, href_mode=1):
         """ 查找内容
 
         Page、Section、SectionGroup等实际所用的search方法
@@ -361,6 +377,10 @@ class _CommonMethods:
         :param return_mode:
             text，文本展示
             html，网页富文本
+        :param href_mode: 超链接的模式
+            0，不设超链接。text模式下强制设为0。
+            1，静态链接（需要调用onenote生成，要多花一点点时间）
+            2，动态链接，在开启server的时候使用才有意义
         """
         # 1 按照规则检索内容
         if isinstance(pattern, str):  # 文本关键词检索
@@ -391,7 +411,7 @@ class _CommonMethods:
         edits = [list(name.split('/')) for name in edits]
         # 更新易变数据的检索树
         for path in edits:
-            node = reduce(lambda x, name: x[name], [self] + path)
+            node = self(path)
             print(node.abspath_name)
             node.get_search_tree(print_mode=False, use_node_cache=False, reparse=reparse)
         root = self.get_search_tree(print_mode=print_mode, use_node_cache=True, reparse=reparse)
@@ -399,25 +419,69 @@ class _CommonMethods:
 
         # 3 检索内容
         start_time = time.time()
-        n = root.sign_node(check_node, flag_name='_flag', child_depth=child_depth, reset_flag=True)
+        n = XlNode.sign_node(root, check_node, flag_name='_flag', child_depth=child_depth, reset_flag=True)
         elapsed2 = time.time() - start_time
 
-        # 4 展示内容
-        texts = [f'更新及获得索引副本：{elapsed1:.2f}秒，内容检索：{elapsed2:.2f}秒，匹配条目数：{n}']
+        # 4 html情况下的渲染算法
+        def node_to_html(x, depth):
+            import html
+
+            if depth < 0:
+                return '<br/>'
+
+            content = f'{getattr(x, "_html_content", html.escape(x.name))}'
+            if not hasattr(x, '_category'):
+                pass
+            elif x._category == 'OE':
+                if href_mode == 1:
+                    url = onenote.get_hyperlink_to_object(x._page_id, x._object_id)
+                    content += f'&nbsp;<a href="{url}">go</a>'
+                elif href_mode == 2:
+                    url = f"onenote/linkid?id={x._page_id}&object_id={x._object_id}"
+                    content += f'&nbsp;<a href="{url}" target="_blank">go</a>'
+            elif x._category == 'Page':
+                color = ['#009900', '#00b300', '#00cc00'][x._page_level - 1]
+                content = f'<font color="{color}">{x.name}</font>'
+                if href_mode == 1:
+                    url = onenote.get_hyperlink_to_object(x._page_id)
+                    content = f'<a href="{url}">{content}</a>'
+                elif href_mode == 2:
+                    url = f"onenote/linkid?id={x._page_id}"
+                    content = f'<a href="{url}" target="_blank">{content}</a>'
+
+            content = content.replace('\n', ' ')
+
+            if padding_mode == 1:
+                div = f'<div>{"&nbsp;" * depth * 4}{content}</div>'
+            else:
+                div = f'<div style="padding-left:{depth * 2 + 1}em;text-indent:-1em">{content}</div>'
+
+            return div
+
+        # 5 展示内容
+        texts = [f'更新索引：{elapsed1:.2f}秒，内容检索：{elapsed2:.2f}秒，匹配条目数：{n}']
         if return_mode == 'text':
-            body = root.render(filter_=lambda x: getattr(x, '_flag', 0), dedent=dedent)
+            body = XlNode.render(root, filter_=lambda x: getattr(x, '_flag', 0), dedent=dedent)
             texts[0] += f'，内容大小：{format_size(len(body.encode()), binary=True)}\n'
             texts.append(body)
             return '\n'.join(texts)
         elif return_mode == 'html':
-            body = root.render_html('_html_content',
-                                    filter_=lambda x: getattr(x, '_flag', 0),
-                                    padding_mode=padding_mode, dedent=dedent)
+            body = XlNode.render_html(root, node_to_html, filter_=lambda x: getattr(x, '_flag', 0), dedent=dedent)
             texts[0] += f'，内容大小：{format_size(len(body.encode()), binary=True)}<br/>'
             texts.append(body)
             return '<br/>'.join(texts)
         else:
             raise ValueError
+
+    def __call__(self, item=None):
+        """ 通过路径形式定位 """
+        if isinstance(item, str):
+            if '/' in item:
+                return reduce(lambda x, name: x[name], [self] + list(item.split('/')))
+            else:
+                return self[item]
+        else:
+            return self
 
 
 class OneNote(ONProcess, _CommonMethods):
@@ -442,7 +506,16 @@ class OneNote(ONProcess, _CommonMethods):
         self.hierarchy = Hierarchy(self.object_tree)
         self._children = list(self.hierarchy)
         self.name = 'onenote'
+        self.id = self._children[0].id  # 以第1个笔记本作为OneNote的id，方便一些功能统一设计
         self._node = self.init_node()
+
+    def get_href(self):
+        # OneNote软件本身没有跳转，这里默认设置跳转到第1个笔记本
+        return self._children[0].get_href()
+
+    def init_node(self):
+        node = Node(self.name, _category='OneNote', _html_content=f'<font color="purple">OneNote</font>')
+        return node
 
     def get_page_content(self, page_id):
         page_content_xml = ElementTree.fromstring(super(OneNote, self).get_page_content(page_id))
@@ -452,7 +525,7 @@ class OneNote(ONProcess, _CommonMethods):
         """
         :param page_changes_xml_in:
             xml，可以是原始的xml文本
-                onenote.update_page_content(page.getxml().replace('曹一众', '曹二众'))
+                onenote.update_page_content(page.get_xml().replace('曹一众', '曹二众'))
             soup, 可以传入一个bs4的soup对象
 
         这里设置pytz时间的东西我也看不懂，但大受震撼~~有点莫名其妙
@@ -526,7 +599,7 @@ class HierarchyNode:
 
     def deserialize_from_xml(self, xml):
         self.name = xml.get("name")
-        self.path = xml.get("path")
+        self.path = xml.get("path")  # page没有这个属性，但也不会报错的
         self.id = xml.get("ID")
         self.last_modified_time = xml.get("lastModifiedTime")
 
@@ -545,6 +618,14 @@ class Notebook(HierarchyNode, _CommonMethods):
             self.__deserialize_from_xml(xml)
 
         self._node = self.init_node()
+
+    def get_href(self):
+        return 'onenote:' + self.path[:-1]
+
+    def init_node(self):
+        node = Node(self.name, _category='Notebook',
+                    _html_content=f'<a href="{self.get_href()}"><font color="red">《{self.name}》</font></a>')
+        return node
 
     def __deserialize_from_xml(self, xml):
         HierarchyNode.deserialize_from_xml(self, xml)
@@ -605,6 +686,14 @@ class SectionGroup(HierarchyNode, _CommonMethods):
             self.__deserialize_from_xml(xml)
 
         self._node = self.init_node()
+
+    def get_href(self):
+        return 'onenote:' + self.path[:-1]
+
+    def init_node(self):
+        node = Node(self.name, _category='SectionGroup',
+                    _html_content=f'<a href="{self.get_href()}"><font color="#e68a00">〖{self.name}〗</font></a>')
+        return node
 
     def __iter__(self):
         # ckz: 这个遍历的时候，就是OneNote里看到的从左到右的顺序：先所有分区，然后所有分区组
@@ -672,6 +761,14 @@ class Section(HierarchyNode, _CommonMethods):
 
         self._node = self.init_node()
 
+    def get_href(self):
+        return 'onenote:' + self.path
+
+    def init_node(self):
+        node = Node(self.name, _category='Section',
+                    _html_content=f'<a href="{self.get_href()}"><font color="#b38600">〈{self.name}〉</font></a>')
+        return node
+
     def __iter__(self):
         for c in self._children:
             yield c
@@ -719,7 +816,7 @@ class Section(HierarchyNode, _CommonMethods):
             cur_page = x._search(use_node_cache=use_node_cache, reparse=reparse)
             if x.page_level == '1':
                 cur_page.parent = self._node
-                page_lv1 = cur_page
+                page_lv2 = page_lv1 = cur_page
             elif x.page_level == '2':
                 cur_page.parent = page_lv1
                 page_lv2 = cur_page
@@ -746,6 +843,19 @@ class Page(_CommonMethods):
             self.__deserialize_from_xml(xml)
 
         self._node = self.init_node()  # 供全文检索的树形结点
+
+    def get_href(self, strict=False):
+        """ 按照OneNote的链接规则，如果同一个分区下，有重名Page，只会查找到第1个
+        如果要精确指向页面，需要使用get_hyperlink_to_object方法
+        """
+        if strict:
+            return onenote.get_hyperlink_to_object(self.id)
+        else:
+            return self.parent.get_href() + f'#{self.name}'
+
+    def init_node(self):
+        node = Node(self.name, _category='Page', _page_id=self.id, _page_level=int(self.page_level))
+        return node
 
     def __iter__(self):
         for c in self._children:
@@ -800,9 +910,9 @@ class Page(_CommonMethods):
 
         return res
 
-    def browser_xml(self):
+    def browser_xml(self, page_info=0):
         from pyxllib.debug.specialist import browser, XlPath
-        xml = self.get_xml()
+        xml = self.get_xml(page_info)
         browser(xml, file=XlPath.tempfile('.xml'))
 
     def parse_xml(self, root=None, *, page_info=0, reparse=False):
@@ -818,111 +928,60 @@ class Page(_CommonMethods):
             比如在遍历tag.contents的时候，因为[层次结构C]的原因，会出现 parent = dfs_parse_node(y, parent) 的较奇怪的写法
             在parse_oe中，parent的层次实现规则，也会较复杂，有些trick
         """
-        from pyxllib.text.xmllib import BeautifulSoup
 
-        if root is None:
-            root = Node('root')
+        # 0 函数
+
+        def _parse_xml(root):
+            soup = BeautifulSoup(xml or '', 'xml')
+            # self.browser_xml()  # 可以用这个查原始的xml内容
+
+            style_defs = {}
+
+            # trick: outline_cnt不仅用来标记是否有多个Outline需要设中介结点。也记录了当前Outline的编号。
+            outline_cnt = 1 if len(soup.find_all('Outline')) > 1 else 0
+
+            cur_node, parent = soup, root
+            while cur_node:
+                x = cur_node
+                if isinstance(x, bs4.element.Tag):
+                    # if分支后注释的数字，是实际逻辑结构上先后遇到的顺序，但为了效率，按照出现频率重排序了
+                    if x.name == 'OE':  # 3
+                        parent = OETag.parse2tree(x, parent, style_defs)
+                        cur_node = cur_node.next_preorder_node(False)
+                        continue
+                    elif x.name == 'Outline':  # 2
+                        # 处理层次结构A
+                        if outline_cnt:
+                            if outline_cnt == 1:
+                                parent = Node(f'Outline{outline_cnt}', parent)
+                            else:
+                                pp = XlNode.find_parent(parent, re.compile('^Outline'))
+                                parent = Node(f'Outline{outline_cnt}', pp.parent if pp else parent)
+                            outline_cnt += 1
+                    elif x.name == 'QuickStyleDef':  # 1
+                        style_defs[x['index']] = x['name']
+                        cur_node = cur_node.next_preorder_node(False)
+                        continue
+
+                cur_node = EnchantBs4Tag.next_preorder_node(cur_node)
+
+            return root
 
         # 1 在一次程序执行中，相同的xml内容解析出的树也是一样的，可以做个缓存
         xml = self.get_xml(page_info=page_info)
         etag = get_etag(xml)
+
+        if root is None:
+            root = Node('root')
 
         if etag in _page_parsed_cache and not reparse:
             root.children = importer.import_(_page_parsed_cache[etag]).children
             return root
 
         # 2 否则进入正常解析流程
-        soup = BeautifulSoup(xml or '', 'xml')
-
-        # self.browser_xml()  # 可以用这个查原始的xml内容
-
-        def parse_oe(x, parent):
-            # 1 获得3个主要属性
-            def get_text(x):
-                if y := x.find('T', recursive=False):
-                    t1 = BeautifulSoup(y.text, 'lxml').text
-                    t2 = y.text
-                elif y := x.find('Table', recursive=False):
-                    # 先Columns标记了一共m列，每列的宽度
-                    # 然后每一行是一个Row，里面有m个Cell
-                    t1 = '[Table]'
-                    t2 = t1
-                elif y := x.find('Image', recursive=False):
-                    t1 = '[Image]'
-                    t2 = t1
-                else:
-                    t1 = ''
-                    t2 = ''
-                return t1, t2
-
-            style_name = style_defs.get(x.get('quickStyleIndex', ''), '')
-            pure_text, html_text = get_text(x)  # 文本内容
-            m = x.find('OEChildren', recursive=False)  # 文本性质子结点
-
-            # 空数据跳过
-            # if not pure_text and not m:
-            #     return parent
-
-            # 2 处理层次结构B
-            if re.match(r'h\d$', style_name):  # 标题类
-                while True:
-                    parent_style_name = getattr(parent, '_style_name', '')
-                    if re.match(r'h\d$', parent_style_name) and parent_style_name >= style_name:
-                        # 如果父结点也是标题类型，且数值上不大于当前结点，则当前结点的实际父结点要往上层找
-                        parent = parent.parent
-                    else:
-                        break
-                # 标题类，会重置parent，本身作为一个中间结点
-                cur_node = parent = Node(pure_text, parent, _style_name=style_name, _html_content=html_text)
-            else:
-                cur_node = Node(pure_text, parent, _html_content=html_text)
-
-            # 3 表格、图片等特殊结构增设层级
-            if pure_text.startswith('[Table]'):
-                for z in x.find_all('T'):
-                    Node(BeautifulSoup(z.text, 'lxml').text, cur_node, _html_content=z.text)
-            elif pure_text.startswith('[Image]'):
-                y = x.find('Image', recursive=False)
-                for z in y.get('alt', '').splitlines():
-                    Node(z, cur_node)
-
-            # 4 处理层次结构C
-            if m:
-                for y in m.find_all('OE', recursive=False):
-                    parse_oe(y, cur_node)
-
-            return parent
-
-        def dfs_parse_node(x, parent):
-            if isinstance(x, bs4.element.Tag):
-                if x.name == 'QuickStyleDef':
-                    style_defs[x['index']] = x['name']
-                elif x.name == 'Title':
-                    # parent.root.name = BeautifulSoup(x.T.text, 'lxml').text
-                    pass
-                elif x.name == 'Outline':
-                    # 处理层次结构A
-                    nonlocal outline_cnt
-                    if outline_cnt:
-                        if outline_cnt == 1:
-                            parent = Node(f'Outline{outline_cnt}', parent)
-                        else:
-                            parent = Node(f'Outline{outline_cnt}', parent.parent)
-                        outline_cnt += 1
-                    for y in x.contents:
-                        parent = dfs_parse_node(y, parent)
-                elif x.name == 'OE':
-                    parent = parse_oe(x, parent)
-                else:
-                    for y in x.contents:
-                        parent = dfs_parse_node(y, parent)
-            return parent  # parent有可能会更新
-
-        style_defs = {}
-        # trick: outline_cnt不仅用来标记是否有多个Outline需要设中介结点。也记录了当前Outline的编号。
-        outline_cnt = 1 if len(soup.find_all('Outline')) > 1 else 0
-        dfs_parse_node(soup, root)
+        root = _parse_xml(root)
         _page_parsed_cache[etag] = exporter.export(root)
+
         return root
 
     def get_page_num(self):
@@ -958,8 +1017,7 @@ class Meta:
         self.name = xml.get("name")
         self.id = xml.get("content")
 
-    def getxml(self):
-        """获得页面的"""
+    def get_xml(self):
         return super(OneNote, onenote).get_page_content(self.id)
 
 
@@ -1159,6 +1217,78 @@ class OE:
                 self.files.append(InsertedFile(node, self))
 
 
+class OETag(bs4.element.Tag):
+
+    def get_text2(self):
+        """ 这是给bs4.Tag准备的功能接口 """
+        if y := self.find('T', recursive=False):
+            t1 = BeautifulSoup(y.text, 'lxml').text
+            t2 = y.text
+        elif y := self.find('Table', recursive=False):
+            # 先Columns标记了一共m列，每列的宽度
+            # 然后每一行是一个Row，里面有m个Cell
+            t1 = '[Table]'
+            t2 = t1
+        elif y := self.find('Image', recursive=False):
+            t1 = '[Image]'
+            t2 = t1
+        else:
+            t1 = ''
+            t2 = ''
+        return t1, t2
+
+    def parse2tree(self, parent, style_defs):
+        """ 从Tag结点，解析出 anytree 格式的结点树
+
+        :param Node parent: anytree的node父结点
+            会将当前Tag解析的内容，转存，挂到parent.children下
+        :param style_defs: 前文解析到的样式表
+        """
+
+        # 1 获得3个主要属性
+        style_name = style_defs.get(self.get('quickStyleIndex', ''), '')
+        pure_text, html_text = OETag.get_text2(self)  # 文本内容
+        m = self.find('OEChildren', recursive=False)  # 文本性质子结点
+
+        # 空数据跳过
+        # if not pure_text and not m:
+        #     return parent
+
+        # 2 处理层次结构B
+        if re.match(r'h\d$', style_name):  # 标题类
+            while True:
+                parent_style_name = getattr(parent, '_style_name', '')
+                if re.match(r'h\d$', parent_style_name) and parent_style_name >= style_name:
+                    # 如果父结点也是标题类型，且数值上不大于当前结点，则当前结点的实际父结点要往上层找
+                    parent = parent.parent
+                else:
+                    break
+            # 标题类，会重置parent，本身作为一个中间结点
+            cur_node = parent = Node(pure_text, parent, _style_name=style_name, _html_content=html_text)
+        else:
+            cur_node = Node(pure_text, parent, _html_content=html_text)
+
+        setattr(cur_node, '_category', 'OE')
+        setattr(cur_node, '_page_id', XlNode.find_parent(self, 'Page')['ID'])  # noqa find_parent适用于bs4.element.Tag
+        setattr(cur_node, '_object_id', self['objectID'])
+
+        # 3 表格、图片等特殊结构增设层级
+        if pure_text.startswith('[Table]'):
+            for z in self.find_all('T'):
+                Node(BeautifulSoup(z.text, 'lxml').text, cur_node, _html_content=z.text)
+        elif pure_text.startswith('[Image]'):
+            y = self.find('Image', recursive=False)
+            for z in y.get('alt', '').splitlines():
+                Node(z, cur_node)
+
+        # 4 处理层次结构C
+        if m:
+            for y in m.find_all('OE', recursive=False):
+                OETag.parse2tree(y, cur_node, style_defs)
+
+        return parent
+
+
 class InsertedFile:
 
     # need to add position data to this class
@@ -1274,7 +1404,7 @@ class Image:
 onenote = OneNote()
 
 
-def start_server(root=None, edits=None, *, port=80):
+def start_server(root=None, edits=None, *, port=80, reparse=False):
     """ 在本地开启一个onenote搜索服务
 
     :param str root: 要检索的onenote根目录，未设置时默认初始化所有OneNote笔记
@@ -1291,15 +1421,11 @@ def start_server(root=None, edits=None, *, port=80):
     >> search_server('核心', ['2022ch4'])
     >> search_server('共享/陈坤泽', ['杂项', 'CF', '吃土乡/大家的幻想乡'])
     """
-    from flask import Flask
-    from flask import request
+    from flask import Flask, request
 
     # 1 初始化检索数据
-    if root:
-        parent = reduce(lambda x, name: x[name], [onenote] + list(root.split('/')))
-    else:
-        parent = onenote
-    parent.get_search_tree(print_mode=True)
+    parent = onenote(root)
+    parent.get_search_tree(print_mode=True, reparse=reparse)
 
     if isinstance(edits, str):
         # 如果输入是字符串，可能使用命令行启动的，需要转义为list
@@ -1320,13 +1446,25 @@ def start_server(root=None, edits=None, *, port=80):
                                 child_depth=int(get_args('child_depth', 0)),
                                 return_mode=get_args('return_mode', 'html'),
                                 padding_mode=int(get_args('padding_mode', 0)),
+                                print_mode=get_args('print_mode', True),
+                                href_mode=int(get_args('href_mode', 2)),  # 默认使用动态链接
                                 dedent=int(get_args('dedent', 1)))
         else:
             ref_url = 'http://localhost/search/onenote?pattern=test'
             return f'请输入检索内容，例如 <a href={ref_url}>{ref_url}</a>'
         return res
 
-    app.run(host='0.0.0.0', port=port)
+    @app.route('/search/onenote/linkid', methods=['GET'])
+    def linkid():
+        """ 通过id进行目标跳转 """
+        page_id = request.args.get('id', None)
+        object_id = request.args.get('object_id', '')
+        onenote.navigate_to(page_id, object_id)
+        # 返回一个直接自关闭的页面内容
+        return '<script type="text/javascript">window.close();</script>'
+
+    # 子线程无法调用win32com生成的onenote资源，如果要使用linkid功能，只能留一个主线程处理
+    app.run(host='0.0.0.0', port=port, threaded=False)
 
 
 if __name__ == '__main__':

@@ -16,22 +16,16 @@ import re
 
 from anytree import Node
 
-from pyxllib.prog.pupil import EnchantBase, run_once
 
+class XlNode(Node):
 
-class EnchantNode(EnchantBase):
-    @classmethod
-    @run_once
-    def enchant(cls):
-        names = cls.check_enchant_names([Node])
-        cls._enchant(Node, names)
-
-    @staticmethod
     def sign_node(self, check_func, *, flag_name='_flag', child_depth=-1, reset_flag=False):
         """ 遍历所有结点
 
         :param check_func: 检查node是否符合要求
             True，自身打上标记2，其余父节点、子结点全部打上1 （这里处理方式后续可以再扩展更灵活）
+
+        不是那么通用，但也可能存在复用的功能，做了个封装
         """
         from anytree import PreOrderIter
 
@@ -60,81 +54,96 @@ class EnchantNode(EnchantBase):
                 set_flag(y, 1)
         return cnt
 
-    @staticmethod
-    def render(self, *, childiter=list, maxlevel=None, filter_=None, dedent=0):
-        """
+    def render(self, attrname='name', *,
+               childiter=list, maxlevel=None, filter_=None,  # 结点的迭代、过滤等规则
+               prefix='\t',
+               dedent=0):
+        """ 渲染展示结构树
 
+        :pram attrname:
+            str, 要展示的成员变量值
+            def func(node, depth)，自定义展示样式
+        :param prefix: 缩进样式
+            str，每个层级增加的样式，会直接用 prefix*depth作为前缀
+            tuple(3), 长度3的tuple，对应AbstractStyle(vertical, cont, end)
+            def func(depth), 输入深度，自定义前缀样式 （未实装，想到这个理念，但觉得用处不大）
         :param dedent: 统一减少缩进层级
 
-        也可以这样可视化：
-        >> from anytree import RenderTree
-        >> print(RenderTree(root))
         """
         from anytree import RenderTree
 
-        def fold_text(s):
-            return s.replace('\n', ' ')[:150]
+        # 1 文本格式化的规则
+        if isinstance(attrname, str):
+            def to_str(node, depth):
+                if depth < 0:
+                    return ''
+                return getattr(node, attrname)
+        elif callable(attrname):
+            to_str = attrname
+        else:
+            raise ValueError
 
-        ls = []
-        for pre, fill, node in RenderTree(self, childiter=childiter, maxlevel=maxlevel):
-            if filter_:
-                if not filter_(node):
-                    continue
-                # 使用filter_参数时，前缀统一成空格
-                pre_len = (len(pre) // 4 - dedent)
-            else:
-                pre_len = len(pre)
-
-            if pre_len < 0:
-                ls.append('')  # 加入一个空行
-            else:
-                pre = pre_len * '\t'
-                msg = re.search(r',\s*(.+?)\)', str(node))  # 显示node的属性值
-                msg = ('\t' + msg.group(1)) if msg else ''
-                ls.append(fold_text(f'{pre}{node.name}{msg}'))
-
-        return '\n'.join(ls)
-
-    @staticmethod
-    def render_html(self, html_attr_name='name', *,
-                    childiter=list, maxlevel=None, filter_=None, padding_mode=0,
-                    dedent=0):
-        """ 渲染成html页面内容
-
-        :param html_attr_name: 最好原node有一个字段存储需要渲染的html内容
-            默认使用name的值作为渲染对象
-        :param padding_mode:
-            0，默认配置，使用html自带的悬挂缩进功能。这种展示效果最好，但复制内容的时候不带缩进。
-            1，使用空格缩进。长文本折行显示效果不好。但是方便复制。
-        :param dedent: 统一减少缩进层级
-            根据这里的实现原理，这个其实也可以是负数，表示增加缩进层级~
-
-        也可以这样可视化：
-        >> from anytree import RenderTree
-        >> print(RenderTree(root))
-        """
-        from anytree import RenderTree
-
+        # 2 遍历结点
         ls = []
         for pre, fill, node in RenderTree(self, childiter=childiter, maxlevel=maxlevel):
             if filter_ and not filter_(node):
                 continue
-            pre_len = len(pre) - dedent * 4
 
-            if pre_len < 0:
-                ls.append('<br/>')
-            else:
-                msg = re.search(r',\s*(.+?)\)', str(node))  # 显示node的属性值
-                msg = ('\t' + msg.group(1)) if msg else ''
-                content = f'{getattr(node, html_attr_name, node.name)}{msg}'
-                if not content.strip():
-                    content = '<br/>'
-                if padding_mode == 1:
-                    ls.append(f'<div>{"&nbsp;" * pre_len}{content}</div>')
-                else:
-                    ls.append(f'<div style="padding-left:{pre_len // 2 + 1}em;text-indent:-1em">{content}</div>')
+            depth = len(pre) // 4 - dedent
+            ls.append(prefix * depth + to_str(node, depth))
 
         return '\n'.join(ls)
 
+    def render_html(self, attrname='name', **kwargs):
+        """ 渲染成html页面内容
+        """
+        if isinstance(attrname, str):
+            def attrname(node, depth):
+                if depth < 0:
+                    return '<br/>'
+                content = getattr(node, attrname)
+                div = f'<div style="padding-left:{depth * 2 + 1}em;text-indent:-1em">{content}</div>'
+                return div
 
-EnchantNode.enchant()
+        return XlNode.render(self, attrname, **kwargs)
+
+    def find_parent(self, check_func):
+        """ 查找包含自身的所有父结点中，name符合check_func的结点 """
+        if isinstance(check_func, str):
+            def _check_func(x):
+                return x.name == check_func
+        elif isinstance(check_func, re.Pattern):
+            def _check_func(x):
+                return check_func.search(x.name)
+        elif callable(check_func):
+            _check_func = check_func
+        else:
+            raise ValueError
+
+        p = self
+        while p and not _check_func(p):
+            p = p.parent
+        return p
+
+    def next_preorder_node(self, iter_child=True):
+        """ 自己写的先序遍历
+
+        主要应用在xml、bs4相关遍历检索时，有时候遇到特殊结点
+            可能子结点不需要解析
+            或者整个cur_node和子结点已经被解析完了，不需要再按照通常的先序遍历继续进入子结点
+        此时可以 iter_child=False，进入下一个兄弟结点
+        """
+        from anytree.util import rightsibling
+
+        if iter_child and self.children:
+            return self.children[0]
+        else:
+            cur_node = self
+            while True:
+                parent = cur_node.parent
+                if parent is None:
+                    return None
+                sibing = rightsibling(cur_node)
+                if sibing:
+                    return sibing
+                cur_node = parent
