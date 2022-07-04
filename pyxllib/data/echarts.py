@@ -24,21 +24,16 @@ from pyxllib.prog.pupil import run_once, EnchantBase, EnchantCvt
 from pyxllib.debug.specialist import TicToc, browser
 from pyxllib.file.specialist import XlPath
 
+from pyecharts.charts.chart import Chart
+from pyecharts.charts import Bar
 
-class EnchantChart(EnchantBase):
 
-    @classmethod
-    @run_once()
-    def enchant(cls):
-        from pyecharts.charts.chart import Chart
-        names = cls.check_enchant_names([Chart])
-        cls._enchant(Chart, names)
+class XlChart(Chart):
 
     @staticmethod
     def set_title(self, title):
         self.set_global_opts(title_opts=pyecharts.options.TitleOpts(title=title))
 
-    @staticmethod
     def add_series(self, name, data, *, type=None, color=None, is_selected=True, labels=None,
                    **kwargs):
         """ 垃圾pyecharts，毁我青春~~
@@ -77,19 +72,9 @@ class EnchantChart(EnchantBase):
         return self
 
 
-EnchantChart.enchant()
-
-
-class EnchantBar(EnchantBase):
+class XlBar(Bar):
 
     @classmethod
-    @run_once()
-    def enchant(cls):
-        from pyecharts.charts import Bar
-        names = cls.check_enchant_names([Bar])
-        cls._enchant(Bar, names, EnchantCvt.staticmethod2classmethod)
-
-    @staticmethod
     def from_dict(cls, yaxis, xaxis=None, *, title=None):
         """ 查看一个数据的条形图
 
@@ -106,11 +91,11 @@ class EnchantBar(EnchantBase):
             b.add_yaxis(k, v)
 
         if title:
-            b.set_title(title)
+            XlChart.set_title(b, title)
 
         return b
 
-    @staticmethod
+    @classmethod
     def from_list(cls, yaxis, xaxis=None, *, title=None):
         """
         >> browser(pyecharts.charts.Bar.from_list(numbers))

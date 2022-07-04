@@ -459,7 +459,7 @@ class _CommonMethods:
             return div
 
         # 5 展示内容
-        texts = [f'更新索引：{elapsed1:.2f}秒，内容检索：{elapsed2:.2f}秒，匹配条目数：{n}']
+        texts = [f'更新数据：{elapsed1:.2f}秒，内容检索：{elapsed2:.2f}秒，匹配条目数：{n}']
         if return_mode == 'text':
             body = XlNode.render(root, filter_=lambda x: getattr(x, '_flag', 0), dedent=dedent)
             texts[0] += f'，内容大小：{format_size(len(body.encode()), binary=True)}\n'
