@@ -23,39 +23,27 @@ from pyxllib.algo.pupil import SearchBase
 from pyxllib.debug.pupil import dprint
 from pyxllib.debug.specialist import browser
 from pyxllib.prog.newbie import round_int
-from pyxllib.prog.pupil import EnchantBase, EnchantCvt, run_once
+from pyxllib.prog.pupil import EnchantBase, EnchantCvt, run_once, inject_members
 from pyxllib.text.newbie import xldictstr
 from pyxllib.text.pupil import shorten, ensure_gbk, BookContents, strwidth, grp_chinese_char
 from pyxllib.file.specialist import File, Dir, get_etag
 
 
-class EnchantBs4Tag(EnchantBase):
-    @classmethod
-    @run_once
-    def enchant(cls):
-        """ 把xlcv的功能嵌入cv2中
+class XlBs4Tag(bs4.element.Tag):
 
-        不太推荐使用该类，可以使用CvImg类更好地解决问题。
-        """
-        names = cls.check_enchant_names([bs4.element.Tag])
-        propertys = {'tag_name'}
-        cls._enchant(bs4.element.Tag, propertys, EnchantCvt.staticmethod2property)
-        cls._enchant(bs4.element.Tag, names - propertys)
-
-    @staticmethod
+    @property
     def tag_name(self):
         """输入一个bs4的Tag或NavigableString，
         返回tag.name或者'NavigableString'
         """
         if self.name:
             return self.name
-        elif isinstance(self, bs4.NavigableString):
+        elif isinstance(self, bs4.element.NavigableString):
             return 'NavigableString'
         else:
             dprint(self)  # 获取结点t名称失败
             return None
 
-    @staticmethod
     def subtag_names(self):
         """ 列出结点的所有直接子结点（花括号后面跟的数字是连续出现次数）
         例如body的： p{137}，tbl，p{94}，tbl，p{1640}，sectPr
@@ -78,7 +66,6 @@ class EnchantBs4Tag(EnchantBase):
             s = s[:-1]
         return s
 
-    @staticmethod
     def treestruct_raw(self, **kwargs):
         """ 查看树形结构的raw版本
         各参数含义详见dfs_base
@@ -88,18 +75,17 @@ class EnchantBs4Tag(EnchantBase):
         s = sb.fmt_nodes(**kwargs)
         return s
 
-    @staticmethod
     def treestruct_brief(self, linenum=True, prefix='- ', **kwargs):
         """ 查看树形结构的简洁版
         """
 
         class Search(SearchBase):
             def fmt_node(self, node, depth, *, prefix=prefix, show_node_type=False):
-                if isinstance(node, bs4.ProcessingInstruction):
+                if isinstance(node, bs4.element.ProcessingInstruction):
                     s = 'ProcessingInstruction，' + str(node)
-                elif isinstance(node, bs4.Tag):
+                elif isinstance(node, bs4.element.Tag):
                     s = node.name + '，' + xldictstr(node.attrs, item_delimit='，')
-                elif isinstance(node, bs4.NavigableString):
+                elif isinstance(node, bs4.element.NavigableString):
                     s = shorten(str(node), 200)
                     if not s.strip():
                         s = '<??>'
@@ -111,7 +97,6 @@ class EnchantBs4Tag(EnchantBase):
         res = search.fmt_nodes(linenum=linenum, **kwargs)
         return res
 
-    @staticmethod
     def treestruct_stat(self):
         """生成一个两个二维表的统计数据
             ls1, ls2 = treestruct_stat()
@@ -158,7 +143,6 @@ class EnchantBs4Tag(EnchantBase):
         df2 = pd.DataFrame.from_records(ls2, columns=['序号', 'element序号', '当前结点', '属性名', '属性值'])
         return df1, df2
 
-    @staticmethod
     def count_tagname(self):
         """统计每个标签出现的次数：
              1                    w:rpr  650
@@ -181,7 +165,6 @@ class EnchantBs4Tag(EnchantBase):
         inner(self)
         return ct.most_common()
 
-    @staticmethod
     def check_tag(self, tagname=None):
         """ 统计每个标签在不同层级出现的次数：
 
@@ -199,15 +182,15 @@ class EnchantBs4Tag(EnchantBase):
             d[name][depth] += 1
 
         def inner(node, depth):
-            if isinstance(node, bs4.ProcessingInstruction):
+            if isinstance(node, bs4.element.ProcessingInstruction):
                 add('ProcessingInstruction', depth)
-            elif isinstance(node, bs4.Tag):
+            elif isinstance(node, bs4.element.Tag):
                 if node.name == tagname and depth:
                     dprint(node, depth)  # tagname里有同名子标签
                 add(node.name, depth)
                 for t in node.children:
                     inner(t, depth + 1)
-            elif isinstance(node, bs4.NavigableString):
+            elif isinstance(node, bs4.element.NavigableString):
                 add('NavigableString', depth)
             else:
                 add('其他特殊结点', depth)
@@ -223,7 +206,6 @@ class EnchantBs4Tag(EnchantBase):
 
         return d
 
-    @staticmethod
     def check_namespace(self):
         """检查名称空间问题，会同时检查标签名和属性名：
             1  cNvPr  pic:cNvPr(579)，wps:cNvPr(52)，wpg:cNvPr(15)
@@ -255,7 +237,6 @@ class EnchantBs4Tag(EnchantBase):
         # browser(ls1, filename='检查名称空间问题')
         return ls1
 
-    @staticmethod
     def get_catalogue(self, *args, size=False, start_level=-1, **kwargs):
         """ 找到所有的h生成文本版的目录
 
@@ -281,7 +262,6 @@ class EnchantBs4Tag(EnchantBase):
         else:
             return ''
 
-    @staticmethod
     def section_text_size(self, factor=1, fmt=False):
         """ 计算某节标题下的正文内容长度 """
         if not re.match(r'h\d+$', self.name):
@@ -293,7 +273,7 @@ class EnchantBs4Tag(EnchantBase):
             if x.name == self.name:
                 break
             else:
-                text = str(x) if isinstance(x, bs4.NavigableString) else x.get_text()
+                text = str(x) if isinstance(x, bs4.element.NavigableString) else x.get_text()
                 part_size += strwidth(text)
         part_size = round_int(part_size * factor)
 
@@ -302,7 +282,6 @@ class EnchantBs4Tag(EnchantBase):
         else:
             return part_size
 
-    @staticmethod
     def head_add_size(self, factor=1):
         """ 标题增加每节内容大小标记
 
@@ -313,7 +292,6 @@ class EnchantBs4Tag(EnchantBase):
             navi_str = list(h.strings)[-1].rstrip()
             navi_str.replace_with(str(navi_str) + '，' + part_size)
 
-    @staticmethod
     def head_add_number(self, start_level=-1, jump=True):
         """ 标题增加每节编号
         """
@@ -335,7 +313,6 @@ class EnchantBs4Tag(EnchantBase):
             else:
                 h.string = nums[i]
 
-    @staticmethod
     def xltext(self):
         """ 自己特用的文本化方法
 
@@ -349,11 +326,9 @@ class EnchantBs4Tag(EnchantBase):
         # return self.prettify()
         return str(self)
 
-    @staticmethod
     def browser(self):
         browser.html(self)
 
-    @staticmethod
     @run_once('id,str')
     def get_nonempty_childrens(self, *args):
         """ 获得所有Tag类型的直接子结点 （偏定制，不是那么通用的接口）
@@ -379,7 +354,6 @@ class EnchantBs4Tag(EnchantBase):
         else:
             return ls
 
-    @staticmethod
     def get_nonempty_children(self, *args):
         """ 输入args下标，指定获得某一个非空子结点 """
         if len(args):
@@ -388,7 +362,6 @@ class EnchantBs4Tag(EnchantBase):
         else:
             return self
 
-    @staticmethod
     def next_preorder_node(self, iter_child=True):
         """ 自己写的先序遍历
 
@@ -415,7 +388,7 @@ class EnchantBs4Tag(EnchantBase):
                 cur_node = parent
 
 
-EnchantBs4Tag.enchant()
+inject_members(XlBs4Tag, bs4.element.Tag)
 
 
 def mathjax_html_head(s):

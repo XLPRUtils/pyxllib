@@ -5,7 +5,7 @@
 # @Date   : 2021/08/25 15:57
 
 """
-图方便的时候，xlpil和xlcv可以进行图片类型转换，然后互相引用彼此已有的一个实现版本
+图方便的时候，PilImg和CvImg可以进行图片类型转换，然后互相引用彼此已有的一个实现版本
 为了性能的时候，则尽量减少各种绕弯，使用最源生的代码来实现
 """
 
@@ -25,182 +25,145 @@ try:
 except ImportError:
     accimage = None
 
-from pyxllib.prog.newbie import RunOnlyOnce
-from pyxllib.prog.pupil import EnchantBase, EnchantCvt
+from pyxllib.prog.pupil import inject_members
 from pyxllib.file.specialist import File, get_font_file
-from pyxllib.cv.xlcvlib import xlcv
+from pyxllib.cv.xlcvlib import CvImg
 
 
-class xlpil(EnchantBase):
-    @classmethod
-    @RunOnlyOnce
-    def enchant(cls):
-        """ 把xlpil的功能嵌入到PIL.Image.Image类中，作为成员函数直接使用
-        即 im = Image.open('test.jpg')
-        im.to_buffer() 等价于使用 xlpil.to_buffer(im)
+class PilImg(PIL.Image.Image):
 
-        pil相比cv，由于无法类似CvImg这样新建一个和np.ndarray等效的类
-        所以还是比较支持嵌入到Image中直接操作
-        """
-        names = cls.check_enchant_names([cv2, np.ndarray, PIL.Image, PIL.Image.Image])
-
-        # 1 绑定到模块下的方法
-        pil_names = set('read read_from_buffer read_from_url'.split())
-        cls._enchant(PIL.Image, pil_names, EnchantCvt.staticmethod2modulefunc)
-
-        # 2 绑定到PIL.Image.Image下的方法
-        # 2.1 属性类
-        propertys = set('imsize n_channels'.split())
-        cls._enchant(PIL.Image.Image, propertys, EnchantCvt.staticmethod2property)
-
-        # 2.2 其他均为方法类
-        cls._enchant(PIL.Image.Image, names - pil_names - propertys)
-
-    @staticmethod
-    def __1_read():
+    def __1_read(self):
         pass
 
-    @staticmethod
-    def read(file, flags=None, **kwargs):
-        if xlpil.is_pil_image(file):
+    @classmethod
+    def read(cls, file, flags=None, **kwargs) -> 'PilImg':
+        if PilImg.is_pil_image(file):
             im = file
-        elif xlcv.is_cv2_image(file):
-            im = xlcv.to_pil_image(file)
+        elif CvImg.is_cv2_image(file):
+            im = CvImg.to_pil_image(file)
         elif File.safe_init(file):
             im = PIL.Image.open(str(file), **kwargs)
         else:
             raise TypeError(f'类型错误或文件不存在：{type(file)} {file}')
-        return xlpil.cvt_channel(im, flags)
+        return PilImg.cvt_channel(im, flags)
 
-    @staticmethod
-    def read_from_buffer(buffer, flags=None, *, b64decode=False):
+    @classmethod
+    def read_from_buffer(cls, buffer, flags=None, *, b64decode=False):
         """ 先用opencv实现，以后可以再研究PIL.Image.frombuffer是否有更快处理策略 """
         if b64decode:
             buffer = base64.b64decode(buffer)
         im = PIL.Image.open(io.BytesIO(buffer))
-        return xlpil.cvt_channel(im, flags)
+        return PilImg.cvt_channel(im, flags)
 
-    @staticmethod
-    def read_from_url(url, flags=None, *, b64decode=False):
+    @classmethod
+    def read_from_url(cls, url, flags=None, *, b64decode=False):
         content = requests.get(url).content
-        return xlpil.read_from_buffer(content, flags, b64decode=b64decode)
+        return PilImg.read_from_buffer(content, flags, b64decode=b64decode)
 
-    @staticmethod
-    def __2_attrs():
+    def __2_attrs(self):
         pass
 
-    @staticmethod
-    def imsize(im):
-        return im.size[::-1]
+    @property
+    def imsize(self):
+        return self.size[::-1]
 
-    @staticmethod
-    def n_channels(im):
+    @property
+    def n_channels(self):
         """ 通道数 """
-        return len(im.getbands())
+        return len(self.getbands())
 
-    @staticmethod
-    def __3_write():
+    def __3_write(self):
         pass
 
-    @staticmethod
-    def to_cv2_image(im):
+    def to_cv2_image(self):
         """ pil图片转np图片 """
-        y = np.array(im)
+        y = np.array(self)
         y = cv2.cvtColor(y, cv2.COLOR_BGR2RGB) if y.size else None
-        return y
+        return CvImg(y)
 
-    @staticmethod
-    def is_pil_image(im):
+    def is_pil_image(self):
         if accimage is not None:
-            return isinstance(im, (PIL.Image.Image, accimage.Image))
+            return isinstance(self, (PIL.Image.Image, accimage.Image))
         else:
-            return isinstance(im, PIL.Image.Image)
+            return isinstance(self, PIL.Image.Image)
 
-    @staticmethod
-    def write(im, path, if_exists=None, **kwargs):
+    def write(self, path, if_exists=None, **kwargs):
         p = File(path)
         if p.exist_preprcs(if_exists):
             p.ensure_parent()
-            im.save(str(p), **kwargs)
+            self.save(str(p), **kwargs)
 
-    @staticmethod
-    def cvt_channel(im, flags=None):
+    def cvt_channel(self, flags=None):
+        im = self
         if flags is None: return im
-        n_c = xlpil.n_channels(im)
+        n_c = im.n_channels
         if flags == 0 and n_c > 1:
             im = im.convert('L')
         elif flags == 1 and n_c != 3:
             im = im.convert('RGB')
         return im
 
-    @staticmethod
-    def to_buffer(im, ext='.jpg', *, b64encode=False):
+    def to_buffer(self, ext='.jpg', *, b64encode=False):
         # 主要是偷懒，不想重写一遍，就直接去调用cv版本的实现了
-        return xlcv.to_buffer(xlpil.to_cv2_image(im), ext, b64encode=b64encode)
+        return self.to_cv2_image().to_buffer(ext, b64encode=b64encode)
 
-    @staticmethod
-    def display(im):
+    def display(self):
         """ 在jupyter中展示 """
         try:
             from IPython.display import display
-            display(im)
+            display(self)
         except ModuleNotFoundError:
             pass
 
-    @staticmethod
-    def __4_plot():
+    def __4_plot(self):
         pass
 
-    @staticmethod
-    def plot_border(im, border=1, fill='black'):
+    def plot_border(self, border=1, fill='black'):
         """ 给图片加上边框
 
         Args:
-            im:
+            self:
             border: 边框的厚度
             fill: 边框颜色
 
         Returns: 一张新图
         """
         from PIL import ImageOps
-        im2 = ImageOps.expand(im, border=border, fill=fill)
+        im2 = ImageOps.expand(self, border=border, fill=fill)
         return im2
 
-    @staticmethod
-    def plot_text(im, text, xy=None, font_size=10, font_type='simfang.ttf', **kwargs):
+    def plot_text(self, text, xy=None, font_size=10, font_type='simfang.ttf', **kwargs):
         """
         :param xy: 写入文本的起始坐标，没写入则自动写在垂直居中位置
         """
         from PIL import ImageFont, ImageDraw
         font_file = get_font_file(font_type)
         font = ImageFont.truetype(font=str(font_file), size=font_size, encoding="utf-8")
-        draw = ImageDraw.Draw(im)
+        draw = ImageDraw.Draw(self)
         if xy is None:
             w, h = font_getsize(font, text)
-            xy = ((im.size[0] - w) / 2, (im.size[1] - h) / 2)
+            xy = ((self.size[0] - w) / 2, (self.size[1] - h) / 2)
         draw.text(xy, text, font=font, **kwargs)
-        return im
+        return self
 
-    @staticmethod
-    def __5_resize():
+    def __5_resize(self):
         pass
 
-    @staticmethod
-    def reduce_area(im, area):
+    def reduce_area(self, area):
         """ 根据面积上限缩小图片
 
         即图片面积超过area时，按照等比例缩小到面积为area的图片
         """
-        h, w = xlpil.imsize(im)
+        im = self
+        h, w = PilImg.imsize(im)
         s = h * w
         if s > area:
             r = (area / s) ** 0.5
             size = int(r * h), int(r * w)
-            im = xlpil.resize2(im, size)
+            im = PilImg.resize2(im, size)
         return im
 
-    @staticmethod
-    def resize2(im, size, **kwargs):
+    def resize2(self, size, **kwargs):
         """
         :param size: 默认是 (w, h)， 这里我倒过来 (h, w)
             但计算机领域，确实经常都是用 (w, h) 的格式，毕竟横轴是x，纵轴才是y
@@ -209,17 +172,16 @@ class xlpil(EnchantBase):
                 默认是 PIL.Image.BICUBIC；如果mode是"1"或"P"模式，则总是 PIL.Image.NEAREST
 
         >>> im = read(np.zeros([100, 200], dtype='uint8'), 0)
-        >>> im.size
+        >>> self.size
         (100, 200)
         >>> im2 = im.reduce_area(50*50, **kwargs)
         >>> im2.size
         (35, 70)
         """
         # 注意pil图像尺寸接口都是[w,h]，跟标准的[h,w]相反
-        return im.resize(size[::-1], **kwargs)
+        return self.resize(size[::-1], **kwargs)
 
-    @staticmethod
-    def reduce_filesize(im, filesize=None, suffix='.jpeg'):
+    def reduce_filesize(self, filesize=None, suffix='.jpeg'):
         """ 按照保存后的文件大小来压缩im
 
         :param filesize: 单位Bytes
@@ -229,6 +191,7 @@ class xlpil(EnchantBase):
 
         >> reduce_filesize(im, 300*1024, 'jpg')
         """
+        im = self
         # 1 工具
         # save接口不支持jpg参数
         if suffix[0] == '.':
@@ -252,8 +215,7 @@ class xlpil(EnchantBase):
             im = im.resize((int(im.size[0] * rate), int(im.size[1] * rate)))
         return im
 
-    @staticmethod
-    def trim(im, *, border=0, color=None):
+    def trim(self, *, border=0, color=None):
         """ 默认裁剪掉白色边缘，可以配合 get_backgroup_color 裁剪掉背景色
 
         :param border: 上下左右保留多少边缘
@@ -270,6 +232,7 @@ class xlpil(EnchantBase):
         if color is None:
             color = (255, 255, 255)
 
+        im = self
         bg = Image.new(im.mode, im.size, color)
         diff = ImageChops.difference(im, bg)
         bbox = diff.getbbox()  # 如果im跟bg一样，也就是裁"消失"了，此时bbox值为None
@@ -281,20 +244,18 @@ class xlpil(EnchantBase):
             im = im.crop(bbox)
         return im
 
-    @staticmethod
-    def __6_warp():
+    def __6_warp(self):
         pass
 
-    @staticmethod
-    def __x_other():
+    def __x_other(self):
         pass
 
-    @staticmethod
-    def random_direction(im):
+    def random_direction(self):
         """ 假设原图片是未旋转的状态0
 
         顺时针转90度是label=1，顺时针转180度是label2 ...
         """
+        im = self
         label = np.random.randint(4)
         if label == 1:
             # PIL的旋转角度，是指逆时针角度；但是我这里编号是顺时针
@@ -305,12 +266,12 @@ class xlpil(EnchantBase):
             im = im.transpose(PIL.Image.ROTATE_90)
         return im, label
 
-    @staticmethod
-    def flip_direction(im, direction):
+    def flip_direction(self, direction):
         """
         :param direction: 逆时针旋转几个90度
             标记现在图片是哪个方向：0是正常，1是向右翻转，2是向下翻转，3是向左翻转
         """
+        im = self
         direction = direction % 4
         if direction:
             im = im.transpose({1: PIL.Image.ROTATE_90,
@@ -318,8 +279,7 @@ class xlpil(EnchantBase):
                                3: PIL.Image.ROTATE_270}[direction])
         return im
 
-    @staticmethod
-    def apply_exif_orientation(im):
+    def apply_exif_orientation(self):
         """ 摆正图片角度
 
         Image.open读取图片时，是手机严格正放时拍到的图片效果，
@@ -330,6 +290,7 @@ class xlpil(EnchantBase):
 
         我自己写过个版本，后来发现 labelme.utils.image 写过功能更强的，抄了过来~~
         """
+        im = self
         try:
             exif = im._getexif()
         except AttributeError:
@@ -373,30 +334,31 @@ class xlpil(EnchantBase):
         else:
             return im
 
-    @staticmethod
-    def get_exif(im):
+    def get_exif(self):
         """ 旧函数名：查看图片的Exif信息 """
-        exif_data = im._getexif()
+        exif_data = self._getexif()
         if exif_data:
             exif = {PIL.ExifTags.TAGS[k]: v for k, v in exif_data.items() if k in PIL.ExifTags.TAGS}
         else:
             exif = None
         return exif
 
-    @staticmethod
-    def rgba2rgb(im):
-        if im.mode in ('RGBA', 'P'):
+    def rgba2rgb(self):
+        if self.mode in ('RGBA', 'P'):
             # 判断图片mode模式，如果是RGBA或P等可能有透明底，则和一个白底图片合成去除透明底
-            background = PIL.Image.new('RGBA', im.size, (255, 255, 255))
+            background = PIL.Image.new('RGBA', self.size, (255, 255, 255))
             # composite是合成的意思。将右图的alpha替换为左图内容
-            im = PIL.Image.alpha_composite(background, im.convert('RGBA')).convert('RGB')
-        return im
+            self = PIL.Image.alpha_composite(background, self.convert('RGBA')).convert('RGB')
+        return self
 
-    @staticmethod
-    def keep_subtitles(im, judge_func=None, trim_color=(255, 255, 255)):
-        im = xlpil.to_cv2_image(im)
-        im = xlcv.keep_subtitles(im, judge_func=judge_func, trim_color=trim_color)
-        return xlcv.to_pil_image(im)
+    def keep_subtitles(self, judge_func=None, trim_color=(255, 255, 255)):
+        im = self.to_cv2_image()
+        im = im.keep_subtitles(judge_func=judge_func, trim_color=trim_color)
+        return im.to_pil_image()
+
+
+# pil相比cv，由于无法类似CvImg这样新建一个和np.ndarray等效的类，所以还是比较支持嵌入到Image中直接操作
+inject_members(PilImg, PIL.Image.Image)
 
 
 def font_getsize(font, text):
@@ -433,7 +395,7 @@ def create_text_image(text, size=None, *, xy=None, font_size=14, bg_color=None, 
         text_color = tuple([random.randint(0, 255) for i in range(3)])
 
     h, w = size
-    im = PIL.Image.new('RGB', (w, h), tuple(bg_color))
-    im2 = xlpil.plot_text(im, text, xy=xy, font_size=font_size, fill=tuple(text_color), **kwargs)
+    im: PilImg = PIL.Image.new('RGB', (w, h), tuple(bg_color))
+    im2 = im.plot_text(text, xy=xy, font_size=font_size, fill=tuple(text_color), **kwargs)
 
     return im2

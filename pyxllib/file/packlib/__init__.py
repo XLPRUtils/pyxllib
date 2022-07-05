@@ -12,7 +12,7 @@ import pyxllib.file.packlib.zipfile as zipfile
 from pyxllib.file.packlib.zipfile import ZipFile
 
 from pyxllib.file.specialist import XlPath, reduce_dir_depth
-from pyxllib.prog.pupil import EnchantBase, run_once
+from pyxllib.prog.pupil import inject_members
 
 """ 问题：py官方的ZipFile解压带中文的文件会乱码
 
@@ -126,16 +126,8 @@ def _unpack_base(packfile, namelist, format=None, extract_dir=None, wrap=0):
         shutil.unpack_archive(packfile, extract_dir, format)
 
 
-class EnchantZipFile(EnchantBase):
+class XlZipFile(ZipFile):
 
-    @classmethod
-    @run_once()
-    def enchant(cls):
-        names = cls.check_enchant_names([ZipFile])
-        # names |= {'__enter__', '__exit__'}  # 双下划线前缀名称的方法默认不会导入，需要手动添加
-        cls._enchant(ZipFile, names)
-
-    @staticmethod
     def infolist2(self, prefix=None, zipinfo=True):
         """>> self.infolist2()  # getinfo的多文件版本
              1           <ZipInfo filename='[Content_Types].xml' compress_type=deflate file_size=1495 compress_size=383>
@@ -156,28 +148,18 @@ class EnchantZipFile(EnchantBase):
             ls = list(map(lambda x: x.filename, ls))
         return ls
 
-    @staticmethod
     def unpack(self, extract_dir=None, format='zip', wrap=0):
         _unpack_base(self.filename, self.namelist(), format, extract_dir, wrap)
 
 
-EnchantZipFile.enchant()
+class XlTarFile(TarFile):
 
-
-class EnchantTarFile(EnchantBase):
-
-    @classmethod
-    @run_once()
-    def enchant(cls):
-        names = cls.check_enchant_names([TarFile])
-        cls._enchant(TarFile, names)
-
-    @staticmethod
     def unpack(self, extract_dir=None, format='tar', wrap=0):
         _unpack_base(self.name, self.getnames(), format, extract_dir, wrap)
 
 
-EnchantTarFile.enchant()
+inject_members(XlZipFile, ZipFile)
+inject_members(XlTarFile, TarFile)
 
 
 def unpack_archive(filename, extract_dir=None, format=None, *, wrap=0):
@@ -186,9 +168,9 @@ def unpack_archive(filename, extract_dir=None, format=None, *, wrap=0):
         format = shutil._find_unpack_format(str(filename).lower())
 
     if format.endswith('zip'):
-        ZipFile(filename).unpack(extract_dir, format, wrap)
+        XlZipFile(filename).unpack(extract_dir, format, wrap)
     elif format.endswith('tar'):
-        TarFile(filename).unpack(extract_dir, format, wrap)
+        XlTarFile(filename).unpack(extract_dir, format, wrap)
     else:
         # 其他还没扩展的格式，不支持wrap功能，但仍然可以使用shutil标准的接口解压
         shutil.unpack_archive(filename, extract_dir, format)

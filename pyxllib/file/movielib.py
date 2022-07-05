@@ -13,21 +13,14 @@ from moviepy.editor import VideoFileClip
 import numpy as np
 from tqdm import tqdm
 
-from pyxllib.prog.pupil import EnchantBase, run_once
+from pyxllib.prog.pupil import inject_members
 from pyxllib.file.specialist import XlPath
 from pyxllib.cv.imhash import get_init_hash, phash
 from pyxllib.cv.xlcvlib import xlcv
 
 
-class EnchantVideoFileClip(EnchantBase):
+class XlVideoFileClip(VideoFileClip):
 
-    @classmethod
-    @run_once
-    def enchant(cls):
-        names = cls.check_enchant_names([VideoFileClip])
-        cls._enchant(VideoFileClip, names)
-
-    @staticmethod
     def get_frame2(self, time_point, *, scale=None):
         """ 官方获得的图片通道是RGB，但是cv2处理的统一规则是BGR，要转换过来
 
@@ -41,7 +34,6 @@ class EnchantVideoFileClip(EnchantBase):
 
         return frame
 
-    @staticmethod
     def get_frames(self, time_points=None, *, interval_second=0.1, cur_hash=None, head_frame=None, scale=None,
                    filter_mode=2, print_mode=True):
         """ 同时获得多帧图片
@@ -80,7 +72,6 @@ class EnchantVideoFileClip(EnchantBase):
             else:
                 yield im
 
-    @staticmethod
     def save_frames(self, out_dir, time_points=None, interval_second=0.1, **kwargs):
         """ 跟get_frames差不多，多了一步自动存储图片文件到目录里
 
@@ -97,7 +88,6 @@ class EnchantVideoFileClip(EnchantBase):
             m, s, ms = tt // 600, (tt // 10) % 60, tt % 10
             xlcv.write(frame, out_dir / f'{m:03}_{s:02}.{ms}.jpg')
 
-    @staticmethod
     def join_subtitles_image(self, time_points, ltrb_pos=None, *,
                              crop_first_frame=False,
                              filter_mode=2):
@@ -146,4 +136,4 @@ class EnchantVideoFileClip(EnchantBase):
         return im
 
 
-EnchantVideoFileClip.enchant()
+inject_members(XlVideoFileClip, VideoFileClip)

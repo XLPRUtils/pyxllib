@@ -206,6 +206,23 @@ class XlprDb(Connection):
                          (json.dumps(accounts, ensure_ascii=False), self.seckey, host_name))
         self.commit()
 
+    @classmethod
+    def connect(cls, conninfo='', seckey='', *,
+                autocommit=False, row_factory=None, context=None, **kwargs) -> 'XlprDb':
+        """ 因为要标记 -> XlprDb，IDE才会识别出类别，有自动补全功能
+        但在类中写@classmethod，无法标记 -> XlprDb，所以就放外面单独写一个方法了
+        """
+        d = XlOsEnv.get('XlprDbAccount', decoding=True)
+        if conninfo == '':
+            conninfo = d['conninfo']
+        if seckey == '':
+            seckey = d['seckey']
+        con = super(XlprDb, cls).connect(conninfo,
+                                         autocommit=autocommit, row_factory=row_factory,
+                                         context=context, **kwargs)
+        con.seckey = seckey
+        return con
+
     def __1_xlapi相关数据表操作(self):
         """
         files，存储二进制文件的表
@@ -469,19 +486,3 @@ class XlprDb(Connection):
 
         h = render_echart_html('gpu_memory', body='<br/>'.join(htmltexts))
         return h
-
-
-def connect_xlprdb(conninfo='', seckey='', *, autocommit=False, row_factory=None, context=None, **kwargs) -> XlprDb:
-    """ 因为要标记 -> XlprDb，IDE才会识别出类别，有自动补全功能
-    但在类中写@classmethod，无法标记 -> XlprDb，所以就放外面单独写一个方法了
-    """
-    d = XlOsEnv.get('XlprDbAccount', decoding=True)
-    if conninfo == '':
-        conninfo = d['conninfo']
-    if seckey == '':
-        seckey = d['seckey']
-    con = super(XlprDb, XlprDb).connect(conninfo,
-                                        autocommit=autocommit, row_factory=row_factory,
-                                        context=context, **kwargs)
-    con.seckey = seckey
-    return con

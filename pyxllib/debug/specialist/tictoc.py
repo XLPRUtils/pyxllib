@@ -238,4 +238,4 @@ class PerfTest:
         funcnames2 = listalign([fn[5:] for fn in funcnames], 'r')
         for i, funcname in enumerate(funcnames):
             perftest(funcnames2[i], getattr(self, funcname),
-                     number=number, repeat=repeat, globals=globals)
+                     number=int(number), repeat=int(repeat), globals=globals)
