@@ -26,7 +26,7 @@ from openpyxl.utils.cell import get_column_letter, column_index_from_string
 import pandas as pd
 
 from pyxllib.prog.newbie import RunOnlyOnce
-from pyxllib.prog.pupil import EnchantBase, EnchantCvt
+from pyxllib.prog.pupil import inject_members
 from pyxllib.algo.specialist import product
 from pyxllib.debug.pupil import dprint
 from pyxllib.debug.specialist import browser
@@ -45,47 +45,37 @@ def excel_addr(n, m) -> str:
     return f'{get_column_letter(int(m))}{n}'
 
 
-class EnchantCell(EnchantBase):
+class XlCell(openpyxl.cell.cell.Cell, openpyxl.cell.cell.MergedCell):
 
-    @classmethod
-    @RunOnlyOnce
-    def enchant(cls):
-        names = cls.check_enchant_names([openpyxl.cell.cell.Cell, openpyxl.cell.cell.MergedCell])
-        cls._enchant(openpyxl.cell.cell.Cell, names)
-        cls._enchant(openpyxl.cell.cell.MergedCell, names)
+    def in_range(self):
+        """ 判断一个单元格所在的合并单元格
 
-    @staticmethod
-    def in_range(cell):
-        """判断一个单元格所在的合并单元格
         >> in_range(ws['C1'])
         <openpyxl.worksheet.cell_range.CellRange> A1:D3
         """
-        ws = cell.parent
+        ws = self.parent
         for rng in ws.merged_cells.ranges:
-            if cell.coordinate in rng:
+            if self.coordinate in rng:
                 break
         else:  # 如果找不到则返回原值
-            rng = cell
+            rng = self
         return rng
 
-    @staticmethod
-    def mcell(cell):
+    def mcell(self):
         """返回“有效单元格”，即如果输入的是一个合并单元格，会返回该合并单元格左上角的单元格
         修改左上角单元格的值才是可行、有意义的
 
         因为跟合并单元格有关，所以 以m前缀 merge
         """
-        if isinstance(cell, MergedCell):
-            ws = cell.parent
-            xy = cell.in_range().top[0]
+        if isinstance(self, MergedCell):
+            ws = self.parent
+            xy = self.in_range().top[0]
             return ws[excel_addr(*xy)]
         else:
-            return cell
+            return self
 
-    @staticmethod
-    def celltype(cell):
+    def celltype(self):
         """
-        :param cell: 一个单元格
         :return: 单元格类型
             0：普通单元格
             1：合并单元格其他衍生位置
@@ -93,54 +83,50 @@ class EnchantCell(EnchantBase):
 
         TODO 这个函数还是可以看看能不能有更好的实现、提速
         """
-        if isinstance(cell, MergedCell):
+        if isinstance(self, MergedCell):
             return 1
-        elif isinstance(cell.offset(1, 0), MergedCell) or isinstance(cell.offset(0, 1), MergedCell):
+        elif isinstance(self.offset(1, 0), MergedCell) or isinstance(self.offset(0, 1), MergedCell):
             # 这里只能判断可能是合并单元格，具体是不是合并单元格，还要
-            rng = cell.in_range()
+            rng = self.in_range()
             return 2 if hasattr(rng, 'size') else 0
         else:
             return 0
 
-    @staticmethod
-    def isnone(cell):
+    def isnone(self):
         """ 是普通单元格且值为None
 
         注意合并单元格的衍生单元格不为None
         """
-        celltype = cell.celltype()
-        return celltype == 0 and cell.value is None
+        celltype = self.celltype()
+        return celltype == 0 and self.value is None
 
-    @staticmethod
-    def copy_cell_format(cell, dst_cell):
+    def copy_cell_format(self, dst_cell):
         """ 单元格全格式复制，需要事先指定好新旧单元格的物理位置
         参考：https://stackoverflow.com/questions/23332259/copy-cell-style-openpyxl
         """
         from copy import copy
-        if cell.has_style:
-            dst_cell.font = copy(cell.font)  # 字体
-            dst_cell.border = copy(cell.border)  # 表格线
-            dst_cell.fill = copy(cell.fill)  # 填充色
-            dst_cell.number_format = copy(cell.number_format)  # 数字格式
-            dst_cell.protection = copy(cell.protection)  # 保护？
-            dst_cell.alignment = copy(cell.alignment)  # 对齐格式
-            # dst_cell.style = cell.style
-        # if cell.comment:
+        if self.has_style:
+            dst_cell.font = copy(self.font)  # 字体
+            dst_cell.border = copy(self.border)  # 表格线
+            dst_cell.fill = copy(self.fill)  # 填充色
+            dst_cell.number_format = copy(self.number_format)  # 数字格式
+            dst_cell.protection = copy(self.protection)  # 保护？
+            dst_cell.alignment = copy(self.alignment)  # 对齐格式
+            # dst_cell.style = self.style
+        # if self.comment:
         # 这个会引发AttributeError。。。
         #       vml = fromstring(self.workbook.vba_archive.read(ws.legacy_drawing))
         #   AttributeError: 'NoneType' object has no attribute 'read'
         # dst_cell.comment = copy(cell.comment)
         # 就算开了keep_vba可以强制写入了，打开的时候文件可能还是会错
 
-    @staticmethod
-    def copy_cell(cell, dst_cell):
+    def copy_cell(self, dst_cell):
         """ 单元格全格式、包括值的整体复制
         """
-        dst_cell.value = cell.value
-        cell.copy_cell_format(dst_cell)
+        dst_cell.value = self.value
+        self.copy_cell_format(dst_cell)
 
-    @staticmethod
-    def down(cell, count=1):
+    def down(self, count=1):
         """ 输入一个单元格，向下移动一格
         注意其跟offset的区别，如果cell是合并单元格，会跳过自身的衍生单元格
 
@@ -157,12 +143,12 @@ class EnchantCell(EnchantBase):
                 r = rng.max_row
             return cell.parent.cell(r + 1, c)
 
+        cell = self
         for _ in range(count):
             cell = _func(cell)
         return cell
 
-    @staticmethod
-    def right(cell, count=1):
+    def right(self, count=1):
         def _func(cell):
             r, c = cell.row, cell.column
             if cell.celltype():
@@ -170,12 +156,12 @@ class EnchantCell(EnchantBase):
                 c = rng.max_col
             return cell.parent.cell(r, c + 1)
 
+        cell = self
         for _ in range(count):
             cell = _func(cell)
         return cell
 
-    @staticmethod
-    def up(cell, count=1):
+    def up(self, count=1):
         def _func(cell):
             r, c = cell.row, cell.column
             if cell.celltype():
@@ -183,12 +169,12 @@ class EnchantCell(EnchantBase):
                 r = rng.min_row
             return cell.parent.cell(max(r - 1, 1), c)
 
+        cell = self
         for _ in range(count):
             cell = _func(cell)
         return cell
 
-    @staticmethod
-    def left(cell, count=1):
+    def left(self, count=1):
         def _func(cell):
             r, c = cell.row, cell.column
             if cell.celltype():
@@ -196,12 +182,12 @@ class EnchantCell(EnchantBase):
                 r = rng.min_row
             return cell.parent.cell(r, max(c - 1, 1))
 
+        cell = self
         for _ in range(count):
             cell = _func(cell)
         return cell
 
-    @staticmethod
-    def fill_color(cell, color, fill_type="solid", **kwargs):
+    def fill_color(self, color, fill_type="solid", **kwargs):
         """ 封装一些我自己常用的填色方案 """
         from openpyxl.styles import PatternFill
         from pyxllib.cv.rgbfmt import RgbFormatter
@@ -209,59 +195,53 @@ class EnchantCell(EnchantBase):
             color = RgbFormatter.from_name(color)
         elif isinstance(color, (list, tuple)):
             color = RgbFormatter(*color)
-        cell.fill = PatternFill(fgColor=color.to_hex()[1:], fill_type=fill_type, **kwargs)
+        self.fill = PatternFill(fgColor=color.to_hex()[1:], fill_type=fill_type, **kwargs)
 
 
-EnchantCell.enchant()
+# 只有cell和mergecell都共同没有的成员方法，才添加进去
+__members = set(dir(XlCell)) - set(dir(openpyxl.cell.cell.Cell)) - set(dir(openpyxl.cell.cell.MergedCell))
+inject_members(XlCell, openpyxl.cell.cell.Cell, __members)
+inject_members(XlCell, openpyxl.cell.cell.MergedCell, __members)
 
 
-class EnchantWorksheet(EnchantBase):
+class XlWorksheet(openpyxl.worksheet.worksheet.Worksheet):
     """ 扩展标准的Workshhet功能 """
 
-    @classmethod
-    @RunOnlyOnce
-    def enchant(cls):
-        names = cls.check_enchant_names([openpyxl.worksheet.worksheet.Worksheet], white_list=['_cells_by_row'])
-        cls._enchant(openpyxl.worksheet.worksheet.Worksheet, names)
-
-    @staticmethod
-    def copy_worksheet(_self, dst_ws):
+    def copy_worksheet(self, dst_ws):
         """跨工作薄时复制表格内容的功能
         openpyxl自带的Workbook.copy_worksheet没法跨工作薄复制，很坑
 
         src_ws.copy_worksheet(dst_ws)
         """
         # 1 取每个单元格的值
-        for row in _self:
+        for row in self:
             for cell in row:
                 try:
                     cell.copy_cell(dst_ws[cell.coordinate])
                 except AttributeError:
                     pass
         # 2 合并单元格的处理
-        for rng in _self.merged_cells.ranges:
+        for rng in self.merged_cells.ranges:
             dst_ws.merge_cells(rng.ref)
         # 3 其他表格属性的复制
         # 这个从excel读取过来的时候，是不准的，例如D3可能因为关闭时停留窗口的原因误跑到D103
         # dprint(origin_ws.freeze_panes)
         # target_ws.freeze_panes = origin_ws.freeze_panes
 
-    @staticmethod
-    def _cells_by_row(_self, min_col, min_row, max_col, max_row, values_only=False):
+    def _cells_by_row(self, min_col, min_row, max_col, max_row, values_only=False):
         """openpyxl的这个迭代器，遇到合并单元格会有bug
         所以我把它重新设计一下~~
         """
         for row in range(min_row, max_row + 1):
-            cells = (_self.cell(row=row, column=column) for column in range(min_col, max_col + 1))
+            cells = (self.cell(row=row, column=column) for column in range(min_col, max_col + 1))
             if values_only:
                 # yield tuple(cell.value for cell in cells)  # 原代码
                 yield tuple(getattr(cell, 'value', None) for cell in cells)
             else:
                 yield tuple(cells)
 
-    @staticmethod
     @run_once('id,str')
-    def search(_self, pattern, min_row=None, max_row=None, min_col=None, max_col=None, order=None, direction=0):
+    def search(self, pattern, min_row=None, max_row=None, min_col=None, max_col=None, order=None, direction=0):
         """ 查找满足pattern正则表达式的单元格
 
         :param pattern: 正则匹配式，可以输入re.complier对象
@@ -281,8 +261,8 @@ class EnchantWorksheet(EnchantBase):
         <Cell '预算总表'.B2>
         """
         # 1 定界
-        x1, x2 = max(min_row or 1, 1), min(max_row or _self.max_row, _self.max_row)
-        y1, y2 = max(min_col or 1, 1), min(max_col or _self.max_column, _self.max_column)
+        x1, x2 = max(min_row or 1, 1), min(max_row or self.max_row, self.max_row)
+        y1, y2 = max(min_col or 1, 1), min(max_col or self.max_column, self.max_column)
 
         # 2 遍历
         if isinstance(pattern, datetime.date):
@@ -291,7 +271,7 @@ class EnchantWorksheet(EnchantBase):
         if isinstance(pattern, (list, tuple)):
             cel = None
             for p in pattern:
-                cel = _self.search(p, x1, x2, y1, y2, order)
+                cel = self.search(p, x1, x2, y1, y2, order)
                 if cel:
                     # up, down, left, right 找到的单元格四边界
                     l, u, r, d = getattr(cel.in_range(), 'bounds', (cel.column, cel.row, cel.column, cel.row))
@@ -311,29 +291,25 @@ class EnchantWorksheet(EnchantBase):
         else:
             if isinstance(pattern, str): pattern = re.compile(pattern)
             for x, y in product(range(x1, x2 + 1), range(y1, y2 + 1), order=order):
-                cell = _self.cell(x, y)
+                cell = self.cell(x, y)
                 if cell.celltype() == 1: continue  # 过滤掉合并单元格位置
                 if pattern.search(str(cell.value)): return cell  # 返回满足条件的第一个值
 
     findcel = search
 
-    @staticmethod
-    def findrow(_self, pattern, *args, **kwargs):
-        cel = _self.findcel(pattern, *args, **kwargs)
+    def findrow(self, pattern, *args, **kwargs):
+        cel = self.findcel(pattern, *args, **kwargs)
         return cel.row if cel else 0
 
-    @staticmethod
-    def findcol(_self, pattern, *args, **kwargs):
-        cel = _self.findcel(pattern, *args, **kwargs)
+    def findcol(self, pattern, *args, **kwargs):
+        cel = self.findcel(pattern, *args, **kwargs)
         return cel.column if cel else 0
 
-    @staticmethod
-    def browser(_self):
+    def browser(self):
         """注意，这里会去除掉合并单元格"""
-        browser(pd.DataFrame(_self.values))
+        browser(pd.DataFrame(self.values))
 
-    @staticmethod
-    def select_columns(_self, columns, column_name='searchkey'):
+    def select_columns(self, columns, column_name='searchkey'):
         r""" 获取表中columns属性列的值，返回dataframe数据类型
 
         :param columns: 搜索列名使用正则re.search字符串匹配查找
@@ -352,7 +328,7 @@ class EnchantWorksheet(EnchantBase):
         # 1 找到所有标题位置，定位起始行
         cels, names, start_line = [], [], -1
         for search_name in columns:
-            cel = _self.findcel(search_name)
+            cel = self.findcel(search_name)
             if cel:
                 cels.append(cel)
                 if column_name == 'searchkey':
@@ -374,13 +350,13 @@ class EnchantWorksheet(EnchantBase):
             if cel:
                 col = cel.column
                 li = []
-                for i in range(start_line, _self.max_row + 1):
-                    v = _self.cell(i, col).mcell().value  # 注意合并单元格的取值
+                for i in range(start_line, self.max_row + 1):
+                    v = self.cell(i, col).mcell().value  # 注意合并单元格的取值
                     li.append(v)
                 datas[names[k]] = li
             else:
                 # 如果没找到列，设一个空列
-                datas[names[k]] = [None] * (_self.max_row + 1 - start_line)
+                datas[names[k]] = [None] * (self.max_row + 1 - start_line)
         df = pd.DataFrame(datas)
 
         # 3 去除所有空行数据
@@ -388,8 +364,7 @@ class EnchantWorksheet(EnchantBase):
 
         return df
 
-    @staticmethod
-    def copy_range(_self, cell_range, rows=0, cols=0):
+    def copy_range(self, cell_range, rows=0, cols=0):
         """ 同表格内的 range 复制操作
 
         Copy a cell range by the number of rows and/or columns:
@@ -412,10 +387,9 @@ class EnchantWorksheet(EnchantBase):
         r = sorted(range(min_row, max_row + 1), reverse=rows > 0)
         c = sorted(range(min_col, max_col + 1), reverse=cols > 0)
         for row, column in product(r, c):
-            _self.cell(row, column).copy_cell(_self.cell(row + rows, column + cols))
+            self.cell(row, column).copy_cell(self.cell(row + rows, column + cols))
 
-    @staticmethod
-    def reindex_columns(_self, orders):
+    def reindex_columns(self, orders):
         """ 重新排列表格的列顺序
 
         >> ws.reindex_columns('I,J,A,,,G,B,C,D,F,E,H,,,K'.split(','))
@@ -423,14 +397,13 @@ class EnchantWorksheet(EnchantBase):
         TODO 支持含合并单元格的整体移动？
         """
         from openpyxl.utils.cell import column_index_from_string
-        max_row, max_column = _self.max_row, _self.max_column
+        max_row, max_column = self.max_row, self.max_column
         for j, col in enumerate(orders, 1):
             if not col: continue
-            _self.copy_range(f'{col}1:{col}{max_row}', cols=max_column + j - column_index_from_string(col))
-        _self.delete_cols(1, max_column)
+            self.copy_range(f'{col}1:{col}{max_row}', cols=max_column + j - column_index_from_string(col))
+        self.delete_cols(1, max_column)
 
-    @staticmethod
-    def to_html(ws, *, border=1,
+    def to_html(self, *, border=1,
                 style='border-collapse:collapse; text-indent:0; margin:0;') -> str:
         r"""
         .from_latex(r'''\begin{tabular}{|c|c|c|c|}
@@ -463,6 +436,7 @@ class EnchantWorksheet(EnchantBase):
         # if self.data_tex:  # 原来做latex的时候有的一个属性
         #     tag_attrs.append(('data-tex', self.data_tex))
 
+        ws = self
         with tag('table', *tag_attrs):
             # dprint(ws.max_row, ws.max_column)
             cols = ws.max_column
@@ -504,8 +478,7 @@ class EnchantWorksheet(EnchantBase):
 
         return res
 
-    @staticmethod
-    def init_from_latex(ws, content):
+    def init_from_latex(self, content):
         """ 注意没有取名为from_latex，因为ws是事先创建好的，这里只是能输入latex代码进行初始化而已 """
         from openpyxl.styles import Border, Alignment, Side
 
@@ -517,6 +490,8 @@ class EnchantWorksheet(EnchantBase):
 
         # 暂时统一边框线的样式 borders。不做细化解析
         double = Side(border_style='thin', color='000000')
+
+        ws = self
 
         # 处理表头
         data_tex = re.search(r'\\begin{tabular}\s*(?:\[.*?\])?\s*' + BRACE5, content).group(1)
@@ -615,9 +590,10 @@ class EnchantWorksheet(EnchantBase):
                         cell.border = Border(top=double)
             row, col = row + 1, 1
 
-    @staticmethod
-    def to_latex(ws):
+    def to_latex(self):
         from pyxllib.text.latex import TexTabular
+
+        ws = self
 
         li = []
         n, m = ws.max_row, ws.max_column
@@ -669,7 +645,6 @@ class EnchantWorksheet(EnchantBase):
 
         return '\n'.join(li)
 
-    @staticmethod
     def cell2(self, row, column, value=None):
         """ 相比原版的cell，支持智能定位单元格位置
 
@@ -716,7 +691,6 @@ class EnchantWorksheet(EnchantBase):
             cell.value = value
         return cell
 
-    @staticmethod
     def iterrows(self, key_column_name, mode='default'):
         """ 通过某个属性列作为key，判断数据所在行
 
@@ -758,40 +732,32 @@ class EnchantWorksheet(EnchantBase):
         return range(min_row, max_row + 1)
 
 
-EnchantWorksheet.enchant()
+inject_members(XlWorksheet, openpyxl.worksheet.worksheet.Worksheet, white_list=['_cells_by_row'])
 
 
-class EnchantWorkbook(EnchantBase):
-    @classmethod
-    @RunOnlyOnce
-    def enchant(cls):
-        names = cls.check_enchant_names([openpyxl.Workbook])
-        cls_names = {'from_html'}
-        cls._enchant(openpyxl.Workbook, cls_names, EnchantCvt.staticmethod2classmethod)
-        cls._enchant(openpyxl.Workbook, names - cls_names)
+class XlWorkbook(openpyxl.Workbook):
 
-    @staticmethod
-    def adjust_sheets(wb, new_sheetnames):
+    def adjust_sheets(self, new_sheetnames):
         """ 按照 new_sheetnames 的清单重新调整sheets
             在清单里的按顺序罗列
             不在清单里的表格删除
             不能出现wb原本没有的表格名
         """
-        for name in set(wb.sheetnames) - set(new_sheetnames):
+        for name in set(self.sheetnames) - set(new_sheetnames):
             # 最好调用标准的remove接口删除sheet
             #   不然虽然能表面上看也能删除sheet，但会有命名空间的一些冗余信息留下
-            wb.remove(wb[name])
-        wb._sheets = [wb[name] for name in new_sheetnames]
-        return wb
+            self.remove(self[name])
+        self._sheets = [self[name] for name in new_sheetnames]
+        return self
 
-    @staticmethod
-    def from_html(content):
+    @classmethod
+    def from_html(cls, content) -> 'XlWorkbook':
         from pyxllib.stdlib.tablepyxl.tablepyxl import document_to_workbook
         # 支持多 <table> 结构
         return document_to_workbook(content)
 
-    @staticmethod
-    def from_latex(content):
+    @classmethod
+    def from_latex(cls, content) -> 'XlWorkbook':
         """
         参考：kun0zhou，https://github.com/kun-zhou/latex2excel/blob/master/latex2excel.py
         """
@@ -809,22 +775,20 @@ class EnchantWorkbook(EnchantBase):
 
         return wb
 
-    @staticmethod
-    def to_html(wb) -> str:
+    def to_html(self) -> str:
         li = []
-        for ws in wb.worksheets:
+        for ws in self.worksheets:
             li.append(ws.to_html())
         return '\n\n'.join(li)
 
-    @staticmethod
-    def to_latex(wb):
+    def to_latex(self):
         li = []
-        for ws in wb.worksheets:
+        for ws in self.worksheets:
             li.append(ws.to_latex())
         return '\n'.join(li)
 
 
-EnchantWorkbook.enchant()
+inject_members(XlWorkbook, openpyxl.Workbook)
 
 
 def demo_openpyxl():

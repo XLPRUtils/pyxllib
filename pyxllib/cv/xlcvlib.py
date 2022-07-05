@@ -14,8 +14,8 @@ import requests
 
 from pyxllib.algo.geo import rect_bounds, warp_points, reshape_coords, quad_warp_wh, get_warp_mat, rect2polygon
 from pyxllib.file.specialist import File
-from pyxllib.prog.newbie import round_int, RunOnlyOnce
-from pyxllib.prog.pupil import EnchantBase, EnchantCvt
+from pyxllib.prog.newbie import round_int
+from pyxllib.debug.specialist import PerfTest
 
 _show_win_num = 0
 
@@ -31,26 +31,66 @@ def _rgb_to_bgr_list(a):
     return a
 
 
-class xlcv(EnchantBase):
+class CvImg(np.ndarray):
 
-    @classmethod
-    @RunOnlyOnce
-    def enchant(cls):
-        """ 把xlcv的功能嵌入cv2中
+    def __new__(cls, input_array, info=None):
+        """ 从np.ndarray继承的固定写法
+        https://numpy.org/doc/stable/user/basics.subclassing.html
 
-        不太推荐使用该类，可以使用CvImg类更好地解决问题。
+        该类使用中完全等价np.ndarray，但额外增加了xlcv中的功能
         """
-        # 虽然只绑定cv2，但其他相关的几个库的方法上，最好也不要重名
-        names = cls.check_enchant_names([np.ndarray, PIL.Image, PIL.Image.Image])
-        names -= {'concat'}
-        cls._enchant(cv2, names, EnchantCvt.staticmethod2modulefunc)
+        # Input array is an already formed ndarray instance
+        # We first cast to be our class type
+        obj = np.asarray(input_array).view(cls)
+        # add the new attribute to the created instance
+        obj.info = info
+        # Finally, we must return the newly created object:
+        return obj
 
-    @staticmethod
-    def __1_read():
+    def __array_finalize__(self, obj):
+        # see InfoArray.__array_finalize__ for comments
+        if obj is None: return
+        self.info = getattr(obj, 'info', None)
+
+    def __getattr__(self, item):
+        """ 对cv2、xlcv的类层级接口封装
+
+        这里使用了较高级的实现方法
+        好处：从而每次开发只需要在xlcv写一遍
+        坏处：没有代码接口提示...
+
+        注意，同名方法，比如size，会优先使用np.ndarray的版本
+        所以为了区分度，xlcv有imsize来代表xlcv的size版本
+
+        并且无法直接使用 cv2.resize， 因为np.ndarray已经有了resize
+
+        这里没有做任何安全性检查，请开发使用者自行分析使用合理性
+        """
+
+        def warp_func(*args, **kwargs):
+            func = getattr(cv2, item, None)  # 尝试去cv2找方法
+            if func is None:
+                raise ValueError(f'不存在的方法名 {item}')
+            res = func(self, *args, **kwargs)
+            if isinstance(res, np.ndarray):  # 返回是原始图片格式，打包后返回
+                return type(self)(res)  # 自定义方法必须自己再转成CvImage格式，否则会变成np.ndarray
+            elif isinstance(res, tuple):  # 如果是tuple类型，则里面的np.ndarray类型也要处理
+                res2 = []
+                for x in res:
+                    if isinstance(x, np.ndarray):
+                        res2.append(type(self)(x))
+                    else:
+                        res2.append(x)
+                return tuple(res2)
+            return res
+
+        return warp_func
+
+    def __1_read(self):
         pass
 
-    @staticmethod
-    def read(file, flags=None, **kwargs) -> np.ndarray:
+    @classmethod
+    def read(cls, file, flags=None, **kwargs):
         """
         :param file: 支持非文件路径参数，会做类型转换
             因为这个接口的灵活性，要判断file参数类型等，速度会慢一点点
@@ -63,22 +103,22 @@ class xlcv(EnchantBase):
         220426周二14:20，注，有些图位深不是24而是48，读到的不是uint8而是uint16
             目前这个接口没做适配，需要下游再除以256后arr.astype('uint8')
         """
-        from pyxllib.cv.xlpillib import xlpil
+        from pyxllib.cv.xlpillib import PilImg
 
-        if xlcv.is_cv2_image(file):
+        if CvImg.is_cv2_image(file):
             im = file
         elif File.safe_init(file):
             # https://www.yuque.com/xlpr/pyxllib/imread
             # + np.frombuffer
             im = cv2.imdecode(np.fromfile(str(file), dtype=np.uint8), -1 if flags is None else flags)
-        elif xlpil.is_pil_image(file):
-            im = xlpil.to_cv2_image(file)
+        elif PilImg.is_pil_image(file):
+            im = PilImg.to_cv2_image(file)
         else:
             raise TypeError(f'类型错误或文件不存在：{type(file)} {file}')
-        return xlcv.cvt_channel(im, flags)
+        return cls(im).cvt_channel(flags)
 
-    @staticmethod
-    def read_from_buffer(buffer, flags=None, *, b64decode=False):
+    @classmethod
+    def read_from_buffer(cls, buffer, flags=None, *, b64decode=False):
         """ 从二进制流读取图片
         这个二进制流指，图片以png、jpg等某种格式存储为文件时，其对应的文件编码
     
@@ -88,47 +128,44 @@ class xlcv(EnchantBase):
             buffer = base64.b64decode(buffer)
         buffer = np.frombuffer(buffer, dtype=np.uint8)
         im = cv2.imdecode(buffer, -1 if flags is None else flags)
-        return xlcv.cvt_channel(im, flags)
+        return cls(im).cvt_channel(flags)
 
-    @staticmethod
-    def read_from_url(url, flags=None, *, b64decode=False):
+    @classmethod
+    def read_from_url(cls, url, flags=None, *, b64decode=False):
         """ 从url直接获取图片到内存中
         """
         content = requests.get(url).content
-        return xlcv.read_from_buffer(content, flags, b64decode=b64decode)
+        return CvImg.read_from_buffer(content, flags, b64decode=b64decode)
 
-    @staticmethod
-    def __2_attrs():
+    def __2_attrs(self):
         pass
 
-    @staticmethod
-    def imsize(im):
+    @property
+    def imsize(self):
         """ 图片尺寸，统一返回(height, width)，不含通道 """
-        return im.shape[:2]
+        return self.shape[:2]
 
-    @staticmethod
-    def n_channels(im):
+    @property
+    def n_channels(self):
         """ 通道数 """
-        if im.ndim == 3:
-            return im.shape[2]
+        if self.ndim == 3:
+            return self.shape[2]
         else:
             return 1
 
-    @staticmethod
-    def height(im):
+    @property
+    def height(self):
         """ 注意PIL.Image.Image本来就有height、width属性，所以不用自定义这两个方法 """
-        return im.shape[0]
+        return self.shape[0]
 
-    @staticmethod
-    def width(im):
-        return im.shape[1]
+    @property
+    def width(self):
+        return self.shape[1]
 
-    @staticmethod
     def __3_write__(self):
         pass
 
-    @staticmethod
-    def to_pil_image(pic, mode=None):
+    def to_pil_image(self, mode=None):
         """ 我也不懂torch里这个实现为啥这么复杂，先直接哪来用，没深究细节
     
         Convert a tensor or an ndarray to PIL Image. （删除了tensor的转换功能）
@@ -136,7 +173,7 @@ class xlcv(EnchantBase):
         See :class:`~torchvision.transforms.ToPILImage` for more details.
     
         Args:
-            pic (Tensor or numpy.ndarray): Image to be converted to PIL Image.
+            self/pic (Tensor or numpy.ndarray): Image to be converted to PIL Image.
             mode (`PIL.Image mode`_): color space and pixel depth of input data (optional).
     
         .. _PIL.Image mode: https://pillow.readthedocs.io/en/latest/handbook/concepts.html#concept-modes
@@ -145,7 +182,7 @@ class xlcv(EnchantBase):
             PIL Image: Image converted to PIL Image.
         """
         # 需要先做个通道转换。这里的cvt是比较万精油的，支持pic是灰度图、RGBA等多种场景情况。
-        pic = cv2.cvtColor(pic, cv2.COLOR_BGR2RGB)
+        pic = cv2.cvtColor(self, cv2.COLOR_BGR2RGB)
 
         # 以下是原版实现代码
         if pic.ndim not in {2, 3}:
@@ -199,12 +236,11 @@ class xlcv(EnchantBase):
 
         return PIL.Image.fromarray(npim, mode=mode)
 
-    @staticmethod
-    def is_cv2_image(im):
+    @classmethod
+    def is_cv2_image(cls, im):
         return isinstance(im, np.ndarray) and im.ndim in {2, 3}
 
-    @staticmethod
-    def cvt_channel(im, flags=None):
+    def cvt_channel(self, flags=None):
         """ 确保图片目前是flags指示的通道情况
 
         :param flags:
@@ -212,36 +248,32 @@ class xlcv(EnchantBase):
             1，强制转为BGR三通道图 （BGRA转BGR默认黑底填充？）
             2，强制转为BGRA四通道图
         """
-        if flags is None: return im
-        n_c = xlcv.n_channels(im)
+        if flags is None: return self
+        n_c = self.n_channels
         tags = ['GRAY', 'BGR', 'BGRA']
         im_flag = {1: 0, 3: 1, 4: 2}[n_c]
         if im_flag != flags:
-            im = cv2.cvtColor(im, getattr(cv2, f'COLOR_{tags[im_flag]}2{tags[flags]}'))
-        return im
+            return cv2.cvtColor(self, getattr(cv2, f'COLOR_{tags[im_flag]}2{tags[flags]}'))
+        return self
 
-    @staticmethod
-    def write(im, file, if_exists='replace'):
+    def write(self, file, if_exists='replace'):
         if not isinstance(file, File):
             file = File(file)
-        data = cv2.imencode(ext=file.suffix, img=im)[1]
+        data = cv2.imencode(ext=file.suffix, img=self)[1]
         return file.write(data.tobytes(), if_exists=if_exists)
 
-    @staticmethod
-    def show(im):
+    def show(self):
         """ 类似Image.show，可以用计算机本地软件打开查看图片 """
-        xlcv.to_pil_image(im).show()
+        self.to_pil_image().show()
 
-    @staticmethod
-    def to_buffer(im, ext='.jpg', *, b64encode=False):
-        flag, buffer = cv2.imencode(ext, im)
+    def to_buffer(self, ext='.jpg', *, b64encode=False):
+        flag, buffer = cv2.imencode(ext, self)
         buffer = bytes(buffer)
         if b64encode:
             buffer = base64.b64encode(buffer)
         return buffer
 
-    @staticmethod
-    def imshow2(im, winname=None, flags=1):
+    def imshow2(self, winname=None, flags=1):
         """ 展示窗口
     
         :param winname: 未输入时，则按test1、test2依次生成窗口
@@ -255,23 +287,20 @@ class xlcv(EnchantBase):
             n = _show_win_num + 1
             winname = f'test{n}'
         cv2.namedWindow(winname, flags)
-        cv2.imshow(winname, im)
+        cv2.imshow(winname, self)
 
-    @staticmethod
-    def display(im):
+    def display(self):
         """ 在jupyter中展示 """
         try:
             from IPython.display import display
-            display(xlcv.to_pil_image(im))
+            display(self.to_pil_image())
         except ModuleNotFoundError:
             pass
 
-    @staticmethod
-    def __4_plot():
+    def __4_plot(self):
         pass
 
-    @staticmethod
-    def bg_color(im, edge_size=5, binary_img=None):
+    def bg_color(self, edge_size=5, binary_img=None):
         """ 智能判断图片背景色
     
         对全图二值化后，考虑最外一层宽度为edge_size的环中，0、1分布最多的作为背景色
@@ -287,8 +316,9 @@ class xlcv(EnchantBase):
         from itertools import chain
 
         # 1 获得二值图，区分前背景
+        im = self
         if binary_img is None:
-            gray_img = xlcv.read(im, 0)
+            gray_img = self.read(im, 0)
             _, binary_img = cv2.threshold(gray_img, np.mean(gray_img), 255, cv2.THRESH_BINARY)
 
         # 2 分别存储点集
@@ -310,42 +340,39 @@ class xlcv(EnchantBase):
         colors = colors0 if len(colors0) > len(colors1) else colors1
         return np.mean(np.array(colors), axis=0, dtype='int').tolist()
 
-    @staticmethod
-    def get_plot_color(im):
+    def get_plot_color(self):
         """ 获得比较适合的作画颜色
     
         TODO 可以根据背景色智能推导画线用的颜色，目前是固定红色
         """
-        if im.ndim == 3:
+        if self.ndim == 3:
             return 0, 0, 255
-        elif im.ndim == 2:
+        elif self.ndim == 2:
             return 255  # 灰度图，默认先填白色
 
-    @staticmethod
-    def get_plot_args(im, color=None):
+    def get_plot_args(self, color=None):
         # 1 作图颜色
         if not color:
-            color = xlcv.get_plot_color(im)
+            color = self.get_plot_color()
 
         # 2 画布
-        if len(color) >= 3 and im.ndim <= 2:
-            dst = cv2.cvtColor(im, cv2.COLOR_GRAY2BGR)
+        if len(color) >= 3 and self.ndim <= 2:
+            dst = cv2.cvtColor(self, cv2.COLOR_GRAY2BGR)
         else:
-            dst = np.array(im)
+            dst = CvImg(self)
 
         return dst, color
 
-    @staticmethod
-    def lines(im, lines, color=None, thickness=1, line_type=cv2.LINE_AA, shift=None):
+    def lines(self, lines, color=None, thickness=1, line_type=cv2.LINE_AA, shift=None):
         """ 在src图像上画系列线段
         """
         # 1 判断 lines 参数内容
         lines = np.array(lines).reshape(-1, 4)
         if not lines.size:
-            return im
+            return self
 
         # 2 参数
-        dst, color = xlcv.get_plot_args(im, color)
+        dst, color = self.get_plot_args(color)
 
         # 3 画线
         if lines.any():
@@ -354,11 +381,9 @@ class xlcv(EnchantBase):
                 cv2.line(dst, (x1, y1), (x2, y2), color, thickness, line_type)
         return dst
 
-    @staticmethod
-    def circles(im, circles, color=None, thickness=1, center=False):
+    def circles(self, circles, color=None, thickness=1, center=False):
         """ 在图片上画圆形
-    
-        :param im: 要作画的图
+
         :param circles: 要画的圆形参数 (x, y, 半径 r)
         :param color: 画笔颜色
         :param center: 是否画出圆心
@@ -366,10 +391,10 @@ class xlcv(EnchantBase):
         # 1 圆 参数
         circles = np.array(circles, dtype=int).reshape(-1, 3)
         if not circles.size:
-            return im
+            return self
 
         # 2 参数
-        dst, color = xlcv.get_plot_args(im, color)
+        dst, color = self.get_plot_args(color)
 
         # 3 作画
         for x in circles:
@@ -379,25 +404,23 @@ class xlcv(EnchantBase):
 
         return dst
 
-    __5_resize = """
-    """
+    def __5_resize(self):
+        pass
 
-    @staticmethod
-    def reduce_area(im, area):
+    def reduce_area(self, area):
         """ 根据面积上限缩小图片
     
         即图片面积超过area时，按照等比例缩小到面积为area的图片
         """
-        h, w = xlcv.imsize(im)
+        h, w = self.imsize
         s = h * w
         if s > area:
             r = (area / s) ** 0.5
             size = int(r * h), int(r * w)
-            im = xlcv.resize2(im, size)
-        return im
+            return self.resize2(size)
+        return self
 
-    @staticmethod
-    def adjust_shape(im, min_length=None, max_length=None):
+    def adjust_shape(self, min_length=None, max_length=None):
         """ 限制图片的最小边，最长边
 
         >>> a = np.zeros((100, 200,3), np.uint8)
@@ -407,6 +430,7 @@ class xlcv(EnchantBase):
         (75, 150, 3)
         """
         # 1 参数预计算
+        im = self
         h, w = im.shape[:2]
         x, y = min(h, w), max(h, w)  # 短边记为x, 长边记为y
         a, b = min_length, max_length  # 小阈值记为a, 大阈值记为b
@@ -426,10 +450,9 @@ class xlcv(EnchantBase):
         if r != 1:
             im = cv2.resize(im, None, fx=r, fy=r)
 
-        return im
+        return CvImg(im)
 
-    @staticmethod
-    def resize2(im, dsize, **kwargs):
+    def resize2(self, dsize, **kwargs):
         """
         :param dsize: (h, w)
         :param kwargs:
@@ -437,10 +460,9 @@ class xlcv(EnchantBase):
         """
         # if 'interpolation' not in kwargs:
         #     kwargs['interpolation'] = cv2.INTER_CUBIC
-        return cv2.resize(im, dsize[::-1], **kwargs)
+        return CvImg(cv2.resize(self, dsize[::-1], **kwargs))
 
-    @staticmethod
-    def reduce_filesize(im, filesize=None, suffix='.jpg'):
+    def reduce_filesize(self, filesize=None, suffix='.jpg'):
         """ 按照保存后的文件大小来压缩im
 
         :param filesize: 单位Bytes
@@ -457,6 +479,7 @@ class xlcv(EnchantBase):
             return len(buffer)
 
         # 2 然后开始循环处理
+        im = self
         while filesize:
             r = get_file_size(im) / filesize
             if r <= 1:
@@ -465,14 +488,12 @@ class xlcv(EnchantBase):
             # 假设图片面积和文件大小成正比，如果r=4，表示长宽要各减小至1/(r**0.5)才能到目标文件大小
             rate = min(1 / (r ** 0.5), 0.95)  # 并且限制每轮至少要缩小至95%，避免可能会迭代太多轮
             im = cv2.resize(im, (int(im.shape[0] * rate), int(im.shape[1] * rate)))
-        return im
+        return CvImg(im)
 
-    @staticmethod
-    def __5_warp():
+    def __6_warp(self):
         pass
 
-    @staticmethod
-    def warp(im, warp_mat, dsize=None, *, view_rate=False, max_zoom=1, reserve_struct=False):
+    def warp(self, warp_mat, dsize=None, *, view_rate=False, max_zoom=1, reserve_struct=False):
         """ 对图像进行透视变换
     
         :param im: np.ndarray的图像数据
@@ -500,6 +521,7 @@ class xlcv(EnchantBase):
             warp_mat = np.concatenate([warp_mat, [[0, 0, 1]]], axis=0)
 
         # 2 view_rate，视野比例改变导致的变换矩阵规则变化
+        im = self
         if view_rate:
             # 2.1 视野变化后的四个角点
             h, w = im.shape[:2]
@@ -528,10 +550,9 @@ class xlcv(EnchantBase):
         dst = cv2.warpPerspective(im, warp_mat, dsize)
 
         # 4 返回值
-        return dst
+        return CvImg(dst)
 
-    @staticmethod
-    def pad(im, pad_size, constant_values=0, mode='constant', **kwargs):
+    def pad(self, pad_size, constant_values=0, mode='constant', **kwargs):
         r""" 拓宽图片上下左右尺寸
     
         基于np.pad，定制、简化了针对图片类型数据的操作
@@ -563,6 +584,7 @@ class xlcv(EnchantBase):
                [255., 255., 255., 255., 255.]])
         """
         # 0 参数检查
+        im = self
         if im.ndim < 2 or im.ndim > 3:
             raise ValueError
 
@@ -578,29 +600,28 @@ class xlcv(EnchantBase):
 
         dst = np.pad(im, pad_width, mode, constant_values=constant_values, **kwargs)
 
-        return dst
+        return CvImg(dst)
 
-    @staticmethod
-    def _get_subrect_image(im, pts, fill=0):
+    def _get_subrect_image(self, pts, fill=0):
         """
         :return:
             dst_img 按外接四边形截取的子图
             new_pts 新的变换后的点坐标
         """
         # 1 计算需要pad的宽度
+        im = self
         x1, y1, x2, y2 = [round_int(v) for v in rect_bounds(pts)]
         h, w = im.shape[:2]
         pad = [-y1, y2 - h, -x1, x2 - w]  # 各个维度要补充的宽度
         pad = [max(0, v) for v in pad]  # 负数宽度不用补充，改为0
 
         # 2 pad并定位rect局部图
-        tmp_img = xlcv.pad(im, pad, fill) if max(pad) > 0 else im
+        tmp_img = im.pad(pad, fill) if max(pad) > 0 else im
         dst_img = tmp_img[y1 + pad[0]:y2, x1 + pad[2]:x2]  # 这里越界不会报错，只是越界的那个维度shape为0
         new_pts = [(pt[0] - x1, pt[1] - y1) for pt in pts]
         return dst_img, new_pts
 
-    @staticmethod
-    def get_sub(im, pts, *, fill=0, warp_quad=False):
+    def get_sub(self, pts, *, fill=0, warp_quad=False):
         """ 从src_im取一个子图
     
         :param im: 原图
@@ -619,25 +640,22 @@ class xlcv(EnchantBase):
             文件、np.ndarray --> np.ndarray
             PIL.Image --> PIL.Image
         """
-        dst, pts = xlcv._get_subrect_image(xlcv.read(im), reshape_coords(pts, 2), fill)
+        dst, pts = self._get_subrect_image(reshape_coords(pts, 2), fill)
         if len(pts) == 4 and warp_quad:
             w, h = quad_warp_wh(pts, method=warp_quad)
             warp_mat = get_warp_mat(pts, rect2polygon([[0, 0], [w, h]]))
-            dst = xlcv.warp(dst, warp_mat, (w, h))
+            dst = dst.warp(warp_mat, (w, h))
         return dst
 
-    @staticmethod
-    def trim(im, *, border=0, color=None):
+    def trim(self, *, border=0, color=None):
         """ 如果想用cv2实现，可以参考： https://stackoverflow.com/questions/49907382/how-to-remove-whitespace-from-an-image-in-opencv
         目前为了偷懒节省代码量，就直接调用pil的版本了
         """
-        from pyxllib.cv.xlpillib import xlpil
-        im = xlcv.to_pil_image(im)
-        im = xlpil.trim(im, border=border, color=color)
-        return xlpil.to_cv2_image(im)
+        im = self.to_pil_image()
+        im = im.trim(im, border=border, color=color)
+        return im.to_cv2_image()
 
-    @staticmethod
-    def keep_subtitles(im, judge_func=None, trim_color=(255, 255, 255)):
+    def keep_subtitles(self, judge_func=None, trim_color=(255, 255, 255)):
         """ 保留（白色）字幕，去除背景，并会裁剪图片缩小尺寸
 
         是比较业务级的一个功能，主要是这段代码挺有学习价值的，有其他变形需求，
@@ -657,9 +675,9 @@ class xlcv(EnchantBase):
         if judge_func is None:
             judge_func = fore_pixel
 
-        im2 = np.apply_along_axis(judge_func, 2, im).astype('uint8')
+        im2 = CvImg(np.apply_along_axis(judge_func, 2, self).astype('uint8'))
         if trim_color:
-            im2 = xlcv.trim(im2, color=trim_color)
+            im2 = im2.trim(color=trim_color)
         return im2
 
     @classmethod
@@ -681,23 +699,24 @@ class xlcv(EnchantBase):
 
         def hstack(imgs):
             """ 水平拼接图片 """
+            imgs = [CvImg(x) for x in imgs]
             patches = []
 
             max_length = max([im.shape[0] for im in imgs])
-            max_channel = max([xlcv.n_channels(im) for im in imgs])
+            max_channel = max([im.n_channels for im in imgs])
             if pad[1]:
-                board = np.ones([max_length, pad[1]], dtype='uint8') * pad_color
+                board = CvImg(np.ones([max_length, pad[1]], dtype='uint8') * pad_color)
                 if max_channel == 3:
-                    board = xlcv.cvt_channel(board, 1)
+                    board = board.cvt_channel(1)
             else:
                 board = None
 
             for im in imgs:
                 h = im.shape[0]
                 if h != max_length:
-                    im = xlcv.pad(im, [0, max_length - h, 0, 0])
+                    im = im.pad([0, max_length - h, 0, 0])
                 if max_channel == 3:
-                    im = xlcv.cvt_channel(im, 1)
+                    im = im.cvt_channel(1)
                 patches += [im]
                 if board is not None:
                     patches += [board]
@@ -707,23 +726,24 @@ class xlcv(EnchantBase):
                 return np.hstack(patches[:-1])
 
         def vstack(imgs):
+            imgs = [CvImg(x) for x in imgs]
             patches = []
 
             max_length = max([im.shape[1] for im in imgs])
-            max_channel = max([xlcv.n_channels(im) for im in imgs])
+            max_channel = max([CvImg(im).n_channels for im in imgs])
             if pad[0]:
-                board = np.ones([pad[0], max_length], dtype='uint8') * pad_color
+                board = CvImg(np.ones([pad[0], max_length], dtype='uint8') * pad_color)
                 if max_channel == 3:
-                    board = xlcv.cvt_channel(board, 1)
+                    board = board.cvt_channel(1)
             else:
                 board = None
 
             for im in imgs:
                 w = im.shape[1]
                 if w != max_length:
-                    im = xlcv.pad(im, [0, 0, 0, max_length - w])
+                    im = im.pad([0, 0, 0, max_length - w])
                 if max_channel == 3:
-                    im = xlcv.cvt_channel(im, 1)
+                    im = im.cvt_channel(1)
                 patches += [im]
                 if board is not None:
                     patches += [board]
@@ -737,34 +757,32 @@ class xlcv(EnchantBase):
             images = [hstack(imgs) for imgs in images]
         return vstack(images)
 
-    def __6_替换颜色(self):
+    def __7_替换颜色(self):
         pass
 
-    @staticmethod
-    def replace_color_by_mask(im, dst_color, mask):
+    def replace_color_by_mask(self, dst_color, mask):
         # TODO mask可以设置权重，从而产生类似渐变的效果？
         c = _rgb_to_bgr_list(dst_color)
         if len(c) == 1:
-            im2 = xlcv.read(im, 0)
+            im2 = self.cvt_channel(0)
             im2[np.where((mask == [255]))] = c[0]
         elif len(c) == 3:
-            if xlcv.n_channels(im) == 4:
-                x, y = im[:, :, :3].copy(), im[:, :, 3:4]
+            if self.n_channels == 4:
+                x, y = self[:, :, :3].copy(), self[:, :, 3:4]
                 x[np.where((mask == [255]))] = c
                 im2 = np.concatenate([x, y], axis=2)
             else:
-                im2 = xlcv.read(im, 1)
+                im2 = self.cvt_channel(1)
                 im2[np.where((mask == [255]))] = c
         elif len(c) == 4:
-            im2 = xlcv.read(im, 2)
+            im2 = self.cvt_channel(2)
             im2[np.where((mask == [255]))] = c
         else:
             raise ValueError(f'dst_color参数值有问题 {dst_color}')
 
         return im2
 
-    @staticmethod
-    def replace_color(im, src_color, dst_color, *, tolerate=5):
+    def replace_color(self, src_color, dst_color, *, tolerate=5):
         """ 替换图片中的颜色
 
         :param src_color: 原本颜色 (r, g, b)
@@ -821,55 +839,50 @@ class xlcv(EnchantBase):
             b = (arr + tolerate).clip(0, 255)
             return a.astype('uint8'), b.astype('uint8')
 
-        im1 = xlcv.read(im, 2)
+        im1 = self.cvt_channel(2)
         a, b = set_range_color(set_color(src_color), tolerate)
         mask = cv2.inRange(im1, a, b)
-        return xlcv.replace_color_by_mask(im, dst_color, mask)
+        return self.replace_color_by_mask(dst_color, mask)
 
-    @staticmethod
-    def replace_background_color(im, dst_color):
-        gray_img = xlcv.read(im, 0)
+    def replace_background_color(self, dst_color):
+        gray_img = self.cvt_channel(0)
         _, binary_img = cv2.threshold(gray_img, np.mean(gray_img), 255, cv2.THRESH_BINARY)
-        return xlcv.replace_color_by_mask(im, dst_color, 255 - binary_img)
+        return self.replace_color_by_mask(dst_color, 255 - binary_img)
 
-    @staticmethod
-    def replace_foreground_color(im, dst_color):
-        gray_img = xlcv.read(im, 0)
+    def replace_foreground_color(self, dst_color):
+        gray_img = self.cvt_channel(0)
         _, binary_img = cv2.threshold(gray_img, np.mean(gray_img), 255, cv2.THRESH_BINARY)
-        return xlcv.replace_color_by_mask(im, dst_color, binary_img)
+        return self.replace_color_by_mask(dst_color, binary_img)
 
-    @staticmethod
-    def replace_ground_color(im, foreground_color, background_color):
+    def replace_ground_color(self, foreground_color, background_color):
         """ 替换前景、背景色
         使用了二值图的方式来做mask
         """
-        gray_img = xlcv.read(im, 0)
+        gray_img = self.cvt_channel(0)
         _, binary_img = cv2.threshold(gray_img, np.mean(gray_img), 255, cv2.THRESH_BINARY)
         if binary_img.mean() > 128:  # 背景色应该比前景多的多，如果平均值大于128，说明黑底白字的模式反了
             binary_img = ~binary_img
         # 0作为背景，255作为前景
-        im = xlcv.replace_color_by_mask(im, background_color, 255 - binary_img)
-        im = xlcv.replace_color_by_mask(im, foreground_color, binary_img)
+        im = self.replace_color_by_mask(background_color, 255 - binary_img)
+        im = im.replace_color_by_mask(foreground_color, binary_img)
         return im
 
-    def __7_other(self):
+    def __8_other(self):
         pass
 
-    @staticmethod
-    def count_pixels(im):
+    def count_pixels(self):
         """ 统计image中各种rgb出现的次数 """
-        colors, counts = np.unique(im.reshape(-1, 3), axis=0, return_counts=True)
+        colors, counts = np.unique(self.reshape(-1, 3), axis=0, return_counts=True)
         colors = [[tuple(c), cnt] for c, cnt in zip(colors, counts)]
         colors.sort(key=lambda x: -x[1])
         return colors
 
-    @staticmethod
-    def color_desc(im, color_num=10):
+    def color_desc(self, color_num=10):
         """ 描述一张图的颜色分布，这个速度还特别慢，没有优化 """
         from collections import Counter
         from pyxllib.cv.rgbfmt import RgbFormatter
 
-        colors = xlcv.count_pixels(im)
+        colors = self.count_pixels()
         total = sum([cnt for _, cnt in colors])
         colors2 = Counter()
         for c, cnt in colors[:10000]:
@@ -881,97 +894,40 @@ class xlcv(EnchantBase):
             print(desc, f'{cnt / total:.2%}')
 
 
-class CvImg(np.ndarray):
-    def __new__(cls, input_array, info=None):
-        """ 从np.ndarray继承的固定写法
-        https://numpy.org/doc/stable/user/basics.subclassing.html
+class _CheckSpeed(PerfTest):
+    """
+    【测试结果】_CheckReadSpeed().perf(number=1e5, repeat=10)
+         1_cv2 用时(秒) 总和: 0.210	均值标准差: 0.021±0.005	总数: 10	最小值: 0.018	最大值: 0.033 运行结果：3
+    2_to_cvimg 用时(秒) 总和: 0.844	均值标准差: 0.084±0.021	总数: 10	最小值: 0.065	最大值: 0.125
+       3_cvimg 用时(秒) 总和: 0.252	均值标准差: 0.025±0.006	总数: 10	最小值: 0.023	最大值: 0.042 运行结果：3
 
-        该类使用中完全等价np.ndarray，但额外增加了xlcv中的功能
-        """
-        # Input array is an already formed ndarray instance
-        # We first cast to be our class type
-        obj = np.asarray(input_array).view(cls)
-        # add the new attribute to the created instance
-        obj.info = info
-        # Finally, we must return the newly created object:
-        return obj
+    【结论】
+    1、~
+    2、每亿次CvImg类型转换，开销是84秒
+    3、使用CvImg访问通道，比直接访问，每亿次调用多4秒
+    """
 
-    def __array_finalize__(self, obj):
-        # see InfoArray.__array_finalize__ for comments
-        if obj is None: return
-        self.info = getattr(obj, 'info', None)
+    def __init__(self, n=100):
+        from pyxllib.file.specialist import XlPath
+        self.im = np.zeros([n, n, 3], dtype='uint8')
+        self.im2 = CvImg(self.im)
+        self.path1 = self.im2.write(XlPath.tempdir() / 'test1.jpg')
 
-    @classmethod
-    def read(cls, file, flags=None, **kwargs):
-        return cls(xlcv.read(file, flags, **kwargs))
-
-    @classmethod
-    def read_from_buffer(cls, buffer, flags=None, *, b64decode=False):
-        return cls(xlcv.read_from_buffer(buffer, flags, b64decode=b64decode))
-
-    @classmethod
-    def read_from_url(cls, url, flags=None, *, b64decode=False):
-        return cls(xlcv.read_from_url(url, flags, b64decode=b64decode))
-
-    @property
-    def imsize(self):
-        # 这里几个属性本来可以直接调用xlcv的实现，但为了性能，这里复写一遍
-        return self.shape[:2]
-
-    @property
-    def n_channels(self):
-        if self.ndim == 3:
-            return self.shape[2]
+    def perf_1_cv2(self):
+        im = self.im
+        if im.ndim == 3:
+            return im.shape[2]
         else:
             return 1
 
-    @property
-    def height(self):
-        return self.shape[0]
+    def perf_2_to_cvimg(self):
+        CvImg(self.im)
 
-    @property
-    def width(self):
-        return self.shape[1]
-
-    def __getattr__(self, item):
-        """ 对cv2、xlcv的类层级接口封装
-
-        这里使用了较高级的实现方法
-        好处：从而每次开发只需要在xlcv写一遍
-        坏处：没有代码接口提示...
-
-        注意，同名方法，比如size，会优先使用np.ndarray的版本
-        所以为了区分度，xlcv有imsize来代表xlcv的size版本
-
-        并且无法直接使用 cv2.resize， 因为np.ndarray已经有了resize
-
-        这里没有做任何安全性检查，请开发使用者自行分析使用合理性
-        """
-
-        def warp_func(*args, **kwargs):
-            func = getattr(cv2, item, getattr(xlcv, item, None))  # 先在cv2找方法，再在xlcv找方法
-            if func is None:
-                raise ValueError(f'不存在的方法名 {item}')
-            res = func(self, *args, **kwargs)
-            if isinstance(res, np.ndarray):  # 返回是原始图片格式，打包后返回
-                return type(self)(res)  # 自定义方法必须自己再转成CvImage格式，否则会变成np.ndarray
-            elif isinstance(res, tuple):  # 如果是tuple类型，则里面的np.ndarray类型也要处理
-                res2 = []
-                for x in res:
-                    if isinstance(x, np.ndarray):
-                        res2.append(type(self)(x))
-                    else:
-                        res2.append(x)
-                return tuple(res2)
-            return res
-
-        return warp_func
+    def perf_3_cvimg(self):
+        return self.im2.n_channels
 
 
 if __name__ == '__main__':
-    im = xlcv.read(r"C:\home\chenkunze\data\aipocr_test\01通用\accurate\3e99d47940bf9fae942c733dcdf5dbe7.jpg")
-    im = xlcv.reduce_filesize(im, 20 * 1024)
-    xlcv.write(im, 'code4101.jpg')
-    a = xlcv.to_buffer(im)
-    b = xlcv.to_buffer(im, b64encode=True)
-    print(humanfriendly.format_size(len(a)), humanfriendly.format_size(len(b)), len(b) / len(a))
+    import fire
+
+    fire.Fire()

@@ -19,18 +19,14 @@ from pyecharts import options as opts
 from pyecharts.globals import ChartType
 from pyecharts.commons.utils import JsCode
 from pyecharts.charts import Line, Scatter, Bar
+from pyecharts.charts.chart import Chart
 
-from pyxllib.prog.pupil import run_once, EnchantBase, EnchantCvt
+from pyxllib.prog.pupil import run_once, inject_members
 from pyxllib.debug.specialist import TicToc, browser
 from pyxllib.file.specialist import XlPath
 
-from pyecharts.charts.chart import Chart
-from pyecharts.charts import Bar
-
 
 class XlChart(Chart):
-
-    @staticmethod
     def set_title(self, title):
         self.set_global_opts(title_opts=pyecharts.options.TitleOpts(title=title))
 
@@ -72,6 +68,9 @@ class XlChart(Chart):
         return self
 
 
+inject_members(XlChart, Chart)
+
+
 class XlBar(Bar):
 
     @classmethod
@@ -91,7 +90,7 @@ class XlBar(Bar):
             b.add_yaxis(k, v)
 
         if title:
-            XlChart.set_title(b, title)
+            b.set_title(title)
 
         return b
 
@@ -101,6 +100,9 @@ class XlBar(Bar):
         >> browser(pyecharts.charts.Bar.from_list(numbers))
         """
         return cls.from_dict({'value': list(yaxis)}, xaxis=xaxis, title=title)
+
+
+inject_members(XlBar, Bar)
 
 
 def get_render_body(chart):

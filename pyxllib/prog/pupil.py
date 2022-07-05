@@ -11,6 +11,7 @@ import functools
 import io
 import itertools
 import json
+import logging
 import math
 import os
 import queue
@@ -20,7 +21,6 @@ import subprocess
 import sys
 import tempfile
 import threading
-from threading import Thread
 import time
 from urllib.parse import urlparse
 
@@ -250,138 +250,6 @@ class DictTool:
                 del dict_[k]
 
 
-class EnchantCvt:
-    """ 把类_cls的功能绑定到类cls里
-
-    根源_cls里的实现类型不同，到cls需要呈现的接口形式不同，有很多种不同的转换形式
-
-    每个分支里，随附了getattr目标函数的一般默认定义模板
-    用_self、_cls表示dst_cls，区别原cls类的self、cls标记
-    """
-
-    @staticmethod
-    def staticmethod2objectmethod(cls, _cls, x):
-        # 目前用的最多的转换形式
-        # @staticmethod
-        # def func1(_self, *args, **kwargs): ...
-        setattr(_cls, x, getattr(cls, x))
-
-    @staticmethod
-    def staticmethod2property(cls, _cls, x):
-        # @staticmethod
-        # def func2(_self): ...
-        setattr(_cls, x, property(getattr(cls, x)))
-
-    @staticmethod
-    def staticmethod2classmethod(cls, _cls, x):
-        # @staticmethod
-        # def func3(_cls, *args, **kwargs): ...
-        setattr(_cls, x, classmethod(getattr(cls, x)))
-
-    @staticmethod
-    def staticmethod2classproperty(cls, _cls, x):
-        # @staticmethod
-        # def func4(_cls): ...
-        setattr(_cls, x, classproperty(getattr(cls, x)))
-
-    @staticmethod
-    def classmethod2objectmethod(cls, _cls, x):
-        # @classmethod
-        # def func5(cls, _self, *args, **kwargs): ...
-        setattr(_cls, x, lambda *args, **kwargs: getattr(cls, x)(*args, **kwargs))
-
-    @staticmethod
-    def classmethod2property(cls, _cls, x):
-        # @classmethod
-        # def func6(cls, _self): ...
-        setattr(_cls, x, lambda *args, **kwargs: property(getattr(cls, x)(*args, **kwargs)))
-
-    @staticmethod
-    def classmethod2classmethod(cls, _cls, x):
-        # @classmethod
-        # def func7(cls, _cls, *args, **kwargs): ...
-        setattr(_cls, x, lambda *args, **kwargs: classmethod(getattr(cls, x)(*args, **kwargs)))
-
-    @staticmethod
-    def classmethod2classproperty(cls, _cls, x):
-        # @classmethod
-        # def func8(cls, _cls): ...
-        setattr(_cls, x, lambda *args, **kwargs: classproperty(getattr(cls, x)(*args, **kwargs)))
-
-    @staticmethod
-    def staticmethod2modulefunc(cls, _cls, x):
-        # @staticmethod
-        # def func9(*args, **kwargs): ...
-        setattr(_cls, x, getattr(cls, x))
-
-    @staticmethod
-    def classmethod2modulefunc(cls, _cls, x):
-        # @classmethod
-        # def func10(cls, *args, **kwargs): ...
-        setattr(_cls, x, lambda *args, **kwargs: getattr(cls, x)(*args, **kwargs))
-
-    @staticmethod
-    def to_moduleproperty(cls, _cls, x):
-        # 理论上还有'to_moduleproperty'的转换模式
-        #   但这个很容易引起歧义，是应该存一个数值，还是动态计算？
-        #   如果是动态计算，可以使用modulefunc的机制显式执行，更不容易引起混乱。
-        #   从这个分析来看，是不需要实现'2moduleproperty'的绑定体系的。py标准语法本来也就没有module @property的概念。
-        raise NotImplementedError
-
-
-class EnchantBase:
-    """
-    一些三方库的类可能功能有限，我们想做一些扩展。
-    常见扩展方式，是另外写一些工具函数，但这样就不“面向对象”了。
-    如果要“面向对象”，需要继承已有的类写新类，但如果组件特别多，开发难度是很大的。
-        比如excel就有单元格、工作表、工作薄的概念。
-        如果自定义了新的单元格，那是不是也要自定义新的工作表、工作薄，才能默认引用到自己的单元格类。
-        这个看着很理想，其实并没有实际开发可能性。
-    所以我想到一个机制，把额外函数形式的扩展功能，绑定到原有类上。
-        这样原来的功能还能照常使用，但多了很多我额外扩展的成员方法，并且也没有侵入原三方库的源码
-        这样一种设计模式，简称“绑定”。换个逼格高点的说法，就是“强化、附魔”的过程，所以称为Enchant。
-        这个功能应用在cv2、pillow、fitz、openpyxl，并在win32com中也有及其重要的应用。
-    """
-
-    @classmethod
-    def check_enchant_names(cls, classes, names=None, *, white_list=None, ignore_case=False):
-        """
-        :param list classes: 不能跟这里列出的模块、类的成员重复
-        :param list|str|tuple names: 要检查的名称清单
-        :param white_list: 白名单，这里面的名称不警告
-            在明确要替换三方库标准功能的时候，可以使用
-        :param ignore_case: 忽略大小写
-        """
-        exist_names = {x.__name__: set(dir(x)) for x in classes}
-        if names is None:
-            names = {x for x in dir(cls) if x[:2] != '__'} \
-                    - {'check_enchant_names', '_enchant', 'enchant'}
-
-        white_list = set(white_list) if white_list else {}
-
-        if ignore_case:
-            names = {x.lower() for x in names}
-            for k, values in exist_names.items():
-                exist_names[k] = {x.lower() for x in exist_names[k]}
-            white_list = {x.lower() for x in white_list}
-
-        for name, k in itertools.product(names, exist_names):
-            if name in exist_names[k] and name not in white_list:
-                print(f'警告！同名冲突！ {k}.{name}')
-
-        return set(names)
-
-    @classmethod
-    def _enchant(cls, _cls, names, cvt=EnchantCvt.staticmethod2objectmethod):
-        """ 这个框架是支持classmethod形式的转换的，但推荐最好还是用staticmethod，可以减少函数嵌套层数，提高效率 """
-        for name in set(names):
-            cvt(cls, _cls, name)
-
-    @classmethod
-    def enchant(cls):
-        raise NotImplementedError
-
-
 def check_install_package(package, speccal_install_name=None, *, user=False):
     """ https://stackoverflow.com/questions/12332975/installing-python-module-within-code
 
@@ -404,19 +272,18 @@ def check_install_package(package, speccal_install_name=None, *, user=False):
         subprocess.check_call(cmds)
 
 
-def run_once(distinct_mode=False, *, limit=1):
+def run_once(distinct_mode=0, *, limit=1):
     """
-    Args:
-        distinct_mode:
-            0，默认False，不区分输入的参数值（包括cls、self），强制装饰的函数只运行一次
-            'str'，设为True或1时，仅以字符串化的差异判断是否是重复调用，参数不同，会判断为不同的调用，每种调用限制最多执行limit次
-            'id,str'，在'str'的基础上，第一个参数使用id代替。一般用于类方法、对象方法的装饰。
-                不考虑类、对象本身的内容改变，只要还是这个类或对象，视为重复调用。
-            'ignore,str'，首参数忽略，第2个开始的参数使用str格式化
-                用于父类某个方法，但是子类继承传入cls，原本id不同会重复执行
-                使用该模式，首参数会ignore忽略，只比较第2个开始之后的参数
-            func等callable类型的对象也行，是使用run_once装饰器的简化写法
-        limit: 默认只会执行一次，该参数可以提高限定的执行次数，一般用不到，用于兼容旧的 limit_call_number 装饰器
+    :param int|str distinct_mode:
+        0，默认False，不区分输入的参数值（包括cls、self），强制装饰的函数只运行一次
+        'str'，设为True或1时，仅以字符串化的差异判断是否是重复调用，参数不同，会判断为不同的调用，每种调用限制最多执行limit次
+        'id,str'，在'str'的基础上，第一个参数使用id代替。一般用于类方法、对象方法的装饰。
+            不考虑类、对象本身的内容改变，只要还是这个类或对象，视为重复调用。
+        'ignore,str'，首参数忽略，第2个开始的参数使用str格式化
+            用于父类某个方法，但是子类继承传入cls，原本id不同会重复执行
+            使用该模式，首参数会ignore忽略，只比较第2个开始之后的参数
+        func等callable类型的对象也行，是使用run_once装饰器的简化写法
+    :param limit: 默认只会执行一次，该参数可以提高限定的执行次数，一般用不到，用于兼容旧的 limit_call_number 装饰器
     Returns: 返回decorator
     """
     if callable(distinct_mode):
@@ -547,3 +414,50 @@ class Timeout:
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.alarm.cancel()
+
+
+@run_once('str')
+def inject_members(from_obj, to_obj, member_list=None, *,
+                   check=False, ignore_case=False,
+                   white_list=None, black_list=None):
+    """ 将from_obj的方法注入到to_obj中
+
+    一般用于类继承中，将子类from_obj的新增的成员方法，添加回父类to_obj中
+        反经合道：这样看似很违反常理，父类就会莫名其妙多出一些可操作的成员方法。
+            但在某些时候能保证面向对象思想的情况下，大大简化工程代码开发量。
+    也可以用于模块等方法的添加
+
+    :param from_obj: 一般是一个类用于反向继承的方法来源，但也可以是模块等任意对象。
+        注意py一切皆类，一个class定义的类本质也是type类定义出的一个对象
+        所以这里概念上称为obj才是准确的，反而是如果叫from_cls不太准确，虽然这个方法主要确实都是用于class类
+    :param to_obj: 同from_obj，要被注入方法的对象
+    :param Sequence[str] member_list: 手动指定的成员方法名，可以不指定，自动生成
+    :param check: 检查重名方法
+    :param ignore_case: 忽略方法的大小写情况，一般用于win32com接口
+    :param Sequence[str] white_list: 白名单。无论是否重名，这里列出的方法都会被添加
+    :param Sequence[str] black_list: 黑名单。这里列出的方法不会被添加
+    """
+    # 1 整理需要注入的方法清单
+    dst = set(dir(to_obj))
+    if ignore_case:
+        dst = {x.lower() for x in dst}
+
+    if member_list:
+        src = set(member_list)
+    else:
+        if ignore_case:
+            src = {x for x in dir(from_obj) if (x.lower() not in dst)}
+        else:
+            src = set(dir(from_obj)) - dst
+
+    # 2 微调
+    if white_list:
+        src |= set(white_list)
+    if black_list:
+        src -= set(black_list)
+
+    # 3 注入方法
+    for x in src:
+        setattr(to_obj, x, getattr(from_obj, x))
+        if check and (x in dst or (ignore_case and x.lower() in dst)):
+            logging.warning(f'Conflict of the same name! {to_obj}.{x}')

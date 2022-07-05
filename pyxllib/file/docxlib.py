@@ -20,7 +20,7 @@ import docx
 import docx.table
 import docx.enum
 
-from pyxllib.prog.pupil import DictTool, EnchantBase, EnchantCvt, run_once
+from pyxllib.prog.pupil import DictTool, inject_members, run_once
 from pyxllib.text.pupil import strwidth
 from pyxllib.debug.specialist import File, Dir, get_etag, browser
 
@@ -249,42 +249,34 @@ class Document:
         return getattr(self.doc, item)
 
 
-class EnchantDocxTable(EnchantBase):
-    @classmethod
-    @run_once
-    def enchant(cls):
-        names = cls.check_enchant_names([docx.table.Table])
-        cls._enchant(docx.table.Table, names)
-
-    @staticmethod
-    def merge_samevalue_in_col(table, col, start_row=1):
+class XlDocxTable(docx.table.Table):
+    def merge_samevalue_in_col(self, col, start_row=1):
         """ 定义合并单元格的函数
 
-        :param table: 需要操作的表格
         :param col: 需要处理数据的列，0开始编号
         :param start_row: 起始行，即表格中开始比对数据的行（其实标题排不排除一般无所谓~默认是排除了）
         """
 
         def merge_cells(start, end):
             if end > start:
-                c = table.cell(start, col)
-                c.merge(table.cell(end, col))
-                c.text = table.cell(start, col).text.strip()
+                c = self.cell(start, col)
+                c.merge(self.cell(end, col))
+                c.text = self.cell(start, col).text.strip()
                 c.vertical_alignment = docx.enum.table.WD_ALIGN_VERTICAL.CENTER
                 c.paragraphs[0].alignment = docx.enum.text.WD_ALIGN_PARAGRAPH.CENTER
 
         ref, start = None, start_row
-        for i in range(start_row, len(table.rows)):
-            v = table.cell(i, col).text
+        for i in range(start_row, len(self.rows)):
+            v = self.cell(i, col).text
             if v != ref:
                 merge_cells(start, i - 1)
                 ref, start = v, i
             else:
-                table.cell(i, col).text = ''
+                self.cell(i, col).text = ''
         merge_cells(start, i)
 
 
-EnchantDocxTable.enchant()
+inject_members(XlDocxTable, docx.table.Table)
 
 
 def __win32_word():
@@ -298,41 +290,37 @@ def __win32_word():
     pass
 
 
-class EnchantWin32WordApplication(EnchantBase):
-    @classmethod
-    @run_once
-    def enchant(cls, app, recursion_enchant=False):
-        """
-        :param app: win32的类是临时生成的，需要给一个参考对象，才方便type(word)算出类型
-        :param recursion_enchant: 是否递归，对目前有的各种子类扩展功能都绑定上
-            默认关闭，如果影响到性能，可以关闭，后面运行中需要时手动设定enchant
-            开启，能方便业务层开发
+@run_once
+def inject_win32word(app, recursion_enchant=False):
+    """ 给win32的word com接口添加功能
 
-            之前有想过可以生成doc里的时候再enchant这些对象，但如果是批量处理脚本，每次建立doc都判断我觉得也麻烦
-            长痛不如短痛，建立app的时候就把所有对象enchant更方便
-        """
-        # app
-        _cls = type(app)
-        names = cls.check_enchant_names([_cls], ignore_case=True)
-        exclude_names = {'get_app'}
-        cls._enchant(_cls, names - exclude_names)
+    :param app: win32的类是临时生成的，需要给一个参考对象，才方便type(word)算出类型
+    :param recursion_enchant: 是否递归，对目前有的各种子类扩展功能都绑定上
+        默认关闭，如果影响到性能，可以关闭，后面运行中需要时手动设定inject注入
+        开启，能方便业务层开发
 
-        if recursion_enchant:
-            # 建一个临时文件，把各种需要绑定的对象都生成绑定一遍
-            # 确保初始化稍微慢点，但后面就方便了
-            doc = app.Documents.Add()
-            EnchantWin32WordDocument.enchant(doc)
+        之前有想过可以生成doc里的时候再enchant这些对象，但如果是批量处理脚本，每次建立doc都判断我觉得也麻烦
+        长痛不如短痛，建立app的时候就把所有对象enchant更方便
+    """
+    inject_members(XlWin32WordApplication, type(app), ignore_case=True)
+    if recursion_enchant:
+        # 建一个临时文件，把各种需要绑定的对象都生成绑定一遍
+        # 确保初始化稍微慢点，但后面就方便了
+        doc = app.Documents.Add()
+        inject_members(XlWin32WordDocument, type(doc), ignore_case=True)
 
-            doc.Activate()
-            rng = doc.Range()  # 全空的文档，有区间[0,1)
-            EnchantWin32WordRange.enchant(rng)
+        doc.Activate()
+        rng = doc.Range()  # 全空的文档，有区间[0,1)
+        inject_members(XlWin32WordRange, type(rng), ignore_case=True)
 
-            doc.Hyperlinks.Add(rng, 'url')  # 因为全空，这里会自动生成对应的明文url
-            EnchantWin32WordHyperlink.enchant(doc.Hyperlinks(1))
+        doc.Hyperlinks.Add(rng, 'url')  # 因为全空，这里会自动生成对应的明文url
+        inject_members(XlWin32WordHyperlink, type(doc.Hyperlinks(1)), ignore_case=True)
 
-            # 处理完关闭文档，不用保存
-            doc.Close(False)
+        # 处理完关闭文档，不用保存
+        doc.Close(False)
 
+
+class XlWin32WordApplication:
     @classmethod
     def get_app(cls, app=None, *, visible=None, display_alerts=0, recursion_enchant=True):
         """
@@ -358,8 +346,8 @@ class EnchantWin32WordApplication(EnchantBase):
                 # 实在不行，就用动态调度
                 app = win32.dynamic.Dispatch(name)
 
-        # 2 enchant
-        cls.enchant(app, recursion_enchant=recursion_enchant)
+        # 2 inject
+        inject_win32word(app, recursion_enchant=recursion_enchant)
 
         if visible is not None:
             app.Visible = visible
@@ -368,25 +356,22 @@ class EnchantWin32WordApplication(EnchantBase):
 
         return app
 
-    @staticmethod
-    def check_close(app, outfile):
+    def check_close(self, outfile):
         """ 检查是否有指定名称的文件被打开，将其关闭，避免new_doc等操作出现问题
         """
         outfile = File(outfile)
-        for x in app.Documents:
+        for x in self.Documents:
             # 有可能文件来自onedrive，这里用safe_init更合理
             if File.safe_init(x.Name, x.Path) == outfile:
                 x.Close()
 
-    @staticmethod
-    def open_doc(app, file_name):
+    def open_doc(self, file_name):
         """ 打开已有的文件
         """
-        doc = app.Documents.Open(str(file_name))
+        doc = self.Documents.Open(str(file_name))
         return doc
 
-    @staticmethod
-    def new_doc(app, file=None):
+    def new_doc(self, file=None):
         """ 创建一个新的文件
         Args:
             file: 文件路径
@@ -401,12 +386,12 @@ class EnchantWin32WordApplication(EnchantBase):
         else:
             file = File(file)
 
-        doc = app.Documents.Add()  # 创建新的word文档
+        doc = self.Documents.Add()  # 创建新的word文档
         doc.save(file)
         return doc
 
-    @staticmethod
-    def wd(app, name, part=None):
+    @classmethod
+    def wd(cls, name, part=None):
         """ 输入字符串名称，获得对应的常量值
 
         :param name: 必须省略前缀wd。这个函数叫wd，就是帮忙省略掉前缀wd的意思
@@ -418,18 +403,8 @@ class EnchantWin32WordApplication(EnchantBase):
             raise ValueError
 
 
-class EnchantWin32WordDocument(EnchantBase):
-    @classmethod
-    @run_once
-    def enchant(cls, doc):
-        _cls = type(doc)
-        names = cls.check_enchant_names([_cls], ignore_case=True)
-        propertys = {'n_page'}
-        cls._enchant(_cls, propertys, EnchantCvt.staticmethod2property)
-        cls._enchant(_cls, names - propertys)
-
-    @staticmethod
-    def save(doc, file_name=None, fmt=None, retain=False, **kwargs):
+class XlWin32WordDocument:
+    def save(self, file_name=None, fmt=None, retain=False, **kwargs):
         """ 我自己简化的保存接口
 
         :param file_name: 保存到指定路径，如果带有后缀
@@ -471,13 +446,13 @@ class EnchantWin32WordDocument(EnchantBase):
             fmt = fmt.lower().lstrip('.')
         elif file_name is not None:
             fmt = File(file_name).suffix[1:].lower()
-        elif doc.Path:
-            fmt = os.path.splitext(doc.Name)[1][1:].lower()
+        elif self.Path:
+            fmt = os.path.splitext(self.Name)[1][1:].lower()
         else:
             fmt = 'docx'
 
         # 3 保存一份原始的文件路径
-        origin_file = File(doc.Name, doc.Path) if doc.Path else None
+        origin_file = File(self.Name, self.Path) if self.Path else None
 
         # 4 如果有指定保存文件路径
         if file_name is not None:
@@ -485,27 +460,27 @@ class EnchantWin32WordDocument(EnchantBase):
             if outfile.suffix[1:].lower() != fmt:
                 # 已有文件名，但这里指定的fmt不同于原文件，则认为是要另存为一个同名的不同格式文件
                 outfile = File(outfile.stem, outfile.parent, suffix=fmt)
-            doc.SaveAs2(str(outfile), save_format(fmt), **kwargs)
+            self.SaveAs2(str(outfile), save_format(fmt), **kwargs)
         # 5 如果没指定保存文件路径
         else:
-            if doc.Path:
-                outfile = File(doc.Name, doc.Path, suffix='.' + fmt)
-                doc.SaveAs2(str(outfile), save_format(outfile.suffix), **kwargs)
+            if self.Path:
+                outfile = File(self.Name, self.Path, suffix='.' + fmt)
+                self.SaveAs2(str(outfile), save_format(outfile.suffix), **kwargs)
             else:
-                etag = get_etag(doc.Content)
+                etag = get_etag(self.Content)
                 outfile = File(etag, Dir.TEMP, suffix=fmt)
-                doc.SaveAs2(str(outfile), save_format(fmt), **kwargs)
+                self.SaveAs2(str(outfile), save_format(fmt), **kwargs)
 
         # 6 是否恢复原doc
-        cur_file = File(doc.Name, doc.Path)  # 当前文件不一定是目标文件f，如果是pdf等格式也不会切换过去
+        cur_file = File(self.Name, self.Path)  # 当前文件不一定是目标文件f，如果是pdf等格式也不会切换过去
         if retain and origin_file and origin_file != cur_file:
-            app = doc.Application
-            doc.Close()
-            doc = app.open_doc(origin_file)
+            app = self.Application
+            self.Close()
+            self = app.open_doc(origin_file)
 
         # 7 返回值
         if retain:
-            return outfile, doc
+            return outfile, self
         else:
             return outfile
 
@@ -514,38 +489,36 @@ class EnchantWin32WordDocument(EnchantBase):
     # def chars(doc):
     #     return doc.Range().chars
 
-    @staticmethod
-    def n_page(doc):
-        return doc.ActiveWindow.Panes(1).Pages.Count
+    @property
+    def n_page(self):
+        return self.ActiveWindow.Panes(1).Pages.Count
 
-    @staticmethod
-    def browser(doc, file_name=None, fmt='html', retain=False):
+    def browser(self, file_name=None, fmt='html', retain=False):
         """ 这个函数可能会导致原doc指向对象被销毁，建议要不追返回值doc继续使用
         """
-        res = doc.save(file_name, fmt, retain=retain)
+        res = self.save(file_name, fmt, retain=retain)
 
         if retain:
-            outfile, doc = res
+            outfile, self = res
         else:
             outfile = res
 
         browser(outfile)
-        return doc
+        return self
 
-    @staticmethod
-    def add_section_size(doc, factor=1):
+    def add_section_size(self, factor=1):
         """ 显示每节长度的标记
         一般在这里计算比在html计算方便
         """
         from humanfriendly import format_size
 
-        n = doc.Paragraphs.Count
+        n = self.Paragraphs.Count
         style_names, text_lens = [], []
-        for p in doc.Paragraphs:
+        for p in self.Paragraphs:
             style_names.append(str(p.Style))
             text_lens.append(strwidth(p.Range.Text))
 
-        for i, p in enumerate(doc.Paragraphs):
+        for i, p in enumerate(self.Paragraphs):
             name = style_names[i]
             if name.startswith('标题'):
                 cumulate_size = 0
@@ -557,103 +530,86 @@ class EnchantWin32WordDocument(EnchantBase):
                 if cumulate_size:
                     size = format_size(cumulate_size * factor).replace(' ', '').replace('bytes', 'B')
                     r = p.Range
-                    doc.Range(r.Start, r.End - 1).InsertAfter(f'，{size}')
+                    self.Range(r.Start, r.End - 1).InsertAfter(f'，{size}')
 
-    @staticmethod
-    def outline_demote(doc, demote_level):
+    def outline_demote(self, demote_level):
         """ 标题降级，降低level层 """
-        for p in doc.Paragraphs:
+        for p in self.Paragraphs:
             p.Range.demote(demote_level)
 
-    @staticmethod
-    def set_style(doc, obj, name):
+    def set_style(self, obj, name):
         """ 给Paragraph、Range等按名称设置样式
 
         :param obj: 当前doc下某个含有Style成员属性的子对象
         :param name: 样式名称
         """
-        setattr(obj, 'Style', doc.Styles(name))
+        setattr(obj, 'Style', self.Styles(name))
 
-    @staticmethod
-    def add_paragraph(doc, text='', style=None):
+    def add_paragraph(self, text='', style=None):
         """ 自定义的插入段落
 
         默认的插入比较麻烦，新建段落、插入文本、设置格式要多步实现，这里封装支持在一步进行多种操作
         """
-        p = doc.Paragraphs.Add()
+        p = self.Paragraphs.Add()
         if text:
             p.Range.InsertBefore(text)
         if style:
-            p.Style = doc.Styles(style)
+            p.Style = self.Styles(style)
         return p
 
 
-class EnchantWin32WordRange(EnchantBase):
+class XlWin32WordRange:
     """ range是以下标0开始，左闭右开的区间
 
     当一个区间出现混合属性，比如有的有加粗，有的没加粗时，标记值为 app.wd('Undefined') 9999999
     vba的True是值-1，False是值0
     """
 
-    @classmethod
-    @run_once
-    def enchant(cls, rng):
-        _cls = type(rng)
-        names = cls.check_enchant_names([_cls], ignore_case=True)
-        propertys = {'chars'}
-        cls._enchant(_cls, propertys, EnchantCvt.staticmethod2property)
-        cls._enchant(_cls, names - propertys)
-
-    @staticmethod
-    def set_hyperlink(rng, url):
+    def set_hyperlink(self, url):
         """ 给当前rng添加超链接
         """
-        doc = rng.Parent
-        doc.Hyperlinks.Add(rng, url)
+        doc = self.Parent
+        doc.Hyperlinks.Add(self, url)
 
-    @staticmethod
-    def chars(rng):
+    @property
+    def chars(self):
         # 有特殊换行，ch.Text可能会得到 '\r\x07'，为了位置对应，只记录一个字符
-        return ''.join([ch.Text[0] for ch in rng.Characters])
+        return ''.join([ch.Text[0] for ch in self.Characters])
 
-    @staticmethod
-    def char_range(rng, start=0, end=None):
+    def char_range(self, start=0, end=None):
         """ 定位rng中的子range对象，这里是以可见字符Characters计数的
 
         :param start: 下标类似切片的规则
         :param end: 见start描述，允许越界，允许负数
             默认不输入表示匹配到末尾
         """
-        n = rng.Characters.Count
+        n = self.Characters.Count
         if end is None or end > n:
             end = n
         elif end < 0:
             end = n + end
-        start_idx, end_idx = rng.Characters(start + 1).Start, rng.Characters(end).End
-        return rng.Document.Range(start_idx, end_idx)
+        start_idx, end_idx = self.Characters(start + 1).Start, self.Characters(end).End
+        return self.Document.Range(start_idx, end_idx)
 
-    @staticmethod
-    def shifting(rng, left=0, right=0):
+    def shifting(self, left=0, right=0):
         """ range左右两边增加偏移量，返回重定位的rng
 
         常用语段落定位，要在段落末尾增加内容时
         >> rng2 = p.Range.shifting(right=-1)
         """
-        return rng.Document.Range(rng.Start + left, rng.End + right)
+        return self.Document.Range(self.Start + left, self.End + right)
 
-    @staticmethod
-    def demote(rng, demote_level):
+    def demote(self, demote_level):
         """ 标题降级，降低level层 """
-        name = rng.Style.NameLocal  # 获得样式名称
+        name = self.Style.NameLocal  # 获得样式名称
         m = re.match(r'标题 (\d)$', name)
         if m:
             lvl = int(m.group(1))
             new_lvl = lvl + demote_level
             new_style = f'标题 {new_lvl}' if new_lvl < 10 else '正文'
-            rng.Style = rng.Parent.Styles(new_style)
+            self.Style = self.Parent.Styles(new_style)
 
-    @staticmethod
-    def set_font(rng, font_fmt):
+    def set_font(self, font_fmt):
         """ 设置字体各种格式
 
         :param dict|str font_fmt:
@@ -665,74 +621,63 @@ class EnchantWin32WordRange(EnchantBase):
             str，使用现有样式名
         """
         if isinstance(font_fmt, dict):
-            font = rng.Font
+            font = self.Font
             for k, v in font_fmt.items():
                 setattr(font, k, v)
         elif isinstance(font_fmt, str):
-            rng.Style = rng.Parent.Styles(font_fmt)
+            self.Style = self.Parent.Styles(font_fmt)
         else:
             raise ValueError
 
-    @staticmethod
-    def insert_before(rng, text, font_fmt=None):
+    def insert_before(self, text, font_fmt=None):
         """ 对原InsertBefore的功能封装
 
         :return: 增加返回值，是新插入内容的range定位
         """
-        start1, end1 = rng.Start, rng.End
-        rng.InsertBefore(text)
-        bias = rng.End - end1  # 新插入的内容大小
-        new_rng = rng.Document.Range(start1, start1 + bias)
+        start1, end1 = self.Start, self.End
+        self.InsertBefore(text)
+        bias = self.End - end1  # 新插入的内容大小
+        new_rng = self.Document.Range(start1, start1 + bias)
         if font_fmt:
             new_rng.set_font(font_fmt)
         return new_rng
 
-    @staticmethod
-    def insert_after(rng, text, font_fmt=None):
+    def insert_after(self, text, font_fmt=None):
         """ 同insert_before，是InsertAfter的重封装
         """
         # 1
-        start1, end1 = rng.Start, rng.End
+        start1, end1 = self.Start, self.End
 
         # 2 往后插入，会排除\r情况
-        doc = rng.Document
+        doc = self.Document
         ch = doc.Range(end1 - 1, end1).Text
         if ch == '\r':
             end1 -= 1
-            rng = doc.Range(start1, end1)
+            self = doc.Range(start1, end1)
 
         # 3
-        rng.InsertAfter(text)
-        bias = rng.End - end1
-        new_rng = rng.Document.Range(end1, end1 + bias)
+        self.InsertAfter(text)
+        bias = self.End - end1
+        new_rng = self.Document.Range(end1, end1 + bias)
         if font_fmt:
             new_rng.set_font(font_fmt)
         return new_rng
 
 
-class EnchantWin32WordHyperlink(EnchantBase):
-    @classmethod
-    @run_once
-    def enchant(cls, link):
-        _cls = type(link)
-        names = cls.check_enchant_names([_cls], ignore_case=True)
-        propertys = {'netloc', 'name'}
-        cls._enchant(_cls, propertys, EnchantCvt.staticmethod2property)
-        cls._enchant(_cls, names - propertys)
-
-    @staticmethod
-    def netloc(link):
+class XlWin32WordHyperlink:
+    @property
+    def netloc(self):
         from urllib.parse import urlparse
-        linkp = urlparse(link.Name)  # 链接格式解析
+        linkp = urlparse(self.Name)  # 链接格式解析
         # netloc = linkp.netloc or Path(linkp.path).name
         netloc = linkp.netloc or linkp.scheme  # 可能是本地文件，此时记录其所在磁盘
         return netloc
 
-    @staticmethod
-    def name(link):
+    @property
+    def name(self):
         """ 这个是转成明文的完整链接，如果要编码过的，可以取link.Name """
         from urllib.parse import unquote
-        return unquote(link.Name)
+        return unquote(self.Name)
 
 
 def rebuild_document_by_word(fmt='html', translate=False, navigation=False, visible=False, quit=None):
