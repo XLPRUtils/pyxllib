@@ -58,7 +58,7 @@ class DocxTools:
         这个功能还有些局限性，后面要扩展鲁棒性
         TODO 增加一个支持将原文档标题降级的功能，降到toc之后
         """
-        app = EnchantWin32WordApplication.get_app()
+        app = XlWin32WordApplication.get_app()
 
         master_doc = app.new_doc(master_file)
         for item in toc:
@@ -145,15 +145,14 @@ class Document:
     def display(self):
         """ 转图片，使用jupyter环境的查看效果
         """
-        from pyxllib.cv.expert import xlpil
-        xlpil.enchant()
+        from pyxllib.cv.expert import PilImg
 
         # 转图片，并且裁剪，加边框输出
         doc = self.to_fitzdoc()
         for i in range(doc.page_count):
             page = doc.load_page(i)
             print('= ' * 10 + f' {page} ' + '= ' * 10)
-            img = page.get_pil_image()
+            img: PilImg = page.get_pil_image()
             img.trim(border=5).plot_border().display()
             del page
 
@@ -291,19 +290,19 @@ def __win32_word():
 
 
 @run_once
-def inject_win32word(app, recursion_enchant=False):
+def inject_win32word(app, recursion_inject=False):
     """ 给win32的word com接口添加功能
 
     :param app: win32的类是临时生成的，需要给一个参考对象，才方便type(word)算出类型
-    :param recursion_enchant: 是否递归，对目前有的各种子类扩展功能都绑定上
+    :param recursion_inject: 是否递归，对目前有的各种子类扩展功能都绑定上
         默认关闭，如果影响到性能，可以关闭，后面运行中需要时手动设定inject注入
         开启，能方便业务层开发
 
-        之前有想过可以生成doc里的时候再enchant这些对象，但如果是批量处理脚本，每次建立doc都判断我觉得也麻烦
-        长痛不如短痛，建立app的时候就把所有对象enchant更方便
+        之前有想过可以生成doc里的时候再inject这些对象，但如果是批量处理脚本，每次建立doc都判断我觉得也麻烦
+        长痛不如短痛，建立app的时候就把所有对象inject更方便
     """
     inject_members(XlWin32WordApplication, type(app), ignore_case=True)
-    if recursion_enchant:
+    if recursion_inject:
         # 建一个临时文件，把各种需要绑定的对象都生成绑定一遍
         # 确保初始化稍微慢点，但后面就方便了
         doc = app.Documents.Add()
@@ -322,13 +321,13 @@ def inject_win32word(app, recursion_enchant=False):
 
 class XlWin32WordApplication:
     @classmethod
-    def get_app(cls, app=None, *, visible=None, display_alerts=0, recursion_enchant=True):
+    def get_app(cls, app=None, *, visible=None, display_alerts=0, recursion_inject=True):
         """
         Args:
             app: 可以自定义在外部使用Dispatch、DispatchEx等形式给入已初始化好的app
             visible: 是否可见
             display_alerts: 是否关闭警告
-            recursion_enchant: 是否递归执行enchant
+            recursion_inject: 是否递归执行inject
         """
         # 1 get app
         name = 'WORD.APPLICATION'
@@ -347,7 +346,7 @@ class XlWin32WordApplication:
                 app = win32.dynamic.Dispatch(name)
 
         # 2 inject
-        inject_win32word(app, recursion_enchant=recursion_enchant)
+        inject_win32word(app, recursion_inject=recursion_inject)
 
         if visible is not None:
             app.Visible = visible
@@ -379,7 +378,7 @@ class XlWin32WordApplication:
                 不存在的文件名：新建对应的空文件
                 已存在的文件名：重置、覆盖一个新的空文件
 
-        使用该函数，会自动执行EnchantWin32WordDocument扩展。
+        使用该函数，会自动执行XlWin32WordDocument扩展。
         """
         if file is None:
             file = File(..., Dir.TEMP, suffix='.docx')
@@ -705,7 +704,7 @@ def rebuild_document_by_word(fmt='html', translate=False, navigation=False, visi
 
     # 1 保存的临时文件名采用etag
     f = File(get_etag(pyperclip.paste()), Dir.TEMP, suffix=fmt)
-    app = EnchantWin32WordApplication.get_app(visible=visible)
+    app = XlWin32WordApplication.get_app(visible=visible)
     app.check_close(f)
     doc = app.new_doc(f)
     doc.Activate()

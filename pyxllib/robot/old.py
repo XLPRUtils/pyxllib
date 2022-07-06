@@ -83,8 +83,8 @@ def EnsureContent(ob=None, encoding='utf8'):
             text = textract.process(ob)
             return text.decode(encoding, errors='ignore')
         elif ob.endswith('.doc'):
-            from pyxllib.robot.win32lib import EnchantWin32WordApplication
-            app = EnchantWin32WordApplication.get_app()
+            from pyxllib.robot.win32lib import XlWin32WordApplication
+            app = XlWin32WordApplication.get_app()
             a = app.open_doc(ob)
             s = a.content
             a.Close()

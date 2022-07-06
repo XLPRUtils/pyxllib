@@ -36,7 +36,7 @@ from pyxllib.prog.pupil import Timeout
 from pyxllib.prog.specialist import tqdm
 from pyxllib.file.specialist import XlPath, get_etag
 from pyxllib.algo.treelib import Node, XlNode
-from pyxllib.text.xmllib import BeautifulSoup, EnchantBs4Tag
+from pyxllib.text.xmllib import BeautifulSoup, XlBs4Tag
 
 """
 参考了onepy的实现，做了重构。OnePy：Provides pythonic wrappers around OneNote COM interfaces
@@ -940,7 +940,8 @@ class Page(_CommonMethods):
             # trick: outline_cnt不仅用来标记是否有多个Outline需要设中介结点。也记录了当前Outline的编号。
             outline_cnt = 1 if len(soup.find_all('Outline')) > 1 else 0
 
-            cur_node, parent = soup, root
+            cur_node: XlBs4Tag = soup
+            parent = root
             while cur_node:
                 x = cur_node
                 if isinstance(x, bs4.element.Tag):
@@ -963,7 +964,7 @@ class Page(_CommonMethods):
                         cur_node = cur_node.next_preorder_node(False)
                         continue
 
-                cur_node = EnchantBs4Tag.next_preorder_node(cur_node)
+                cur_node = XlBs4Tag.next_preorder_node(cur_node)
 
             return root
 
