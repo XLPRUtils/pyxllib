@@ -7,8 +7,8 @@
 import cv2
 from tqdm import tqdm
 
-from pyxllib.cv.xlcvlib import CvImg
-from pyxllib.cv.xlpillib import PilImg
+from pyxllib.cv.xlcvlib import CvImg, xlcv
+from pyxllib.cv.xlpillib import PilImg, xlpil
 from pyxllib.file.specialist import XlPath
 
 

@@ -360,6 +360,8 @@ class PilImg(PIL.Image.Image):
 # pil相比cv，由于无法类似CvImg这样新建一个和np.ndarray等效的类，所以还是比较支持嵌入到Image中直接操作
 inject_members(PilImg, PIL.Image.Image)
 
+xlpil = PilImg  # 与xlcv对称
+
 
 def font_getsize(font, text):
     """ 官方自带的font.getsize遇到换行符的text，计算不准确
