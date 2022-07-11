@@ -6,6 +6,8 @@
 
 
 """ 封装一些代码开发中常用的功能，工程组件 """
+import re
+from abc import ABC, abstractmethod
 import datetime
 import functools
 import io
@@ -24,7 +26,7 @@ import threading
 import time
 from urllib.parse import urlparse
 
-from pyxllib.prog.newbie import classproperty
+from pyxllib.prog.newbie import classproperty, EmptyWith
 
 
 def system_information():
@@ -591,3 +593,109 @@ def inject_members(from_obj, to_obj, member_list=None, *,
         setattr(to_obj, x, getattr(from_obj, x))
         if check and (x in dst or (ignore_case and x.lower() in dst)):
             logging.warning(f'Conflict of the same name! {to_obj}.{x}')
+
+
+class LaborContractor(ABC):
+    """ 包工头，并且要保证多线程安全 """
+
+    def __init__(self, min_worker_num, max_worker_num=None, max_idle=None, lock=None):
+        """
+
+        :param min_worker_num: 初始工人数、最少待命工人数
+        :param max_worker_num: 工人上限数
+        :param int max_idle: 工人闲置上限秒数，达到指定阈值内没有工作的工人会被自动解聘
+        :param lock: 多线程的时候，为了修改安全，可以加锁
+        """
+        self.all_workers = {}  # 所有工人数据。id: worker, 最后一次执行完任务的时间
+        self.await_workers = queue.Queue()  # 待命的工人
+        self.max_worker_num = max_worker_num
+        self.max_idle = max_idle
+        if lock is None:
+            lock = EmptyWith()
+        self.lock = lock
+
+        for i in range(min_worker_num):
+            worker = self.register_recruit_worker()
+            if worker is not None:
+                self.await_workers.put(worker)
+
+        self.recruit_num = 0  # 正在招聘的数量
+
+        if max_idle:
+            # 自动监工的子进程
+            threading.Thread(target=self.check_idle).start()
+
+    def check_status(self):
+        return f'现有{len(self.all_workers)}个workers，{self.await_workers.qsize()}个待机中'
+
+    def register_recruit_worker(self):
+        """ 对recruit_worker的封装，主要供内部使用的方法 """
+        new_worker = self.recruit_worker()
+        if new_worker is not None:
+            self.all_workers[id(new_worker)] = {'last_work_time': datetime.datetime.now(),  # 最后一次出工时间
+                                                'count': 0,  # 出工次数
+                                                }
+            return new_worker
+
+    def check_idle(self):
+        """ 检查有没工人在摸鱼，开除掉 """
+        while True:
+            time.sleep(self.max_idle)
+            now = datetime.datetime.now()
+            cur_await_workers = []  # 一个个工人拎出来检查
+            while True:
+                try:
+                    worker = self.await_workers.get_nowait()
+                except queue.Empty:
+                    break
+                message = self.all_workers[id(worker)]
+                if (now - message['last_work_time']).total_seconds() >= self.max_idle:
+                    del self.all_workers[id(worker)]
+                else:
+                    cur_await_workers.append(worker)
+            # 检查完了，放工人们回去等待任务
+            for worker in cur_await_workers:
+                self.await_workers.put(worker)
+
+    @abstractmethod
+    def recruit_worker(self):
+        """ 招聘一个工人，可以返回None表示招聘失败 """
+        return
+
+    def dispatch_worker(self, check_interval=1, wait_seconds=5):
+        """ 派遣一个工人出来工作
+
+        :param check_interval: 每过多少秒检查一次是否有工人
+        :param wait_seconds: 等待多久没有工人可用，就尝试新增工人
+        """
+        # 1 在wait_seconds内尝试等待工人
+        if len(self.all_workers):
+            try:
+                return self.await_workers.get(timeout=wait_seconds)
+            except queue.Empty:
+                pass
+
+        # 2 否则尝试招聘新工人
+        # print(f'{self.recruit_num=}')
+        if len(self.all_workers) + self.recruit_num < self.max_worker_num:
+            with self.lock:
+                self.recruit_num += 1
+            new_worker = self.register_recruit_worker()
+            with self.lock:
+                self.recruit_num -= 1
+            if new_worker is not None:
+                return new_worker
+
+        # 3 再否则就要一直等下去了
+        while True:
+            x = self.await_workers.get()
+            if x:
+                return x
+            time.sleep(check_interval)
+
+    def return_worker(self, worker):
+        """ 工作完了，退回工人 """
+        self.await_workers.put(worker)
+        worker_message = self.all_workers[id(worker)]
+        worker_message['last_work_time'] = datetime.datetime.now()
+        worker_message['count'] += 1
