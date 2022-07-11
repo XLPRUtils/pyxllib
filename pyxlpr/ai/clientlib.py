@@ -15,11 +15,10 @@ import base64
 import json
 import pprint
 import time
-import urllib3
+import statistics
 
 import cv2
 import requests
-import statistics
 
 from pyxllib.prog.newbie import round_int
 from pyxllib.prog.pupil import check_install_package, is_url
@@ -149,14 +148,14 @@ def __2_定制不同输出格式():
     pass
 
 
-class XlAiClient:
+class XlAiClientBase:
     """
     封装该类
         目的1：合并输入文件和url的识别
         目的2：带透明底的png百度api识别不了，要先转成RGB格式
     """
 
-    def __init__(self):
+    def __init__(self, auto_setup=True):
         # 1 默认值
         self.db = None
         self._aipocr = None
@@ -166,7 +165,7 @@ class XlAiClient:
 
         # 2 如果环境变量预存了账号信息，自动加载使用
         accounts = XlOsEnv.get('XlAiAccounts', decoding=True)
-        if accounts:
+        if accounts and auto_setup:
             if 'aipocr' in accounts:
                 self.setup_aipocr(**accounts['aipocr'])
             if 'mathpix' in accounts:
@@ -177,8 +176,8 @@ class XlAiClient:
     def setup_database(self, db):
         """ 是否将运行结果存储到数据库中
 
-        from pyxllib.data.pglib import connect_xlprdb
-        db = connect_xlprdb()
+        from pyxllib.data.pglib import XlprDb
+        db = XlprDb.connect()
         self.setup_database(db)
         """
         self.db = db
@@ -196,16 +195,40 @@ class XlAiClient:
         self._mathpix_header = {'Content-type': 'application/json'}
         self._mathpix_header.update({'app_id': app_id, 'app_key': app_key})
 
-    def setup_priu(self, token, host='118.195.202.82'):
-        """ 福建省模式识别与图像理解重点实验室 """
+    def setup_priu(self, token, host=None):
+        """ 福建省模式识别与图像理解重点实验室
+
+        :param str|list[str] host:
+            str, 主机IP，比如'118.195.202.82'
+            list, 也可以输入一个列表，会从左到右依次尝试链接，使用第一个能成功链接的ip，常用语优先选用局域网，找不到再使用公网接口
+        """
         self._priu_header = {'Content-type': 'application/json'}
         self._priu_header.update({'Token': token})
-        self._priu_host = host
 
-        try:
-            return '欢迎来到 厦门理工' in requests.get(f'http://{host}/home').text
-        except requests.exceptions.ConnectionError:
-            return False
+        if host is None:
+            # 优先尝试局域网链接，如果失败则尝试公网链接
+            hosts = ['172.16.170.136', '118.195.202.82']
+        elif isinstance(host, str):
+            hosts = [host]
+        elif isinstance(host, (list, tuple)):
+            hosts = host
+        else:
+            raise TypeError
+
+        connent = False
+        for host in hosts:
+            try:
+                if '欢迎来到 厦门理工' in requests.get(f'http://{host}/home', timeout=5).text:
+                    self._priu_host = host
+                    connent = True
+                    break
+            except requests.exceptions.ConnectionError:
+                continue
+
+        if not connent:
+            raise ConnectionError('PRIU接口登录失败')
+
+        return connent
 
     @classmethod
     def adjust_image(cls, in_, flags=1, *, b64decode=True, to_buffer=True, b64encode=False,
@@ -952,6 +975,20 @@ class XlAiClient:
         assert ratio == 1, f'本地不做缩放，由服务器进行缩放处理'
         return buffer.decode()
 
+    def common_ocr(self, im):
+        data = {'image': self._priu_read_image(im)}
+        r = requests.post(f'http://{self._priu_host}/api/common_ocr', json.dumps(data), headers=self._priu_header)
+        return json.loads(r.text)
+
+    def hesuan_layout(self, im):
+        data = {'image': self._priu_read_image(im)}
+        r = requests.post(f'http://{self._priu_host}/api/hesuan_layout', json.dumps(data), headers=self._priu_header)
+        return json.loads(r.text)
+
+
+class XlAiClient(XlAiClientBase):
+    """ XlAiClientBase存放真实原始接口，这里XlAiClient会有些为了方便，做的二次解析接口 """
+
     def priu_api(self, mode, im, options=None):
         """ 借助服务器来调用该类中含有的其他函数接口
 
@@ -964,26 +1001,57 @@ class XlAiClient:
         r = requests.post(f'http://{self._priu_host}/api/{mode}', json.dumps(data), headers=self._priu_header)
         return json.loads(r.text)
 
-    def common_ocr(self, im):
-        data = {'image': self._priu_read_image(im)}
-        r = requests.post(f'http://{self._priu_host}/api/common_ocr', json.dumps(data), headers=self._priu_header)
-        return json.loads(r.text)
-
-    def hesuan_layout(self, im):
-        data = {'image': self._priu_read_image(im)}
-        r = requests.post(f'http://{self._priu_host}/api/hesuan_layout', json.dumps(data), headers=self._priu_header)
-        return json.loads(r.text)
-
-    def rec_singleline(self, im, mode='basicGeneral'):
-        """ 通用的识别一张图的所有文本，并拼接到一起 """
-        text = ''  # 因图片太小等各种原因，没有识别到结果，默认就设空值
+    def ocr2texts(self, im, mode='basicGeneral', options=None):
+        """ 通用的识别一张图的所有文本 """
+        texts = []  # 因图片太小等各种原因，没有识别到结果，默认就设空值
         try:
-            d = self.priu_api(mode, im)
+            d = self.priu_api(mode, im, options)
             if 'shapes' in d:
-                text = ' '.join([sp['label']['text'] for sp in d['shapes']])
+                texts = [sp['label']['text'] for sp in d['shapes']]
         except requests.exceptions.ConnectionError:
             pass
-        return text
+        return texts
+
+    def rec_singleline(self, im, mode='basicGeneral', options=None):
+        """ 通用的识别一张图的所有文本，并拼接到一起 """
+        texts = self.ocr2texts(im, mode, options)
+        return ' '.join(texts)
+
+
+def common_labelme_label(im_kwargs=None, db_kwargs=None):
+    """ XlAiServer扩展功能接口的装饰器，可以把一般性结果格式转成label格式
+
+    :param im_kwargs: 定制图片的特殊处理参数，详见下述功能接口
+    :param db_kwargs: 定制数据库相关的特殊操作
+    """
+
+    def decorator(func):
+        _im_kwargs = im_kwargs or {}
+        _db_kwargs = db_kwargs or {}
+
+        def wrapper(self, im, options=None):
+            def func2(buffer, options=None):
+                im = xlcv.read_from_buffer(buffer)
+                return func(self, im, options)
+
+            buffer, ratio = self.adjust_image(im, **_im_kwargs)
+            lmdict = self.run_with_db(func2, buffer, options,
+                                      use_exists_record=False,  # 我自己的模型，默认都不存储识别结果
+                                      mode_name=func.__name__,
+                                      **_db_kwargs)
+
+            if ratio != 1:
+                ratio2 = 1 / ratio
+                for sp in lmdict['shapes']:
+                    sp['points'] = [[round_int(p[0] * ratio2), round_int(p[1] * ratio2)] for p in sp['points']]
+                lmdict['imageHeight'] = round_int(lmdict['imageHeight'] * ratio2)
+                lmdict['imageWidth'] = round_int(lmdict['imageWidth'] * ratio2)
+
+            return lmdict
+
+        return wrapper
+
+    return decorator
 
 
 def demo_aipocr():

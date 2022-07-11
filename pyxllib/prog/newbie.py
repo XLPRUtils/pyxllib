@@ -338,3 +338,14 @@ def xl_format_g(x, p=3):
     else:
         # 否则返回默认的g格式
         return s
+
+
+class EmptyWith:
+    """ 空上下文类
+    """
+
+    def __enter__(self):
+        pass
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        pass

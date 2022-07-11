@@ -45,7 +45,7 @@ def excel_addr(n, m) -> str:
     return f'{get_column_letter(int(m))}{n}'
 
 
-class XlCell(openpyxl.cell.cell.Cell, openpyxl.cell.cell.MergedCell):
+class XlCell(openpyxl.cell.cell.Cell):  # 适用于 openpyxl.cell.cell.MergedCell，但这里不能多重继承
 
     def in_range(self):
         """ 判断一个单元格所在的合并单元格
@@ -199,7 +199,8 @@ class XlCell(openpyxl.cell.cell.Cell, openpyxl.cell.cell.MergedCell):
 
 
 # 只有cell和mergecell都共同没有的成员方法，才添加进去
-__members = set(dir(XlCell)) - set(dir(openpyxl.cell.cell.Cell)) - set(dir(openpyxl.cell.cell.MergedCell))
+__members = set(dir(XlCell)) - set(dir(openpyxl.cell.cell.Cell)) - \
+            set(dir(openpyxl.cell.cell.MergedCell)) - {'__dict__'}
 inject_members(XlCell, openpyxl.cell.cell.Cell, __members)
 inject_members(XlCell, openpyxl.cell.cell.MergedCell, __members)
 
@@ -691,7 +692,7 @@ class XlWorksheet(openpyxl.worksheet.worksheet.Worksheet):
             cell.value = value
         return cell
 
-    def iterrows(self, key_column_name, mode='default'):
+    def iterrows(self, key_column_name, mode='default', *, to_dict=None):
         """ 通过某个属性列作为key，判断数据所在行
 
         正常遍历行用iterrows，离散找数据用cell2
@@ -701,6 +702,7 @@ class XlWorksheet(openpyxl.worksheet.worksheet.Worksheet):
             default: 从ws.max_row往前找到第一个key非空的单元格
             any_content: 从ws.max_row往前找到第一个含有值的行
             ... 待开发更多需求
+        :param list[str] to_dict: 写出属性名，迭代的时候，返回除了下标，还有转换出的字典数据
         :return: 返回range类型，可以直接用于for循环
         """
         # 1 起始行
@@ -729,7 +731,16 @@ class XlWorksheet(openpyxl.worksheet.worksheet.Worksheet):
         else:
             raise NotImplementedError(f'{mode}')
 
-        return range(min_row, max_row + 1)
+        if to_dict:
+            data = []
+            for i in range(min_row, max_row + 1):
+                msg = {}
+                for k in to_dict:
+                    msg[k] = self.cell2(i, k).value
+                data.append([i, msg])
+            return data
+        else:
+            return range(min_row, max_row + 1)
 
 
 inject_members(XlWorksheet, openpyxl.worksheet.worksheet.Worksheet, white_list=['_cells_by_row'])

@@ -186,9 +186,9 @@ class XlSSHClient(paramiko.SSHClient):
     def log_in(cls, host_name, user_name, map_path=None, **kwargs):
         r""" 使用XlprDb里存储的服务器、账号信息，进行登录
         """
-        from pyxllib.data.pglib import connect_xlprdb
+        from pyxllib.data.pglib import XlprDb
 
-        with connect_xlprdb() as con:
+        with XlprDb.connect() as con:
             if host_name.startswith('g_'):
                 host_ip = con.execute("SELECT host_ip FROM hosts WHERE host_name='xlpr0'").fetchone()[0]
                 pw, port = con.execute('SELECT (pgp_sym_decrypt(accounts, %s)::jsonb)[%s]::text, frpc_port'
@@ -451,7 +451,7 @@ class XlSSHClient(paramiko.SSHClient):
         remote_path = remote_dir / local_path.name
 
         if mkdir:  # 判断服务器remote_dir存不存在，也要用命令，还不如直接用mkdir了
-            self.exec(f'mkdir -p {remote_dir}')  # remote如果不存在父目录则建立
+            self.exec(f'mkdir -p "{remote_dir}"')  # remote如果不存在父目录则建立
 
         if print_mode == 0:
             # 虽然不显示运行信息，但也要记录已上传了多少流量

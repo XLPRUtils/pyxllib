@@ -38,7 +38,7 @@ class 网课考勤:
         self.返款标题 = ''
         self.表格路径 = r'考勤.xlsx'
         self.在线表格 = 'https://docs.qq.com/sheet/DUlF1UnRackJ2Vm5U'  # 生成日报用
-        self.开课日期 = '2022-01-08'  # 通过开课时间，会自动判断出是念住课还是觉观禅课
+        self.开课日期 = '2022-01-08'
         self.视频返款 = [20, 15, 10, 5, 0, 0]  # 直播(当堂)/第1天（当天）/第2天/第3天/第4天/第5天，完成观看的依次返款额。
         self.打卡返款 = [100, 150, 200]  # 打卡满5/10/15次的返款额
         self._init(today)
@@ -57,7 +57,8 @@ class 网课考勤:
         else:
             self.today = date.today()
         self.开课日期 = date.fromisoformat(self.开课日期)
-        self.觉观禅课 = (self.开课日期.day == 1)
+        # self.觉观禅课 = (self.开课日期.day == 1)
+        self.觉观禅课 = '觉观' in self.返款标题
         self.当天课次 = (self.today - self.开课日期).days + 1
         self.结束课次 = self.当天课次 - len(self.视频返款) + 1
         self.用户列表 = pd.read_csv(self.get_file('小鹅通下载表/用户列表导出*.csv'))
@@ -159,12 +160,19 @@ class 网课考勤:
                 待查手机号.append(t)
             ls = self.查找用户([x['真实姓名'], x['微信昵称']], 待查手机号)
             摘要ls = list(map(self.用户信息摘要, ls))
+
+            用户ID = ''
             if len(ls) == 1:
                 # 只有一个关联的直接匹配上，否则填空
                 用户ID = ls[0]['用户ID']
             else:
                 # 只有一条有考勤记录时
                 flags = [('考勤' in text) for text in 摘要ls]
+                if sum(flags) == 1:
+                    idx = flags.index(1)
+                    用户ID = ls[idx]['用户ID']
+            if 用户ID == '':
+                flags = [('账号状态=正常' in text) for text in 摘要ls]
                 if sum(flags) == 1:
                     idx = flags.index(1)
                     用户ID = ls[idx]['用户ID']

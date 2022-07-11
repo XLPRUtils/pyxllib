@@ -38,7 +38,7 @@ class FitzDoc:
         self.src_file = File(file)
         self.doc = fitz.open(str(file))
 
-    def to_images(self, dst_dir=None, file_fmt='{filestem}_{number}.png', num_width=None, *,
+    def to_images(self, dst_dir=None, file_fmt='{filestem}_{number}.jpg', num_width=None, *,
                   scale=1, start=1, fmt_onepage=False):
         """ 将pdf转为若干页图片
 
