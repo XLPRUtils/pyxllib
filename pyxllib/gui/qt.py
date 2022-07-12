@@ -158,10 +158,10 @@ def get_input_widget(items=None, cur_value=None, *, parent=None, valcvt=None,
             [('福建', [('龙岩', ['连城', '长汀', ...], ...)]), ('北京', ...)]
             这种情况会返回多个widget
     :param cur_value: 当前显示的文本值
-    :param valcvt: 数值类型转换函数，非法时返回ValueError
+    :param valcvt: 数值类型转换函数，非法时抛出ValueError
         很多输入框是传入文本，有时需要转为int、float、list等类型
         支持输入常见类型转换的字符串名称，比如int、float
-    :param correct_changed: 文本改变时的回调函数
+    :param correct_changed: 文本改变时的回调函数，一般用于数值有效性检查
     :param n_widget: 配合items为嵌套数组使用，需要指定嵌套层数
         此时cur_value、cvt、enabled、text_changed等系列值可以传入n_widget长度的list
     :param enabled: 是否可编辑
