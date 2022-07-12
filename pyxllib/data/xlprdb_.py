@@ -200,7 +200,7 @@ class XlprDb(Connection):
     def check_database_useage(self):
         """ 查看数据库一些统计情况 """
         from pyxllib.text.nestenv import NestEnv
-        from pyxllib.text.xmllib import render_echart_html
+        from pyxllib.data.echarts import render_echart_html
 
         def check_api_useage():
             """ 检查接口调用量 """

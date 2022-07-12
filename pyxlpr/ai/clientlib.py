@@ -56,6 +56,16 @@ def zoom_point(pt, ratio):
         return {k: round_int(v * ratio) for k, v in pt.items()}
 
 
+def zoom_labelme(d, ratio):
+    """ 对labelme的标注进行缩放 """
+    ratio2 = 1 / ratio
+    for sp in d['shapes']:
+        sp['points'] = [[round_int(p[0] * ratio2), round_int(p[1] * ratio2)] for p in sp['points']]
+    d['imageHeight'] = round_int(d['imageHeight'] * ratio2)
+    d['imageWidth'] = round_int(d['imageWidth'] * ratio2)
+    return d
+
+
 def labelmelike_extend_args(core_func):
     """ 扩展 main_func 函数，支持一些通用上下游切面功能
 
@@ -158,8 +168,11 @@ class XlAiClientBase:
     def __init__(self, auto_setup=True):
         # 1 默认值
         self.db = None
+
         self._aipocr = None
+
         self._mathpix_header = None
+
         self._priu_header = None
         self._priu_host = None
 
@@ -167,14 +180,17 @@ class XlAiClientBase:
         accounts = XlOsEnv.get('XlAiAccounts', decoding=True)
         if accounts and auto_setup:
             if 'aipocr' in accounts:
-                self.setup_aipocr(**accounts['aipocr'])
+                self.login_aipocr(**accounts['aipocr'])
             if 'mathpix' in accounts:
-                self.setup_mathpix(**accounts['mathpix'])
+                self.login_mathpix(**accounts['mathpix'])
             if 'priu' in accounts:
-                self.setup_priu(**accounts['priu'])
+                self.login_priu(**accounts['priu'])
 
-    def setup_database(self, db):
-        """ 是否将运行结果存储到数据库中
+    def __A1_登录账号(self):
+        pass
+
+    def set_database(self, db):
+        """ 是否关联数据库，查找已运行过的结果，或存储运行结果
 
         from pyxllib.data.pglib import XlprDb
         db = XlprDb.connect()
@@ -182,7 +198,7 @@ class XlAiClientBase:
         """
         self.db = db
 
-    def setup_aipocr(self, app_id, api_key, secret_key):
+    def login_aipocr(self, app_id, api_key, secret_key):
         """
         注：带透明底的png百度api识别不了，要先转成RGB格式
         """
@@ -191,11 +207,11 @@ class XlAiClientBase:
 
         self._aipocr = aip.AipOcr(str(app_id), api_key, secret_key)
 
-    def setup_mathpix(self, app_id, app_key):
+    def login_mathpix(self, app_id, app_key):
         self._mathpix_header = {'Content-type': 'application/json'}
         self._mathpix_header.update({'app_id': app_id, 'app_key': app_key})
 
-    def setup_priu(self, token, host=None):
+    def login_priu(self, token, host=None):
         """ 福建省模式识别与图像理解重点实验室
 
         :param str|list[str] host:
@@ -229,6 +245,9 @@ class XlAiClientBase:
             raise ConnectionError('PRIU接口登录失败')
 
         return connent
+
+    def __A2_调整图片和关联数据库(self):
+        pass
 
     @classmethod
     def adjust_image(cls, in_, flags=1, *, b64decode=True, to_buffer=True, b64encode=False,
@@ -270,60 +289,14 @@ class XlAiClientBase:
         ratio = current_height / origin_height
         return im, ratio
 
-    def run_with_db(self, func, buffer, options=None, *,
-                    mode_name=None,
-                    use_exists_record=True,
-                    update_record=True,
-                    save_buffer_threshold_size=4 * 1024 ** 2):
-        """ 配合database数据库的情况下，调用API功能
-
-        :param mode_name: 可以指定存入数据库的功能名，默认用func的名称
-        :param use_exists_record: 如果数据库里已有记录，是否直接复用
-        :param update_record: 新结果是否记录到数据库
-        :param save_buffer_threshold_size: buffer小余多少，才存储进数据库
-
-        """
-
-        # 1 预处理，参数标准化
-        if options is None:
-            options = {}
-        options = {k: options[k] for k in sorted(options.keys())}  # 对参数进行排序，方便去重
-
-        # 2 调百度识别接口
-        if self.db and (use_exists_record or update_record):  # 有开数据库，并且复用和更新至少有项开启了
-            if mode_name is None:
-                mode_name = func.__name__
-            # 如果数据库里有处理过的记录，直接引用
-            im_etag = get_etag(buffer)
-            if use_exists_record:
-                res = self.db.get_xlapi_record(mode=mode_name, etag=im_etag, options=options)
-            else:
-                res = None
-
-            # 否则调用百度的接口识别
-            # TODO 这里使用协程逻辑最合理但配置麻烦，需要func底层等做协程的适配支持
-            #   使用多线程测试了并没有更快，也发现主要耗时是post，数据库不会花太多时间，就先不改动了
-            #   等以后数据库大了，看运行是否会慢，可以再测试是否有必要弄协程
-            if res is None or 'error_code' in res:
-                tt = time.time()
-                res = func(buffer, options)
-                elapse_ms = round_int(1000 * (time.time() - tt))
-
-                if len(buffer) < save_buffer_threshold_size:
-                    self.db.insert_row2files(buffer, etag=im_etag, name='.jpg')
-                if update_record:
-                    input = {'mode': mode_name, 'etag': im_etag}
-                    if options:
-                        input['options'] = options
-                    xlapi_id = self.db.insert_row2xlapi(input, res, elapse_ms, on_conflict='REPLACE')
-                    res['xlapi_id'] = xlapi_id
-
-            if 'log_id' in res:  # 有xlapi_id的标记，就不用百度原本的log_id了
-                del res['log_id']
+    def run_with_db(self, func, buffer, options=None, **kwargs):
+        if self.db:
+            return self.db.run_api(func, buffer, options, **kwargs)
         else:
-            res = func(buffer, options)
+            return func(buffer, options)
 
-        return res
+    def regist_api(self, func):
+        pass
 
     def __B1_通用(self):
         pass
@@ -1016,42 +989,6 @@ class XlAiClient(XlAiClientBase):
         """ 通用的识别一张图的所有文本，并拼接到一起 """
         texts = self.ocr2texts(im, mode, options)
         return ' '.join(texts)
-
-
-def common_labelme_label(im_kwargs=None, db_kwargs=None):
-    """ XlAiServer扩展功能接口的装饰器，可以把一般性结果格式转成label格式
-
-    :param im_kwargs: 定制图片的特殊处理参数，详见下述功能接口
-    :param db_kwargs: 定制数据库相关的特殊操作
-    """
-
-    def decorator(func):
-        _im_kwargs = im_kwargs or {}
-        _db_kwargs = db_kwargs or {}
-
-        def wrapper(self, im, options=None):
-            def func2(buffer, options=None):
-                im = xlcv.read_from_buffer(buffer)
-                return func(self, im, options)
-
-            buffer, ratio = self.adjust_image(im, **_im_kwargs)
-            lmdict = self.run_with_db(func2, buffer, options,
-                                      use_exists_record=False,  # 我自己的模型，默认都不存储识别结果
-                                      mode_name=func.__name__,
-                                      **_db_kwargs)
-
-            if ratio != 1:
-                ratio2 = 1 / ratio
-                for sp in lmdict['shapes']:
-                    sp['points'] = [[round_int(p[0] * ratio2), round_int(p[1] * ratio2)] for p in sp['points']]
-                lmdict['imageHeight'] = round_int(lmdict['imageHeight'] * ratio2)
-                lmdict['imageWidth'] = round_int(lmdict['imageWidth'] * ratio2)
-
-            return lmdict
-
-        return wrapper
-
-    return decorator
 
 
 def demo_aipocr():

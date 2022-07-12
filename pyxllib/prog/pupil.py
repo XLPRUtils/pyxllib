@@ -6,7 +6,6 @@
 
 
 """ 封装一些代码开发中常用的功能，工程组件 """
-import re
 from abc import ABC, abstractmethod
 import datetime
 import functools
@@ -19,12 +18,14 @@ import os
 import queue
 import signal
 import socket
+import socketserver
 import subprocess
 import sys
 import tempfile
 import threading
 import time
 from urllib.parse import urlparse
+
 
 from pyxllib.prog.newbie import classproperty, EmptyWith
 
@@ -699,3 +700,17 @@ class LaborContractor(ABC):
         worker_message = self.all_workers[id(worker)]
         worker_message['last_work_time'] = datetime.datetime.now()
         worker_message['count'] += 1
+
+
+def find_free_ports(count=1):
+    """ 随机获得可用端口
+
+    :param count: 需要的端口数量（会保证给出的端口号不重复）
+    :return: list
+    """
+    ports = set()
+    while len(ports) < count:
+        with socketserver.TCPServer(("localhost", 0), None) as s:
+            ports.add(s.server_address[1])
+
+    return list(ports)

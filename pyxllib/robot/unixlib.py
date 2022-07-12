@@ -14,20 +14,20 @@ check_install_package('scp')
 
 from collections import defaultdict
 import os
-import re
 import pathlib
+import re
 import shutil
+import sys
 
-import paramiko
-from tqdm import tqdm
-import scp as scplib
 import humanfriendly
 import pandas as pd
+import paramiko
+import scp as scplib
+from tqdm import tqdm
 
 from pyxllib.algo.pupil import natural_sort
 from pyxllib.file.specialist import XlPath
 from pyxllib.debug.specialist import get_xllog
-from pyxllib.prog.specialist import XlOsEnv
 
 logger = get_xllog('location')
 
@@ -183,7 +183,7 @@ class XlSSHClient(paramiko.SSHClient):
         self.Path = Path
 
     @classmethod
-    def log_in(cls, host_name, user_name, map_path=None, **kwargs):
+    def login(cls, host_name, user_name, map_path=None, **kwargs):
         r""" 使用XlprDb里存储的服务器、账号信息，进行登录
         """
         from pyxllib.data.pglib import XlprDb
@@ -201,7 +201,10 @@ class XlSSHClient(paramiko.SSHClient):
                                           (con.seckey, user_name, host_name)).fetchone()
 
         if map_path is None:
-            map_path = {'C:/': '/'}
+            if sys.platform == 'win32':
+                map_path = {'C:/': '/'}
+            else:
+                map_path = {'/': '/'}
         return cls(host_ip, port, user_name, pw[1:-1], map_path=map_path, **kwargs)
 
     def exec(self, command, *args, **kwargs):
