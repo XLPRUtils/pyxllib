@@ -975,7 +975,7 @@ class XlAiClient(XlAiClientBase):
         r = requests.post(f'http://{self._priu_host}/api/{mode}', json.dumps(data), headers=self._priu_header)
         return json.loads(r.text)
 
-    def ocr2texts(self, im, mode='basicGeneral', options=None):
+    def ocr2texts(self, im, mode='common_ocr', options=None):
         """ 通用的识别一张图的所有文本 """
         texts = []  # 因图片太小等各种原因，没有识别到结果，默认就设空值
         try:
@@ -986,7 +986,7 @@ class XlAiClient(XlAiClientBase):
             pass
         return texts
 
-    def rec_singleline(self, im, mode='basicGeneral', options=None):
+    def rec_singleline(self, im, mode='common_ocr', options=None):
         """ 通用的识别一张图的所有文本，并拼接到一起 """
         texts = self.ocr2texts(im, mode, options)
         return ' '.join(texts)
