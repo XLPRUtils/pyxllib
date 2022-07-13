@@ -951,7 +951,8 @@ class XlAiClientBase:
     def common_ocr(self, im):
         data = {'image': self._priu_read_image(im)}
         r = requests.post(f'http://{self._priu_host}/api/common_ocr', json.dumps(data), headers=self._priu_header)
-        return json.loads(r.text)
+        res = json.loads(r.text)
+        return res
 
     def hesuan_layout(self, im):
         data = {'image': self._priu_read_image(im)}
