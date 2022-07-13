@@ -83,13 +83,13 @@ class ValuesStat:
     """ 一串数值的相关统计分析 """
 
     def __init__(self, values):
+        from statistics import stdev, mean
         self.values = values
         self.n = len(values)
         self.sum = sum(values)
-        # np有标准差等公式，但这是basic底层库，不想依赖太多第三方库，所以手动实现
         if self.n:
-            self.mean = self.sum / self.n
-            self.std = math.sqrt((sum([(x - self.mean) ** 2 for x in values]) / self.n))
+            self.mean = mean(self.values)
+            self.std = stdev(self.values)
             self.min, self.max = min(values), max(values)
         else:
             self.mean = self.std = self.min = self.max = float('nan')
