@@ -4,6 +4,7 @@
 # @Email  : 877362867@qq.com
 # @Date   : 2021/06/03 20:35
 
+import builtins
 from collections import Counter
 import datetime
 import inspect
@@ -155,6 +156,9 @@ def dprint(*args, **kwargs):
     '##'
     """
     print(dformat(depth=3, **kwargs))
+
+# dprint会被注册进builtins，可以在任意地方直接使用
+setattr(builtins, 'dprint', dprint)
 
 
 class DPrint:

@@ -172,18 +172,22 @@ def dataframes_to_excel(outfile, dataframes):
     """ 将多个dataframe表格写入一个excel文件
 
     >> dataframes_to_excel('test.xlsx', {'images': df1, 'annotations': df2})
+
+    # TODO 存成表格后，可以使用openpyxl等库再打开表格精修
     """
     with pd.ExcelWriter(str(outfile)) as writer:
         # 标题比正文11号大1号，并且蓝底白字，左对齐，上下垂直居中
-        # head_format = writer.book.add_format({'font_size': 12, 'font_color': 'blue',
-        #                                       'align': 'left', 'valign': 'vcenter'})
+        head_format = writer.book.add_format({'font_size': 12, 'font_color': 'blue',
+                                              'align': 'left', 'valign': 'vcenter'})
         for k, v in dataframes.items():
             # 设置首行冻结
             v.to_excel(writer, sheet_name=k, freeze_panes=(1, 0))
             # 首行首列特殊标记  （这个不能随便加，对group、mul index、含名称index等场合不适用）
-            # writer.sheets[k].write('A1', '_order', head_format)
+            if isinstance(v.index, pd.core.indexes.range.RangeIndex):
+                writer.sheets[k].write('A1', '_order', head_format)
             # 特殊标记第一行的格式
-            # writer.sheets[k].set_row(0, cell_format=head_format)  # 这个不知道为什么不起作用~~
+            if isinstance(v.columns, pd.core.indexes.base.Index):
+                writer.sheets[k].set_row(0, cell_format=head_format)  # 这个不知道为什么不起作用~~
 
 
 def xlpivot(df, index=None, columns=None, values=None):

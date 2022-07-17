@@ -294,7 +294,7 @@ class XlprDb(Connection):
               'route': '/'.join(request.base_url.split('/')[3:]),
               'update_time': utc_timestamp(8),
               'xlapi_id': xlapi_id}
-        print(kw)
+        print(kw)  # 监控谁在用api
         self.insert_row('xlserver', kw)
 
     def run_api(self, func, buffer, options=None, *,
@@ -495,7 +495,7 @@ class XlprDb(Connection):
         h = render_echart_html('cpu_memory', body='<br/>'.join(htmltexts))
         return h
 
-    def dbview_disk_memory(self, recent=datetime.timedelta(days=30), date_trunc='hour'):
+    def dbview_disk_memory(self, recent=datetime.timedelta(days=30), date_trunc='day'):
         """ 查看disk硬盘使用近况
         """
         from pyxllib.data.echarts import render_echart_html

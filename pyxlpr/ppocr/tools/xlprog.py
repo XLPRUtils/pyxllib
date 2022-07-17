@@ -7,14 +7,18 @@
 """
 对PaddleOcr进行了更高程度的工程化封装
 """
-
+import collections
 import os
 import sys
+import re
+
+import pandas as pd
 import yaml
 import shutil
 import copy
 import inspect
 import math
+import json
 
 import numpy as np
 
@@ -58,9 +62,9 @@ class PaddleOcrBaseConfig:
         跟是否是Train模式有关，默认加载的模型会不一样
             train要加载latest，其他默认优先加载accuracy
         """
-        if train:
+        if train:  # 用于模型训练时，应该是优先回复上一次的模型
             candidates = ['latest', 'best_accuracy']
-        else:
+        else:  # 用于其他场合，则应该是默认找最佳模型来使用
             candidates = ['best_accuracy', 'latest']
 
         for name in candidates:
@@ -128,7 +132,7 @@ class PaddleOcrBaseConfig:
                 具体支持的方法，可以见XlSimpleDataSet类下前缀为from_的成员方法
             其他为选填字段，具体见from_定义支持的扩展功能，一般有以下常见参数功能
             [ratio] 一个小数比例，可以负数代表从后往前取
-                一般用于懒的物理区分Train、Eval数据集的时候，在代码里用算法自动拆分训练、验证集
+                一般用于懒得物理区分Train、Eval数据集的时候，在代码里用算法自动拆分训练、验证集
 
         """
         node = self.cfg[mode]['dataset']
@@ -286,14 +290,15 @@ class PaddleOcrBaseConfig:
         pass
 
 
-class XlDet(PaddleOcrBaseConfig):
+class XlTextDet(PaddleOcrBaseConfig):
     """ 检测模型专用配置
     """
 
-    def autolabel(self, datadir='data', *, model_type=0, **kwargs):
+    def autolabel(self, datadir, *, model_type=0, **kwargs):
         """ 预标注检测、识别
 
         TODO model_type在det1_mobile的时候，默认设为2？
+
         """
         pocr = self.build_ppocr(model_type, **kwargs)
         pocr.ocr2labelme(datadir, det=True, rec=True)
@@ -533,36 +538,128 @@ class XlDet(PaddleOcrBaseConfig):
     def __config_demo(self):
         """ 常用的配置示例 """
 
+    def set_xllabelme_dataset(self, data_dir, ratio_list):
+        """ 设置xllabelme格式的文字检测标注数据
+
+        我自设的一种简单的数据集范式
+
+        :param data_dir: 数据根目录
+        :param list[float, float] ratio_list: 训练集、验证集所需的比例
+            可以取负数，表示从后往前取；底层设置了随机数种子，每次取得具体文件是固定的。
+            数据集较少的话，一般是推荐 [0.9, -0.1]，较多的话可以 [0.8, -0.2]
+        """
+        self.set_xlsimpledataset('Train', data_dir, [{'type': 'labelme_det', 'ratio': ratio_list[0]}])
+        self.set_xlsimpledataset('Eval', data_dir, [{'type': 'labelme_det', 'ratio': ratio_list[1]}])
+
     def det1_mobile_raw(self):
         """ paddle源生格式的配置示例 """
         self.det1_mobile_init(pretrained=2)  # 基础配置
-        self.set_save_dir('models/det1_mobile_raw')  # 模型保存位置
+        self.set_save_dir('_train/det1_mobile_raw')  # 模型保存位置
         self.set_simpledataset('Train', 'data', ['data/ppdet_train.txt'])
-        self.set_xlsimpledataset('Eval', 'data', ['data/ppdet_val.txt'])
+        self.set_simpledataset('Eval', 'data', ['data/ppdet_val.txt'])
         self.set_iter_num(150000)
         return self
 
     def det1_mobile(self):
         """ labelme标注格式的检测训练 """
         self.det1_mobile_init(pretrained=2)  # 基础配置
-        self.set_save_dir('models/det1_mobile')  # 模型保存位置
-        self.set_xlsimpledataset('Train', 'data', [{'type': 'labelme_det', 'ratio': 0.9}])
-        self.set_xlsimpledataset('Eval', 'data', [{'type': 'labelme_det', 'ratio': -0.1}])
-        self.set_iter_num(150000)
+        self.set_save_dir('_train/det1_mobile')  # 模型保存位置
+        self.set_xllabelme_dataset('data', [0.9, -0.1])  # 设置数据集
+        self.set_iter_num(150000)  # 设置迭代轮次
         return self
 
     def det1_server(self):
         self.det1_server_init(pretrained=2)  # 基础配置
-        self.set_save_dir('models/det1_server')  # 模型保存位置
-        self.set_xlsimpledataset('Train', 'data', [{'type': 'labelme_det', 'ratio': 0.9}])
-        self.set_xlsimpledataset('Eval', 'data', [{'type': 'labelme_det', 'ratio': -0.1}])
-        self.set_iter_num(150000)
+        self.set_save_dir('_train/det1_server')  # 模型保存位置
+        self.set_xllabelme_dataset('data', [0.9, -0.1])  # 设置数据集
+        self.set_iter_num(150000)  # 设置迭代轮次
         return self
 
 
 class XlRec(PaddleOcrBaseConfig):
     """ 识别模型专用配置
     """
+
+    def stat_texts(self, xllabelme_data_dir, *, ref_dict='ppocr_keys_v1.txt'):
+        """ 检查标注的句子、字符出现情况 statistics texts
+
+        :param xllabelme_data_dir: xllabelme格式的标注数据所在目录
+        :param ref_dict: 参考字典文件
+        """
+        from collections import Counter
+        from pyxllib.algo.pupil import ValuesStat
+        from pyxllib.algo.stat import dataframes_to_excel
+        from pyxlpr.ppocr.utils import get_dict_content
+
+        root = XlPath(xllabelme_data_dir)
+        outfile = root.parent / 'stat_texts.xlsx'
+
+        # 1 读取数据
+        sentances_counter = Counter()  # 每句话的内容，和相同话出现的次数
+        for f in root.rglob('*.json'):
+            for sp in f.read_json()['shapes']:
+                text = json.loads(sp['label'])['text']
+                sentances_counter[text] += 1
+
+        # 2 统计 sentances 每句话出现频率, words 每个单词出现频率, chars 每个字符出现频率
+        chars_counter = Counter()
+        words_counter = Counter()
+        for sentance, cnt in sentances_counter.items():
+            for word in sentance.split():  # 目前先按空格分开，虽然严格来说，对于中文情况，要用结巴分词处理更准确
+                words_counter[word] += cnt
+            for ch in sentance:  # 统计每个字符出现次数，包括空格
+                chars_counter[ch] += cnt
+
+        # 3 转df
+        char_dict = set(get_dict_content(ref_dict).splitlines())
+        ls = []
+        new_chars = []
+        for char, cnt in chars_counter.most_common():
+            ls.append([char, cnt, '' if char in char_dict else 'True'])
+            if char not in char_dict and char != ' ':
+                new_chars.append(char)
+        chars_df = pd.DataFrame.from_records(ls, columns=['char', 'count', 'new_char'])
+
+        words_df = pd.DataFrame.from_records(words_counter.most_common(), columns=['word', 'count'])
+        sentances_df = pd.DataFrame.from_records([[sentance, cnt, len(sentance)]
+                                                  for sentance, cnt in sentances_counter.most_common()],
+                                                 columns=['sentance', 'count', 'length'])
+
+        # 计算不同长度句子的分布规律
+        ct = Counter()
+        lengths = []
+        for _, row in sentances_df.iterrows():
+            ct[row['length']] += row['count']
+            lengths += [row['length']] * row['count']  # 这个实现不是那么得优雅，但如果要兼容ValuesStat只能先这样处理
+        # ct = sentances_df.groupby('length').sum().to_dict()['count']
+        max_len = max(sentances_df['length'])
+        sentances_length_df = pd.DataFrame.from_records([[i, ct.get(i, 0)] for i in range(max_len + 1)],
+                                                        columns=['length', 'count'])
+
+        # 4 频数规律计算
+        def summary(title, vals):
+            msg = ValuesStat(vals).summary(['g', '.2f', '.2f', 'g', 'g'])
+            # print(msg)
+            return [title] + re.findall(r':\s+(\S+)', msg)
+
+        print('【stat_texts】')
+        print(f'输出文件：{outfile.as_posix()}')
+
+        print(f'不在字典中的{len(new_chars)}个字符：' + ''.join(new_chars))
+
+        ls = [
+            summary('字符频数', chars_df['count']),
+            summary('词组频数', words_df['count']),
+            summary('句子频数', sentances_df['count']),
+            summary('句子长度', lengths),
+        ]
+        df = pd.DataFrame.from_records(ls, columns=['title', '总和', '均值标准差', '总数', '最小值', '最大值'])
+        print(df)
+
+        # 5 存储分析表
+        sheets = {'字符': chars_df, '词组': words_df,
+                  '句子': sentances_df, '句子长度': sentances_length_df}
+        dataframes_to_excel(outfile, sheets)
 
     def rec_chinese_lite(self):
         """ 能识别中文的一个轻量模型
@@ -575,7 +672,7 @@ class XlRec(PaddleOcrBaseConfig):
 
 
 class XlCls:
-    """ 分类模型 """
+    """ 分类模型，这个是基本使用源生的paddlepaddle，没有使用有个更强的paddleclas """
 
 
 class XlOcr:
