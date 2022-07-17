@@ -4,7 +4,7 @@
 # @Email  : 877362867@qq.com
 # @Date   : 2020/05/30 22:43
 
-
+import builtins
 import enum
 import html
 import inspect
@@ -466,6 +466,11 @@ def showdir(c, *, to_html=None, printf=True, width=200):
         print(res)
 
     return res
+
+
+# 注册进builtins，可以在任意地方直接使用
+setattr(builtins, 'browser', browser)
+setattr(builtins, 'showdir', showdir)
 
 
 def render_echart(ob, name, show=False):

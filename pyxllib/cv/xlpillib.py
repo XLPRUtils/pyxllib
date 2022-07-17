@@ -27,7 +27,7 @@ except ImportError:
 
 from pyxllib.prog.pupil import inject_members
 from pyxllib.file.specialist import File, get_font_file
-from pyxllib.cv.xlcvlib import CvImg
+from pyxllib.cv.xlcvlib import xlcv
 
 
 class PilImg(PIL.Image.Image):
@@ -39,8 +39,8 @@ class PilImg(PIL.Image.Image):
     def read(cls, file, flags=None, **kwargs) -> 'PilImg':
         if PilImg.is_pil_image(file):
             im = file
-        elif CvImg.is_cv2_image(file):
-            im = CvImg.to_pil_image(file)
+        elif xlcv.is_cv2_image(file):
+            im = xlcv.to_pil_image(file)
         elif File.safe_init(file):
             im = PIL.Image.open(str(file), **kwargs)
         else:
