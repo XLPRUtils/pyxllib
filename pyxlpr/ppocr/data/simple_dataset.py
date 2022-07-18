@@ -366,3 +366,7 @@ class XlSimpleDataSet(SimpleDataSetExt):
             json2_str = json.dumps(json2_data, ensure_ascii=False)
             data_lines.append(('\t'.join([img_file.relative_to(data_dir).as_posix(), json2_str])))
         return data_lines
+
+    @run_once('str')
+    def from_simple_rec(self, subdir='.', ratio=None):
+        pass

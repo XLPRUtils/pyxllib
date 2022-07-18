@@ -21,6 +21,7 @@ import math
 import json
 
 import numpy as np
+from tqdm import tqdm
 
 from pyxlpr.ppocr.tools.program import preprocess
 from pyxlpr.ppocr.data import build_dataloader
@@ -661,14 +662,64 @@ class XlRec(PaddleOcrBaseConfig):
                   '句子': sentances_df, '句子长度': sentances_length_df}
         dataframes_to_excel(outfile, sheets)
 
-    def rec_chinese_lite(self):
-        """ 能识别中文的一个轻量模型
+    def create_recdata(self, src, dst, *, print_mode=True, recreate=False):
+        """ 从xllabelme标注的格式，生成到paddle支持的识别数据格式；提取出供文本识别模型训练的文本行数据
 
+        :param src: xllabelme_data_dir
+        :param dst: 目标存储位置的根目录
+        :param recreate: 如果目标目录存在，将其删除，重新生成
         """
-        cfg = self.config_from_template('rec/ch_ppocr_v2.0/rec_chinese_lite_train_v2.0')
-        # cfg['Global']['pretrained_model'] = Paths.models / 'ch_ppocr_mobile_v2.0_rec_train/best_accuracy'
-        self.cfg['Global']['epoch_num'] = 10000
+        # 0
+        src, dst = XlPath(src), XlPath(dst)
+        if recreate and dst.is_dir():
+            dst.delete()  # 如果已有，将其删除
+
+        # 1 生成图片
+        chars = set()
+        labels1, labels2 = [], []
+        for f in tqdm(list(src.rglob('*.json')), desc='提取文本行数据', disable=not print_mode):
+            data = f.read_json()
+            impath = f.parent / data['imagePath']
+            im = xlcv.read(impath)
+            for i, sp in enumerate(data['shapes'], start=1):
+                # a组，提取文本行的时候，按外接矩形框截取
+                name = f'imgs/{f.stem}_r{i:03}.jpg'
+                text = json.loads(sp['label'])['text']
+                chars |= set(text)
+                xlcv.write(xlcv.get_sub(im, sp['points']), dst / name)
+                labels1.append(f'{name}\t{text}')
+
+                # b组，提取文本行的时候，进行仿射变换矫正
+                name = f'imgs/{f.stem}_w{i:03}.jpg'
+                xlcv.write(xlcv.get_sub(im, sp['points'], warp_quad=True), dst / name)
+                labels2.append(f'{name}\t{text}')
+
+        # 2 字典文件
+        chars -= set(' \n\t')  # 要去掉空格等字符
+        (dst / 'char_dict.txt').write_text('\n'.join(sorted(chars)))
+
+        # 3 标注数据
+        (dst / 'labels_rect.txt').write_text('\n'.join(labels1))
+        (dst / 'labels_warp.txt').write_text('\n'.join(labels2))
+        (dst / 'labels_total.txt').write_text('\n'.join(labels1 + labels2))
+
         return self
+
+    def set_rec_dataset(self, data_dir, label_file_list):
+        """ 设置识别数据集
+
+        :param data_dir: 数据所在根目录
+        :param list[str|list] label_file_list: 标注文件清单
+            str，标注文件的相对路径
+            list[str, float]，除了str描述标注文件路径，还有个ratio值配置选取样本的比例
+        """
+
+        # self.cfg['Train']['dataset']['data_dir'] = Paths.eleclabel / 'recdata'
+        # self.cfg['Train']['dataset']['label_file_list'] = [Paths.eleclabel / 'recdata/labels_ab.txt']
+        # self.cfg['Eval']['dataset']['data_dir'] = Paths.eleclabel / 'recdata'
+        # self.cfg['Eval']['dataset']['label_file_list'] = [Paths.eleclabel / 'recdata/labels_ab.txt']
+
+        raise NotImplementedError
 
 
 class XlCls:
