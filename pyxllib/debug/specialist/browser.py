@@ -156,7 +156,7 @@ class Browser(Explorer):
             elif msedge_dir in paths:
                 app = 'msedge'
             else:
-                app = 'explorer'
+                app = 'C:/Program Files/Google/Chrome/Application/chrome.exe'
         super().__init__(app, shell)
 
     @classmethod
