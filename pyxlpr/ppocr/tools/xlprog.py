@@ -555,7 +555,7 @@ class XlTextDet(PaddleOcrBaseConfig):
     def det1_mobile_raw(self):
         """ paddle源生格式的配置示例 """
         self.det1_mobile_init(pretrained=2)  # 基础配置
-        self.set_save_dir('_train/det1_mobile_raw')  # 模型保存位置
+        self.set_save_dir('train/det1_mobile_raw')  # 模型保存位置
         self.set_simpledataset('Train', 'data', ['data/ppdet_train.txt'])
         self.set_simpledataset('Eval', 'data', ['data/ppdet_val.txt'])
         self.set_iter_num(150000)
@@ -564,14 +564,14 @@ class XlTextDet(PaddleOcrBaseConfig):
     def det1_mobile(self):
         """ labelme标注格式的检测训练 """
         self.det1_mobile_init(pretrained=2)  # 基础配置
-        self.set_save_dir('_train/det1_mobile')  # 模型保存位置
+        self.set_save_dir('train/det1_mobile')  # 模型保存位置
         self.set_xllabelme_dataset('data', [0.9, -0.1])  # 设置数据集
         self.set_iter_num(150000)  # 设置迭代轮次
         return self
 
     def det1_server(self):
         self.det1_server_init(pretrained=2)  # 基础配置
-        self.set_save_dir('_train/det1_server')  # 模型保存位置
+        self.set_save_dir('train/det1_server')  # 模型保存位置
         self.set_xllabelme_dataset('data', [0.9, -0.1])  # 设置数据集
         self.set_iter_num(150000)  # 设置迭代轮次
         return self
@@ -668,6 +668,8 @@ class XlRec(PaddleOcrBaseConfig):
         :param src: xllabelme_data_dir
         :param dst: 目标存储位置的根目录
         :param recreate: 如果目标目录存在，将其删除，重新生成
+
+        注意：本套生成方法仅供参考，这套处理目前不是那么泛用
         """
         # 0
         src, dst = XlPath(src), XlPath(dst)
@@ -712,6 +714,8 @@ class XlRec(PaddleOcrBaseConfig):
         :param list[str|list] label_file_list: 标注文件清单
             str，标注文件的相对路径
             list[str, float]，除了str描述标注文件路径，还有个ratio值配置选取样本的比例
+
+        TODO 想做设置的集成，但目前还没想到好的设计方式，可以自己手动拆分数据，并在autoset中配置，也不会很麻烦
         """
 
         # self.cfg['Train']['dataset']['data_dir'] = Paths.eleclabel / 'recdata'

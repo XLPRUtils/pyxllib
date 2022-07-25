@@ -155,7 +155,7 @@ class Browser(Explorer):
                 app = 'chrome'
             elif msedge_dir in paths:
                 app = 'msedge'
-            else:
+            else:  # 默认使用谷歌。之前试过explorer不行~~
                 app = 'C:/Program Files/Google/Chrome/Application/chrome.exe'
         super().__init__(app, shell)
 

@@ -212,7 +212,7 @@ class xlcv(EnchantBase):
             1，强制转为BGR三通道图 （BGRA转BGR默认黑底填充？）
             2，强制转为BGRA四通道图
         """
-        if flags is None: return im
+        if flags is None or flags == -1: return im
         n_c = xlcv.n_channels(im)
         tags = ['GRAY', 'BGR', 'BGRA']
         im_flag = {1: 0, 3: 1, 4: 2}[n_c]
