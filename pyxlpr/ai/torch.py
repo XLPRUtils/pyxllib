@@ -13,7 +13,6 @@ import torch.utils.data
 
 import torchvision
 from torchvision import transforms
-from easydict import EasyDict
 
 # 把pytorch等常用的导入写了
 import torch.utils.data
@@ -523,14 +522,14 @@ class XlPredictor:
 
         return loader
 
-    def forward(self, loader, *, info=False, return_gt=True):
+    def forward(self, loader, *, print_mode=False, return_gt=True):
         """ 前向传播
 
         改功能是__call__的子部分，常在train、eval阶段单独调用
         因为eval阶段，已经有预设好的train_loader、val_loader，不需要使用inputs2loader智能生成一个loader
 
         :param torch.utils.data.DataLoader loader: 标准的DataLoader类型，每次能获取[batch_x, batch_y]
-        :param info: 有时候数据量比较大，可能会需要看推断进度条
+        :param print_mode: 有时候数据量比较大，可能会需要看推断进度条
         :param return_gt: 注意跟__call__的不同，这里默认是True，__call__默认是False
             前者常用于评价阶段，后者常用于部署阶段，应用场景不同，常见配置有区别
         :return:
@@ -539,7 +538,7 @@ class XlPredictor:
         """
         preds = []
         with torch.no_grad():
-            for batched_inputs in tqdm(loader, 'eval batch', disable=not info):
+            for batched_inputs in tqdm(loader, 'eval batch', disable=not print_mode):
                 # 有的模型forward里没有处理input的device问题，则需要在这里使用self.device设置
                 # batched_inputs = batched_inputs.to(self.device)  # 这一步可能不应该写在这里，还是先注释掉吧
                 batch_y = self.model(batched_inputs).tolist()
@@ -553,7 +552,7 @@ class XlPredictor:
         return preds
 
     def __call__(self, raw_in, *, batch_size=None, y_placeholder=...,
-                 info=False, return_gt=False):
+                 print_mode=False, return_gt=False):
         """ 前传推断结果
 
         :param batch_size: 具体运行中可以重新指定batch_size
@@ -567,7 +566,7 @@ class XlPredictor:
         根据不同model结构特殊性
         """
         loader = self.inputs2loader(raw_in, batch_size=batch_size, y_placeholder=y_placeholder)
-        preds = self.forward(loader, info=info, return_gt=return_gt)
+        preds = self.forward(loader, print_mode=print_mode, return_gt=return_gt)
         # 返回结果，单样本的时候作简化
         if len(preds) == 1 and not isinstance(raw_in, (list, tuple, set)):
             return preds[0]
@@ -639,6 +638,8 @@ class ZcPredictor:
             该参数可以不设，默认每次传入多少张图，就同时多少张进行批处理
         :param opts: 除了配置文件的参数，可以自设字典，覆盖更新配置参数值，常用的参数有
         """
+        from easydict import EasyDict
+
         # 1 配置参数
         if isinstance(config_file, str) and config_file[-5:].lower() == '.yaml':
             deploy_path = os.environ.get('OCRWORK_DEPLOY', '.')  # 支持在环境变量自定义：部署所用的配置、模型所在目录

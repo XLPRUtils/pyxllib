@@ -121,14 +121,13 @@ class ImageClasPredictor:
 class ClasAccuracy(paddle.metric.Metric):
     """ 分类问题的精度 """
 
-    def __init__(self, num_classes=None, *, verbose=0):
+    def __init__(self, num_classes=None, *, print_mode=0):
         """
-        Args:
-            num_classes: 其实这个参数不输也没事~~
-            verbose:
-                0，静默
-                1，reset的时候，输出f1指标
-                2，reset的时候，还会输出crosstab
+        :param num_classes: 其实这个参数不输也没事~~
+        :param print_mode:
+            0，静默
+            1，reset的时候，输出f1指标
+            2，reset的时候，还会输出crosstab
         """
         super(ClasAccuracy, self).__init__()
         self.num_classes = num_classes
@@ -136,7 +135,7 @@ class ClasAccuracy(paddle.metric.Metric):
         self.count = 0
         self.gt = []
         self.pred = []
-        self.verbose = verbose
+        self.print_mode = print_mode
 
     def name(self):
         return 'acc'
@@ -154,10 +153,10 @@ class ClasAccuracy(paddle.metric.Metric):
         return self.count / self.total
 
     def reset(self):
-        if self.verbose:
+        if self.print_mode:
             a = ClasEvaluater(self.gt, self.pred)
             print(a.f1_score('all'))
-            if self.verbose > 1:
+            if self.print_mode > 1:
                 print(a.crosstab())
         self.count = 0
         self.total = 0
@@ -168,9 +167,9 @@ class ClasAccuracy(paddle.metric.Metric):
 class VisualAcc(paddle.callbacks.Callback):
     def __init__(self, logdir, experimental_name, *, save_model_with_input=None):
         """
-        :param logdir:
-        :param experimental_name:
-        :param save_model_with_input: 默认不存储模型结构，当开启该参数时，
+        :param logdir: log所在根目录
+        :param experimental_name: 实验名子目录
+        :param save_model_with_input: 默认不存储模型结构
         """
         from pyxllib.prog.pupil import check_install_package
         check_install_package('visualdl')

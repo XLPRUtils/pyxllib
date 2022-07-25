@@ -79,7 +79,7 @@ class PilImg(PIL.Image.Image):
         """ pil图片转np图片 """
         y = np.array(self)
         y = cv2.cvtColor(y, cv2.COLOR_BGR2RGB) if y.size else None
-        return CvImg(y)
+        return y
 
     def is_pil_image(self):
         if accimage is not None:
@@ -95,7 +95,7 @@ class PilImg(PIL.Image.Image):
 
     def cvt_channel(self, flags=None):
         im = self
-        if flags is None: return im
+        if flags is None or flags == -1: return im
         n_c = im.n_channels
         if flags == 0 and n_c > 1:
             im = im.convert('L')

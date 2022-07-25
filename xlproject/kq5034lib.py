@@ -68,6 +68,9 @@ class 网课考勤:
         for f in self.root.glob('小鹅通下载表/**/*直播观看详情*.csv'):
             df = pd.read_csv(f, skiprows=1)
             self.考勤表出现次数 += Counter([x.strip() for x in df['用户ID']])
+        for f in self.root.glob('小鹅通下载表/**/*直播用户列表*.csv'):
+            df = pd.read_csv(f)
+            self.考勤表出现次数 += Counter([x.strip() for x in df['用户ID']])
 
         self.异常data = {}
 
@@ -185,14 +188,19 @@ class 网课考勤:
         ls = []
         columns = ['课次', '用户ID', '观看日期', '在线时长(分钟)']
         for f in self.root.glob('小鹅通下载表/*.csv'):
-            m = re.match(r'(\d{4}\-\d{2}\-\d{2}).+?课.*?(\d+).+?直播观看详情', f.stem)
-            if not m:
+            if m := re.match(r'(\d{4}\-\d{2}\-\d{2}).+?课.*?(\d+).+?直播观看详情', f.stem):
+                stat_day, 课次 = date.fromisoformat(m.group(1)), int(m.group(2))
+                skiprows = 1
+            elif m := re.search(r'.+?课.*?(\d+).+?直播用户列表.+?(\d{4}\-\d{2}\-\d{2})', f.stem):
+                stat_day, 课次 = date.fromisoformat(m.group(2)), int(m.group(1))
+                skiprows = 0
+            else:
                 continue
-            stat_day, 课次 = date.fromisoformat(m.group(1)), int(m.group(2))
+
             if stat_day > self.today:  # 超过self.today的数据不记录
                 continue
             观看日期 = (stat_day - self.开课日期).days - 课次 + 1
-            df = pd.read_csv(f, skiprows=1)
+            df = pd.read_csv(f, skiprows=skiprows)
             for idx, r in df.iterrows():
                 k = '累计观看时长(秒)' if 观看日期 else '直播观看时长(秒)'
                 ls.append([课次, r['用户ID'].strip(), 观看日期, int(int(r[k]) / 60)])
