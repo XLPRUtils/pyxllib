@@ -18,6 +18,7 @@ import time
 import statistics
 
 import cv2
+import numpy as np
 import requests
 
 from pyxllib.prog.newbie import round_int
@@ -990,6 +991,15 @@ class XlAiClient(XlAiClientBase):
         """ 通用的识别一张图的所有文本，并拼接到一起 """
         texts = self.ocr2texts(im, mode, options)
         return ' '.join(texts)
+
+    def humanseg(self, im):
+        """ 人像抠图 """
+        im = xlcv.read(im, 1)
+        mask_buffer = self.priu_api('deeplabv3p_xception65_humanseg', im)['imageData']
+        mask = xlcv.read_from_buffer(mask_buffer, b64decode=True)
+        print(im.shape, mask.shape)
+        new_im = np.concatenate([im, np.expand_dims(mask, axis=2)], axis=2)  # 变成BGRA格式图片
+        return new_im
 
 
 def demo_aipocr():
