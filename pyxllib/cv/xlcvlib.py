@@ -82,6 +82,7 @@ class xlcv(EnchantBase):
         """ 从二进制流读取图片
         这个二进制流指，图片以png、jpg等某种格式存储为文件时，其对应的文件编码
 
+        :param bytes|str buffer:
         :param b64decode: 是否需要先进行base64解码
         """
         if b64decode:
@@ -144,8 +145,9 @@ class xlcv(EnchantBase):
         Returns:
             PIL Image: Image converted to PIL Image.
         """
-        # 需要先做个通道转换。这里的cvt是比较万精油的，支持pic是灰度图、RGBA等多种场景情况。
-        pic = cv2.cvtColor(pic, cv2.COLOR_BGR2RGB)
+        # BGR 转为 RGB
+        if pic.ndim > 2 and pic.shape[2] >= 3:
+            pic[:, :, [0, 1, 2]] = pic[:, :, [2, 1, 0]]
 
         # 以下是原版实现代码
         if pic.ndim not in {2, 3}:
@@ -233,7 +235,7 @@ class xlcv(EnchantBase):
         xlcv.to_pil_image(im).show()
 
     @staticmethod
-    def to_buffer(im, ext='.jpg', *, b64encode=False):
+    def to_buffer(im, ext='.jpg', *, b64encode=False) -> bytes:
         flag, buffer = cv2.imencode(ext, im)
         buffer = bytes(buffer)
         if b64encode:
