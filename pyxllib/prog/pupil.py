@@ -216,9 +216,10 @@ class DictTool:
         # else:  # 旧版本py手动实现一个兼容功能
         for x in args:
             for k, v in x.items():
-                # if k not in dict_:
-                #     dict_[k] = v
-                dict_[k] = v
+                # 220729周五21:21，又切换成dict_有的不做替换
+                if k not in dict_:
+                    dict_[k] = v
+                # dict_[k] = v
 
     @classmethod
     def sub(cls, dict_, keys):

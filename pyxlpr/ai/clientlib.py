@@ -40,9 +40,21 @@ def __1_转类labelme标注():
 def loc2points(loc, ratio=1):
     """ 百度的location格式转为 {'points': [[a, b], [c, d]], 'shape_type: 'rectangle'} """
     # 目前关注到的都是矩形，不知道有没可能有其他格式
-    l, t, r, b = xywh2ltrb([loc['left'], loc['top'], loc['width'], loc['height']])
+    ltrb = xywh2ltrb([loc['left'], loc['top'], loc['width'], loc['height']])
     if ratio != 1:
-        l, t, r, b = [round_int(x * ratio) for x in [l, t, r, b]]
+        ltrb = [x * ratio for x in ltrb]
+    l, t, r, b = round_int(ltrb, ndim=1)
+    return {'points': [[l, t], [r, b]],
+            'shape_type': 'rectangle'}
+
+
+def loc2points2(loc, ratio=1):
+    """ 百度的location格式转为 {'points': [[a, b], [c, d]], 'shape_type: 'rectangle'} """
+    # 目前关注到的都是矩形，不知道有没可能有其他格式
+    ltrb = xywh2ltrb([loc['left'], loc['top'], loc['right'] - loc['left'], loc['bottom'] - loc['top']])
+    if ratio != 1:
+        ltrb = [x * ratio for x in ltrb]
+    l, t, r, b = round_int(ltrb, ndim=1)
     return {'points': [[l, t], [r, b]],
             'shape_type': 'rectangle'}
 
@@ -166,7 +178,7 @@ class XlAiClientBase:
         目的2：带透明底的png百度api识别不了，要先转成RGB格式
     """
 
-    def __init__(self, auto_setup=True):
+    def __init__(self, auto_setup=True, check=True):
         # 1 默认值
         self.db = None
 
@@ -185,7 +197,7 @@ class XlAiClientBase:
             if 'mathpix' in accounts:
                 self.login_mathpix(**accounts['mathpix'])
             if 'priu' in accounts:
-                self.login_priu(**accounts['priu'])
+                self.login_priu(**accounts['priu'], check=check)
 
     def __A1_登录账号(self):
         pass
@@ -212,7 +224,7 @@ class XlAiClientBase:
         self._mathpix_header = {'Content-type': 'application/json'}
         self._mathpix_header.update({'app_id': app_id, 'app_key': app_key})
 
-    def login_priu(self, token, host=None):
+    def login_priu(self, token, host=None, *, check=True):
         """ 福建省模式识别与图像理解重点实验室
 
         :param str|list[str] host:
@@ -232,20 +244,23 @@ class XlAiClientBase:
         else:
             raise TypeError
 
-        connent = False
-        for host in hosts:
-            try:
-                if '欢迎来到 厦门理工' in requests.get(f'http://{host}/home', timeout=5).text:
-                    self._priu_host = host
-                    connent = True
-                    break
-            except requests.exceptions.ConnectionError:
-                continue
+        if check:
+            connent = False
+            for host in hosts:
+                try:
+                    if '欢迎来到 厦门理工' in requests.get(f'http://{host}/home', timeout=5).text:
+                        self._priu_host = host
+                        connent = True
+                        break
+                except requests.exceptions.ConnectionError:
+                    continue
 
-        if not connent:
-            raise ConnectionError('PRIU接口登录失败')
-
-        return connent
+            if not connent:
+                raise ConnectionError('PRIU接口登录失败')
+            return connent
+        else:
+            self._priu_host = hosts[0]  # 不检查的场景，一般都是局域网内使用
+            return None
 
     def __A2_调整图片和关联数据库(self):
         pass
@@ -960,6 +975,27 @@ class XlAiClientBase:
         r = requests.post(f'http://{self._priu_host}/api/hesuan_layout', json.dumps(data), headers=self._priu_header)
         return json.loads(r.text)
 
+    def lexical_analysis(self, texts, options=None, return_mode=None):
+        # TODO 可以增加接口参数，配置返回值类型。其他api同理。
+        data = {'texts': texts}
+        if options:
+            data['options'] = options
+        r = requests.post(f'http://{self._priu_host}/api/lac', json.dumps(data), headers=self._priu_header)
+        res = json.loads(r.text)
+
+        if return_mode == 'raw':
+            pass
+        else:
+            res = [x['word'] for x in res]
+        return res
+
+    def sentiment_classify(self, texts, options=None):
+        data = {'texts': texts}
+        if options:
+            data['options'] = options
+        r = requests.post(f'http://{self._priu_host}/api/senta_bilstm', json.dumps(data), headers=self._priu_header)
+        return json.loads(r.text)
+
 
 class XlAiClient(XlAiClientBase):
     """ XlAiClientBase存放真实原始接口，这里XlAiClient会有些为了方便，做的二次解析接口 """
@@ -992,14 +1028,20 @@ class XlAiClient(XlAiClientBase):
         texts = self.ocr2texts(im, mode, options)
         return ' '.join(texts)
 
-    def humanseg(self, im):
-        """ 人像抠图 """
+    def humanseg(self, im, options=None):
+        """ 人像抠图
+
+        TODO 还没测过特大、特小图会不会有问题~
+        """
         im = xlcv.read(im, 1)
         mask_buffer = self.priu_api('deeplabv3p_xception65_humanseg', im)['imageData']
         mask = xlcv.read_from_buffer(mask_buffer, b64decode=True)
-        print(im.shape, mask.shape)
         new_im = np.concatenate([im, np.expand_dims(mask, axis=2)], axis=2)  # 变成BGRA格式图片
         return new_im
+
+    def det_face(self, im, options=None):
+        lmdict = self.priu_api('ultra_light_fast_generic_face_detector_1mb_640', im)
+        return lmdict
 
 
 def demo_aipocr():
