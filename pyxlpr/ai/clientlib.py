@@ -11,6 +11,7 @@
 
 
 """
+import os
 import base64
 import json
 import pprint
@@ -323,7 +324,7 @@ class XlAiClient:
 
         注意只要ratio!=1涉及到缩放的，偏移误差是会变大的~~
         """
-        buffer, ratio = self.adjust_image(imageage)
+        buffer, ratio = self.adjust_image(image)
         result_dict = self.run_with_db(self._aipocr.general, buffer, options)
         result_dict = ToLabelmeLike.list_word(result_dict, 1 / ratio, 'words_result', 'words_result_num')
         return result_dict
@@ -985,7 +986,10 @@ class XlAiClient:
         if kwargs:
             data.update(kwargs)
         r = requests.post(f'http://{self._priu_host}/api/{mode}', json.dumps(data), headers=self._priu_header)
-        res = json.loads(r.text)
+        if r.status_code == 200:
+            res = json.loads(r.text)
+        else:
+            raise ConnectionError(r.text)
 
         # 2 统一返回值的范式，默认都是dict。 有些特殊格式表示是图片，这里会自动做后处理解析。
         if isinstance(res, dict) and len(res) == 1 and 'imageData' in res:
@@ -1055,6 +1059,14 @@ class XlAiClient:
     def det_face(self, image):
         lmdict = self.priu_api('ultra_light_fast_generic_face_detector_1mb_640', image)
         return lmdict
+
+    def rec_speech(self, audio_file):
+        if os.path.isfile(audio_file):
+            audio = base64.b64encode(XlPath(audio_file).read_bytes()).decode()
+        else:
+            raise NotImplementedError
+        text = self.priu_api('u2_conformer_wenetspeech', audio=audio)[0]
+        return text
 
 
 def demo_aipocr():
