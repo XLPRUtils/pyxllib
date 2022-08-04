@@ -43,17 +43,23 @@ from pyxllib.data.sqlite import SqlBase
 class Connection(psycopg.Connection, SqlBase):
     def exec_col(self, query, params=None, *, prepare=None, binary=False):
         """ 获得第1列的值，注意这个方法跟select_col很像，但更泛用，优先推荐使用exec_col
+
+        >> self.exec_col('SELECT id FROM skindata')
         """
         for row in self.execute(query, params, prepare=prepare, binary=binary):
             yield row[0]
 
     def exec_nametuple(self, *args, **kwargs):
         cur = self.cursor(row_factory=psycopg.rows.namedtuple_row)
-        return cur.execute(*args, **kwargs)
+        data = cur.execute(*args, **kwargs)
+        # cur.close()
+        return data
 
     def exec_dict(self, *args, **kwargs):
         cur = self.cursor(row_factory=psycopg.rows.dict_row)
-        return cur.execute(*args, **kwargs)
+        data = cur.execute(*args, **kwargs)
+        # cur.close()
+        return data
 
     def __增(self):
         pass

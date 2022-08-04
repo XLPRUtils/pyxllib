@@ -306,6 +306,8 @@ class XlAiClient:
         ratio = current_height / origin_height
         return im, ratio
 
+        # 恩，我觉得读书最重要还是改变自己的认知观念，从而改变人生。至于工作啥的，功利的东西其实还是次要的。
+
     def run_with_db(self, func, buffer, options=None, **kwargs):
         if self.db:
             return self.db.run_api(func, buffer, options, **kwargs)
@@ -988,7 +990,7 @@ class XlAiClient:
         r = requests.post(f'http://{self._priu_host}/api/{mode}', json.dumps(data), headers=self._priu_header)
         if r.status_code == 200:
             res = json.loads(r.text)
-        else:
+        else:  # TODO 正常状态码不只200，可能还有重定向等某些不一定是错误的状态
             raise ConnectionError(r.text)
 
         # 2 统一返回值的范式，默认都是dict。 有些特殊格式表示是图片，这里会自动做后处理解析。
