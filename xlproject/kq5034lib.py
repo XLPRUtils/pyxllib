@@ -497,10 +497,15 @@ class 网课考勤:
             return
 
         # 2 读取数据
-        df = pd.read_csv(files[-1])
-        data = {}
-        for idx, row in df.iterrows():
-            data[row['用户id']] = row['打卡次数']
+        # df = pd.read_csv(files[-1])
+        # data = {}
+        # for idx, row in df.iterrows():
+        #     data[row['用户id']] = row['打卡次数']
+
+        # 220804周四08:28，小鹅通更新了模板
+        df = pd.read_excel(files[-1])
+        df.columns = df.columns.str.replace('\t', '')
+        data = Counter([x.strip() for x in df['user_id']])
 
         # 3 将打卡次数写入表格
         ls = []  # 返款汇总

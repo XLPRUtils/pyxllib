@@ -8,6 +8,11 @@
 xml等网页结构方面的处理
 """
 
+from pyxllib.prog.pupil import check_install_package
+
+# 一个xpath解析库
+check_install_package('xpath_parser', 'xpath-parser')
+
 import collections
 from collections import Counter, defaultdict
 import re
@@ -18,6 +23,7 @@ import pandas as pd
 import bs4
 from bs4 import BeautifulSoup
 from humanfriendly import format_size
+from xpath_parser import XpathExpression
 
 from pyxllib.algo.pupil import SearchBase
 from pyxllib.debug.pupil import dprint
@@ -386,6 +392,45 @@ class XlBs4Tag(bs4.element.Tag):
                 if sibing:
                     return sibing
                 cur_node = parent
+
+    def find_by_xpath(self, xpath):
+        """ 使用xpath定位元素
+
+        bs4官方没有自带，网上找到的很多也不中意。就自己根据需求简单定制一下。非完整版实现，但希望能支持常用的几个操作。
+        好在还是有现成的xpath解析库的，自己扩展实现也不会太难。
+        """
+        xp = XpathExpression(xpath)
+
+        cur_tag = self
+        for node in xp.nodes:
+            if node.name == '*':
+                name = None
+            else:
+                name = node.name
+
+            # TODO 其他前缀功能： .. 父结点， / 根节点
+            recursive = node.ignore_position
+
+            attrs = {}
+            limit = 1
+            for a in node.attrs:
+                if a[0] == '@':
+                    k, v = a.split('=')
+                    attrs[k[1:]] = v[1:-1]
+                elif re.match(r'\d+$', a):  # 索引下标
+                    limit = int(a)
+                else:
+                    raise NotImplementedError
+
+            # node.type没用上，应该有些需要用途的
+
+            sub_tags = cur_tag.find_all(name, attrs, recursive, limit=limit)
+            if sub_tags:
+                cur_tag = sub_tags[-1]
+            else:  # 没找到
+                return None
+
+        return cur_tag
 
 
 inject_members(XlBs4Tag, bs4.element.Tag)
