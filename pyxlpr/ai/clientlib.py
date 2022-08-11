@@ -172,6 +172,22 @@ def __2_定制不同输出格式():
     pass
 
 
+class BigData:
+    """ TODO 通过网络传较大的数据，比如图片数据的时候，会在全流程中涉及其四种数据格式的操作
+    可以一次计算，多次复用
+
+    客户端不太有这个问题，正常操作就好。我的云服务端则需要用这个类。
+    """
+
+    def __init__(self, b64data):
+        pass
+
+
+class BigImageData(BigData):
+    """ TODO 看后续有没必要再进一步细分大数据类型，如果没必要，可以把这个子类删除，只留BigData就行 """
+    pass
+
+
 class XlAiClient:
     """
     封装该类

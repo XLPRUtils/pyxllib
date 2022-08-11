@@ -344,17 +344,12 @@ class _CommonMethods:
         else:
             root = self._search(use_node_cache=use_node_cache, reparse=reparse)
 
-        def save_cache():
-            if cache_num != len(_page_parsed_cache) or reparse:
-                # 如果前后数量不一致，表示有更新内容，重新写入一份缓存文件。或者明确使用了reparse了也要保存。
-                _page_parsed_cache_file.write_pkl(_page_parsed_cache)
+        # 保存缓存文件
+        if cache_num != len(_page_parsed_cache) or reparse:
+            # 如果前后数量不一致，表示有更新内容，重新写入一份缓存文件。或者明确使用了reparse了也要保存。
+            _page_parsed_cache_file.write_pkl(_page_parsed_cache)
 
-        savefile_thread = Thread(target=save_cache)
-        savefile_thread.start()  # 开子线程去保存文件，和后面的拷贝副本并行处理
-
-        # 3 拷贝副本，并等待保存文件的子线程也执行完
         root.parent = None
-        savefile_thread.join()
         return root
 
     def search(self, pattern, child_depth=0, *,

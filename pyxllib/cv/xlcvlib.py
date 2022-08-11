@@ -8,6 +8,7 @@ import base64
 
 import PIL.Image
 import cv2
+import filetype
 import humanfriendly
 import numpy as np
 import requests
@@ -71,6 +72,8 @@ class xlcv(EnchantBase):
             # https://www.yuque.com/xlpr/pyxllib/imread
             # + np.frombuffer
             im = cv2.imdecode(np.fromfile(str(file), dtype=np.uint8), -1 if flags is None else flags)
+            if im is None:  # 在文件类型名写错时，可能会读取失败
+                raise ValueError(f'{file} {filetype.guess(file)}')
         elif xlpil.is_pil_image(file):
             im = xlpil.to_cv2_image(file)
         else:

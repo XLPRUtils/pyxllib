@@ -291,7 +291,7 @@ class PaddleOcrBaseConfig:
         pass
 
 
-class XlTextDet(PaddleOcrBaseConfig):
+class XlDetText(PaddleOcrBaseConfig):
     """ 检测模型专用配置
     """
 
