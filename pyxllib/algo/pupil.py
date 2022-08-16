@@ -83,13 +83,13 @@ class ValuesStat:
     """ 一串数值的相关统计分析 """
 
     def __init__(self, values):
-        from statistics import stdev, mean
+        from statistics import pstdev, mean
         self.values = values
         self.n = len(values)
         self.sum = sum(values)
         if self.n:
             self.mean = mean(self.values)
-            self.std = stdev(self.values)
+            self.std = pstdev(self.values)
             self.min, self.max = min(values), max(values)
         else:
             self.mean = self.std = self.min = self.max = float('nan')

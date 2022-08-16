@@ -344,6 +344,7 @@ class XlWin32WordApplication:
             except TypeError:
                 # 实在不行，就用动态调度
                 app = win32.dynamic.Dispatch(name)
+            # 注：好像docx的默认打开程序也会有影响，最好默认都是office，不要被改成wps
 
         # 2 inject
         inject_win32word(app, recursion_inject=recursion_inject)
