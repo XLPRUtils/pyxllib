@@ -30,7 +30,7 @@ _dir = Path(__file__).parent
 
 setup(
     name='pyxllib',  # pip 安装时用的名字
-    version='0.2.53',  # 当前版本，每次更新上传到pypi都需要修改; 第4位版本号一般是修紧急bug
+    version='0.2.54',  # 当前版本，每次更新上传到pypi都需要修改; 第4位版本号一般是修紧急bug
     author='code4101',
     author_email='877362867@qq.com',
     url='https://github.com/XLPRUtils/pyxllib',
@@ -47,7 +47,7 @@ setup(
         'Programming Language :: Python :: 3',
         'Operating System :: OS Independent',  # 大部分功能都是跨平台的
     ],
-    python_requires='>=3.8',  # v0.2.38开始，使用象牙运算符
+    python_requires='>=3.6',  # v0.2.38开始，使用象牙运算符。但这会导致aistudio上的py3.7无法直接pip到最新版本，所以仍然先限定环境为3.6
     # 必须安装的模块，本库最常用的接口模式为 from pyxllib.xl import *，安装其必须的组件
     # ①如需要打包生成exe，尽量避免install多余的包，可以额外写脚本把这些依赖卸载
     # ②对运算性能速度有极致要求的场景，可以不使用pyxllib.xl接口，尽量避免import任何多余的无用代码
