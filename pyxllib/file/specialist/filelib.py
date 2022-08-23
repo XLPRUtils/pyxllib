@@ -971,8 +971,8 @@ class XlPath(type(pathlib.Path())):
         f = open(self, 'r', encoding=encoding)
         return chunked(f, batch_size)
 
-    def write_text(self, data, encoding='utf8', errors=None):
-        with open(self, 'w', encoding=encoding, errors=errors) as f:
+    def write_text(self, data, encoding='utf8', errors=None, newline=None):
+        with open(self, 'w', encoding=encoding, errors=errors, newline=newline) as f:
             return f.write(data)
 
     def read_pkl(self):

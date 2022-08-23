@@ -28,6 +28,7 @@ from tqdm import tqdm
 from pyxllib.algo.pupil import natural_sort
 from pyxllib.file.specialist import XlPath
 from pyxllib.debug.specialist import get_xllog
+from pyxllib.prog.specialist import mtqdm
 
 logger = get_xllog('location')
 
@@ -91,11 +92,16 @@ class ScpProgress:
 
 
 class XlSSHClient(paramiko.SSHClient):
+    """ 自己封装的一套ssh工具
+
+    因为我自己都是用ubuntu18系统，所以这里有些精细化的功能，可能不一定能兼容其他发行版
+    """
+
     def __1_初始化和执行(self):
         pass
 
     def __init__(self, server, port, user, passwd, *, map_path=None,
-                 relogin=0, relogin_interval=1):
+                 relogin=0, relogin_interval=1, timeout=None):
         """
 
         :param map_path: 主要在上传、下载文件的时候，可以用来自动定位路径
@@ -113,7 +119,7 @@ class XlSSHClient(paramiko.SSHClient):
         # 重试登录
         for k in range(relogin + 1):
             try:
-                self.connect(server, port, user, passwd)
+                self.connect(server, port, user, passwd, timeout=timeout)
                 break
             except paramiko.ssh_exception.SSHException:
                 if k < relogin:
@@ -133,10 +139,17 @@ class XlSSHClient(paramiko.SSHClient):
 
             def exists_type(self):
                 # TODO 还没有考虑符号链接等情况，在特殊情况下可能会出意外
+                # 目录返回-1，文件返回1，不存在返回0
                 t = self.client.exec(f'if test -d "{self}"; then echo -1;'
                                      f'elif test -f "{self}"; then echo 1;'
                                      'else echo 0; fi')
                 return int(t)
+
+            def is_file(self):
+                return self.exists_type() == 1
+
+            def is_dir(self):
+                return self.exists_type() == -1
 
             def sub_rel_paths(self, mtime=False, *, extcmd=''):
                 """ 目录对象的时候，可以获取远程目录下的文件清单（相对路径）
@@ -207,24 +220,33 @@ class XlSSHClient(paramiko.SSHClient):
                 map_path = {'/': '/'}
         return cls(host_ip, port, user_name, pw[1:-1], map_path=map_path, **kwargs)
 
-    def exec(self, command, *args, **kwargs):
+    def exec(self, command, *args, ignore_errors=False, pipe_in=None, **kwargs):
         """ exec_command的简化版
 
-        如果stderr出错，则抛出异常
-        否则返回运行结果的文本数据
+        :param ignore_errors:
+            如果stderr出错，则抛出异常，否则返回运行结果的文本数据
+            注意有些功能比较特别，是会往stderr写一些内容，但不一定是报错的，如果需要精细控制，建议直接使用exec_command接口
 
-        【备忘】
-        nginx -t的两句返回，虽然是正确状态，默认是放在stderr的
+            【备忘】
+            nginx -t的两句返回，虽然是正确状态，默认是放在stderr的
+            安装anaconda也是会有一些输出到stderr的内容
+        :param pipe_in: 通过管道输入课交互式操作的内容
         """
+        # 这个命令有些交互性的操作，需要通过管道输入文本的机制来代替手动交互的过程
+        if pipe_in:
+            host_file = '/tmp/' + XlPath.tempfile().name
+            self.write_file(host_file, pipe_in, newline='\n')
+            command = f'{command} < {host_file}'
+
+        # 执行命令
         stdin, stdout, stderr = self.exec_command(command, *args, **kwargs)
         stderr = list(stderr)
-        if stderr:  # TODO 目前警告也会报错，其实警告没关系
-            print(''.join(stderr))
-            raise SshCommandError(f'服务器执行命令报错: {command}')
+        if not ignore_errors and stderr:  # TODO 目前警告也会报错，其实警告没关系
+            raise SshCommandError(f'服务器执行命令报错: {command}，' + ''.join(stderr).rstrip())
         return '\n'.join([f.strip() for f in list(stdout)])
 
-    def exec_script(self, main_cmd, script='', *, file=None):
-        r""" 执行批量、脚本命令
+    def exec_script(self, main_cmd, script='', *, file=None, **kwargs):
+        r""" 执行批量、脚本命令，常用语执行一段py程序
 
         :paramn main_cmd: 主命令
         :param script: 用字符串表达的一套命令
@@ -256,7 +278,7 @@ class XlSSHClient(paramiko.SSHClient):
         local_file.delete()
 
         # 2 执行程序
-        res = self.exec(f'{main_cmd} {host_file}')
+        res = self.exec(f'{main_cmd} {host_file}', **kwargs)
         self.exec(f'rm {host_file}')
         return res
 
@@ -501,6 +523,20 @@ class XlSSHClient(paramiko.SSHClient):
         self.scp_get(local_path=local_path, info=info, limit_bytes=limit_bytes, if_exists='mtime')
         self.scp_put(local_path, mkdir=mkdir, print_mode=info, limit_bytes=limit_bytes, if_exists='mtime')
 
+    def write_file(self, host_file, text, newline=None):
+        """ 在服务器写一个文件
+        实现上通过先在本地生成一个文件，然后上传上去，算一个特殊的scp_put操作
+
+        :param newline: 默认跟使用的操作系统有关，一般在windows运行就是生成\r\n
+            远程服务器，以unix居多，此类文件，最好都用\n作为换行符，而不是windows默认的\r\n
+            尤其用到exec中的pipe_in时，必须使用\n
+        """
+        scp = scplib.SCPClient(self.get_transport())
+        local_file = XlPath.tempfile()
+        local_file.write_text(text, newline=newline)
+        scp.put(local_file, host_file)
+        local_file.delete()
+
     def __3_host_trace(self):
         pass
 
@@ -635,8 +671,14 @@ class XlSSHClient(paramiko.SSHClient):
         del user_usage['_total']
         return user_usage
 
-    def __4_其他(self):
+    def __4_运维(self):
         pass
+
+    def get_hostname(self):
+        return self.exec('hostname')
+
+    def set_hostname(self, name):
+        return self.exec(f'hostnamectl set-hostname {name}')
 
     def restart_frpc(self, frp_dir='/root/frp_0.37.0_linux_amd64'):
         """ 因为service不一定有效，这里通过暴力找frpc的方式来设置
@@ -651,3 +693,101 @@ class XlSSHClient(paramiko.SSHClient):
         ]
         # 注意关闭和重启需要同时操作，不然在外网穿刺连接ssh，执行第1句后就断开连接了
         self.exec('; '.join(cmds))
+
+    def __5_开发环境(self):
+        pass
+
+    def reinstall_conda(self, package='Anaconda3-2022.05-Linux-x86_64.sh'):
+        """ 给当前用户重装anaconda
+
+        :param package: 要安装的目标版本，可以修改，以后有时间也可以考虑怎么做成自动找最新版
+            这个版本配套的py是 3.9.12，默认路径在 /root/anaconda3/bin/python
+        """
+        from pyxllib.debug.specialist import get_xllog
+
+        xllog = get_xllog()
+
+        xllog.info('清除已有的anaconda3...')
+        self.exec('rm -rf ~/anaconda3')
+
+        xllog.info('下载安装包...')
+        if not self.Path(f'/tmp/{package}').is_file():  # 如果不存在文件，则自动下载
+            self.exec(f'wget https://mirrors.tuna.tsinghua.edu.cn/anaconda/archive/{package} -P /tmp/',
+                      ignore_errors=True)
+            self.exec(f'chmod 777 /tmp/{package}')  # 下载的包，其他用户也可以读取、执行
+
+        xllog.info('自动安装anaconda3...')
+        self.exec(f'bash /tmp/{package}', pipe_in='\nyes\n' * 2, ignore_errors=True)
+
+    def install_pytorch(self, cuda_version='10.2'):
+        """ 有些驱动用的还是10.2的，所以为了兼容性装10.2，但一些新版的，可以考虑装11.3
+
+        # TODO 可以通过nvidia-smi算出当前cuda版本，然后找最适合的pytorch的~~
+        """
+        self.exec(f'anaconda3/bin/conda install '
+                  f'pytorch torchvision torchaudio cudatoolkit={cuda_version} -c pytorch',
+                  pipe_in='y\n')
+        print(self.exec_script(f'anaconda3/bin/python',
+                               'import torch\nprint(f"{torch.cuda.is_available()=}")'))
+
+    def install_paddle(self, cuda_version='10.2'):
+        """ https://www.paddlepaddle.org.cn/install
+
+        比较大的文件，cudatoolkit要365M，cudnn要185M，paddle是285M
+        """
+        self.exec(f'anaconda3/bin/conda install '
+                  f'paddlepaddle-gpu==2.3.2 cudatoolkit={cuda_version} '
+                  f'--channel https://mirrors.tuna.tsinghua.edu.cn/anaconda/cloud/Paddle/',
+                  pipe_in='y\n')
+        print(self.exec_script(f'anaconda3/bin/python',
+                               'import paddle\npaddle.utils.run_check()',
+                               ignore_errors=True))
+
+
+class XlSSHs:
+    """ 多服务器管理器，常用于一些批量运维工作 """
+
+    def __init__(self, sshs: dict):
+        """ 为了方便使用，这个类一般是继承出来重定制的
+
+        :param dict sshs:
+            key: 昵称
+            value: 初始化好的ssh
+        """
+        self.sshs: dict[str, XlSSHClient] = sshs
+
+    def run(self, func, parallel=False):
+        """
+
+        :param func: def func(ssh)
+        :param parallel: 是否并行运行
+        :return dict: 返回所有运行结果文本
+        """
+        res = {}  # 存储所有运行结果（文本格式）
+
+        def wrap_func(item):
+            name, ssh = item
+            msg = [f'【{name}】']
+            try:
+                out = func(ssh)
+            except SshCommandError as e:
+                out = e.args[0]
+            res[name] = out
+            if out:
+                msg.append(out)
+            print('\n'.join(msg) + '\n')
+
+        if parallel:
+            # 并行需要打包输出，不然内容会乱掉
+            mtqdm(wrap_func, self.sshs.items(), max_workers=16, disable=True)
+        else:
+            # 串行可以动态输出，不会乱，但可以及时看到效果
+            for name, ssh in self.sshs.items():
+                print(f'【{name}】')
+                out = func(ssh)
+                if out:
+                    print(out)
+                print()
+                res[name] = out
+
+        return res

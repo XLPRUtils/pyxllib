@@ -16,6 +16,14 @@ def __1_目录级处理图片的功能():
     pass
 
 
+
+class A(object):
+    pass
+
+class B:
+    pass
+
+
 class ImagesDir(XlPath):
     def debug_image_func(self, func, pattern='*', *, save=None, show=False):
         """

@@ -295,6 +295,7 @@ class XlprDb(Connection):
         return self.execute('SELECT id FROM xlapi WHERE input=%s', (input,)).fetchone()[0]
 
     def insert_row2xlserver(self, request, xlapi_id=0):
+        print(request.base_url)
         kw = {'remote_addr': request.remote_addr,
               'token': request.headers.get('Token', None),
               'route': '/'.join(request.base_url.split('/')[3:]),
