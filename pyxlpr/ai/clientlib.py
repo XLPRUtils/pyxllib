@@ -253,7 +253,7 @@ class XlAiClient:
 
         if host is None:
             # 优先尝试局域网链接，如果失败则尝试公网链接
-            hosts = ['172.16.170.136', '118.195.202.82']
+            hosts = ['172.16.170.136', 'https://xmutpriu.com']
         elif isinstance(host, str):
             hosts = [host]
         elif isinstance(host, (list, tuple)):
@@ -261,11 +261,16 @@ class XlAiClient:
         else:
             raise TypeError
 
+        # 确保都有http或https前缀
+        for i, host in enumerate(hosts):
+            if 'http' not in host:
+                hosts[i] = f'http://{host}'
+
         if check:
             connent = False
             for host in hosts:
                 try:
-                    if '欢迎来到 厦门理工' in requests.get(f'http://{host}/home', timeout=5).text:
+                    if '欢迎来到 厦门理工' in requests.get(f'{host}/test_page', timeout=5).text:
                         self._priu_host = host
                         connent = True
                         break
@@ -1003,7 +1008,7 @@ class XlAiClient:
             data['options'] = options
         if kwargs:
             data.update(kwargs)
-        r = requests.post(f'http://{self._priu_host}/api/{mode}', json.dumps(data), headers=self._priu_header)
+        r = requests.post(f'{self._priu_host}/api/{mode}', json.dumps(data), headers=self._priu_header)
         if r.status_code == 200:
             res = json.loads(r.text)
         else:  # TODO 正常状态码不只200，可能还有重定向等某些不一定是错误的状态
@@ -1018,7 +1023,7 @@ class XlAiClient:
 
     def common_ocr(self, image):
         data = {'image': self._priu_read_image(image)}
-        r = requests.post(f'http://{self._priu_host}/api/common_ocr', json.dumps(data), headers=self._priu_header)
+        r = requests.post(f'{self._priu_host}/api/common_ocr', json.dumps(data), headers=self._priu_header)
         res = json.loads(r.text)
         return res
 
@@ -1040,7 +1045,7 @@ class XlAiClient:
 
     def hesuan_layout(self, image):
         data = {'image': self._priu_read_image(image)}
-        r = requests.post(f'http://{self._priu_host}/api/hesuan_layout', json.dumps(data), headers=self._priu_header)
+        r = requests.post(f'{self._priu_host}/api/hesuan_layout', json.dumps(data), headers=self._priu_header)
         return json.loads(r.text)
 
     def lexical_analysis(self, texts, options=None, return_mode=None):
@@ -1048,7 +1053,7 @@ class XlAiClient:
         data = {'texts': texts}
         if options:
             data['options'] = options
-        r = requests.post(f'http://{self._priu_host}/api/lac', json.dumps(data), headers=self._priu_header)
+        r = requests.post(f'{self._priu_host}/api/lac', json.dumps(data), headers=self._priu_header)
         res = json.loads(r.text)
 
         if return_mode == 'raw':
@@ -1061,7 +1066,7 @@ class XlAiClient:
         data = {'texts': texts}
         if options:
             data['options'] = options
-        r = requests.post(f'http://{self._priu_host}/api/senta_bilstm', json.dumps(data), headers=self._priu_header)
+        r = requests.post(f'{self._priu_host}/api/senta_bilstm', json.dumps(data), headers=self._priu_header)
         return json.loads(r.text)
 
     def humanseg(self, image):
@@ -1097,7 +1102,7 @@ def demo_aipocr():
 
     xlapi = XlAiClient()
     # xlapi.setup_database()
-    xlapi._priu_host = 'localhost:5003'
+    xlapi._priu_host = 'http://localhost:5003'
 
     mode = 'general'
 
