@@ -42,7 +42,7 @@ from pyxllib.prog.specialist import mtqdm
 from pyxllib.algo.pupil import Groups, make_index_function, matchpairs
 from pyxllib.algo.geo import rect_bounds, rect2polygon, reshape_coords, ltrb2xywh, xywh2ltrb, ComputeIou
 from pyxllib.algo.stat import dataframes_to_excel
-from pyxllib.file.specialist import File, Dir, PathGroups
+from pyxllib.file.specialist import File, Dir, PathGroups, XlPath
 from pyxllib.debug.specialist import get_xllog
 from pyxlpr.data.icdar import IcdarEval
 from pyxlpr.data.labelme import LABEL_COLORMAP7, ToLabelmeJson, LabelmeDataset, LabelmeDict
@@ -83,11 +83,13 @@ class CocoGtData:
         :param start_idx: 图片起始下标
         :return: list[dict(id, file_name, width, height)]
         """
-        files = Dir(imdir).select_files(['*.jpg', '*.png'])
+        # files = Dir(imdir).select_files(['*.jpg', '*.png'])
+        files = XlPath(imdir).rglob_images()
         images = []
         for i, f in enumerate(files, start=start_idx):
-            w, h = Image.open(str(f)).size
-            images.append({'id': i, 'file_name': f.name, 'width': w, 'height': h})
+            w, h = PIL.Image.open(str(f)).size
+            images.append({'id': i, 'file_name': f.relpath(imdir).as_posix(),
+                           'width': w, 'height': h})
         return images
 
     @classmethod
