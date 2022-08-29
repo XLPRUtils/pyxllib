@@ -141,6 +141,8 @@ class Connection(psycopg.Connection, SqlBase):
         :param dict cols: 要更新的字段及值
         :param dict where: 怎么匹配到对应记录
         :return:
+
+        >> xldb.update('xlapi', {'input': d}, {'id': x['id']})
         """
         kvs = ','.join([f'{k}=%s' for k in cols.keys()])
         ops = ' AND '.join([f'{k}=%s' for k in where.keys()])
@@ -295,7 +297,6 @@ class XlprDb(Connection):
         return self.execute('SELECT id FROM xlapi WHERE input=%s', (input,)).fetchone()[0]
 
     def insert_row2xlserver(self, request, xlapi_id=0):
-        print(request.base_url)
         kw = {'remote_addr': request.remote_addr,
               'token': request.headers.get('Token', None),
               'route': '/'.join(request.base_url.split('/')[3:]),
@@ -349,7 +350,7 @@ class XlprDb(Connection):
                 if len(buffer) < save_buffer_threshold_size:
                     self.insert_row2files(buffer, etag=im_etag, name='.jpg')
                 if update_record:
-                    input = {'mode': mode_name, 'etag': im_etag}
+                    input = {'mode': mode_name, 'image': im_etag}
                     if options:
                         input['options'] = options
                     xlapi_id = self.insert_row2xlapi(input, res, elapse_ms, on_conflict='REPLACE')
