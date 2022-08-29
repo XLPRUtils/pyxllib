@@ -367,15 +367,29 @@ class PaddleOCR(predict_system.TextSystem):
 
         指定的 det_model_dir、rec_model_dir 不存在时，会自动下载最新模型放到指定目录里
         """
-        # 1 路径类变量自动转str类型，注意None的要跳过
+        # 1 一些参数智能分析判断
+
+        # 如果设置了识别模型路径，并且模型目录里、或目录旁有char_dict.txt，则以此作为字典文件
+        if 'rec_model_dir' in kwargs and 'rec_char_dict_path' not in kwargs:
+            p1 = XlPath(kwargs['rec_model_dir']) / 'char_dict.txt'
+            p2 = XlPath(kwargs['rec_model_dir']).parent / 'char_dict.txt'
+            if p1.is_file():
+                kwargs['rec_char_dict_path'] = p1
+            elif p2.is_file():  # 如果同级目录有char_dict.txt也行
+                kwargs['rec_char_dict_path'] = p2
+
+        # 路径类变量自动转str类型，注意None的要跳过
         for k, v in kwargs.items():
             if k.endswith('_dir') or k.endswith('_path'):
                 if v is not None:
                     kwargs[k] = str(kwargs[k])
+
         # 2 构建一个ppocr对象
         ppocr = PaddleOCR(use_angle_cls=use_angle_cls, lang=lang, show_log=show_log, **kwargs)
+
         # 3 识别一张空图，预初始化，使得后面的计时更准确
         ppocr.ocr(np.zeros([320, 320, 3], dtype='uint8'))
+
         return ppocr
 
     def __1_ocr(self):
@@ -593,11 +607,12 @@ class PaddleOCR(predict_system.TextSystem):
         metric['fps'] = metric['total_frame'] / sum(timer.data)
         return metric
 
-    def rec_metric_labelme(self, root, *, cls=False, bc=False, print_mode=True, ignores=None):
+    def rec_metric_labelme(self, root, *, cls=False, bc=False, print_mode=True,
+                           max_file_num=None, attr_filter=None):
         """
         :param bc: 是否打开bcompare比较所有识别错误的内容
-        :param dict ignores: 不处理的特殊标记
-            比如 ignores={'content_class': '其它类'}
+        :param max_file_num: 有时候只想简单测下速度，可以只测几张图就够
+        :param attr_filter: def attr_filter(attr) 返回True才保留
         """
         from pyxllib.debug.specialist import bcompare
         from pyxlpr.ppocr.metrics.rec_metric import RecMetric
@@ -607,6 +622,8 @@ class PaddleOCR(predict_system.TextSystem):
         timer1, timer2 = Timer('读图速度'), Timer('总共耗时')
         # 有json文件才算有标注，空图最好也能对应一份空shapes的json文件才会进行判断
         files = list(XlPath(root).rglob_files('*.json'))
+        if max_file_num:
+            files = files[:max_file_num]
         tags, gts, preds = [], [], []
         for f in tqdm(files):
             data = f.read_json()
@@ -618,18 +635,17 @@ class PaddleOCR(predict_system.TextSystem):
             for i, sp in enumerate(data['shapes']):
                 attr = DictTool.json_loads(sp['label'], 'text')
 
-                # if ignores:
-                #     for k, v in ignores.items():
-                #         if attr.get(k) == v:
-                #             continue
+                if attr_filter and not attr_filter(attr):
+                    continue
 
                 tags.append(f'{f.stem}_{i:03}')  # 这里并不是要真的生成图片，所以有一定重复没有关系
                 subimg = xlcv.get_sub(img, sp['points'])
+                xlcv.write(subimg, f.parent / f'{f.stem}/{i:03}.png')
                 timer2.start()
                 text, score = self.rec_singleline(subimg, cls=cls)
                 timer2.stop()
                 preds.append(text)
-                gts.append(attr['text'])
+                gts.append(attr['text'].strip())
 
         # 2 精度测评及测速
         metrics = RecMetric.eval(preds, gts)
