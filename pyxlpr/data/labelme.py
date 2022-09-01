@@ -17,7 +17,7 @@ import numpy as np
 from pyxllib.prog.newbie import round_int
 from pyxllib.prog.pupil import DictTool
 from pyxllib.debug.specialist import get_xllog, Iterate, dprint
-from pyxllib.file.specialist import File, Dir, PathGroups, get_encoding, XlPath
+from pyxllib.file.specialist import XlPath, PathGroups, get_encoding, XlPath
 from pyxllib.prog.specialist import mtqdm
 from pyxllib.cv.expert import xlpil
 from pyxllib.algo.geo import ltrb2xywh, rect_bounds, warp_points, resort_quad_points, rect2polygon, get_warp_mat
@@ -36,7 +36,7 @@ class BasicLabelDataset:
         :param dict[str, readed_data] relpath2data: {relpath: data1, 'a/1.txt': data2, ...}
             如果未传入data具体值，则根据目录里的情况自动初始化获得data的值
 
-            relpath是对应的File标注文件的相对路径字符串
+            relpath是对应的XlPath标注文件的相对路径字符串
             data1, data2 是读取的标注数据，根据不同情况，会存成不同格式
                 如果是json则直接保存json内存对象结构
                 如果是txt可能会进行一定的结构化解析存储
@@ -55,7 +55,7 @@ class BasicLabelDataset:
         """
 
         # 1 基础操作
-        root = Dir(root)
+        root = XlPath(root)
         self.root, self.rp2data, self.extdata = root, relpath2data or {}, extdata or {}
         self.pathgs = None
 
@@ -64,7 +64,7 @@ class BasicLabelDataset:
 
         # 2 如果没有默认data数据，以及传入slt参数，则需要使用默认文件关联方式读取标注
         relpath2data = {}
-        gs = PathGroups.groupby(Dir(root).select_files('**/*'))
+        gs = PathGroups.groupby(XlPath(root).rglob_files())
         if isinstance(fltr, str):
             gs = gs.select_group_which_hassuffix(fltr)
         elif callable(fltr):
@@ -73,10 +73,10 @@ class BasicLabelDataset:
 
         # 3 读取数据
         for stem, suffixs in tqdm(gs.data.items(), f'{self.__class__.__name__}读取数据', disable=not prt):
-            f = File(stem + f'.{slt}')
+            f = XlPath(stem + f'.{slt}')
             if reads and f.exists():
                 # dprint(f)  # 空json会报错：json.decoder.JSONDecodeError: Expecting value: line 1 column 1 (char 0)
-                relpath2data[f.relpath(self.root)] = f.read()
+                relpath2data[f.relpath(self.root)] = f.read_auto()
             else:
                 relpath2data[f.relpath(self.root)] = None
 
@@ -89,19 +89,19 @@ class BasicLabelDataset:
         """
         :param relpath: 必须是斜杠表示的相对路径 'a/1.txt'、'b/2.json'
         """
-        self.rp2data[relpath] = File(relpath, self.root).read(**kwargs)
+        self.rp2data[relpath] = (self.root / relpath).read_auto(**kwargs)
 
     def reads(self, prt=False, **kwargs):
         """ 为了性能效率，初始化默认不会读取数据，需要调用reads才会开始读取数据 """
         for k in tqdm(self.rp2data.keys(), f'读取{self.__class__.__name__}数据', disable=not prt):
-            self.rp2data[k] = File(k, self.root).read(**kwargs)
+            self.rp2data[k] = (self.root / k).read_auto(**kwargs)
 
     def write(self, relpath, **kwargs):
         """
         :param relpath: 必须是斜杠表示的相对路径 'a/1.txt'、'b/2.json'
         """
         data = self.rp2data[relpath]
-        file = File(relpath, self.root)
+        file = self.root / relpath
         if file:  # 如果文件存在，要遵循原有的编码规则
             with open(str(file), 'rb') as f:
                 bstr = f.read()
@@ -136,6 +136,8 @@ def is_labelme_json_data(data):
     :param data: dict
     :return: True or False
     """
+    if not isinstance(data, dict):
+        return False
     has_keys = set('version flags shapes imagePath imageData imageHeight imageWidth'.split())
     return not (has_keys - data.keys())
 
@@ -151,7 +153,7 @@ def reduce_labelme_jsonfile(jsonpath):
 
     if is_labelme_json_data(data) and data['imageData']:
         data['imageData'] = None
-        File(p).write(data, encoding=encoding, if_exists='replace')
+        XlPath(p).write_auto(data, encoding=encoding, if_exists='replace')
 
 
 class ToLabelmeJson:
@@ -171,7 +173,7 @@ class ToLabelmeJson:
         """
         :param imgpath: 可选参数图片路径，强烈建议要输入，否则建立的label json会少掉图片宽高信息
         """
-        self.imgpath = File(imgpath)
+        self.imgpath = XlPath(imgpath)
         # 读取图片数据，在一些转换规则比较复杂，有可能要用到原图数据
         if self.imgpath:
             # 一般都只需要获得尺寸，用pil读取即可，速度更快，不需要读取图片rgb数据
@@ -260,7 +262,7 @@ class ToLabelmeJson:
         if dst is None and self.imgpath:
             dst = self.imgpath.with_suffix('.json')
         # 官方json支持indent=None的写法，但是ujson必须要显式写indent=0
-        return File(dst).write(self.data, if_exists=if_exists, indent=0)
+        return XlPath(dst).write_auto(self.data, if_exists=if_exists, indent=0)
 
     @classmethod
     def create_json(cls, imgpath, annotation):
@@ -281,9 +283,9 @@ class ToLabelmeJson:
         :param labeldir: 标注数据路径，默认跟imdir同目录
         :return:
         """
-        ims = Dir(imdir).select_files(['*.jpg', '*.png'])
+        ims = XlPath(imdir).rglob_images()
         if not labeldir: labeldir = imdir
-        txts = [File(f.stem, labeldir, suffix=label_file_suffix) for f in ims]
+        txts = [(XlPath(labeldir) / (f.stem + label_file_suffix)) for f in ims]
         cls.main_pair(ims, txts)
 
     @classmethod
@@ -297,7 +299,7 @@ class Quad2Labelme(ToLabelmeJson):
     """ 四边形类标注转labelme """
 
     def get_data(self, infile):
-        lines = File(infile).read().splitlines()
+        lines = XlPath(infile).read_text().splitlines()
         for line in lines:
             # 一般是要改这里，每行数据的解析规则
             vals = line.split(',', maxsplit=8)
@@ -322,7 +324,7 @@ class LabelmeDict:
         """
         # 1 传入图片路径的初始化
         if imfile:
-            file = File(imfile)
+            file = XlPath(imfile)
             name = file.name
             img = xlpil.read(file)
             height, width = img.height, img.width
@@ -413,6 +415,58 @@ class LabelmeDict:
 
         lmdict['imageData'] = None
         return lmdict
+
+    @classmethod
+    def refine_structure(cls, old_json_path, *, old_img_path=None,
+                         new_stem_name=None, new_img_suffix=None):
+        """ 重置labelme标注文件，这是一个比较综合的调整优化接口
+
+        :param old_json_path: 原json路径
+        :param old_img_path: 原图路径，可以不填，从old_json_path推算出来
+        :param new_stem_name: 新的stem昵称，没写的时候，以json的stem为准
+        :param new_img_suffix: 是否要调整图片后缀格式，常用图图片格式统一操作
+            没写的时候，以找到的图片为准，如果图片没找到，则以imagePath的后缀为准
+        """
+        from pyxllib.cv.expert import xlcv
+
+        # 1 参数解析
+        old_json_path = XlPath(old_json_path)
+        parent = old_json_path.parent
+        lmdict = old_json_path.read_json()
+
+        if old_img_path is None:
+            old_img_path = parent / lmdict['imagePath']
+            if not old_img_path.is_file():
+                # 如果imagePath的图片并不存在，需要用json的名称去推导，如果也还是不存在，就按照imagePath的后缀设置
+                try:
+                    old_img_path = next(parent.glob_images(f'{old_json_path.stem}.*'))
+                except StopIteration:
+                    old_img_path = parent / (old_json_path.stem + XlPath(lmdict['imagePath']).suffix)
+
+        if new_stem_name is None:
+            new_stem_name = old_json_path.stem
+
+        if new_img_suffix is None:
+            new_img_suffix = old_img_path.suffix
+
+        # 2 重命名、重置
+        new_json_path = parent / (new_stem_name + '.json')
+        new_img_path = parent / (new_stem_name + new_img_suffix)
+
+        # 优化json数据
+        cls.reduce(lmdict)
+        lmdict['imagePath'] = new_img_path.name
+        new_json_path.write_json(lmdict)
+        if new_json_path.as_posix() != old_json_path.as_posix():
+            old_json_path.delete()
+
+        # TODO points浮点过长的优化？xllabelme默认优化了？
+
+        # 优化图片
+        if old_img_path.is_file():
+            xlcv.write(xlcv.read(old_img_path), new_img_path)
+            if new_img_path.as_posix() != old_img_path.as_posix():
+                old_img_path.delete()
 
     @classmethod
     def flip_points(cls, lmdict, direction, *, inplace=True):
@@ -533,14 +587,32 @@ class LabelmeDataset(BasicLabelDataset):
         # 已有的数据已经读取了，这里要补充空labelme标注
         if self.pathgs:
             for stem, suffixs in tqdm(self.pathgs.data.items(), f'{self.__class__.__name__}优化数据', disable=not prt):
-                f = File(stem + f'.{slt}')
+                f = XlPath(stem + f'.{slt}')
                 if reads and not f.exists():
-                    self.rp2data[f.relpath(self.root)] = LabelmeDict.gen_data(File(stem, suffix=suffixs[0]))
+                    self.rp2data[f.relpath(self.root)] = LabelmeDict.gen_data(XlPath.init(stem, suffix=suffixs[0]))
+
+        # 优化rp2data，去掉一些并不是labelme的字典
+        rp2data = {}
+        for k, v in self.rp2data.items():
+            if is_labelme_json_data(v):
+                rp2data[k] = v
+        self.rp2data = rp2data
 
     def reduces(self):
         """ 移除imageData字段值 """
-        for _, lmdict in self.rp2data:
+        for lmdict in self.rp2data.values():
             LabelmeDict.reduce(lmdict)
+
+    def refine_structures(self, *, img_suffix=None):
+        """ 整套labelme数据的重置
+
+        :param img_suffix: 是否统一图片的后缀格式，比如.jpg
+
+        不过不同的情景问题不同，请了解清楚这个函数的算法逻辑，能解决什么性质的问题后，再调用
+        """
+        # 有些字典的imagePath可能有错误，可以调用该方法修正
+        for jsonfile in tqdm(self.rp2data.keys(), desc='labelme字典优化'):
+            LabelmeDict.refine_structure(self.root / jsonfile, new_img_suffix=img_suffix)
 
     def update_labelattrs(self, *, points=False):
         """ 将shape['label'] 升级为字典类型
