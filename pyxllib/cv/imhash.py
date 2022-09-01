@@ -28,3 +28,10 @@ def phash(image, *args, **kwargs):
     """
     im = xlpil.read(image)
     return imagehash.phash(im, *args, **kwargs)
+
+
+def dhash(image, *args, **kwargs):
+    """ 修改了官方接口，这里输入的image支持泛用格式
+    """
+    im = xlpil.read(image)
+    return imagehash.dhash(im, *args, **kwargs)

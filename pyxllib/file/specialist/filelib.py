@@ -1276,31 +1276,44 @@ class XlPath(type(pathlib.Path())):
     def __4_重复文件相关功能(self):
         """ 检查目录里的各种文件情况 """
 
-    def glob_repeat_files(self, pattern='*', *, sort_mode='count', print_mode=False):
+    def glob_repeat_files(self, pattern='*', *, sort_mode='count', print_mode=False,
+                          files=None, hash_func=None):
         """ 返回重复的文件组
 
+        :param files: 直接指定候选文件清单，此时pattern默认失效
+        :param hash_func: hash规则，默认使用etag规则
         :param sort_mode:
             count: 按照重复的文件数量从多到少排序
             size: 按照空间总占用量从大到小排序
         :return: [(etag, files, per_file_size), ...]
         """
+        # 0 文件清单和hash方法
+        if files is None:
+            files = list(self.glob_files(pattern))
+
+        if hash_func is None:
+            def hash_func(f):
+                return get_etag(str(f))
+
         # 1 获取所有etag，这一步比较费时
-        etag2files = defaultdict(list)
-        for f in tqdm(self.glob_files(pattern), desc='get etags', disable=not print_mode):
-            etag = get_etag(str(f))
-            etag2files[etag].append(f)
+        hash2files = defaultdict(list)
+
+        for f in tqdm(files, desc='get etags', disable=not print_mode):
+            etag = hash_func(f)
+            hash2files[etag].append(f)
 
         # 2 转格式，排序
-        etag2files = [(k, vs, vs[0].size()) for k, vs in etag2files.items() if len(vs) > 1]
+        hash2files = [(k, vs, vs[0].size()) for k, vs in hash2files.items() if len(vs) > 1]
         if sort_mode == 'count':
-            etag2files.sort(key=lambda x: (-len(x[1]), -len(x[1]) * x[2]))
+            hash2files.sort(key=lambda x: (-len(x[1]), -len(x[1]) * x[2]))
         elif sort_mode == 'size':
-            etag2files.sort(key=lambda x: (-len(x[1]) * x[2], -len(x[1])))
+            hash2files.sort(key=lambda x: (-len(x[1]) * x[2], -len(x[1])))
 
         # 3 返回每一组数据
-        return etag2files
+        return hash2files
 
-    def delete_repeat_files(self, pattern='*', *, sort_mode='count', print_mode=True, debug=False):
+    def delete_repeat_files(self, pattern='*', *, sort_mode='count', print_mode=True, debug=False,
+                            files=None, hash_func=None):
         """
         :param debug:
             True，只是输出检查清单，不做操作
@@ -1315,7 +1328,8 @@ class XlPath(type(pathlib.Path())):
             if print_mode:
                 print(*args, **kwargs)
 
-        files = self.glob_repeat_files(pattern, sort_mode=sort_mode, print_mode=print_mode)
+        files = self.glob_repeat_files(pattern, sort_mode=sort_mode, print_mode=print_mode,
+                                       files=files, hash_func=hash_func)
         for i, (etag, files, _size) in enumerate(files, start=1):
             n = len(files)
             printf(f'{i}、{etag}\t{format_size(_size)} × {n} ≈ {format_size(_size * n)}')
@@ -1331,6 +1345,16 @@ class XlPath(type(pathlib.Path())):
                         printf(f'\t{f.relpath(self)}\tdelete')
             if print_mode:
                 printf()
+
+    def check_repeat_files(self, pattern='**/*', **kwargs):
+        if 'debug' not in kwargs:
+            kwargs['debug'] = True
+        self.delete_repeat_files(pattern, **kwargs)
+
+    def check_repeat_name_files(self, pattern='**/*', **kwargs):
+        if 'hash_func' not in kwargs:
+            kwargs['hash_func'] = lambda p: p.name.lower()
+        self.check_repeat_files(pattern, **kwargs)
 
     def __5_文件后缀相关功能(self):
         """ 检查目录里的各种文件情况 """
