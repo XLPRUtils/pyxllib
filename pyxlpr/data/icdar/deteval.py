@@ -8,13 +8,13 @@
 #Description: Evaluation script that computes Text Localization following the Deteval implementation
 
 from collections import namedtuple
-import pyxllib.data.icdar.rrc_evaluation_funcs_1_1 as rrc_evaluation_funcs
+import pyxlpr.data.icdar.rrc_evaluation_funcs_1_1 as rrc_evaluation_funcs
 import importlib
 
 def evaluation_imports():
     """
     evaluation_imports: Dictionary ( key = module name , value = alias  )  with python modules used in the evaluation. 
-    """    
+    """
     return {
             'math':'math',
             'numpy':'np'
@@ -33,7 +33,7 @@ def default_evaluation_params():
                 'MTYPE_OM_M':1.,
                 'GT_SAMPLE_NAME_2_ID':'gt_img_([0-9]+).txt',
                 'DET_SAMPLE_NAME_2_ID':'res_img_([0-9]+).txt',
-                'CRLF':False # Lines are delimited by Windows CRLF format                
+                'CRLF':False # Lines are delimited by Windows CRLF format
             }
 
 def validate_data(gtFilePath, submFilePath,evaluationParams):
@@ -45,7 +45,7 @@ def validate_data(gtFilePath, submFilePath,evaluationParams):
     gt = rrc_evaluation_funcs.load_zip_file(gtFilePath, evaluationParams['GT_SAMPLE_NAME_2_ID'])
 
     subm = rrc_evaluation_funcs.load_zip_file(submFilePath, evaluationParams['DET_SAMPLE_NAME_2_ID'], True)
-    
+
     #Validate format of GroundTruth
     for k in gt:
         rrc_evaluation_funcs.validate_lines_in_file(k,gt[k],evaluationParams['CRLF'],True,True)
@@ -54,39 +54,39 @@ def validate_data(gtFilePath, submFilePath,evaluationParams):
     for k in subm:
         if (k in gt) == False :
             raise Exception("The sample %s not present in GT" %k)
-        
+
         rrc_evaluation_funcs.validate_lines_in_file(k,subm[k],evaluationParams['CRLF'],True,False)
 
-    
+
 def evaluate_method(gtFilePath, submFilePath, evaluationParams):
     """
     Method evaluate_method: evaluate method and returns the results
         Results. Dictionary with the following values:
         - method (required)  Global method metrics. Ex: { 'Precision':0.8,'Recall':0.9 }
         - samples (optional) Per sample metrics. Ex: {'sample1' : { 'Precision':0.8,'Recall':0.9 } , 'sample2' : { 'Precision':0.8,'Recall':0.9 }
-    """    
+    """
 
     for module,alias in evaluation_imports().items():
         globals()[alias] = importlib.import_module(module)
 
     def one_to_one_match(row, col):
         cont = 0
-        for j in range(len(recallMat[0])):    
+        for j in range(len(recallMat[0])):
             if recallMat[row,j] >= evaluationParams['AREA_RECALL_CONSTRAINT'] and precisionMat[row,j] >= evaluationParams['AREA_PRECISION_CONSTRAINT'] :
                 cont = cont +1
         if (cont != 1):
             return False
         cont = 0
-        for i in range(len(recallMat)):    
+        for i in range(len(recallMat)):
             if recallMat[i,col] >= evaluationParams['AREA_RECALL_CONSTRAINT'] and precisionMat[i,col] >= evaluationParams['AREA_PRECISION_CONSTRAINT'] :
                 cont = cont +1
         if (cont != 1):
             return False
-        
+
         if recallMat[row,col] >= evaluationParams['AREA_RECALL_CONSTRAINT'] and precisionMat[row,col] >= evaluationParams['AREA_PRECISION_CONSTRAINT'] :
             return True
         return False
-    
+
     def num_overlaps_gt(gtNum):
         cont = 0
         for detNum in range(len(detRects)):
@@ -97,22 +97,22 @@ def evaluate_method(gtFilePath, submFilePath, evaluationParams):
 
     def num_overlaps_det(detNum):
         cont = 0
-        for gtNum in range(len(recallMat)):    
+        for gtNum in range(len(recallMat)):
             if gtNum not in gtDontCareRectsNum:
                 if recallMat[gtNum,detNum] > 0 :
                     cont = cont +1
         return cont
-    
+
     def is_single_overlap(row, col):
         if num_overlaps_gt(row)==1 and num_overlaps_det(col)==1:
             return True
         else:
             return False
-    
+
     def one_to_many_match(gtNum):
         many_sum = 0
         detRects = []
-        for detNum in range(len(recallMat[0])):    
+        for detNum in range(len(recallMat[0])):
             if gtRectMat[gtNum] == 0 and detRectMat[detNum] == 0 and detNum not in detDontCareRectsNum:
                 if precisionMat[gtNum,detNum] >= evaluationParams['AREA_PRECISION_CONSTRAINT'] :
                     many_sum += recallMat[gtNum,detNum]
@@ -120,12 +120,12 @@ def evaluate_method(gtFilePath, submFilePath, evaluationParams):
         if round(many_sum,4) >=evaluationParams['AREA_RECALL_CONSTRAINT'] :
             return True,detRects
         else:
-            return False,[]         
-    
+            return False,[]
+
     def many_to_one_match(detNum):
         many_sum = 0
         gtRects = []
-        for gtNum in range(len(recallMat)):    
+        for gtNum in range(len(recallMat)):
             if gtRectMat[gtNum] == 0 and detRectMat[detNum] == 0 and gtNum not in gtDontCareRectsNum:
                 if recallMat[gtNum,detNum] >= evaluationParams['AREA_RECALL_CONSTRAINT'] :
                     many_sum += precisionMat[gtNum,detNum]
@@ -134,7 +134,7 @@ def evaluate_method(gtFilePath, submFilePath, evaluationParams):
             return True,gtRects
         else:
             return False,[]
-    
+
     def area(a, b):
             dx = min(a.xmax, b.xmax) - max(a.xmin, b.xmin) + 1
             dy = min(a.ymax, b.ymax) - max(a.ymin, b.ymin) + 1
@@ -142,38 +142,38 @@ def evaluate_method(gtFilePath, submFilePath, evaluationParams):
                     return dx*dy
             else:
                     return 0.
-    
+
     def center(r):
         x = float(r.xmin) + float(r.xmax - r.xmin + 1) / 2.;
         y = float(r.ymin) + float(r.ymax - r.ymin + 1) / 2.;
         return Point(x,y)
-        
+
     def point_distance(r1, r2):
         distx = math.fabs(r1.x - r2.x)
         disty = math.fabs(r1.y - r2.y)
-        return math.sqrt(distx * distx + disty * disty )  
-        
-    
+        return math.sqrt(distx * distx + disty * disty )
+
+
     def center_distance(r1, r2):
         return point_distance(center(r1), center(r2))
-    
+
     def diag(r):
         w = (r.xmax - r.xmin + 1)
         h = (r.ymax - r.ymin + 1)
-        return math.sqrt(h * h + w * w)  
-    
+        return math.sqrt(h * h + w * w)
+
     def rectangle_to_points(rect):
         points = [int(rect.xmin), int(rect.ymax), int(rect.xmax), int(rect.ymax), int(rect.xmax), int(rect.ymin), int(rect.xmin), int(rect.ymin)]
-        return points    
-    
+        return points
+
     perSampleMetrics = {}
-    
+
     methodRecallSum = 0
     methodPrecisionSum = 0
-    
+
     Rectangle = namedtuple('Rectangle', 'xmin ymin xmax ymax')
     Point = namedtuple('Point', 'x y')
-    
+
     if isinstance(gtFilePath, str):
         gt = rrc_evaluation_funcs.load_zip_file(gtFilePath,evaluationParams['GT_SAMPLE_NAME_2_ID'])
     else:
@@ -185,7 +185,7 @@ def evaluate_method(gtFilePath, submFilePath, evaluationParams):
 
     numGt = 0;
     numDet = 0;
-   
+
     for resFile in gt:
         if isinstance(gt[resFile], bytes):
             gtFile = rrc_evaluation_funcs.decode_utf8(gt[resFile])
@@ -193,7 +193,7 @@ def evaluate_method(gtFilePath, submFilePath, evaluationParams):
             gtFile = gt[resFile]
         recall = 0
         precision = 0
-        hmean = 0        
+        hmean = 0
         recallAccum = 0.
         precisionAccum = 0.
         gtRects = []
@@ -204,10 +204,10 @@ def evaluate_method(gtFilePath, submFilePath, evaluationParams):
         detDontCareRectsNum = []#Array of Detected Rectangles' matched with a don't Care GT
         pairs = []
         evaluationLog = ""
-        
+
         recallMat = np.empty([1,1])
-        precisionMat = np.empty([1,1])              
-        
+        precisionMat = np.empty([1,1])
+
         pointsList,_,transcriptionsList = rrc_evaluation_funcs.get_tl_line_values_from_file_contents(gtFile,evaluationParams['CRLF'],True,True,False)
         for n in range(len(pointsList)):
             points = pointsList[n]
@@ -217,10 +217,10 @@ def evaluate_method(gtFilePath, submFilePath, evaluationParams):
             gtRects.append(gtRect)
             gtPolPoints.append(points)
             if dontCare:
-                gtDontCareRectsNum.append( len(gtRects)-1 )                 
-        
+                gtDontCareRectsNum.append( len(gtRects)-1 )
+
         evaluationLog += "GT rectangles: " + str(len(gtRects)) + (" (" + str(len(gtDontCareRectsNum)) + " don't care)\n" if len(gtDontCareRectsNum)>0 else "\n")
-        
+
         if resFile in subm:
             if isinstance(subm[resFile], bytes):
                 detFile = rrc_evaluation_funcs.decode_utf8(subm[resFile])
@@ -228,7 +228,7 @@ def evaluate_method(gtFilePath, submFilePath, evaluationParams):
                 detFile = subm[resFile]
             pointsList,_,_ = rrc_evaluation_funcs.get_tl_line_values_from_file_contents(detFile,evaluationParams['CRLF'],True,False,False)
             for n in range(len(pointsList)):
-                points = pointsList[n]            
+                points = pointsList[n]
                 detRect = Rectangle(*points)
                 detRects.append(detRect)
                 detPolPoints.append(points)
@@ -310,7 +310,7 @@ def evaluate_method(gtFilePath, submFilePath, evaluationParams):
                                     detRectMat[detNum] = 1
                                 evaluationLog += "Match GT #" + str(gtNum) + " with Det #" + str(matchesDet) + "\n"
                             else:
-                                evaluationLog += "Match Discarded GT #" + str(gtNum) + " with Det #" + str(matchesDet) + " not single overlap\n"    
+                                evaluationLog += "Match Discarded GT #" + str(gtNum) + " with Det #" + str(matchesDet) + " not single overlap\n"
 
                 # Find many-to-one matches
                 evaluationLog += "Find many-to-one matches\n"
@@ -319,7 +319,7 @@ def evaluate_method(gtFilePath, submFilePath, evaluationParams):
                         match,matchesGt = many_to_one_match(detNum)
                         if match is True :
                             #in deteval we have to make other validation before mark as one-to-one
-                            if num_overlaps_det(detNum)>=2 :                          
+                            if num_overlaps_det(detNum)>=2 :
                                 detRectMat[detNum] = 1
                                 recallAccum += (evaluationParams['MTYPE_OO_O'] if len(matchesGt)==1 else evaluationParams['MTYPE_OM_M']*len(matchesGt))
                                 precisionAccum += (evaluationParams['MTYPE_OO_O'] if len(matchesGt)==1 else evaluationParams['MTYPE_OM_M'])
@@ -328,7 +328,7 @@ def evaluate_method(gtFilePath, submFilePath, evaluationParams):
                                     gtRectMat[gtNum] = 1
                                 evaluationLog += "Match GT #" + str(matchesGt) + " with Det #" + str(detNum) + "\n"
                             else:
-                                evaluationLog += "Match Discarded GT #" + str(matchesGt) + " with Det #" + str(detNum) + " not single overlap\n"                                    
+                                evaluationLog += "Match Discarded GT #" + str(matchesGt) + " with Det #" + str(detNum) + " not single overlap\n"
 
                 numGtCare = (len(gtRects) - len(gtDontCareRectsNum))
                 if numGtCare == 0:
@@ -337,7 +337,7 @@ def evaluate_method(gtFilePath, submFilePath, evaluationParams):
                 else:
                     recall = float(recallAccum) / numGtCare
                     precision =  float(0) if (len(detRects) - len(detDontCareRectsNum))==0 else float(precisionAccum) / (len(detRects) - len(detDontCareRectsNum))
-                hmean = 0 if (precision + recall)==0 else 2.0 * precision * recall / (precision + recall)  
+                hmean = 0 if (precision + recall)==0 else 2.0 * precision * recall / (precision + recall)
 
         methodRecallSum += recallAccum
         methodPrecisionSum += precisionAccum
@@ -358,20 +358,20 @@ def evaluate_method(gtFilePath, submFilePath, evaluationParams):
                                         'evaluationParams': evaluationParams,
                                         'evaluationLog': evaluationLog
                                     }
-        
+
     methodRecall = 0 if numGt==0 else methodRecallSum/numGt
     methodPrecision = 0 if numDet==0 else methodPrecisionSum/numDet
     methodHmean = 0 if methodRecall + methodPrecision==0 else 2* methodRecall * methodPrecision / (methodRecall + methodPrecision)
-    
+
     methodMetrics = {'precision':methodPrecision, 'recall':methodRecall,'hmean': methodHmean  }
 
     resDict = {'calculated':True,'Message':'','method': methodMetrics,'per_sample': perSampleMetrics}
-    
-    
+
+
     return resDict;
 
 
 
 if __name__=='__main__':
-        
+
     rrc_evaluation_funcs.main_evaluation(None,default_evaluation_params,validate_data,evaluate_method)

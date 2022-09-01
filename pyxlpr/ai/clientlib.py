@@ -979,12 +979,13 @@ class XlAiClient:
     def __D_福建省模式识别与图像理解重点实验室(self):
         pass
 
-    def _priu_read_image(self, image):
-        # 不进行尺寸、文件大小压缩，这样会由平台上负责进行ratio缩放计算
+    def _priu_read_image(self, image, min_length=None, max_length=None,
+                         limit_b64buffer_size=None, b64encode=None, **kwargs):
+        # 默认不进行尺寸、文件大小压缩，这样会由平台上负责进行ratio缩放计算
         buffer, ratio = self.adjust_image(image,
-                                          min_length=None, max_length=None,
-                                          limit_b64buffer_size=None,
-                                          b64encode=True)
+                                          min_length=min_length, max_length=max_length,
+                                          limit_b64buffer_size=limit_b64buffer_size,
+                                          b64encode=b64encode, **kwargs)
         assert ratio == 1, f'本地不做缩放，由服务器进行缩放处理'
         return buffer.decode()
 

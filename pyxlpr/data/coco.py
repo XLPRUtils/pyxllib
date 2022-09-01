@@ -42,7 +42,7 @@ from pyxllib.prog.specialist import mtqdm
 from pyxllib.algo.pupil import Groups, make_index_function, matchpairs
 from pyxllib.algo.geo import rect_bounds, rect2polygon, reshape_coords, ltrb2xywh, xywh2ltrb, ComputeIou
 from pyxllib.algo.stat import dataframes_to_excel
-from pyxllib.file.specialist import File, Dir, PathGroups, XlPath
+from pyxllib.file.specialist import PathGroups, XlPath
 from pyxllib.debug.specialist import get_xllog
 from pyxlpr.data.icdar import IcdarEval
 from pyxlpr.data.labelme import LABEL_COLORMAP7, ToLabelmeJson, LabelmeDataset, LabelmeDict
@@ -58,7 +58,7 @@ class CocoGtData:
     """
 
     def __init__(self, gt):
-        self.gt_dict = gt if isinstance(gt, dict) else File(gt).read()
+        self.gt_dict = gt if isinstance(gt, dict) else XlPath(gt).read_json()
 
     @classmethod
     def gen_image(cls, image_id, file_name, height=None, width=None, **kwargs):
@@ -155,7 +155,7 @@ class CocoGtData:
         :param start_box_id: box_id起始编号
         :param category_id: 归属类别
         """
-        lines = File(file).read()
+        lines = XlPath(file).read_text()
         box_id = start_box_id
         annotations = []
         for line in lines.splitlines():
@@ -188,7 +188,7 @@ class CocoGtData:
     def gen_gt_dict(cls, images, annotations, categories, outfile=None):
         data = {'images': images, 'annotations': annotations, 'categories': categories}
         if outfile is not None:
-            File(outfile).write(data)
+            XlPath(outfile).write_json(data)
         return data
 
     @classmethod
@@ -322,7 +322,7 @@ class CocoGtData:
         :return:
             extdata，存储了一些匹配异常信息
         """
-        root, data = Dir(root), {}
+        root, data = XlPath(root), {}
         catid2name = {x['id']: x['name'] for x in self.gt_dict['categories']}
 
         # 1 准备工作，构建文件名索引字典
@@ -438,7 +438,7 @@ class CocoData(CocoGtData):
             if not dt:
                 dt_list = default_dt
             else:
-                dt_list = dt if isinstance(dt, (list, tuple)) else File(dt).read()
+                dt_list = dt if isinstance(dt, (list, tuple)) else XlPath(dt).read_json()
                 if min_score:
                     dt_list = [b for b in dt_list if (b['score'] >= min_score)]
                 if not dt_list:
@@ -941,7 +941,7 @@ class CocoParser(CocoEval):
         def func(g):
             # 1 获得图片id和文件
             image_id, df = g
-            imfile = File(df.iloc[0]['file_name'], imdir)
+            imfile = XlPath(imdir) / df.iloc[0]['file_name']
             if not imfile:
                 return  # 如果没有图片不处理
 
@@ -958,8 +958,7 @@ class CocoParser(CocoEval):
             lm.write()  # 保存json文件到img对应目录下
 
         if dst_dir:
-            dst_dir = Dir(dst_dir)
-            dst_dir.ensure_dir()
+            os.makedirs(dst_dir, exist_ok=True)
         gt_anns = self.gt_anns.copy()
         # 为了方便labelme操作，需要扩展几列内容
         gt_anns['file_name'] = [self.images.loc[x, 'file_name'] for x in gt_anns['image_id']]
@@ -1221,7 +1220,7 @@ class CocoMatch(CocoParser, CocoMatchBase):
 
         return categories
 
-    def eval_all(self):
+    def eval_all(self, multi_iou_step=0.1):
         """ 把目前支持的所有coco格式的测评全部跑一遍
         """
         xllog = get_xllog()
@@ -1232,21 +1231,25 @@ class CocoMatch(CocoParser, CocoMatchBase):
         ie = IcdarEval(*self.to_icdareval_data())
         print('icdar2013  ', ie.icdar2013())
         print('deteval    ', ie.deteval())
-        print('iou        ', ie.iou())
+        if sys.platform != 'win32':  # 这个功能好像在windows运行不了
+            print('iou        ', ie.iou())
         ie = IcdarEval(*self.to_icdareval_data(min_score=0.5))
         print('如果滤除dt中score<0.5的低置信度框：')
         print('icdar2013  ', ie.icdar2013())
         print('deteval    ', ie.deteval())
-        print('iou        ', ie.iou())
+        if sys.platform != 'win32':
+            print('iou        ', ie.iou())
         sys.stdout.flush()
 
         xllog.info('3 框匹配情况，多分类F1值')
         # TODO 这个结果补充画个图表？
         print(f'gt共有{self.n_gt_box()}，dt共有{self.n_dt_box()}')
-        print(self.multi_iou_f1_df(0.1))
+        print(self.multi_iou_f1_df(multi_iou_step))
 
         xllog.info('4 dt按不同score过滤后效果')
-        print(self.parse_dt_score())
+        with pd.option_context('display.max_colwidth', -1, 'display.max_columns', 20,
+                               'display.width', 200):  # 上下文控制格式
+            print(self.parse_dt_score())
 
     def to_excel(self, savepath, *, segmentation=False):
         dataframes_to_excel(savepath,
@@ -1265,7 +1268,7 @@ class CocoMatch(CocoParser, CocoMatchBase):
         def func(g):
             # 1 获得图片id和文件
             image_id, df = g
-            imfile = File(df.iloc[0]['file_name'], imdir)
+            imfile = XlPath(imdir) / df.iloc[0]['file_name']
             if not imfile:
                 return  # 如果没有图片不处理
             image = self.images.loc[image_id]
@@ -1284,8 +1287,7 @@ class CocoMatch(CocoParser, CocoMatchBase):
             lm.write(if_exists=None)  # 保存json文件到img对应目录下
 
         if dst_dir is not None:
-            dst_dir = Dir(dst_dir)
-            dst_dir.ensure_dir()
+            os.makedirs(dst_dir, exist_ok=True)
         match_anns = self.match_anns.copy()
         # 为了方便labelme操作，需要扩展几列内容
         match_anns['file_name'] = [self.images.loc[x, 'file_name'] for x in match_anns['image_id']]

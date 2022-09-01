@@ -14,7 +14,7 @@ import numpy as np
 import requests
 
 from pyxllib.algo.geo import rect_bounds, warp_points, reshape_coords, quad_warp_wh, get_warp_mat, rect2polygon
-from pyxllib.file.specialist import File
+from pyxllib.file.specialist import XlPath
 from pyxllib.prog.newbie import round_int, RunOnlyOnce
 from pyxllib.prog.pupil import EnchantBase, EnchantCvt
 
@@ -68,7 +68,7 @@ class xlcv(EnchantBase):
 
         if xlcv.is_cv2_image(file):
             im = file
-        elif File.safe_init(file):
+        elif XlPath.safe_init(file):
             # https://www.yuque.com/xlpr/pyxllib/imread
             # + np.frombuffer
             im = cv2.imdecode(np.fromfile(str(file), dtype=np.uint8), -1 if flags is None else flags)
@@ -78,7 +78,14 @@ class xlcv(EnchantBase):
             im = xlpil.to_cv2_image(file)
         else:
             raise TypeError(f'类型错误或文件不存在：{type(file)} {file}')
-        return xlcv.cvt_channel(im, flags)
+
+        if im.dtype == np.uint16:
+            # uint16类型，统一转为uint8。就我目前所会遇到的所有需求，都不需要用到uint16，反而会带来很多麻烦。
+            im = cv2.convertScaleAbs(im, alpha=255. / 65535.)
+
+        im = xlcv.cvt_channel(im, flags)
+
+        return im
 
     @staticmethod
     def read_from_buffer(buffer, flags=None, *, b64decode=False):
@@ -227,10 +234,11 @@ class xlcv(EnchantBase):
 
     @staticmethod
     def write(im, file, if_exists='replace'):
-        if not isinstance(file, File):
-            file = File(file)
+        file = XlPath(file)
         data = cv2.imencode(ext=file.suffix, img=im)[1]
-        return file.write(data.tobytes(), if_exists=if_exists)
+        if file.exist_preprcs(if_exists):
+            file.write_bytes(data.tobytes())
+        return file
 
     @staticmethod
     def show(im):

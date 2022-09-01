@@ -865,6 +865,37 @@ class XlPath(type(pathlib.Path())):
             dir = tempfile.gettempdir()
         return cls(tempfile.mktemp(suffix=suffix, dir=dir))
 
+    @classmethod
+    def init(cls, path, root=None, *, suffix=None):
+        """ 仿照原来File的初始化接口形式 """
+        p = XlPath(path)
+        if root:
+            p = XlPath(root) / p
+
+        if suffix:
+            if suffix[0] == '.':  # 使用.时强制修改后缀
+                p = p.with_suffix(suffix)
+            elif not p.suffix:
+                p = p.with_suffix('.' + suffix)
+
+        return p
+
+    @classmethod
+    def safe_init(cls, arg_in):
+        """ 输入任意类型的_in，会用比较安全的机制，判断其是否为一个有效的路径格式并初始化
+        初始化失败则返回None
+        """
+        try:
+            p = XlPath(arg_in)
+            p.is_file()  # 有些问题上一步不一定测的出来，要再补一个测试。具体存不存在是不是文件并不重要，而是使用这个能检查出问题。
+            return p
+        except (ValueError, TypeError, OSError, PermissionError):
+            # ValueError：文件名过长，代表输入很可能是一段文本，根本不是路径
+            # TypeError：不是str等正常的参数
+            # OSError：非法路径名，例如有 *? 等
+            # PermissionError: linux上访问无权限、不存在的路径
+            return None
+
     def start(self, *args, **kwargs):
         """ 使用关联的程序打开p，类似于双击的效果
 
@@ -1036,14 +1067,16 @@ class XlPath(type(pathlib.Path())):
         else:  # 非文件对象
             raise FileNotFoundError(f'{self} 文件不存在，无法读取。')
 
-    def write_auto(self, data, *args, **kwargs):
+    def write_auto(self, data, *args, if_exists=None, **kwargs):
         """ 根据文件后缀自动识别写入函数 """
         mode = self.suffix.lower()[1:]
         write_func = getattr(self, 'write_' + mode, None)
-        if write_func:
-            return write_func(data, *args, **kwargs)
-        else:
-            return self.write_text(str(data), *args, **kwargs)
+        if self.exist_preprcs(if_exists):
+            if write_func:
+                return write_func(data, *args, **kwargs)
+            else:
+                return self.write_text(str(data), *args, **kwargs)
+        return self
 
     def __2_glob(self):
         """ 类型判断、glob系列 """
@@ -1140,7 +1173,55 @@ class XlPath(type(pathlib.Path())):
         """ 复制、删除、移动等操作 """
         pass
 
-    def rename2(self, dst, *, if_exists=None):
+    def exist_preprcs(self, if_exists=None):
+        """ 从旧版File机制复制过来的函数
+
+        这个实际上是在做copy等操作前，如果目标文件已存在，需要预先删除等的预处理
+        并返回判断，是否需要执行下一步操作
+
+        有时候情况比较复杂，process无法满足需求时，可以用exist_preprcs这个底层函数协助
+
+        :param if_exists:
+            None: 不做任何处理，直接运行，依赖于功能本身是否有覆盖写入机制
+            'error': 如果要替换的目标文件已经存在，则报错
+            'replace': 把存在的文件先删除
+                本来是叫'delete'更准确的，但是考虑用户理解，
+                    一般都是用在文件替换场合，叫成'delete'会非常怪异，带来不必要的困扰、误解
+                所以还是决定叫'replace'
+            'skip': 不执行后续功能
+            'backup': 先做备份  （对原文件先做一个备份）
+        """
+        need_run = True
+        if self.exists():
+            if if_exists is None:
+                return need_run
+            elif if_exists == 'error':
+                raise FileExistsError(f'目标文件已存在： {self}')
+            elif if_exists == 'replace':
+                self.delete()
+            elif if_exists == 'skip':
+                need_run = False
+            elif if_exists == 'backup':
+                self.backup(move=True)
+            else:
+                raise ValueError(f'{if_exists}')
+        return need_run
+
+    def copy(self, dst, if_exists=None):
+        if not self.exists():
+            return
+
+        dst = XlPath(dst)
+        if dst.exist_preprcs(if_exists):
+            if self.is_file():
+                shutil.copy2(self, dst)
+            else:
+                shutil.copytree(self, dst)
+
+    def move(self, dst, if_exists=None):
+        return self.rename2(dst, if_exists)
+
+    def rename2(self, dst, if_exists=None):
         """ 相比原版的reanme，搞了更多骚操作，但性能也会略微下降，所以重写一个功能名 """
         if not self.exists():
             return
@@ -1153,19 +1234,7 @@ class XlPath(type(pathlib.Path())):
                 self.rename(tmp)
                 self.delete()
                 tmp.rename(dst)
-        elif dst.exists():
-            if if_exists is None:
-                self.rename(dst)
-            elif if_exists == 'error':
-                raise FileExistsError(f'{dst}')
-            elif if_exists == 'replace':
-                dst.delete()
-                self.rename(dst)
-            elif if_exists == 'skip':
-                pass
-            else:
-                raise ValueError(f'{if_exists}')
-        else:
+        elif dst.exist_preprcs(if_exists):
             self.rename(dst)
 
     def delete(self):
@@ -1173,6 +1242,36 @@ class XlPath(type(pathlib.Path())):
             os.remove(self)
         elif self.is_dir():
             shutil.rmtree(self)
+
+    def backup(self, tail=None, if_exists='replace', move=False):
+        r""" 对文件末尾添加时间戳备份，也可以使用自定义标记tail
+
+        :param tail: 自定义添加后缀
+            tail为None时，默认添加特定格式的时间戳
+        :param if_exists: 备份的目标文件名存在时的处理方案
+            这个概率非常小，真遇到，先把已存在的删掉，重新写入一个是可以接受的
+        :param move: 是否删除原始文件
+
+        # TODO：有个小bug，如果在不同时间实际都是相同一个文件，也会被不断反复备份
+        #    如果想解决这个，就要读取目录下最近的备份文件对比内容了
+        """
+        from datetime import datetime
+
+        # 1 判断自身文件是否存在
+        if not self:
+            return None
+
+        # 2 计算出新名称
+        if not tail:
+            tail = datetime.fromtimestamp(self.mtime()).strftime(' %y%m%d-%H%M%S')  # 时间戳
+        name, ext = os.path.splitext(str(self))
+        dst = name + tail + ext
+
+        # 3 备份就是特殊的copy操作
+        if move:
+            return self.move(dst, if_exists)
+        else:
+            return self.copy(dst, if_exists)
 
     def __4_重复文件相关功能(self):
         """ 检查目录里的各种文件情况 """
@@ -1223,13 +1322,13 @@ class XlPath(type(pathlib.Path())):
 
             for j, f in enumerate(files, start=1):
                 if debug:
-                    printf(f'\t{f}')
+                    printf(f'\t{f.relpath(self)}')
                 else:
                     if j == 1:
-                        printf(f'\t{f}')
+                        printf(f'\t{f.relpath(self)}')
                     else:
                         f.delete()
-                        printf(f'\t{f}\tdelete')
+                        printf(f'\t{f.relpath(self)}\tdelete')
             if print_mode:
                 printf()
 

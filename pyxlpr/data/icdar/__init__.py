@@ -11,7 +11,7 @@
 
 import re
 
-from pyxllib.xl import File, Dir, shorten
+from pyxllib.xl import XlPath, Dir, shorten
 
 
 class IcdarEval:
@@ -60,7 +60,7 @@ class IcdarEval:
             # 如果是字典，信任其是按照官方格式来标注的
             # {'16000,1': b'566,227,673,261,0\n682,210,945,260,0', '16001,1': ...
             return label
-        elif isinstance(label, (str, File)) and str(label)[-4:].lower() == '.zip':
+        elif isinstance(label, (str, XlPath)) and str(label)[-4:].lower() == '.zip':
             # 官方原版的 zip 文件初始化方法
             return label
         elif Dir.safe_init(label):
@@ -84,13 +84,13 @@ class IcdarEval:
         return res
 
     def icdar2013(self, params=None):
-        from pyxllib.data.icdar.icdar2013 import evaluate_method, default_evaluation_params
+        from pyxlpr.data.icdar.icdar2013 import evaluate_method, default_evaluation_params
         return self._eval(evaluate_method, default_evaluation_params, params)
 
     def deteval(self, params=None):
-        from pyxllib.data.icdar.deteval import evaluate_method, default_evaluation_params
+        from pyxlpr.data.icdar.deteval import evaluate_method, default_evaluation_params
         return self._eval(evaluate_method, default_evaluation_params, params)
 
     def iou(self, params=None):
-        from pyxllib.data.icdar.iou import evaluate_method, default_evaluation_params
+        from pyxlpr.data.icdar.iou import evaluate_method, default_evaluation_params
         return self._eval(evaluate_method, default_evaluation_params, params)
