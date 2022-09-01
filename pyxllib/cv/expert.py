@@ -4,23 +4,18 @@
 # @Email  : 877362867@qq.com
 # @Date   : 2021/08/25 15:57
 
+from collections import defaultdict
+
 import cv2
 from tqdm import tqdm
 
+from pyxllib.file.specialist import get_etag
 from pyxllib.cv.xlcvlib import CvImg, xlcv
 from pyxllib.cv.xlpillib import PilImg, xlpil
 from pyxllib.file.specialist import XlPath
 
 
 def __1_目录级处理图片的功能():
-    pass
-
-
-
-class A(object):
-    pass
-
-class B:
     pass
 
 
@@ -111,3 +106,19 @@ class ImagesDir(XlPath):
                     printf(f'{j}、{f} {im.shape} -> {im2.shape}')
                     xlcv.write(im2, f)
                     j += 1
+
+    def check_repeat_phash_images(self, pattern='**/*', **kwargs):
+        from pyxllib.cv.imhash import phash
+        if 'files' not in kwargs:
+            kwargs['files'] = self.glob_images(pattern)
+        if 'hash_func' not in kwargs:
+            kwargs['hash_func'] = lambda p: phash(p)
+        self.check_repeat_files(pattern, **kwargs)
+
+    def check_repeat_dhash_images(self, pattern='**/*', **kwargs):
+        from pyxllib.cv.imhash import dhash
+        if 'files' not in kwargs:
+            kwargs['files'] = self.glob_images(pattern)
+        if 'hash_func' not in kwargs:
+            kwargs['hash_func'] = lambda p: dhash(p)
+        self.check_repeat_files(pattern, **kwargs)
