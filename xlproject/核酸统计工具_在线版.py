@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 # @Author : 厦门理工计算机学院 王大寒/(PRIU)福建省模式识别与图像理解重点实验室
-# @Document : https://www.yuque.com/code4101/python/hesuan
+# @Document : https://www.yuque.com/xlpr/doai/hesuan
 # @Email  : (陈)877362867@qq.com
 # @Address: 厦门理工综合楼1905
-# @Date   : 2022/08/28
+# @Date   : 2022/08/31
 
 import datetime
 import json
@@ -26,7 +26,7 @@ from PyQt5.QtWidgets import (QApplication, QMainWindow, QLabel, QGridLayout, QWi
 
 from pyxllib.file.xlsxlib import openpyxl
 from pyxllib.gui.qt import get_input_widget
-from pyxllib.xl import TicToc, XlPath, matchpairs
+from pyxllib.xl import TicToc, XlPath, matchpairs, get_etag
 
 from pyxlpr.ai.clientlib import XlAiClient
 
@@ -35,21 +35,53 @@ class PPOCR:
     def __init__(self):
         self.xlapi = XlAiClient()
         self.xlapi.login_priu('14VITkixP7fD#)[')
+        # 本地缓存，已经识别过的，不重复提交服务器。
+        self.cache = self.read_cache()  # etag: result_attrs
+
+    def read_cache(self):
+        """ 每个月的结果会在本地做缓存 """
+        f = XlPath.tempdir() / datetime.date.today().strftime('hesuan%Y%m.pkl')
+        if f.is_file():
+            return f.read_pkl()
+        else:
+            return {}
+
+    def write_cache(self):
+        f = XlPath.tempdir() / datetime.date.today().strftime('hesuan%Y%m.pkl')
+        f.write_pkl(self.cache)
+
+    def get_image_buffer(self, f):
+        # 核酸识别的图片大概率不需要很清晰的图片，每张图文件大小可以控制在300kb以内的jpg文件
+        # ratio用不到，api接口只会返回关键类别字典值
+        buffer, ratio = self.xlapi.adjust_image(f, limit_b64buffer_size=300 * 1024, max_length=800, b64encode=True)
+        return buffer.decode()
 
     def parse_light(self, f):
-        return self.xlapi.priu_api(f'hesuan/parse_light', f)
+        xlapi = self.xlapi
+        etag = 'parse_light,' + get_etag(XlPath(f).read_bytes())
+        if etag not in self.cache:
+            data = {'image': self.get_image_buffer(f)}
+            r = requests.post(f'{xlapi._priu_host}/api/hesuan/parse_light',
+                              json.dumps(data), headers=xlapi._priu_header)
+            attrs = json.loads(r.text)
+            if 'xlapi' in attrs:
+                del attrs['xlapi']
+            self.cache[etag] = attrs
+        return self.cache[etag]
 
     def parse_multi_layout_light(self, files):
         xlapi = self.xlapi
-        data = {}
-        data['images'] = [xlapi._priu_read_image(x) for x in files]
-        r = requests.post(f'{xlapi._priu_host}/api/hesuan/parse_multi_layout_light',
-                          json.dumps(data), headers=xlapi._priu_header)
-        attrs = json.loads(r.text)
-        # print(attrs)
-        if 'xlapi' in attrs:
-            del attrs['xlapi']
-        return attrs
+        etag = 'parse_multi_layout_light,' + ','.join([get_etag(XlPath(f).read_bytes()) for f in files])
+        if etag not in self.cache:
+            data = {'images': [xlapi._priu_read_image(x) for x in files]}
+            r = requests.post(f'{xlapi._priu_host}/api/hesuan/parse_multi_layout_light',
+                              json.dumps(data), headers=xlapi._priu_header)
+            attrs = json.loads(r.text)
+            # print(attrs)
+            if 'xlapi' in attrs:
+                del attrs['xlapi']
+            self.cache[etag] = attrs
+        return self.cache[etag]
 
 
 class Hesuan:
@@ -309,7 +341,6 @@ class Hesuan:
                 for col in self.columns:
                     row.append(attrs.get(col, ''))
                 ls.append(row)
-
         else:
             img_lists = self.get_img_fileslist(imdir, self.file_num)
             total_number = len(img_lists)
@@ -571,6 +602,7 @@ class MainWindow(QMainWindow):
         res = hs.parse(self.srcdir, self.get_students(), pb=self.pb)
         dstfile = self.dstfile
         dstfile.write_text(res, encoding='utf8')
+        hs.ppocr.write_cache()
         os.startfile(dstfile)
 
 
@@ -580,6 +612,18 @@ def gui():
     mainWin = MainWindow()
     mainWin.show()
     sys.exit(app.exec_())
+
+
+def 性能测试():
+    model = PPOCR()
+
+    files = list(XlPath('/home/chenkunze/data/hesuan/data/A1 核酸报告-按模板分类').rglob_images())
+    tt = time.time()
+    for f in tqdm(files):
+        model.parse_light(f)
+    print((time.time() - tt) / len(files), '秒/张')
+
+    model.write_cache()
 
 
 if __name__ == '__main__':
