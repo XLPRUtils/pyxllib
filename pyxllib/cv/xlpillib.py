@@ -11,6 +11,7 @@
 
 import base64
 import io
+import os
 import random
 
 import cv2
@@ -26,7 +27,7 @@ except ImportError:
     accimage = None
 
 from pyxllib.prog.pupil import inject_members
-from pyxllib.file.specialist import File, get_font_file
+from pyxllib.file.specialist import XlPath, get_font_file
 from pyxllib.cv.xlcvlib import xlcv
 
 
@@ -41,7 +42,7 @@ class PilImg(PIL.Image.Image):
             im = file
         elif xlcv.is_cv2_image(file):
             im = xlcv.to_pil_image(file)
-        elif File.safe_init(file):
+        elif XlPath.safe_init(file):
             im = PIL.Image.open(str(file), **kwargs)
         else:
             raise TypeError(f'类型错误或文件不存在：{type(file)} {file}')
@@ -87,11 +88,18 @@ class PilImg(PIL.Image.Image):
         else:
             return isinstance(self, PIL.Image.Image)
 
-    def write(self, path, if_exists=None, **kwargs):
-        p = File(path)
+    def write(self, path, *, if_exists=None, **kwargs):
+        p = XlPath(path)
         if p.exist_preprcs(if_exists):
-            p.ensure_parent()
-            self.save(str(p), **kwargs)
+            os.makedirs(p.parent, exist_ok=True)
+            suffix = p.suffix[1:]
+            if suffix == 'jpg':
+                suffix = 'jpeg'
+            if self.mode in ('RGBA', 'P') and suffix == 'jpeg':
+                im = self.convert('RGB')
+            else:
+                im = self
+            im.save(str(p), suffix, **kwargs)
 
     def cvt_channel(self, flags=None):
         im = self
@@ -201,6 +209,8 @@ class PilImg(PIL.Image.Image):
 
         def get_file_size(im):
             file = io.BytesIO()
+            if im.mode in ('RGBA', 'P') and suffix == 'jpeg':
+                im = im.convert('RGB')
             im.save(file, suffix)
             return len(file.getvalue())
 

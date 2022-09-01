@@ -9,7 +9,7 @@
 #1. C. Wolf and J.M. Jolion, "Object Count / Area Graphs for the Evaluation of Object Detection and Segmentation Algorithms", International Journal of Document Analysis, vol. 8, no. 4, pp. 280-296, 2006.
 
 from collections import namedtuple
-import pyxllib.data.icdar.rrc_evaluation_funcs_1_1 as rrc_evaluation_funcs
+import pyxlpr.data.icdar.rrc_evaluation_funcs_1_1 as rrc_evaluation_funcs
 import importlib
 
 def evaluation_imports():
