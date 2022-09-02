@@ -233,7 +233,7 @@ class xlcv(EnchantBase):
         return im
 
     @staticmethod
-    def write(im, file, if_exists='replace'):
+    def write(im, file, if_exists=None):
         file = XlPath(file)
         data = cv2.imencode(ext=file.suffix, img=im)[1]
         if file.exist_preprcs(if_exists):
