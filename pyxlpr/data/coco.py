@@ -326,7 +326,7 @@ class CocoGtData:
         catid2name = {x['id']: x['name'] for x in self.gt_dict['categories']}
 
         # 1 准备工作，构建文件名索引字典
-        gs = PathGroups.groupby(root.select_files('**/*'))
+        gs = PathGroups.groupby([x for x in root.rglob_files()])
 
         # 2 遍历生成labelme数据
         not_finds = set()  # coco里有的图片，root里没有找到
@@ -355,11 +355,17 @@ class CocoGtData:
                     lmdict['shapes'].append(shape)
 
                 if seg:
-                    # 把分割也显示出来（用灰色）
                     for x in ann['segmentation']:
-                        an = {'box_id': ann['id'], 'xltype': 'seg', 'shape_color': [191, 191, 191]}
-                        label = json.dumps(an, ensure_ascii=False)
-                        lmdict['shapes'].append(LabelmeDict.gen_shape(label, x))
+                        if bbox:
+                            # 把分割也显示出来（用灰色）
+                            an = {'box_id': ann['id'], 'xltype': 'seg', 'shape_color': [191, 191, 191]}
+                            label = json.dumps(an, ensure_ascii=False)
+                            lmdict['shapes'].append(LabelmeDict.gen_shape(label, x))
+                        else:
+                            # 如果关闭了bbox的显示，这里segmentation要特殊处理
+                            an = {'box_id': ann['id'], 'xltype': 'seg'}
+                            label = json.dumps(an, ensure_ascii=False)
+                            lmdict['shapes'].append(LabelmeDict.gen_shape(label, x))
 
             f = imfile.with_suffix('.json')
 

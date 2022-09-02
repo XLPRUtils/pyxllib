@@ -100,7 +100,7 @@ class XlSSHClient(paramiko.SSHClient):
     def __1_初始化和执行(self):
         pass
 
-    def __init__(self, server, port, user, passwd, *, map_path=None,
+    def __init__(self, server, user, passwd, *, port=22, map_path=None,
                  relogin=0, relogin_interval=1, timeout=None):
         """
 
@@ -115,6 +115,10 @@ class XlSSHClient(paramiko.SSHClient):
         super().__init__()
         self.load_system_host_keys()
         self.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+
+        # 端口号可以卸载server里
+        if ':' in server:
+            server, port = server.split(':')
 
         # 重试登录
         for k in range(relogin + 1):
@@ -218,7 +222,7 @@ class XlSSHClient(paramiko.SSHClient):
                 map_path = {'C:/': '/'}
             else:
                 map_path = {'/': '/'}
-        return cls(host_ip, port, user_name, pw[1:-1], map_path=map_path, **kwargs)
+        return cls(host_ip, user_name, pw[1:-1], port=port, map_path=map_path, **kwargs)
 
     def exec(self, command, *args, ignore_errors=False, pipe_in=None, **kwargs):
         """ exec_command的简化版

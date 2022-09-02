@@ -1477,7 +1477,7 @@ class PathGroups(Groups):
     """ 按stem文件名（不含后缀）分组的相关功能 """
 
     @classmethod
-    def groupby(cls, files, key=lambda x: os.path.splitext(str(x))[0], ykey=lambda y: y.suffix[1:]):
+    def groupby(cls, files, key=lambda x: os.path.splitext(XlPath(x).as_posix())[0], ykey=lambda y: y.suffix[1:]):
         """
         :param files: 用Dir.select选中的文件、目录清单
         :param key: D:/home/datasets/textGroup/SROIE2019+/data/task3_testcrop/images/X00016469670
@@ -1515,7 +1515,7 @@ class PathGroups(Groups):
         :param name: 支持 '1.jpg', 'a/1.jpg' 等格式
         :param count: 返回匹配数量上限，-1表示返回所有匹配项
         :return: 找到第一个匹配项后返回
-            找的有就返回File对象
+            找的有就返回XlPath对象
             找没有就返回None
 
         注意这个功能是大小写敏感的，如果出现大小写不匹配
@@ -1529,7 +1529,7 @@ class PathGroups(Groups):
         ext = ext[1:]
         for k, v in self.data.items():
             if k.endswith(stem) and ext in v:
-                ls.append(File(k, suffix=ext))
+                ls.append(XlPath.init(k, suffix=ext))
                 if len(ls) >= count:
                     break
         return ls
