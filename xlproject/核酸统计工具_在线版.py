@@ -19,6 +19,9 @@ import pandas as pd
 import requests
 from tqdm import tqdm
 
+import xlrd2
+import cv2
+
 from PyQt5.QtCore import QSize, Qt, QUrl
 from PyQt5.QtGui import QFont, QIcon, QDesktopServices
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QLabel, QGridLayout, QWidget,
@@ -53,7 +56,7 @@ class PPOCR:
     def get_image_buffer(self, f):
         # 核酸识别的图片大概率不需要很清晰的图片，每张图文件大小可以控制在300kb以内的jpg文件
         # ratio用不到，api接口只会返回关键类别字典值
-        buffer, ratio = self.xlapi.adjust_image(f, limit_b64buffer_size=300 * 1024, max_length=800, b64encode=True)
+        buffer, ratio = self.xlapi.adjust_image(f, limit_b64buffer_size=500 * 1024, b64encode=True)
         return buffer.decode()
 
     def parse_light(self, f):
@@ -73,7 +76,7 @@ class PPOCR:
         xlapi = self.xlapi
         etag = 'parse_multi_layout_light,' + ','.join([get_etag(XlPath(f).read_bytes()) for f in files])
         if etag not in self.cache:
-            data = {'images': [xlapi._priu_read_image(x) for x in files]}
+            data = {'images': [self.get_image_buffer(x) for x in files]}
             r = requests.post(f'{xlapi._priu_host}/api/hesuan/parse_multi_layout_light',
                               json.dumps(data), headers=xlapi._priu_header)
             attrs = json.loads(r.text)
@@ -333,7 +336,12 @@ class Hesuan:
                 if f.name == 'xmut.jpg':
                     # 有的人没设目录，直接在根目录全量查找了，此时需要过滤掉我的一个资源图片
                     continue
-                attrs = self.ppocr.parse_light(f)
+                try:
+                    attrs = self.ppocr.parse_light(f)
+                except Exception as e:
+                    print(f'{f.as_posix()} 图片有问题，跳过未处理。')
+                    continue
+
                 rf, ff = f.relpath(imdir).as_posix(), f.resolve()
                 attrs['文件'] = f'<a href="{ff}" target="_blank">{rf}</a><br/>'
                 # 如果要展示图片，可以加：<img src="{ff}" width=100/>，但实测效果不好
@@ -389,10 +397,19 @@ class Hesuan:
 
         def set_color(m):
             s1, s2 = m.groups()
+
+            parts = s1.split('-')
+            if len(parts) > 1:
+                parts[1] = f'{min(12, int(parts[1])):02}'
+            s1 = '-'.join(parts)
+
             # 每个日期颜色是固定的，而不是按照相距今天的天数来选的
-            i = (datetime.date.fromisoformat(s1) - datetime.date(2022, 1, 1)).days
-            c = colors[i % len(colors)]
-            return f'<td bgcolor="#{c}">{s1}{s2}</td>'
+            try:
+                i = (datetime.date.fromisoformat(s1) - datetime.date(2022, 1, 1)).days
+                c = colors[i % len(colors)]
+                return f'<td bgcolor="#{c}">{s1}{s2}</td>'
+            except ValueError:
+                return f'<td>{s1}{s2}</td>'
 
         res = df.to_html(escape=False)
         res = re.sub(r'<td>(\d{4}-\d{2}-\d{2})(.*?)</td>', set_color, res)
@@ -440,7 +457,7 @@ class MainWindow(QMainWindow):
         # 1 窗口核心属性
         self.setMinimumSize(QSize(900, 300))
         self.setWindowIcon(QIcon('models/xmut.jpg'))
-        self.setWindowTitle("核酸检测分析 @(厦门理工学院)福建省模式识别与图像理解重点实验室")
+        self.setWindowTitle("核酸检测分析v4.0（在线版） @(厦门理工学院)福建省模式识别与图像理解重点实验室")
 
         # 2 使用网格布局
         centralWidget = QWidget(self)

@@ -640,7 +640,7 @@ class PaddleOCR(predict_system.TextSystem):
 
                 tags.append(f'{f.stem}_{i:03}')  # 这里并不是要真的生成图片，所以有一定重复没有关系
                 subimg = xlcv.get_sub(img, sp['points'])
-                xlcv.write(subimg, f.parent / f'{f.stem}/{i:03}.png')
+                # xlcv.write(subimg, f.parent / f'{f.stem}/{i:03}.png')
                 timer2.start()
                 text, score = self.rec_singleline(subimg, cls=cls)
                 timer2.stop()
