@@ -102,15 +102,15 @@ class BasicLabelDataset:
         """
         data = self.rp2data[relpath]
         file = self.root / relpath
-        if file:  # 如果文件存在，要遵循原有的编码规则
+        if file.is_file():  # 如果文件存在，要遵循原有的编码规则
             with open(str(file), 'rb') as f:
                 bstr = f.read()
             encoding = get_encoding(bstr)
             kwargs['encoding'] = encoding
             kwargs['if_exists'] = 'replace'
-            file.write(data, **kwargs)
+            file.write_auto(data, **kwargs)
         else:  # 否则直接写入
-            file.write(data, **kwargs)
+            file.write_auto(data, **kwargs)
 
     def writes(self, *, max_workers=8, prt=False, **kwargs):
         """ 重新写入每份标注文件
