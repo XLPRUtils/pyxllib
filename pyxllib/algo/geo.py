@@ -137,6 +137,8 @@ def resort_quad_points(src_pts):
            [  0,  50]])
     """
     pts = copy.copy(src_pts)
+    if isinstance(pts, np.ndarray):
+        pts = pts.tolist()
     if pts[0][1] > pts[2][1]:
         pts[0], pts[2] = pts[2], pts[0]
     if pts[1][1] > pts[3][1]:
