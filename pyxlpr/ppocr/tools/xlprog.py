@@ -599,8 +599,10 @@ class XlRec(PaddleOcrBaseConfig):
         sentances_counter = Counter()  # 每句话的内容，和相同话出现的次数
         for f in root.rglob('*.json'):
             for sp in f.read_json()['shapes']:
-                text = json.loads(sp['label'])['text']
-                sentances_counter[text] += 1
+                attr = json.loads(sp['label'])
+                if 'text' in attr:
+                    text = attr['text']
+                    sentances_counter[text] += 1
 
         # 2 统计 sentances 每句话出现频率, words 每个单词出现频率, chars 每个字符出现频率
         chars_counter = Counter()
