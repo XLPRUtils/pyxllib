@@ -18,6 +18,7 @@ import pathlib
 import re
 import shutil
 import sys
+import socket
 
 import humanfriendly
 import pandas as pd
@@ -27,10 +28,10 @@ from tqdm import tqdm
 
 from pyxllib.algo.pupil import natural_sort
 from pyxllib.file.specialist import XlPath
-from pyxllib.debug.specialist import get_xllog
 from pyxllib.prog.specialist import mtqdm
+from pyxllib.debug.specialist import get_xllog
 
-logger = get_xllog('location')
+xllog = get_xllog()
 
 
 class SshCommandError(Exception):
@@ -87,7 +88,7 @@ class ScpProgress:
         if sent == size and self.kwargs.get('limit_bytes'):
             if self.trans_size >= self.kwargs.get('limit_bytes'):
                 if self.info:
-                    logger.warning('达到限定上传大小，早停。')
+                    xllog.warning('达到限定上传大小，早停。')
                 raise ScpLimitError
 
 
@@ -103,31 +104,44 @@ class XlSSHClient(paramiko.SSHClient):
     def __init__(self, server, user, passwd, *, port=22, map_path=None,
                  relogin=0, relogin_interval=1, timeout=None):
         """
-
+        :param str|list server:
         :param map_path: 主要在上传、下载文件的时候，可以用来自动定位路径
             参考写法：{'C:/': '/'}  # 将D盘映射到服务器位置
         :param int relogin: 当连接失败的时候，可能只是某种特殊原因，可以尝试重新连接
             该参数设置重连的次数
         :param int|float relogin_interval: 每次重连的间隔秒数
-
+        :param port: 为了向下兼容，暂时保留这个参数，但这个参数其实没用了
+            如果要设port，可以直接在server参数里配置
         """
-
         super().__init__()
+
         self.load_system_host_keys()
         self.set_missing_host_key_policy(paramiko.AutoAddPolicy())
 
-        # 端口号可以卸载server里
-        if ':' in server:
-            server, port = server.split(':')
+        if isinstance(server, (list, tuple)):
+            servers = server
+        else:
+            servers = [server]
 
-        # 重试登录
-        for k in range(relogin + 1):
-            try:
-                self.connect(server, port, user, passwd, timeout=timeout)
+        for server in servers:
+            logo = False
+            # 端口号可以卸载server里
+            if ':' in server:
+                server, port = server.split(':')
+
+            # 重试登录
+            for k in range(relogin + 1):
+                try:
+                    self.connect(server, port, user, passwd, timeout=timeout)
+                    logo = True
+                    break
+                except paramiko.ssh_exception.SSHException:
+                    if k < relogin:
+                        time.sleep(relogin_interval)
+
+            if logo:
                 break
-            except paramiko.ssh_exception.SSHException:
-                if k < relogin:
-                    time.sleep(relogin_interval)
+
         else:
             raise paramiko.ssh_exception.SSHException
 
@@ -238,7 +252,7 @@ class XlSSHClient(paramiko.SSHClient):
         """
         # 这个命令有些交互性的操作，需要通过管道输入文本的机制来代替手动交互的过程
         if pipe_in:
-            host_file = '/tmp/' + XlPath.tempfile().name
+            host_file = '/tmp/pipeins/' + XlPath.tempfile().name
             self.write_file(host_file, pipe_in, newline='\n')
             command = f'{command} < {host_file}'
 
@@ -269,7 +283,7 @@ class XlSSHClient(paramiko.SSHClient):
 
         # 虽然是基于本地的情况生成随机名称脚本，但一般在服务器也不会冲突，概率特别小
         local_file = XlPath.tempfile()
-        host_file = '/tmp/' + local_file.name
+        host_file = '/tmp/scripts/' + local_file.name
 
         if file is not None:
             shutil.copy2(XlPath(file), local_file)
@@ -701,27 +715,27 @@ class XlSSHClient(paramiko.SSHClient):
     def __5_开发环境(self):
         pass
 
+    def download_file(self, url, package):
+        p = self.Path(f'/tmp/download/{package}')
+        if not p.is_file():  # 如果不存在文件，则自动下载
+            self.exec(f'wget {url} -P /tmp/download', ignore_errors=True)
+            self.exec(f'chmod 777 /tmp/download/{package}')  # 下载的包，其他用户也可以读取、执行
+        return p
+
     def reinstall_conda(self, package='Anaconda3-2022.05-Linux-x86_64.sh'):
         """ 给当前用户重装anaconda
 
         :param package: 要安装的目标版本，可以修改，以后有时间也可以考虑怎么做成自动找最新版
             这个版本配套的py是 3.9.12，默认路径在 /root/anaconda3/bin/python
         """
-        from pyxllib.debug.specialist import get_xllog
-
-        xllog = get_xllog()
-
         xllog.info('清除已有的anaconda3...')
         self.exec('rm -rf ~/anaconda3')
 
-        xllog.info('下载安装包...')
-        if not self.Path(f'/tmp/{package}').is_file():  # 如果不存在文件，则自动下载
-            self.exec(f'wget https://mirrors.tuna.tsinghua.edu.cn/anaconda/archive/{package} -P /tmp/',
-                      ignore_errors=True)
-            self.exec(f'chmod 777 /tmp/{package}')  # 下载的包，其他用户也可以读取、执行
+        xllog.info(f'下载文件：{package}')
+        p = self.download_file(f'https://mirrors.tuna.tsinghua.edu.cn/anaconda/archive/{package}', package)
 
         xllog.info('自动安装anaconda3...')
-        self.exec(f'bash /tmp/{package}', pipe_in='\nyes\n' * 2, ignore_errors=True)
+        self.exec(f'bash {p}', pipe_in='\nyes\n' * 2, ignore_errors=True)
 
     def install_pytorch(self, cuda_version='10.2'):
         """ 有些驱动用的还是10.2的，所以为了兼容性装10.2，但一些新版的，可以考虑装11.3
@@ -751,14 +765,29 @@ class XlSSHClient(paramiko.SSHClient):
 class XlSSHs:
     """ 多服务器管理器，常用于一些批量运维工作 """
 
-    def __init__(self, sshs: dict):
+    def __init__(self, sshs: dict = None):
         """ 为了方便使用，这个类一般是继承出来重定制的
 
         :param dict sshs:
             key: 昵称
             value: 初始化好的ssh
         """
+        sshs = sshs or {}
         self.sshs: dict[str, XlSSHClient] = sshs
+
+    def add_ssh(self, name, server, user, passwd):
+        """
+        :param str name: 给当前连接设置一个方便描述的昵称
+        :param str|list server:
+            str, ip地址，可以附带port输入，默认是端口22
+            list，支持输入list，在第1个连接失败后，依次尝试后面的链接
+        :param user: 用户名
+        :param passwd: 密码
+        """
+        try:
+            self.sshs[name] = XlSSHClient(server, user, passwd, timeout=2)
+        except (TimeoutError, socket.timeout, paramiko.ssh_exception.SSHException) as e:
+            xllog.warning(f'{name} {server} {user} 连接失败！')
 
     def run(self, func, parallel=False):
         """

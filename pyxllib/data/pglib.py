@@ -12,13 +12,18 @@ import os
 import sys
 
 from pyxllib.prog.pupil import check_install_package
+from pyxllib.file.specialist import XlPath, ensure_localdir
 
 if sys.platform == 'win32':
-    # https://www.yuque.com/xlpr/pyxllib/install_psycopg
-
     # windows系统中pg的默认安装位置
-    # TODO 更好的办法还是检查没有后，自动下载，这个得等新版的后端，从我们自己服务器下载
-    os.environ['PATH'] += r";C:/Program Files/PostgreSQL/14/bin"
+    # https://www.yuque.com/xlpr/pyxllib/install_psycopg
+    pgdll_dir = XlPath('C:/Program Files/PostgreSQL/14/bin')
+    if not pgdll_dir.is_dir():  # 换一个自定义目录继续检查
+        pgdll_dir = XlPath.userdir() / '.xlpr/pgdll'
+    if not pgdll_dir.is_dir():
+        print('没有PostgreSQL对应的dll文件，自动下载：')
+        ensure_localdir(pgdll_dir, 'https://xmutpriu.com/download/pgdll_v14.zip')
+    os.environ['PATH'] += ';' + pgdll_dir.as_posix()
 
 check_install_package('psycopg')
 
@@ -36,7 +41,7 @@ import psycopg.rows
 from pyxllib.prog.newbie import round_int
 from pyxllib.prog.pupil import utc_now, utc_timestamp
 from pyxllib.prog.specialist import XlOsEnv
-from pyxllib.file.specialist import XlPath, get_etag
+from pyxllib.file.specialist import get_etag
 from pyxllib.data.sqlite import SqlBase
 
 
