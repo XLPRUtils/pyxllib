@@ -36,9 +36,11 @@ from pyxllib.debug.pupil import dprint
 from pyxllib.debug.specialist import dataframe_str, bcompare
 
 
-class Git:
+# TODO 可以学习了解使用二次封装的 https://github.com/ishepard/pydriller 库来实现需求
+
+class Git(git.Git):
     def __init__(self, repo_path):
-        self.g = git.Git(repo_path)
+        super().__init__(str(repo_path))
 
     def commits_name(self, n=None, file=None):
         """ 每条commit的标题名称
@@ -51,29 +53,31 @@ class Git:
             cmd.append(f'-{n}')
         if file:
             cmd.append(file)
-        return self.g.log(*cmd).splitlines()
+        return self.log(*cmd).splitlines()
 
     def commits_time0(self, n=None, file=None):
         """每条commit的提交时间
-        使用excel可以识别的时间格式"""
+        使用excel可以识别的时间格式
+        """
         cmd = ['--pretty=%cd', '--date=format:%Y/%m/%d %H:%M']
         if n:
             cmd.append(f'-{n}')
         if file:
             cmd.append(file)
-        t = self.g.log(*cmd)
+        t = self.log(*cmd)
 
         return t.splitlines()
 
     def commits_time(self, n=None, file=None):
         """每条commit的提交时间
-        参数含义参考commits_name里的解释"""
+        参数含义参考commits_name里的解释
+        """
         cmd = ['--pretty=%cd', '--date=format:%y%m%d-%w-%H:%M']
         if n:
             cmd.append(f'-{n}')
         if file:
             cmd.append(file)
-        t = self.g.log(*cmd)
+        t = self.log(*cmd)
 
         def myweektag(m):
             s = m.group().replace('0', '7')
@@ -85,16 +89,18 @@ class Git:
 
     def commits_sha(self, n=None, file=None) -> [str, str, ...]:
         """每条commit的sha哈希值
-        参数含义参考commits_name里的解释"""
+        参数含义参考commits_name里的解释
+        """
         cmd = ['--pretty=%h']
         if n:
             cmd.append(f'-{n}')
         if file:
             cmd.append(file)
-        return self.g.log(*cmd).splitlines()
+        return self.log(*cmd).splitlines()
 
     def commits_stat(self, n=None, file=None):
-        """统计每个commits修改的文件数和插入行数、删除行数
+        """ 统计每个commits修改的文件数和插入行数、删除行数
+
         :param n: 输出条目数，默认为全部
         :param file: 仅摘取file文件（文件夹）的历史记录
         :return: 一个n*3的二维list，第0列是修改的文件数，第1列是插入的代码行数，第2列是删除的代码行数
@@ -104,7 +110,7 @@ class Git:
             cmd.append(f'-{n}')
         if file:
             cmd.append(file)
-        s = self.g.log(*cmd)
+        s = self.log(*cmd)
 
         file_changed = []
         insertion = []
@@ -122,13 +128,14 @@ class Git:
 
     def commits_author(self, n=None, file=None):
         """每条commit的作者
-        参数含义参考commits_name里的解释"""
+        参数含义参考commits_name里的解释
+        """
         cmd = ['--pretty=%an']
         if n:
             cmd.append(f'-{n}')
         if file:
             cmd.append(file)
-        return self.g.log(*cmd).splitlines()
+        return self.log(*cmd).splitlines()
 
     def list_commits(self, n=None, file=None, exceltime=False) -> pd.DataFrame:
         """
@@ -153,7 +160,7 @@ class Git:
         ls.extend(self.commits_stat(n, file))
         ls.append(self.commits_author(n, file))
         ls = swap_rowcol(ls)
-        t = file or self.g.working_dir
+        t = file or self.working_dir
         col_tag = (t + ' / commit名称', '时间', 'sha', 'files_changed', 'insertions', 'deletions', 'author')
         df = pd.DataFrame.from_records(ls, columns=col_tag)
         return df
@@ -226,9 +233,9 @@ class Git:
         sha = self.smartsha(sha, file)
 
         if sha:
-            s = self.g.show(f'{sha}:{file}')
+            s = self.show(f'{sha}:{file}')
         else:
-            s = File(os.path.join(self.g.working_dir, file)).read()
+            s = File(os.path.join(self.working_dir, file)).read()
         return s
 
     def bcompare(self, file, sha1=0, sha2=None):
@@ -254,7 +261,7 @@ class Git:
             s2 = self.show(file, sha2_id)
         else:
             sha2_id = None
-            s2 = os.path.join(self.g.working_dir, file)  # 存储文件名而不是内容
+            s2 = os.path.join(self.working_dir, file)  # 存储文件名而不是内容
 
         # 3 对比
         dprint(sha1, sha2, sha1_id, sha2_id)
@@ -278,7 +285,7 @@ class Git:
         # 2 files没有设置则匹配所有文件
         # TODO 当前已经不存在的文件这样是找不到的，有办法把历史文件也挖出来？
         if not files:
-            with Dir(self.g.working_dir):
+            with Dir(self.working_dir):
                 files = filesmatch('**/*.py')
 
         # 3 遍历文件
