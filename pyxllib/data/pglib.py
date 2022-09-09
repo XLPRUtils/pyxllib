@@ -328,8 +328,7 @@ class XlprDb(Connection):
         """
 
         # 1 预处理，参数标准化
-        if options is None:
-            options = {}
+        options = options or {}
         options = {k: options[k] for k in sorted(options.keys())}  # 对参数进行排序，方便去重
 
         # 2 调百度识别接口
