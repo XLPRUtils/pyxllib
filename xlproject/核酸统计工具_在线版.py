@@ -7,7 +7,6 @@
 # @Date   : 2022/08/31
 
 import datetime
-import json
 import os
 import re
 import sys
@@ -37,7 +36,7 @@ from pyxlpr.ai.clientlib import XlAiClient
 class PPOCR:
     def __init__(self):
         self.xlapi = XlAiClient()
-        self.xlapi.login_priu('14VITkixP7fD#)[')
+        self.xlapi.login_priu('hs14TkixP7fD#')
         # 本地缓存，已经识别过的，不重复提交服务器。
         self.cache = self.read_cache()  # etag: result_attrs
 
@@ -64,9 +63,8 @@ class PPOCR:
         etag = 'parse_light,' + get_etag(XlPath(f).read_bytes())
         if etag not in self.cache:
             data = {'image': self.get_image_buffer(f)}
-            r = requests.post(f'{xlapi._priu_host}/api/hesuan/parse_light',
-                              json.dumps(data), headers=xlapi._priu_header)
-            attrs = json.loads(r.text)
+            attrs = requests.post(f'{xlapi._priu_host}/api/hesuan/parse_light',
+                                  json=data, headers=xlapi._priu_header).json()
             if 'xlapi' in attrs:
                 del attrs['xlapi']
             self.cache[etag] = attrs
@@ -77,9 +75,8 @@ class PPOCR:
         etag = 'parse_multi_layout_light,' + ','.join([get_etag(XlPath(f).read_bytes()) for f in files])
         if etag not in self.cache:
             data = {'images': [self.get_image_buffer(x) for x in files]}
-            r = requests.post(f'{xlapi._priu_host}/api/hesuan/parse_multi_layout_light',
-                              json.dumps(data), headers=xlapi._priu_header)
-            attrs = json.loads(r.text)
+            attrs = requests.post(f'{xlapi._priu_host}/api/hesuan/parse_multi_layout_light',
+                                  json=data, headers=xlapi._priu_header).json()
             # print(attrs)
             if 'xlapi' in attrs:
                 del attrs['xlapi']

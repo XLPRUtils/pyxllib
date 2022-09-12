@@ -172,22 +172,6 @@ def __2_定制不同输出格式():
     pass
 
 
-class BigData:
-    """ TODO 通过网络传较大的数据，比如图片数据的时候，会在全流程中涉及其四种数据格式的操作
-    可以一次计算，多次复用
-
-    客户端不太有这个问题，正常操作就好。我的云服务端则需要用这个类。
-    """
-
-    def __init__(self, b64data):
-        pass
-
-
-class BigImageData(BigData):
-    """ TODO 看后续有没必要再进一步细分大数据类型，如果没必要，可以把这个子类删除，只留BigData就行 """
-    pass
-
-
 class XlAiClient:
     """
     封装该类
@@ -195,7 +179,7 @@ class XlAiClient:
         目的2：带透明底的png百度api识别不了，要先转成RGB格式
     """
 
-    def __init__(self, auto_setup=True, check=True):
+    def __init__(self, auto_login=True, check=True):
         # 1 默认值
         self.db = None
 
@@ -208,7 +192,7 @@ class XlAiClient:
 
         # 2 如果环境变量预存了账号信息，自动加载使用
         accounts = XlOsEnv.get('XlAiAccounts', decoding=True)
-        if accounts and auto_setup:
+        if accounts and auto_login:
             if 'aipocr' in accounts:
                 self.login_aipocr(**accounts['aipocr'])
             if 'mathpix' in accounts:
@@ -330,6 +314,11 @@ class XlAiClient:
         # 恩，我觉得读书最重要还是改变自己的认知观念，从而改变人生。至于工作啥的，功利的东西其实还是次要的。
 
     def run_with_db(self, func, buffer, options=None, **kwargs):
+        # 这是一个特殊参数，如果配置在options里，会转接到kwargs参数里处理
+        if 'use_exists_record' in options:
+            kwargs['use_exists_record'] = options['use_exists_record']
+            del options['use_exists_record']
+
         if self.db:
             return self.db.run_api(func, buffer, options, **kwargs)
         else:

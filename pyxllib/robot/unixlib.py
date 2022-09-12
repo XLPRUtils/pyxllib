@@ -253,6 +253,7 @@ class XlSSHClient(paramiko.SSHClient):
         # 这个命令有些交互性的操作，需要通过管道输入文本的机制来代替手动交互的过程
         if pipe_in:
             host_file = '/tmp/pipeins/' + XlPath.tempfile().name
+            # os.makedirs(XlPath(host_file).parent, exist_ok=True)
             self.write_file(host_file, pipe_in, newline='\n')
             command = f'{command} < {host_file}'
 

@@ -36,6 +36,7 @@ class TextlineShape:
             total_area = (b[2] - b[0]) * (b[3] - b[1])
             # 缩放比例
             self.bounds = bound_scale(self.bounds, self.polygon.area / total_area)
+            # self.bounds = bound_scale(self.bounds, 0.5)
 
         self.minx, self.maxx = self.bounds[0], self.bounds[2]
         self.width = self.maxx - self.minx

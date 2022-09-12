@@ -171,8 +171,8 @@ def get_font_file(name):
     # 注意不能下载到C:/Windows/Fonts，会遇到权限问题，报错
     font_file = XlPath.userdir() / f'.xlpr/fonts/{name}'
     # 去github上paddleocr项目下载
-    # TODO 不过paddleocr字体数量有限，而且github有时候可能会卡下载不了~~本来要弄到码云，但是码云现在要登陆才能下载了
-    from_url = f'https://raw.githubusercontent.com/code4101/data1/main/fonts/{name}'
+    # from_url = f'https://raw.githubusercontent.com/code4101/data1/main/fonts/{name}'
+    from_url = f'https://xmutpriu.com/download/fonts/{name}'
     try:
         ensure_localfile(font_file, from_url)
     except TimeoutError as e:
