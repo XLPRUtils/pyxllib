@@ -518,8 +518,8 @@ def bound_scale(bound, scale):
     :param scale: 比例，例如0.5，就是缩放一半
     """
     x1, y1, x2, y2 = bound
-    x0 = (x2 - x1) / 2
-    y0 = (y2 - y1) / 2
+    x0 = (x2 + x1) / 2
+    y0 = (y2 + y1) / 2
     r = 1 - scale ** 0.5
 
     x1 += r * abs(x0 - x1)
