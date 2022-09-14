@@ -21,8 +21,8 @@ import docx.table
 import docx.enum
 
 from pyxllib.prog.pupil import DictTool, inject_members, run_once
+from pyxllib.prog.specialist import File, Dir, get_etag, browser
 from pyxllib.text.pupil import strwidth
-from pyxllib.debug.specialist import File, Dir, get_etag, browser
 
 
 def __docx():

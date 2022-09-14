@@ -11,9 +11,7 @@ import time
 import warnings
 import os
 from threading import Thread
-import copy
 from functools import reduce
-import urllib.parse
 
 import bs4
 import pytz
@@ -34,9 +32,9 @@ if win32com.client.gencache.is_readonly:
 from pyxllib.prog.newbie import SingletonForEveryClass
 from pyxllib.prog.pupil import Timeout
 from pyxllib.prog.specialist import tqdm
-from pyxllib.file.specialist import XlPath, get_etag
 from pyxllib.algo.treelib import Node, XlNode
 from pyxllib.text.xmllib import BeautifulSoup, XlBs4Tag
+from pyxllib.file.specialist import XlPath, get_etag
 
 """
 参考了onepy的实现，做了重构。OnePy：Provides pythonic wrappers around OneNote COM interfaces
@@ -906,7 +904,7 @@ class Page(_CommonMethods):
         return res
 
     def browser_xml(self, page_info=0):
-        from pyxllib.debug.specialist import browser, XlPath
+        from pyxllib.prog.specialist import browser, XlPath
         xml = self.get_xml(page_info)
         browser(xml, file=XlPath.tempfile('.xml'))
 

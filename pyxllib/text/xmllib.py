@@ -25,11 +25,10 @@ from bs4 import BeautifulSoup
 from humanfriendly import format_size
 from xpath_parser import XpathExpression
 
-from pyxllib.algo.pupil import SearchBase
-from pyxllib.debug.pupil import dprint
-from pyxllib.debug.specialist import browser
 from pyxllib.prog.newbie import round_int
-from pyxllib.prog.pupil import run_once, inject_members
+from pyxllib.prog.pupil import dprint, run_once, inject_members
+from pyxllib.prog.specialist import browser
+from pyxllib.algo.pupil import SearchBase
 from pyxllib.text.newbie import xldictstr
 from pyxllib.text.pupil import shorten, ensure_gbk, BookContents, strwidth, grp_chinese_char
 from pyxllib.file.specialist import File, Dir, get_etag

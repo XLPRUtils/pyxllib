@@ -2,7 +2,14 @@
 # -*- coding: utf-8 -*-
 # @Author : 陈坤泽
 # @Email  : 877362867@qq.com
-# @Date   : 2021/06/06 11:16
+# @Date   : 2021/06/06 18:40
+
+from pyxllib.prog.specialist.common import *
+from pyxllib.prog.specialist.xllog import *
+from pyxllib.prog.specialist.browser import *
+from pyxllib.prog.specialist.bc import *
+from pyxllib.prog.specialist.tictoc import *
+from pyxllib.prog.specialist.datetime import *
 
 import base64
 import concurrent.futures
@@ -89,7 +96,7 @@ def distribute_package(root, version=None, repository=None, *,
     :param version_file: 保存版本号的文件，注意看正则规则，需要满足特定的范式，才会自动更新版本号
     :param delete_dist: 上传完是否自动删除dist目录，要检查上传包是否有遗漏时，要关闭
     """
-    from pyxllib.file.specialist import XlPath, File
+    from pyxllib.file.specialist import XlPath
 
     # 1 切换工作目录
     os.chdir(str(root))

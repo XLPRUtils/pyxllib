@@ -11,13 +11,12 @@ import ujson
 import copy
 from collections import Counter
 
-from pyxllib.prog.deprecatedlib import deprecated
 import numpy as np
 
 from pyxllib.prog.newbie import round_int
 from pyxllib.prog.pupil import DictTool
-from pyxllib.debug.specialist import get_xllog, Iterate, dprint
-from pyxllib.file.specialist import XlPath, PathGroups, get_encoding, XlPath
+from pyxllib.prog.specialist import get_xllog, Iterate
+from pyxllib.file.specialist import PathGroups, get_encoding, XlPath
 from pyxllib.prog.specialist import mtqdm
 from pyxllib.cv.expert import xlpil
 from pyxllib.algo.geo import ltrb2xywh, rect_bounds, warp_points, resort_quad_points, rect2polygon, get_warp_mat

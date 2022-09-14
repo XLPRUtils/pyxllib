@@ -16,13 +16,12 @@ check_install_package('pyecharts')
 
 import pyecharts
 from pyecharts import options as opts
-from pyecharts.globals import ChartType
 from pyecharts.commons.utils import JsCode
-from pyecharts.charts import Line, Scatter, Bar
+from pyecharts.charts import Bar
 from pyecharts.charts.chart import Chart
 
-from pyxllib.prog.pupil import run_once, inject_members
-from pyxllib.debug.specialist import TicToc, browser
+from pyxllib.prog.pupil import inject_members
+from pyxllib.prog.specialist import TicToc
 from pyxllib.file.specialist import XlPath
 
 

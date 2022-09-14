@@ -10,9 +10,8 @@ import math
 import time
 import sys
 
+from pyxllib.prog.pupil import EmptyPoolExecutor, format_exception
 from pyxllib.text.pupil import shorten
-from pyxllib.prog.pupil import EmptyPoolExecutor
-from pyxllib.debug.pupil import format_exception
 
 XLLOG_CONF_FILE = 'xllog.yaml'
 

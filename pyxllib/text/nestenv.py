@@ -7,9 +7,9 @@
 import bisect
 import re
 
+from pyxllib.algo.intervals import Intervals, ReMatch
 from pyxllib.text.newbie import bracket_match2
 from pyxllib.text.pupil import grp_bracket, strfind, findspan, substr_count
-from pyxllib.algo.intervals import Intervals, ReMatch
 
 
 def pqmove(s, p, q):

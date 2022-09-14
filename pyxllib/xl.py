@@ -25,7 +25,3 @@ from pyxllib.text.specialist import *
 from pyxllib.file.newbie import *
 from pyxllib.file.pupil import *
 from pyxllib.file.specialist import *
-
-from pyxllib.debug.newbie import *
-from pyxllib.debug.pupil import *
-from pyxllib.debug.specialist import *

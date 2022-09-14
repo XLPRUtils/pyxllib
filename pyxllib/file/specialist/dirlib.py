@@ -17,10 +17,10 @@ import tempfile
 import humanfriendly
 
 # 大小写不敏感字典
+from pyxllib.prog.newbie import first_nonnone
 from pyxllib.algo.pupil import natural_sort
 from pyxllib.text.pupil import strfind
 from pyxllib.file.specialist import get_etag, PathBase, File, XlPath
-from pyxllib.prog.newbie import first_nonnone
 
 
 def __1_Dir类():
@@ -298,7 +298,7 @@ class Dir(PathBase):
         Dir('test').select('**/*', type_='file').procfiles(func, ref_dir='test2')
 
         """
-        from pyxllib.debug.specialist.xllog import Iterate
+        from pyxllib.prog.specialist import Iterate
 
         if ref_dir:
             ref_dir = Dir(ref_dir)

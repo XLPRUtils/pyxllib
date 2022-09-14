@@ -6,8 +6,8 @@
 
 import re
 
+from pyxllib.prog.specialist import browser
 from pyxllib.text.pupil import grp_bracket, continuous_zero
-from pyxllib.debug.specialist import browser
 
 
 class TexTabular:

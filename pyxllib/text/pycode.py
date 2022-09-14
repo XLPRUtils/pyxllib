@@ -27,7 +27,7 @@ def pycode_sort_import(s):
             2、import在前，from在后
         """
         name = re.search(r'(?:import|from)\s+(\S+)', line).group(1)
-        for i, x in enumerate('stdlib prog algo text file debug cv data database gui ai robot tool ex'.split()):
+        for i, x in enumerate('stdlib prog algo text file cv data extend'.split()):
             name = name.replace('pyxllib.' + x, f'{i:02}')
         for i, x in enumerate('pyxllib pyxlpr xlproject'.split()):
             name = name.replace(x, f'~{i:02}')

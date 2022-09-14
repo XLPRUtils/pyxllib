@@ -4,5 +4,5 @@
 # @Email  : 877362867@qq.com
 # @Date   : 2021/08/01 15:26
 
-from pyxllib.robot.autogui.autogui import *
-from pyxllib.robot.autogui.virtualkey import *
+from pyxllib.extend.autogui.autogui import *
+from pyxllib.extend.autogui.virtualkey import *

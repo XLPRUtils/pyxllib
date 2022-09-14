@@ -14,9 +14,9 @@ import requests
 
 from pyxllib.prog.newbie import len_in_dim2
 from pyxllib.prog.pupil import check_install_package
+from pyxllib.prog.specialist import dataframe_str
 from pyxllib.text.pupil import ContentLine
 from pyxllib.file.specialist import get_encoding, File
-from pyxllib.debug.specialist.common import dataframe_str
 
 
 def regularcheck(pattern, string, flags=0):

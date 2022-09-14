@@ -14,7 +14,7 @@ check_install_package('pyspellchecker')
 
 from spellchecker import SpellChecker
 
-from pyxllib.debug.pupil import dprint
+from pyxllib.prog.pupil import dprint
 
 
 class MySpellChecker(SpellChecker):

@@ -43,7 +43,7 @@ from pyxllib.algo.pupil import Groups, make_index_function, matchpairs
 from pyxllib.algo.geo import rect_bounds, rect2polygon, reshape_coords, ltrb2xywh, xywh2ltrb, ComputeIou
 from pyxllib.algo.stat import dataframes_to_excel
 from pyxllib.file.specialist import PathGroups, XlPath
-from pyxllib.debug.specialist import get_xllog
+from pyxllib.prog.specialist import get_xllog
 from pyxlpr.data.icdar import IcdarEval
 from pyxlpr.data.labelme import LABEL_COLORMAP7, ToLabelmeJson, LabelmeDataset, LabelmeDict
 from xlcocotools.coco import COCO

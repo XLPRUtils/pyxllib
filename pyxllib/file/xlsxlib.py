@@ -19,17 +19,14 @@ import datetime
 import re
 
 import openpyxl
-from openpyxl import Workbook
 from openpyxl.cell.cell import MergedCell
 from openpyxl.styles import Font
 from openpyxl.utils.cell import get_column_letter, column_index_from_string
 import pandas as pd
 
-from pyxllib.prog.newbie import RunOnlyOnce
-from pyxllib.prog.pupil import inject_members
+from pyxllib.prog.pupil import inject_members, dprint
+from pyxllib.prog.specialist import browser
 from pyxllib.algo.specialist import product
-from pyxllib.debug.pupil import dprint
-from pyxllib.debug.specialist import browser
 
 
 def excel_addr(n, m) -> str:
@@ -430,7 +427,7 @@ class XlWorksheet(openpyxl.worksheet.worksheet.Worksheet):
           </tr>
         </table>
         """
-        from yattag import Doc, indent
+        from yattag import Doc
 
         doc, tag, text = Doc().tagtext()
         tag_attrs = [('border', border), ('style', style)]

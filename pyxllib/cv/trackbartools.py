@@ -16,7 +16,7 @@ import time
 import cv2
 import numpy as np
 
-from pyxllib.debug.specialist import TicToc
+from pyxllib.prog.specialist import TicToc
 from pyxllib.cv.expert import xlcv
 
 
