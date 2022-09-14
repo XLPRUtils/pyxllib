@@ -15,13 +15,12 @@ import re
 
 import fitz
 
-from pyxllib.prog.newbie import round_int, RunOnlyOnce, decode_bitflags
-from pyxllib.prog.pupil import DictTool, inject_members
+from pyxllib.prog.newbie import round_int, decode_bitflags
+from pyxllib.prog.pupil import DictTool, inject_members, dprint
+from pyxllib.prog.specialist import browser
 from pyxllib.algo.newbie import round_unit
 from pyxllib.algo.pupil import get_number_width
 from pyxllib.file.specialist import File, Dir, writefile, get_etag
-from pyxllib.debug.pupil import dprint
-from pyxllib.debug.specialist import browser
 from pyxllib.cv.expert import xlcv, xlpil
 from pyxlpr.data.labelme import LabelmeDict
 

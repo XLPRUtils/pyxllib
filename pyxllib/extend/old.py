@@ -20,6 +20,7 @@ import textwrap
 from os.path import join as pathjoin
 from collections import OrderedDict, Counter
 import base64
+import requests
 
 from bs4 import BeautifulSoup
 
@@ -83,7 +84,7 @@ def EnsureContent(ob=None, encoding='utf8'):
             text = textract.process(ob)
             return text.decode(encoding, errors='ignore')
         elif ob.endswith('.doc'):
-            from pyxllib.robot.win32lib import XlWin32WordApplication
+            from pyxllib.ex.win32lib import XlWin32WordApplication
             app = XlWin32WordApplication.get_app()
             a = app.open_doc(ob)
             s = a.content

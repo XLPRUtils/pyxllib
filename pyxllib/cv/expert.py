@@ -9,10 +9,9 @@ from collections import defaultdict
 import cv2
 from tqdm import tqdm
 
-from pyxllib.file.specialist import get_etag
+from pyxllib.file.specialist import get_etag, XlPath
 from pyxllib.cv.xlcvlib import CvImg, xlcv
 from pyxllib.cv.xlpillib import PilImg, xlpil
-from pyxllib.file.specialist import XlPath
 
 
 def __1_目录级处理图片的功能():

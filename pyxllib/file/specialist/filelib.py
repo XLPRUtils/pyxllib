@@ -30,9 +30,9 @@ from more_itertools import chunked
 import filetype
 from tqdm import tqdm
 
+from pyxllib.prog.pupil import is_url, is_file, DictTool
 from pyxllib.algo.pupil import Groups
 from pyxllib.file.pupil import struct_unpack, gen_file_filter
-from pyxllib.prog.pupil import is_url, is_file, DictTool
 
 
 def __1_judge():

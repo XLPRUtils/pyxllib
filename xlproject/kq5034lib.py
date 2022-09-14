@@ -28,7 +28,7 @@ from tqdm import tqdm
 from pyxllib.text.pupil import chinese2digits, grp_chinese_char
 from pyxllib.file.xlsxlib import openpyxl
 from pyxllib.file.specialist import XlPath
-from pyxllib.debug.specialist import TicToc, parse_datetime, browser
+from pyxllib.prog.specialist import parse_datetime, browser
 from pyxllib.cv.rgbfmt import RgbFormatter
 from pyxllib.data.sqlite import Connection
 

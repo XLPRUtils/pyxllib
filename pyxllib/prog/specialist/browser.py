@@ -16,13 +16,12 @@ import datetime
 import pandas as pd
 from bs4 import BeautifulSoup
 
-from pyxllib.debug.pupil import dprint, func_input_message
-from pyxllib.debug.specialist.common import TypeConvert, NestedDict, KeyValuesCounter, dataframe_str
-from pyxllib.file.specialist import File, Dir, get_etag
 from pyxllib.prog.newbie import typename
-from pyxllib.prog.pupil import is_url, is_file
+from pyxllib.prog.pupil import dprint, func_input_message, is_url, is_file
+from pyxllib.prog.specialist.common import TypeConvert, NestedDict, KeyValuesCounter, dataframe_str
+from pyxllib.prog.specialist.tictoc import TicToc
 from pyxllib.text.pupil import ensure_gbk, shorten
-from pyxllib.debug.specialist.tictoc import TicToc
+from pyxllib.file.specialist.dirlib import File, Dir, get_etag
 
 
 def getasizeof(*objs, **opts):

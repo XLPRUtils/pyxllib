@@ -22,8 +22,8 @@ import re
 import sys
 
 from pyxllib.prog.newbie import RunOnlyOnce
+from pyxllib.prog.pupil import dprint
 from pyxllib.text.newbie import circlednumber2digits, digits2circlednumber, roman2digits, digits2roman
-from pyxllib.debug.pupil import dprint
 
 
 def shorten(s, width=200, placeholder='...'):

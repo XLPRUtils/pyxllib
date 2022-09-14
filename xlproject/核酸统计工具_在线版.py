@@ -18,16 +18,13 @@ import pandas as pd
 import requests
 from tqdm import tqdm
 
-import xlrd2
-import cv2
-
 from PyQt5.QtCore import QSize, Qt, QUrl
 from PyQt5.QtGui import QFont, QIcon, QDesktopServices
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QLabel, QGridLayout, QWidget,
                              QLineEdit, QToolButton, QFileDialog, QProgressBar)
 
 from pyxllib.file.xlsxlib import openpyxl
-from pyxllib.gui.qt import get_input_widget
+from pyxllib.extend.qt import get_input_widget
 from pyxllib.xl import TicToc, XlPath, matchpairs, get_etag
 
 from pyxlpr.ai.clientlib import XlAiClient

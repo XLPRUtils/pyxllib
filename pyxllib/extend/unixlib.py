@@ -13,7 +13,6 @@ check_install_package('scp')
 # check_install_package('fabric')
 
 from collections import defaultdict
-import os
 import pathlib
 import re
 import shutil
@@ -26,10 +25,9 @@ import paramiko
 import scp as scplib
 from tqdm import tqdm
 
+from pyxllib.prog.specialist import mtqdm, get_xllog
 from pyxllib.algo.pupil import natural_sort
 from pyxllib.file.specialist import XlPath
-from pyxllib.prog.specialist import mtqdm
-from pyxllib.debug.specialist import get_xllog
 
 xllog = get_xllog()
 

@@ -30,10 +30,10 @@ import git
 import pandas as pd
 
 from pyxllib.prog.newbie import swap_rowcol
+from pyxllib.prog.pupil import dprint
+from pyxllib.prog.specialist import dataframe_str, bcompare
 from pyxllib.text.pupil import digit2weektag
 from pyxllib.file.specialist import Dir, File, filesmatch
-from pyxllib.debug.pupil import dprint
-from pyxllib.debug.specialist import dataframe_str, bcompare
 
 
 # TODO 可以学习了解使用二次封装的 https://github.com/ishepard/pydriller 库来实现需求

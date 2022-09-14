@@ -5,14 +5,11 @@
 # @Date   : 2020/06/01 18:13
 
 import copy
-import shutil
 
-from pyxllib.prog.deprecatedlib import deprecated
+from pyxllib.prog.pupil import dprint, prettifystr
+from pyxllib.prog.specialist.browser import Explorer
 from pyxllib.algo.pupil import intersection_split
-from pyxllib.algo.specialist import DictCmper
-from pyxllib.file.specialist import File, Dir, filesmatch, get_encoding, XlPath
-from pyxllib.debug.pupil import dprint, prettifystr
-from pyxllib.debug.specialist.browser import Explorer
+from pyxllib.file.specialist import File, Dir, filesmatch, get_encoding
 
 
 # 需要使用的第三方软件

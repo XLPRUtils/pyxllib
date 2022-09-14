@@ -14,8 +14,7 @@ from collections import defaultdict
 
 import pandas as pd
 
-from pyxllib.prog.newbie import round_int
-from pyxllib.debug.pupil import dprint
+from pyxllib.prog.pupil import dprint
 
 
 def treetable(childreds, parents, arg3=None, nodename_colname=None):
@@ -324,7 +323,7 @@ def pareto_accumulate(weights, accuracy=0.01, *, print_mode=False):
     if print_mode:
         if sys.platform == 'win32':
             from pyxllib.data.echarts import Line
-            from pyxllib.debug.specialist import browser
+            from pyxllib.prog.specialist import browser
 
             x = Line()
             x.add_series('帕累托累积权重', pts, labels=labels, label={'position': 'right'})

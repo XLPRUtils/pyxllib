@@ -11,8 +11,8 @@ import re
 import bs4
 from bs4 import BeautifulSoup
 
+from pyxllib.prog.pupil import dprint
 from pyxllib.text.pupil import grp_bracket
-from pyxllib.debug.pupil import dprint
 
 
 def gettag_name(tagstr):

@@ -25,9 +25,9 @@ from humanfriendly import format_timespan
 import pandas as pd
 import pyautogui
 
-from pyxllib.robot.autogui import type_text, clipboard_decorator
+from pyxllib.prog.specialist import browser, TicToc, parse_datetime
 from pyxllib.file.specialist import File, Dir
-from pyxllib.debug.specialist import browser, TicToc, parse_datetime
+from pyxllib.extend.autogui import type_text, clipboard_decorator
 
 
 def _print_df_result(df, outfmt='text'):
@@ -121,7 +121,7 @@ class UtoolsBase:
 
     def bcompare(self):
         """ 可以通过subinput设置文件后缀类型 """
-        from pyxllib.debug.specialist import bcompare
+        from pyxllib.prog.specialist import bcompare
 
         suffix = self.cmds.get('subinput', None)
         try:
@@ -145,7 +145,7 @@ class UtoolsFile(UtoolsBase):
         if 'MatchedFiles' in self.cmds:
             self.paths = [pathlib.Path(f['path']) for f in self.cmds['MatchedFiles']]
         else:
-            self.paths = [pathlib.Path(os.path.abspath(f)).resolve() for f in os.listdir('.')]
+            self.paths = [pathlib.Path(os.path.abspath(f)).resolve() for f in os.listdir('../robot')]
 
     @classmethod
     def is_image(cls, f):

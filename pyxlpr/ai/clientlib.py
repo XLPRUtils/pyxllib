@@ -15,7 +15,6 @@ import os
 import base64
 import json
 import pprint
-import time
 import statistics
 
 import cv2
@@ -26,8 +25,8 @@ from pyxllib.prog.newbie import round_int
 from pyxllib.prog.pupil import check_install_package, is_url
 from pyxllib.prog.specialist import XlOsEnv
 from pyxllib.algo.geo import xywh2ltrb, rect_bounds
-from pyxllib.file.specialist import get_etag, XlPath
-from pyxllib.debug.specialist import TicToc
+from pyxllib.file.specialist import XlPath
+from pyxllib.prog.specialist import TicToc
 from pyxllib.cv.expert import xlcv
 
 
@@ -1083,12 +1082,10 @@ class XlAiClient:
 
 
 def demo_aipocr():
-    from tqdm import tqdm
     import pprint
     import re
 
     from pyxlpr.data.labelme import LabelmeDict
-    from pyxllib.debug.specialist import browser
 
     xlapi = XlAiClient()
     # xlapi.setup_database()

@@ -14,8 +14,8 @@ check_install_package('Levenshtein', 'python-Levenshtein')
 import Levenshtein
 import pandas as pd
 
+from pyxllib.prog.specialist import dataframe_str
 from pyxllib.text.pupil import briefstr
-from pyxllib.debug.specialist.common import dataframe_str
 
 
 class MatchSimString:

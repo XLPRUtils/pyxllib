@@ -29,8 +29,6 @@ import sys
 
 __dir__ = os.path.dirname(__file__)
 
-import paddle
-
 sys.path.append(os.path.join(__dir__, ''))
 
 import cv2
@@ -614,7 +612,7 @@ class PaddleOCR(predict_system.TextSystem):
         :param max_file_num: 有时候只想简单测下速度，可以只测几张图就够
         :param attr_filter: def attr_filter(attr) 返回True才保留
         """
-        from pyxllib.debug.specialist import bcompare
+        from pyxllib.prog.specialist import bcompare
         from pyxlpr.ppocr.metrics.rec_metric import RecMetric
         from pyxllib.prog.pupil import DictTool
 
