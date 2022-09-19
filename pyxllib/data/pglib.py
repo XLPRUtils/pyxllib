@@ -324,7 +324,6 @@ class XlprDb(Connection):
         :param use_exists_record: 如果数据库里已有记录，是否直接复用
         :param update_record: 新结果是否记录到数据库
         :param save_buffer_threshold_size: buffer小余多少，才存储进数据库
-
         """
 
         # 1 预处理，参数标准化

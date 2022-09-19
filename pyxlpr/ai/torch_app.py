@@ -9,7 +9,7 @@ from torch import nn
 import torchvision
 
 from pyxllib.cv.xlcvlib import CvImg
-from pyxllib.ai.torch import XlPredictor
+from pyxlpr.ai.xltorch import XlPredictor
 
 
 class ImageDirectionModelV2(nn.Module):

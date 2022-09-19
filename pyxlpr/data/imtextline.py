@@ -28,6 +28,9 @@ class TextlineShape:
         """
         :param box: 可以转成Polygon的数据类型
         :param shrink_bound: 倾斜度过大的文本框，需要特殊处理，把外接矩形缩小会更准确些。
+            使用这个参数后，斜的框可以当成矩形框理解、处理
+
+        详细文档：https://www.yuque.com/xlpr/pyxllib/textlineshape
         """
         self.polygon = ShapelyPolygon.gen(box)
         self.bounds = self.polygon.bounds
@@ -45,10 +48,18 @@ class TextlineShape:
         self.centroid = self.polygon.centroid
 
     def in_the_same_line(self, other):
-        """ 两个框在同一个文本行 """
+        """ 两个框在同一个文本行（一般特指在同一水平行的文本） """
         if other.miny < self.centroid.y < other.maxy:
             return True
         elif self.miny < other.centroid.y < self.maxy:
+            return True
+        else:
+            return False
+
+    def in_the_same_column(self, other):
+        if other.minx < self.centroid.x < other.maxx:
+            return True
+        elif self.minx < other.centroid.x < self.maxx:
             return True
         else:
             return False
