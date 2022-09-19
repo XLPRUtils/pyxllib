@@ -904,7 +904,8 @@ class Page(_CommonMethods):
         return res
 
     def browser_xml(self, page_info=0):
-        from pyxllib.prog.specialist import browser, XlPath
+        from pyxllib.prog.specialist import browser
+        from pyxllib.file.specialist import XlPath
         xml = self.get_xml(page_info)
         browser(xml, file=XlPath.tempfile('.xml'))
 

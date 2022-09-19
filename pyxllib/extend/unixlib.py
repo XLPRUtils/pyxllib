@@ -260,7 +260,8 @@ class XlSSHClient(paramiko.SSHClient):
         stderr = list(stderr)
         if not ignore_errors and stderr:  # TODO 目前警告也会报错，其实警告没关系
             raise SshCommandError(f'服务器执行命令报错: {command}，' + ''.join(stderr).rstrip())
-        return '\n'.join([f.strip() for f in list(stdout)])
+        # return '\n'.join([f.strip() for f in list(stdout)])
+        return ''.join([f for f in list(stdout)])
 
     def exec_script(self, main_cmd, script='', *, file=None, **kwargs):
         r""" 执行批量、脚本命令，常用语执行一段py程序
