@@ -316,14 +316,22 @@ class CocoGtData:
             anno['id'] = i
         return anns
 
-    def to_labelme_cls(self, root, *, bbox=True, seg=False, info=False):
+    def to_labelme_cls(self, root, *, bbox=True, seg=False, info=False, seg_color=(191, 191, 191)):
         """
         :param root: 图片根目录
+        :param tuple|int seg_color: 可以输入-1，表示随机颜色
         :return:
             extdata，存储了一些匹配异常信息
         """
         root, data = XlPath(root), {}
         catid2name = {x['id']: x['name'] for x in self.gt_dict['categories']}
+
+        # 0 工具函数
+        def get_color():
+            if color == -1:
+                return [random.randint(0, 255), random.randint(0, 255), random.randint(0, 255)]
+            else:
+                return color
 
         # 1 准备工作，构建文件名索引字典
         gs = PathGroups.groupby([x for x in root.rglob_files()])
@@ -333,6 +341,7 @@ class CocoGtData:
         multimatch = dict()  # coco里的某张图片，在root找到多个匹配文件
         for img, anns in tqdm(self.group_gt(reserve_empty=True), disable=not info):
             # 2.1 文件匹配
+            print("img['file_name']:", img['file_name'])
             imfiles = gs.find_files(img['file_name'])
             if not imfiles:  # 没有匹配图片的，不处理
                 not_finds.add(img['file_name'])
@@ -352,13 +361,16 @@ class CocoGtData:
                     ann = DictTool.or_(ann, {'category_name': catid2name[ann['category_id']]})
                     label = json.dumps(ann, ensure_ascii=False)
                     shape = LabelmeDict.gen_shape(label, xywh2ltrb(ann['bbox']))
-                    lmdict['shapes'].append(shape)
-
+                    if not seg:
+                        lmdict['shapes'].append(shape)
                 if seg:
                     for x in ann['segmentation']:
                         if bbox:
                             # 把分割也显示出来（用灰色）
-                            an = {'box_id': ann['id'], 'xltype': 'seg', 'shape_color': [191, 191, 191]}
+                            an = {'box_id': ann['id'], 'xltype': 'seg', 'shape_color': get_seg_color()}
+                            for k in ['text']:
+                                if k in ann:
+                                    an[k] = ann[k]
                             label = json.dumps(an, ensure_ascii=False)
                             lmdict['shapes'].append(LabelmeDict.gen_shape(label, x))
                         else:
@@ -371,13 +383,15 @@ class CocoGtData:
 
             data[f.relpath(root)] = lmdict
 
-        return LabelmeDataset(root, data,
-                              extdata={'categories': self.gt_dict['categories'],
-                                       'not_finds': not_finds,
+        return LabelmeDataset(root, data, extdata={'categories': self.gt_dict['categories'], 'not_finds': not_finds,
                                        'multimatch': Groups(multimatch)})
 
     def to_labelme(self, root, *, bbox=True, seg=False, info=False):
-        self.to_labelme_cls(root, bbox=bbox, seg=seg, info=info).writes()
+        if not bbox and seg:
+            seg_color = -1
+        else:
+            seg_color = (191, 191, 191)
+        self.to_labelme_cls(root, bbox=bbox, seg=seg, info=info, seg_color=seg_color).writes()
 
     def split_data(self, parts, *, shuffle=True):
         """ 数据拆分器
