@@ -432,6 +432,7 @@ class XlWin32WordDocument:
             # 有些情况可能无法使用gencache，导致没有constants，所以默认可以直接映射到整数，避免使用到constants
             common = {'doc': 0,
                       'html': 8,
+                      'htm': 10,  # 筛选过的html，一般文件会小的多
                       'txt': 2,
                       'docx': 16,
                       'pdf': 17}
@@ -573,6 +574,12 @@ class XlWin32WordRange:
 
     @property
     def chars(self):
+        """
+
+        注意，获得doc全部文本的其他常见方法
+            doc.Range().Text
+
+        """
         # 有特殊换行，ch.Text可能会得到 '\r\x07'，为了位置对应，只记录一个字符
         return ''.join([ch.Text[0] for ch in self.Characters])
 
