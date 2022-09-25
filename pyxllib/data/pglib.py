@@ -410,7 +410,8 @@ class XlprDb(Connection):
         :param title: 表格标题
         :param list ls: n*3，第1列是时间，第2列是总值，第3列是每个用户具体的数据
         """
-        from pyxllib.data.echarts import Line, get_render_body
+        from pyecharts.charts import Line
+        from pyxllib.data.echarts import get_render_body
 
         map_user_name = {}
         for ks, v in self.execute('SELECT account_names, name FROM users'):

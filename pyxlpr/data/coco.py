@@ -327,11 +327,11 @@ class CocoGtData:
         catid2name = {x['id']: x['name'] for x in self.gt_dict['categories']}
 
         # 0 工具函数
-        def get_color():
-            if color == -1:
+        def get_seg_color():
+            if seg_color == -1:
                 return [random.randint(0, 255), random.randint(0, 255), random.randint(0, 255)]
             else:
-                return color
+                return seg_color
 
         # 1 准备工作，构建文件名索引字典
         gs = PathGroups.groupby([x for x in root.rglob_files()])
@@ -341,7 +341,6 @@ class CocoGtData:
         multimatch = dict()  # coco里的某张图片，在root找到多个匹配文件
         for img, anns in tqdm(self.group_gt(reserve_empty=True), disable=not info):
             # 2.1 文件匹配
-            print("img['file_name']:", img['file_name'])
             imfiles = gs.find_files(img['file_name'])
             if not imfiles:  # 没有匹配图片的，不处理
                 not_finds.add(img['file_name'])
@@ -357,8 +356,9 @@ class CocoGtData:
             img = DictTool.or_(img, {'xltype': 'image'})
             lmdict['shapes'].append(LabelmeDict.gen_shape(json.dumps(img, ensure_ascii=False), [[-10, 0], [-5, 0]]))
             for ann in anns:
+                ann = DictTool.or_(ann, {'category_name': catid2name[ann['category_id']]})
+
                 if bbox:
-                    ann = DictTool.or_(ann, {'category_name': catid2name[ann['category_id']]})
                     label = json.dumps(ann, ensure_ascii=False)
                     shape = LabelmeDict.gen_shape(label, xywh2ltrb(ann['bbox']))
                     if not seg:
@@ -384,7 +384,7 @@ class CocoGtData:
             data[f.relpath(root)] = lmdict
 
         return LabelmeDataset(root, data, extdata={'categories': self.gt_dict['categories'], 'not_finds': not_finds,
-                                       'multimatch': Groups(multimatch)})
+                                                   'multimatch': Groups(multimatch)})
 
     def to_labelme(self, root, *, bbox=True, seg=False, info=False):
         if not bbox and seg:
