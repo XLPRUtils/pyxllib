@@ -9,12 +9,14 @@ from pyxllib.prog.pupil import check_install_package
 check_install_package('pyautogui')
 check_install_package('keyboard')
 check_install_package('klembord')
+check_install_package('mss')  # 多屏幕截图
 
 from collections import defaultdict
 import json
 import os
 import time
 
+import mss
 import numpy as np
 from pandas.api.types import is_list_like
 import pyautogui
@@ -671,6 +673,26 @@ def grab_pixel_color(radius=0):
         desc = color.relative_color_desc(color_range=2, precise_mode=True)
         print('\r' + f'{color.to_hex()} {desc}', end='', flush=True)
         time.sleep(0.1)
+
+
+def grab_monitor(order=0):
+    """ 截屏
+
+    :param int order:
+        默认0，截取全部屏幕
+        1，截取第1个屏幕
+        2，截取第2个屏幕
+        ...
+    """
+    from PIL import Image
+    from pyxllib.xlcv import PilImg
+
+    with mss.mss() as sct:
+        assert order < len(sct.monitors), '屏幕下标越界'
+        monitor = sct.monitors[order]
+        sct_img = sct.grab(monitor)
+        img = Image.frombytes("RGB", sct_img.size, sct_img.bgra, "raw", "BGRX")
+        return PilImg.read(img).to_cv2_image()  # 返回是np矩阵
 
 
 if __name__ == '__main__':

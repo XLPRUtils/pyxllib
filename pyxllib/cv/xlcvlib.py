@@ -450,7 +450,7 @@ class xlcv(EnchantBase):
         """
         # if 'interpolation' not in kwargs:
         #     kwargs['interpolation'] = cv2.INTER_CUBIC
-        return cv2.resize(im, dsize[::-1], **kwargs)
+        return cv2.resize(im, tuple(dsize[::-1]), **kwargs)
 
     @staticmethod
     def reduce_filesize(im, filesize=None, suffix='.jpg'):
