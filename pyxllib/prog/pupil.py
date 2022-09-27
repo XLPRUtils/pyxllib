@@ -8,6 +8,7 @@
 """ 封装一些代码开发中常用的功能，工程组件 """
 import builtins
 from collections import Counter
+import ctypes
 import datetime
 import functools
 import inspect
@@ -846,3 +847,13 @@ class PrettifyStrDecorator:
     def __call__(self, *args, **kwargs):
         self.last_raw_res = self.func(*args, **kwargs)
         return prettifystr(self.last_raw_res)
+
+
+def hide_console_window():
+    """ 隐藏命令行窗口 """
+    import ctypes
+    kernel32 = ctypes.WinDLL('kernel32')
+    user32 = ctypes.WinDLL('user32')
+    SW_HIDE = 0
+    hWnd = kernel32.GetConsoleWindow()
+    user32.ShowWindow(hWnd, SW_HIDE)
