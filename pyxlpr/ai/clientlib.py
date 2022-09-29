@@ -310,13 +310,15 @@ class XlAiClient:
         ratio = current_height / origin_height
         return im, ratio
 
-        # 恩，我觉得读书最重要还是改变自己的认知观念，从而改变人生。至于工作啥的，功利的东西其实还是次要的。
-
     def run_with_db(self, func, buffer, options=None, **kwargs):
-        # 这是一个特殊参数，如果配置在options里，会转接到kwargs参数里处理
-        if 'use_exists_record' in options:
-            kwargs['use_exists_record'] = options['use_exists_record']
-            del options['use_exists_record']
+        """ 这一套主要是适配百度视觉api接口的情况，基本都是输入一个buffer和一个options
+        如果自己模型有特殊接口范式，可以额外定制，不一定要运行这个run_with_db
+        """
+        # 这里有几个特殊参数，如果配置在options里，会转接到kwargs参数里处理
+        for name in 'record_files record_xlapi record_xlserver use_exists_xlapi'.split():
+            if name in options:
+                kwargs[name] = options[name]
+                del options[name]
 
         if self.db:
             return self.db.run_api(func, buffer, options, **kwargs)
@@ -922,7 +924,7 @@ class XlAiClient:
         del result_dict['words_result_num']
         return result_dict
 
-    def __C_其他三方库接口(self):
+    def __C_其他三方api接口(self):
         pass
 
     def mathpix_latex(self, image, **options):
