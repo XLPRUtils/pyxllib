@@ -80,15 +80,15 @@ class __NestEnvBase:
             li.extend(substr_intervals(self.s[left:right], head, tail, invert=True) + left)
         return NestEnv(self.s, Intervals(li))
 
-    def expand(self, ne):
+    def expand(self, ne, adjacent=False):
         r""" 在现有区间上，判断是否有被其他区间包含，有则进行延展
         可以输入head、tail配对规则，也可以输入现成的区间
+
+        :param adjacent: 是否支持邻接的区间扩展
 
         >>> ne = LatexNestEnv(r'aa$cc\ce{a}dd$bb\ce{d}h$h$')
         >>> ne.latexcmd1(r'ce').expand(ne.formula()).strings()
         ['$cc\\ce{a}dd$', '\\ce{d}']
-
-        TODO 扩展临接也能延展的功能？
         """
         if isinstance(ne, NestEnv):
             b = ne.intervals
@@ -96,7 +96,11 @@ class __NestEnvBase:
             b = ne
         else:
             raise TypeError
-        c = self.intervals + Intervals([x for x in b if (self.intervals & x)])
+        if adjacent:
+            c = self.intervals + Intervals([x for x in b if (self.intervals.is_adjacent_and(x))])
+            c = Intervals(c.merge_intersect_interval(adjacent=True))
+        else:
+            c = self.intervals + Intervals([x for x in b if (self.intervals & x)])
         return NestEnv(self.s, c)
 
     def filter(self, func):

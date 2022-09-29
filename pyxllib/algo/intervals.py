@@ -347,7 +347,7 @@ class Intervals:
         return li
 
     def merge_intersect_interval(self, adjacent=False):
-        """将存在相交的区域进行合并
+        """ 将存在相交的区域进行合并
 
         :param adjacent: 如果相邻紧接，也进行拼接
 
@@ -616,6 +616,41 @@ class Intervals:
                     li.append(a & b)
         return Intervals(li)
 
+    def is_adjacent_and(self, other):
+        """ __and__运算的变形，两区间邻接时也认为相交
+
+        >>> Intervals([(2, 4), (9, 11)]).is_adjacent_and(Interval(0, 10))
+        True
+        >>> Intervals([(1, 5), (6, 8)]).is_adjacent_and(Intervals([(2, 7), (7, 9)]))
+        True
+        >>> Intervals([(2, 11)]).is_adjacent_and(Intervals())
+        False
+        >>> Intervals().is_adjacent_and(Intervals([(2, 11)]))
+        False
+        >>> Intervals([(2, 11)]).is_adjacent_and(Interval(11, 13))
+        True
+        """
+        # 0 区间 转 区间集
+        if isinstance(other, Interval):
+            other = Intervals([other])
+
+        # 1 区间集和区间集做相交运算，生成一个新的区间集
+        """假设a、b都是从左到右按顺序取得，所以可以对b的遍历进行一定过滤简化"""
+        A = self.merge_intersect_interval()
+        B = other.merge_intersect_interval()
+        li, k = [], 0
+        for a in A:
+            for j in range(k, len(B)):
+                b = B[j]
+                if b.end() < a.start():
+                    # B[0~j]都在a前面，在后续的a中，可以直接从B[j]开始找
+                    k = j
+                elif b.start() > a.end():  # b已经到a右边，后面的b不用再找了，不会有相交
+                    break
+                else:  # 可能有相交
+                    return True
+        return False
+
     def __contains__(self, other):
         r"""
         >>> Interval(3, 5) in Intervals([(2, 6)])
@@ -750,7 +785,9 @@ def iter_intervals(arg):
             yield t
 
 
-def highlight_intervals(content, intervals, colors=None, background=True, showmath=False):
+def highlight_intervals(content, intervals, colors=None, background=True,
+                        use_mathjax=False,
+                        title='highlight_intervals'):
     """文本匹配可视化
     获得高亮显示的匹配区间的html代码
 
@@ -765,13 +802,14 @@ def highlight_intervals(content, intervals, colors=None, background=True, showma
     :param background:
         True，使用背景色
         False，不使用背景色，而是字体颜色
-    :param showmath:
+    :param use_mathjax:
         True，渲染公式
         False，不渲染公式，只以文本展示
     """
     # 1 存储要插入的html样式
     from collections import defaultdict
     import html
+    from pyxllib.text.xmllib import get_jinja_template
 
     d = defaultdict(str)
 
@@ -793,28 +831,7 @@ def highlight_intervals(content, intervals, colors=None, background=True, showma
                 d[r] = '</font>' + d[r]
 
     # 3 拼接最终的html代码
-    # （1）配一个特殊的pre样式
-    head = r"""<!DOCTYPE html>
-<html>
-
-<head>
-<script src="https://cdn.jsdelivr.net/gh/google/code-prettify@master/loader/run_prettify.js"></script>
-"""
-    if showmath:
-        head += """<script src="https://a.cdn.histudy.com/lib/config/mathjax_config-klxx.js?v=1.1"></script>
-<script type="text/javascript" async="" src="https://a.cdn.histudy.com/lib/mathjax/2.7.1/MathJax/MathJax.js?config=TeX-AMS-MML_SVG">
-MathJax.Hub.Config(MATHJAX_KLXX_CONFIG);
-</script>
-        """
-    head += r"""</head>
-
-<body>
-<pre class="prettyprint nocode linenums">
-"""
-    tail = '</pre>\n</body>\n</html>'
-
-    # （2）辅助变量
-    res = [head]
+    res = ["""<pre class="prettyprint nocode linenums">"""]
     s = content
     idxs = sorted(d.keys())  # 按顺序取需要插入的下标
 
@@ -826,9 +843,8 @@ MathJax.Hub.Config(MATHJAX_KLXX_CONFIG);
     if idxs:  # 最后一个标记
         res.append(d[idxs[-1]])
         res.append(s[idxs[-1]:])
-    res.append(tail)
-
-    return ''.join(res)
+    res.append('</pre>')
+    return get_jinja_template('highlight_code.html').render(title=title, body=''.join(res), use_mathjax=use_mathjax)
 
 
 class StrIdxBack:
