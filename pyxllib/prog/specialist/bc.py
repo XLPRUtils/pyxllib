@@ -9,7 +9,7 @@ import copy
 from pyxllib.prog.pupil import dprint, prettifystr
 from pyxllib.prog.specialist.browser import Explorer
 from pyxllib.algo.pupil import intersection_split
-from pyxllib.file.specialist import File, Dir, filesmatch, get_encoding
+from pyxllib.file.specialist import File, Dir, filesmatch, get_encoding, XlPath
 
 
 # 需要使用的第三方软件
@@ -47,8 +47,8 @@ class BCompare(Explorer):
         new_args = []
         default_suffix = None
         for i, arg in enumerate(args):
-            f = File.safe_init(arg)
-            if f:  # 是文件对象，且存在
+            f = XlPath.safe_init(arg)
+            if f.is_file():  # 是文件对象，且存在
                 new_args.append(f)
                 if not default_suffix:
                     default_suffix = f.suffix
@@ -57,8 +57,10 @@ class BCompare(Explorer):
             #     raise FileNotFoundError(f'{f}')
             else:  # 不是文件对象，要转存到文件
                 if not files[i]:  # 没有设置文件名则生成一个
-                    files[i] = File(ref_names[i], Dir.TEMP, suffix=default_suffix)
-                files[i].write(arg)
+                    files[i] = XlPath.init(ref_names[i], Dir.TEMP, suffix=default_suffix)
+                else:
+                    files[i] = XlPath(files[i])
+                files[i].write_text(arg)
                 new_args.append(files[i])
 
         return new_args
@@ -78,11 +80,11 @@ class BCompare(Explorer):
         files = self.to_bcompare_files(*args, files=files)
 
         if sameoff and len(files) > 1:
-            if files[0].read() == files[1].read():
+            if files[0].read_text() == files[1].read_text():
                 return
         super().__call__(*([str(f) for f in files]), wait=wait, **kwargs)
         # bc软件操作中可能会修改原文内容，所以这里需要重新读取，不能用前面算过的结果
-        return files[0].read()
+        return XlPath(files[0]).read_text()
 
 
 bcompare = BCompare()  # nowatch: 调试阶段，不需要自动watch的变量

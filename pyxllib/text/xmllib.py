@@ -673,3 +673,12 @@ def get_jinja_template(name, **kwargs):
 
     template = Environment(**kwargs).from_string((XlPath(__file__).parent / f'templates/{name}').read_text())
     return template
+
+
+def concat_htmlbody(ls):
+    """ 对多份网页内容中的body进行拼接
+    """
+    texts = [re.search(r'<body>(.*?)</body>', x, flags=re.DOTALL).group(1) for x in ls]
+    # 用第一份作为主模板
+    text = re.sub(r'<body>(.*?)</body>', lambda m: '<body>' + '\n'.join(texts) + '</body>', ls[0], flags=re.DOTALL)
+    return text

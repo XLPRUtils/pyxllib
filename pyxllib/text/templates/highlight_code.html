@@ -1,0 +1,17 @@
+<!DOCTYPE html>
+<html>
+<head>
+<title>{{ title }}</title>
+<script src="https://cdn.jsdelivr.net/gh/google/code-prettify@master/loader/run_prettify.js"></script>
+{% if use_mathjax %}
+<script src="https://a.cdn.histudy.com/lib/config/mathjax_config-klxx.js?v=1.1"></script>
+<script type="text/javascript" async="" src="https://a.cdn.histudy.com/lib/mathjax/2.7.1/MathJax/MathJax.js?config=TeX-AMS-MML_SVG">
+MathJax.Hub.Config(MATHJAX_KLXX_CONFIG);
+</script>
+{% else %}
+{% endif%}
+</head>
+<body>
+{{ body }}
+</body>
+</html>
