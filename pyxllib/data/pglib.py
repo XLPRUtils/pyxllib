@@ -277,8 +277,6 @@ class XlprDb(Connection):
         self.commit()
 
     def get_xlapi_record(self, **input):
-        if 'options' in input and not input['options']:
-            del input['options']
         res = self.execute('SELECT id, output FROM xlapi WHERE input=%s', (self.cvt_type(input),)).fetchone()
         if res:
             _id, output = res
@@ -301,19 +299,20 @@ class XlprDb(Connection):
 
         return self.execute('SELECT id FROM xlapi WHERE input=%s', (input,)).fetchone()[0]
 
-    def insert_row2xlserver(self, request, xlapi_id=0):
+    def insert_row2xlserver(self, request, xlapi_id=0, **kwargs):
         kw = {'remote_addr': request.remote_addr,
-              'token': request.headers.get('Token', None),
               'route': '/'.join(request.base_url.split('/')[3:]),
               'update_time': utc_timestamp(8),
               'xlapi_id': xlapi_id}
+        kw.update(kwargs)
         print(kw)  # 监控谁在用api
         self.insert_row('xlserver', kw)
 
     def run_api(self, func, buffer, options=None, *,
                 mode_name=None,
-                use_exists_record=True,
-                update_record=True,
+                record_files=True,
+                use_exists_xlapi=True,
+                record_xlapi=True,
                 save_buffer_threshold_size=4 * 1024 ** 2):
         """ 配合database数据库的情况下，调用API功能
 
@@ -321,8 +320,11 @@ class XlprDb(Connection):
         :param buffer: 图片数据
         :param options: 执行api功能的配套采纳数
         :param mode_name: 可以指定存入数据库的功能名，默认用func的名称
-        :param use_exists_record: 如果数据库里已有记录，是否直接复用
-        :param update_record: 新结果是否记录到数据库
+
+        :param record_files: 是否保存数据文件
+        :param record_xlapi: 新结果是否记录到数据库
+        :param use_exists_xlapi: 如果数据库里已有记录，是否直接复用
+
         :param save_buffer_threshold_size: buffer小余多少，才存储进数据库
         """
 
@@ -331,13 +333,14 @@ class XlprDb(Connection):
         options = {k: options[k] for k in sorted(options.keys())}  # 对参数进行排序，方便去重
 
         # 2 调百度识别接口
-        if use_exists_record or update_record:  # 有开数据库，并且复用和更新至少有项开启了
+        if use_exists_xlapi or record_xlapi:  # 有开数据库，并且复用和更新至少有项开启了
             if mode_name is None:
                 mode_name = func.__name__
+
             # 如果数据库里有处理过的记录，直接引用
             im_etag = get_etag(buffer)
-            if use_exists_record:
-                res = self.get_xlapi_record(mode=mode_name, etag=im_etag, options=options)
+            if use_exists_xlapi:
+                res = self.get_xlapi_record(mode=mode_name, image=im_etag, **options)
             else:
                 res = None
 
@@ -347,22 +350,22 @@ class XlprDb(Connection):
             #   等以后数据库大了，看运行是否会慢，可以再测试是否有必要弄协程
             if res is None or 'error_code' in res:
                 tt = time.time()
-                res = func(buffer, options)
+                res = func(buffer, **options)
                 elapse_ms = round_int(1000 * (time.time() - tt))
 
-                if len(buffer) < save_buffer_threshold_size:
+                if record_files and len(buffer) < save_buffer_threshold_size:
                     self.insert_row2files(buffer, etag=im_etag, name='.jpg')
-                if update_record:
+                if record_xlapi:
                     input = {'mode': mode_name, 'image': im_etag}
                     if options:
-                        input['options'] = options
+                        input.update(options)
                     xlapi_id = self.insert_row2xlapi(input, res, elapse_ms, on_conflict='REPLACE')
                     res['xlapi_id'] = xlapi_id
 
             if 'log_id' in res:  # 有xlapi_id的标记，就不用百度原本的log_id了
                 del res['log_id']
         else:
-            res = func(buffer, options)
+            res = func(buffer, **options)
 
         return res
 
