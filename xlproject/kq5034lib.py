@@ -28,7 +28,7 @@ from tqdm import tqdm
 from pyxllib.text.pupil import chinese2digits, grp_chinese_char
 from pyxllib.file.xlsxlib import openpyxl
 from pyxllib.file.specialist import XlPath
-from pyxllib.prog.specialist import parse_datetime, browser
+from pyxllib.prog.specialist import parse_datetime, browser, TicToc
 from pyxllib.cv.rgbfmt import RgbFormatter
 from pyxllib.data.sqlite import Connection
 
@@ -114,8 +114,11 @@ class 网课考勤:
         ls = []
         for idx, x in self.用户列表.iterrows():
             logo = False
+            if '真实姓名' in x:
+                x['姓名'] = x['真实姓名']
+
             if 昵称:
-                if x['昵称'] in 昵称 or x['真实姓名'] in 昵称:
+                if x['昵称'] in 昵称 or x['姓名'] in 昵称:
                     logo = True
             if 手机号:
                 if check_telphone(x.get('账户绑定手机号'), 手机号) or check_telphone(x.get('最近采集的手机号'), 手机号):
@@ -305,7 +308,7 @@ class 网课考勤:
             msg.append('第1次建议大家都查看下完整考勤表，记一下自己的学号，方便以后核对考勤数据。'
                        '以后群里统一以学号的方式汇报异常的考勤数据，未列出则都是"正常完成当堂学习"的学员。')
             msg.append('如果发现自己考勤数据不对（特别手机号、昵称有更改可能导致用户ID匹配错），'
-                       '可以群里、私聊反馈给我或其他考勤义工修正。')
+                       '可以群里、私聊反馈给我修正。')
 
         # 2 要过期的课程
         if 0 < self.结束课次 + 1 < 22:
@@ -390,7 +393,7 @@ class 网课考勤:
 
         # 6 返款文件
         if ls:
-            ls = [x for x in ls if '无订单号' not in x]
+            ls = [x for x in ls if ('无订单号' not in x and 'None' not in x)]
             (self.root / (f'第{self.当天课次:02}天 ' + '+'.join(name) + '返款.csv')).write_text('\n'.join(ls))
 
         # 7 提示信息

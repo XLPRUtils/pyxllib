@@ -698,6 +698,7 @@ class LatexNestEnv(NestEnv):
                  min_bracket=0, max_bracket=float('inf'), brackets=None,
                  linefeed=1, invert=False):
         r"""匹配latex命令区间
+
         :param part: TODO 功能待开发~~
             0，整块内容
             name，仅命令名，如果有star会含*
