@@ -787,7 +787,8 @@ def iter_intervals(arg):
 
 def highlight_intervals(content, intervals, colors=None, background=True,
                         use_mathjax=False,
-                        title='highlight_intervals'):
+                        title='highlight_intervals',
+                        set_pre='<pre class="prettyprint nocode linenums">'):
     """文本匹配可视化
     获得高亮显示的匹配区间的html代码
 
@@ -797,6 +798,8 @@ def highlight_intervals(content, intervals, colors=None, background=True,
         Intervals、[(2,4), (6,8)]
 
         请自行保证区间嵌套语法正确性，本函数不检查处理嵌套混乱错误问题
+    :param set_pre: 设置<pre>显示格式。比如常见的，对于太长的文本行，可以自动断行：
+        set_pre='<pre class="prettyprint nocode linenums" style="white-space: pre-wrap;">'
     :param colors: 一个数组，和intervals一一对应，轮询使用的颜色
         默认值为： ['red']
     :param background:
@@ -831,7 +834,7 @@ def highlight_intervals(content, intervals, colors=None, background=True,
                 d[r] = '</font>' + d[r]
 
     # 3 拼接最终的html代码
-    res = ["""<pre class="prettyprint nocode linenums">"""]
+    res = [set_pre]
     s = content
     idxs = sorted(d.keys())  # 按顺序取需要插入的下标
 
