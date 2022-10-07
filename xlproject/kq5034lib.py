@@ -505,10 +505,11 @@ class 网课考勤:
         # for idx, row in df.iterrows():
         #     data[row['用户id']] = row['打卡次数']
 
-        # 220804周四08:28，小鹅通更新了模板
-        df = pd.read_excel(files[-1])
-        df.columns = df.columns.str.replace('\t', '')
-        data = Counter([x.strip() for x in df['user_id']])
+        # df = pd.read_excel(files[-1])  # 220804周四08:28，小鹅通更新了模板
+        df = pd.read_csv(files[-1])  # 221005周三09:19，小鹅通又双叒更新了
+        # df.columns = df.columns.str.replace('\t', '')
+        # data = Counter([x.strip() for x in df['用户id']])
+        data = {row['用户id']: row['打卡次数'] for _, row in df.iterrows()}
 
         # 3 将打卡次数写入表格
         ls = []  # 返款汇总
