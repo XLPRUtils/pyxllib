@@ -38,6 +38,26 @@ class __NestEnvBase:
         if intervals is None: intervals = Intervals([[0, len(s)]])
         self.intervals = Intervals(intervals)
 
+    @classmethod
+    def from_fragments(cls, fragments):
+        """ 输入拆分好的文本片段进行初始化
+
+        :param list fragments: 第0个str是区间外文本，第1个str是区间内的文本，第2个是区间外，依次类推
+            如果起始是区间外，可以加个''空片段在最前面实现占位
+
+        >>> __NestEnvBase.from_fragments(['a', '12', 'bc', '3', 'e']).strings()
+        ['12', '3']
+        >>> __NestEnvBase.from_fragments(['', '12', 'bc', '3', 'e']).strings()
+        ['12', '3']
+        """
+        intervals = []
+        start = 0
+        for i, t in enumerate(fragments):
+            if i % 2:  # 区间内
+                intervals.append([start, start+len(t)])
+            start += len(t)
+        return cls(''.join(fragments), intervals)
+
     def inner(self, head, tail=None):
         r""" 0、匹配标记里，不含head、tail标记
 
@@ -54,7 +74,7 @@ class __NestEnvBase:
         for reg in self.intervals:
             left, right = reg.start(), reg.end()
             li.extend(substr_intervals(self.s[left:right], head, tail, inner=True) + left)
-        return NestEnv(self.s, Intervals(li))
+        return type(self)(self.s, Intervals(li))
 
     def inside(self, head, tail=None):
         r""" 1、匹配标记里
@@ -66,7 +86,7 @@ class __NestEnvBase:
         for reg in self.intervals:
             left, right = reg.start(), reg.end()
             li.extend(substr_intervals(self.s[left:right], head, tail) + left)
-        return NestEnv(self.s, Intervals(li))
+        return type(self)(self.s, Intervals(li))
 
     def outside(self, head, tail=None):
         r""" 2、匹配标记外
@@ -78,7 +98,7 @@ class __NestEnvBase:
         for reg in self.intervals:
             left, right = reg.start(), reg.end()
             li.extend(substr_intervals(self.s[left:right], head, tail, invert=True) + left)
-        return NestEnv(self.s, Intervals(li))
+        return type(self)(self.s, Intervals(li))
 
     def expand(self, ne, adjacent=False):
         r""" 在现有区间上，判断是否有被其他区间包含，有则进行延展
@@ -101,7 +121,7 @@ class __NestEnvBase:
             c = Intervals(c.merge_intersect_interval(adjacent=True))
         else:
             c = self.intervals + Intervals([x for x in b if (self.intervals & x)])
-        return NestEnv(self.s, c)
+        return type(self)(self.s, c)
 
     def filter(self, func):
         r""" 传入一个自定义函数func，会将每个区间的s传入，只保留func(s)为True的区间
@@ -110,7 +130,7 @@ class __NestEnvBase:
         ['$bbb$', '$fff$']
         """
         li = list(filter(lambda x: func(self.s[x.start():x.end()]), self.intervals))
-        return NestEnv(self.s, li)
+        return type(self)(self.s, li)
 
     def _parse_tags(self, tags):
         if not isinstance(tags[0], (list, tuple)):
@@ -166,6 +186,9 @@ class __NestEnvBase:
     def __bool__(self):
         """NestEnv类的布尔逻辑由区间集的逻辑确定"""
         return bool(self.intervals)
+
+    def __eq__(self, other):
+        return self.s == other.s and self.intervals == other.intervals
 
     def string(self, idx=0):
         """第一个区间匹配的值
@@ -255,14 +278,14 @@ class __NestEnvBase:
         ['$b$', '$d']
         """
         if isinstance(other, Intervals):
-            return NestEnv(self.s, self.intervals & other)
+            return type(self)(self.s, self.intervals & other)
         elif isinstance(other, NestEnv):
             if self.s != other.s:  # 两个不是同个文本内容的话是不能合并的
                 raise ValueError('两个NestEnv的主文本内容不相同，不能求子区间集的交')
-            return NestEnv(self.s, self.intervals & other.intervals)
+            return type(self)(self.s, self.intervals & other.intervals)
         else:  # 其他一律转Intervals对象处理
             # raise TypeError(rf'NestEnv不能和{type(other)}类型做区间集交运算')
-            return NestEnv(self.s, self.intervals & Intervals(other))
+            return type(self)(self.s, self.intervals & Intervals(other))
 
     def __or__(self, other):
         """ 区间集相加运算
@@ -274,13 +297,13 @@ class __NestEnvBase:
         ['aa$b$ccc$dd$']
         """
         if isinstance(other, Intervals):
-            return NestEnv(self.s, self.intervals | other)
+            return type(self)(self.s, self.intervals | other)
         elif isinstance(other, NestEnv):
             if self.s != other.s:
                 raise ValueError('两个NestEnv的主文本内容不相同，不能求子区间集的并')
-            return NestEnv(self.s, self.intervals | other.intervals)
+            return type(self)(self.s, self.intervals | other.intervals)
         else:  # 其他一律转Intervals对象处理
-            return NestEnv(self.s, self.intervals | Intervals(other))
+            return type(self)(self.s, self.intervals | Intervals(other))
 
     def __add__(self, other):
         return self | other
@@ -295,13 +318,13 @@ class __NestEnvBase:
         ['d$']
         """
         if isinstance(other, Intervals):
-            return NestEnv(self.s, self.intervals - other)
+            return type(self)(self.s, self.intervals - other)
         elif isinstance(other, NestEnv):
             if self.s != other.s:
                 raise ValueError('两个NestEnv的主文本内容不相同，子区间集不能相减')
-            return NestEnv(self.s, self.intervals - other.intervals)
+            return type(self)(self.s, self.intervals - other.intervals)
         else:  # 其他一律转Intervals对象处理
-            return NestEnv(self.s, self.intervals - Intervals(other))
+            return type(self)(self.s, self.intervals - Intervals(other))
 
     def nest(self, func, invert=False):
         """ 对每个子区间进行一层嵌套定位
@@ -322,6 +345,10 @@ class __NestEnvBase:
             if invert: res = res.invert(len(t))
             li.extend(res + left)
         return type(self)(self.s, Intervals(li))
+
+    def highlight(self, colors=None, **kwargs):
+        from pyxllib.algo.intervals import highlight_intervals
+        return highlight_intervals(self.s, self.intervals, colors=colors, **kwargs)
 
 
 class NestEnv(__NestEnvBase):

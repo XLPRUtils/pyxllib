@@ -787,8 +787,9 @@ def iter_intervals(arg):
 
 def highlight_intervals(content, intervals, colors=None, background=True,
                         use_mathjax=False,
+                        only_body=False,
                         title='highlight_intervals',
-                        set_pre='<pre class="prettyprint nocode linenums">'):
+                        set_pre='<pre class="prettyprint nocode linenums" style="white-space: pre-wrap;">'):
     """文本匹配可视化
     获得高亮显示的匹配区间的html代码
 
@@ -798,8 +799,10 @@ def highlight_intervals(content, intervals, colors=None, background=True,
         Intervals、[(2,4), (6,8)]
 
         请自行保证区间嵌套语法正确性，本函数不检查处理嵌套混乱错误问题
-    :param set_pre: 设置<pre>显示格式。比如常见的，对于太长的文本行，可以自动断行：
-        set_pre='<pre class="prettyprint nocode linenums" style="white-space: pre-wrap;">'
+    :param set_pre: 设置<pre>显示格式。
+        标准 不自动换行： '<pre class="prettyprint nocode linenums">'
+        比如常见的，对于太长的文本行，可以自动断行：
+            set_pre='<pre class="prettyprint nocode linenums" style="white-space: pre-wrap;">'
     :param colors: 一个数组，和intervals一一对应，轮询使用的颜色
         默认值为： ['red']
     :param background:
@@ -808,6 +811,7 @@ def highlight_intervals(content, intervals, colors=None, background=True,
     :param use_mathjax:
         True，渲染公式
         False，不渲染公式，只以文本展示
+    :param only_body: 不返回完整的html页面内容，只有body主体内容
     """
     # 1 存储要插入的html样式
     from collections import defaultdict
@@ -846,8 +850,14 @@ def highlight_intervals(content, intervals, colors=None, background=True,
     if idxs:  # 最后一个标记
         res.append(d[idxs[-1]])
         res.append(s[idxs[-1]:])
+    if not idxs:
+        res.append(s)
     res.append('</pre>')
-    return get_jinja_template('highlight_code.html').render(title=title, body=''.join(res), use_mathjax=use_mathjax)
+
+    if only_body:
+        return ''.join(res)
+    else:
+        return get_jinja_template('highlight_code.html').render(title=title, body=''.join(res), use_mathjax=use_mathjax)
 
 
 class StrIdxBack:

@@ -107,6 +107,10 @@ class Connection(sqlite3.Connection, SqlBase):
         # 2 新建表格
         self.execute(f'CREATE TABLE {table_name}({column_descs})')
 
+    def clear_table(self, table_name):
+        """ 【DDL删】清空表格内容 """
+        self.execute(f'DELETE FROM {table_name}')
+
     def ensure_column(self, table_name, col_name, col_type='', *, col_ref_val=None):
         """ 【DDL改】添加字段
         :param table_name:
