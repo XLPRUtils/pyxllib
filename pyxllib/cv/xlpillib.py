@@ -241,6 +241,8 @@ class PilImg(PIL.Image.Image):
 
         if color is None:
             color = (255, 255, 255)
+        else:
+            color = tuple(color)
 
         im = self
         bg = Image.new(im.mode, im.size, color)

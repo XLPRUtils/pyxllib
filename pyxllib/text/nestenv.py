@@ -259,7 +259,7 @@ class __NestEnvBase:
         >>> (~NestEnv('aa$b$cc').find2('$', '$')).strings()
         ['aa', 'cc']
         """
-        return NestEnv(self.s, self.intervals.invert(len(self.s)))
+        return type(self)(self.s, self.intervals.invert(len(self.s)))
 
     def invert(self):
         r"""
