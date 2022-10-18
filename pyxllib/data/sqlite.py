@@ -67,6 +67,20 @@ class Connection(sqlite3.Connection, SqlBase):
         res = self.execute(f"SELECT name FROM sqlite_master WHERE type='table' AND name='{table_name}'").fetchone()
         return bool(res)
 
+    def get_table_names(self):
+        """ 获得所有表格名 """
+        return [x[0] for x in self.execute("SELECT name FROM sqlite_master WHERE type='table'")]
+
+    def count_all_talbe_rows(self):
+        """ 统计所有表格的数据行数 """
+        names = self.get_table_names()
+        ls = []
+        for name in names:
+            n = self.execute(f'SELECT count(*) FROM {name}').fetchone()[0]
+            ls.append([name, n])
+        ls.sort(key=lambda x: -x[1])
+        return ls
+
     @classmethod
     def autotype(cls, val):
         if isinstance(val, str):
@@ -183,3 +197,16 @@ class Connection(sqlite3.Connection, SqlBase):
         cur = self.cursor()
         cur.row_factory = dict_factory
         return cur.execute(*args, **kwargs)
+
+    def vacuum(self):
+        """ 删除数据后，文件不会直接减小，需要使用vacuum来实际压缩文件占用空间 """
+        self.execute('vacuum')  # 不用 commit
+
+    def keep_top_n_rows(self, table_name, num, col_name='id'):
+        """ 只保留一小部分数据，常用来做lite、demo数据示例文件
+
+        :param col_name: 参照的列名
+        """
+        self.execute(f'DELETE FROM {table_name} WHERE {col_name} NOT IN'
+                     f'(SELECT {col_name} FROM {table_name} LIMIT {num})')
+        self.commit()

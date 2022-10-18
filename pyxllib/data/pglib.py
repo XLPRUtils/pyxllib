@@ -205,6 +205,26 @@ class XlprDb(Connection):
         # conninfo = 'postgresql://postgres:yourpassword@172.16.170.110/xlpr'
         return XlOsEnv.persist_set('XlprDbAccount', {'conninfo': conninfo, 'seckey': seckey}, encoding=True)
 
+    @classmethod
+    def connect(cls, conninfo='', seckey='', *,
+                autocommit=False, row_factory=None, context=None, **kwargs) -> 'XlprDb':
+        """ 因为要标记 -> XlprDb，IDE才会识别出类别，有自动补全功能
+        但在类中写@classmethod，无法标记 -> XlprDb，所以就放外面单独写一个方法了
+        """
+        d = XlOsEnv.get('XlprDbAccount', decoding=True)
+        if conninfo == '':
+            conninfo = d['conninfo']
+        if seckey == '':
+            seckey = d['seckey']
+        # 注意这里获取的是XlprDb类型
+        con = super(XlprDb, cls).connect(conninfo, autocommit=autocommit, row_factory=row_factory, context=context,
+                                         **kwargs)
+        con.seckey = seckey
+        return con
+
+    def __1_hosts相关数据表操作(self):
+        pass
+
     def update_host(self, host_name, accounts=None, **kwargs):
         """ 更新一台服务器的信息
 
@@ -220,24 +240,46 @@ class XlprDb(Connection):
                          (json.dumps(accounts, ensure_ascii=False), self.seckey, host_name))
         self.commit()
 
-    @classmethod
-    def connect(cls, conninfo='', seckey='', *,
-                autocommit=False, row_factory=None, context=None, **kwargs) -> 'XlprDb':
-        """ 因为要标记 -> XlprDb，IDE才会识别出类别，有自动补全功能
-        但在类中写@classmethod，无法标记 -> XlprDb，所以就放外面单独写一个方法了
-        """
-        d = XlOsEnv.get('XlprDbAccount', decoding=True)
-        if conninfo == '':
-            conninfo = d['conninfo']
-        if seckey == '':
-            seckey = d['seckey']
-        con = super(XlprDb, cls).connect(conninfo,
-                                         autocommit=autocommit, row_factory=row_factory,
-                                         context=context, **kwargs)
-        con.seckey = seckey
-        return con
+    def set_host_account(self, host_name, user_name, passwd):
+        """ 设置某台服务器的一个账号密码
 
-    def __1_xlapi相关数据表操作(self):
+        >> xldb.set_host_account('titan2', 'chenkunze', '123456')
+
+        """
+        # 读取旧的账号密码字典数据
+        d = self.execute("SELECT pgp_sym_decrypt(accounts, %s)::jsonb FROM hosts WHERE host_name=%s",
+                         (self.seckey, host_name)).fetchone()[0]
+        # 修改字典数据
+        d[user_name] = str(passwd)
+        # 将新的字典数据写回数据库
+        self.execute('UPDATE hosts SET accounts=pgp_sym_encrypt(%s, %s) WHERE host_name=%s',
+                     (json.dumps(d, ensure_ascii=False), self.seckey, host_name))
+        self.commit()
+
+    def login_ssh(self, host_name, user_name, map_path=None, **kwargs):
+        """ 通过数据库里的服务器数据记录，直接登录服务器 """
+        from pyxllib.extend.unixlib import XlSSHClient
+
+        if host_name.startswith('g_'):
+            host_ip = self.execute("SELECT host_ip FROM hosts WHERE host_name='xlpr0'").fetchone()[0]
+            pw, port = self.execute('SELECT (pgp_sym_decrypt(accounts, %s)::jsonb)[%s]::text, frpc_port'
+                                    ' FROM hosts WHERE host_name=%s',
+                                    (self.seckey, user_name, host_name[2:])).fetchone()
+        else:
+            port = 22
+            host_ip, pw = self.execute('SELECT host_ip, (pgp_sym_decrypt(accounts, %s)::jsonb)[%s]::text'
+                                       ' FROM hosts WHERE host_name=%s',
+                                       (self.seckey, user_name, host_name)).fetchone()
+
+        if map_path is None:
+            if sys.platform == 'win32':
+                map_path = {'C:/': '/'}
+            else:
+                map_path = {'/': '/'}
+
+        return XlSSHClient(host_ip, user_name, pw[1:-1], port=port, map_path=map_path, **kwargs)
+
+    def __2_xlapi相关数据表操作(self):
         """
         files，存储二进制文件的表
             etag，文件、二进制对应的etag值
@@ -369,12 +411,46 @@ class XlprDb(Connection):
 
         return res
 
-    def __2_host_trace相关可视化(self):
+    def __3_host_trace相关可视化(self):
         """ TODO dbview 改名 host_trace """
         pass
 
     def __dbtool(self):
         pass
+
+    def record_host_usage(self, cpu=True, gpu=True, disk=False):
+        """ 记录服务器各种状况，存储到PG数据库
+
+        TODO 并行处理
+        TODO 功能还可以增加：gpu显卡温度、硬盘读写速率检查、网络上传下载带宽
+        """
+        # 1 服务器列表
+        host_names = list(self.exec_col('SELECT host_name FROM hosts WHERE id > 1 ORDER BY id'))
+        host_cpu_gb = {h: v for h, v in self.execute('SELECT host_name, cpu_gb FROM hosts')}
+
+        # 2 去所有服务器取使用情况
+        for i, host_name in enumerate(host_names, start=1):
+            print('-' * 20, i, host_name, '-' * 20)
+            try:
+                ssh = self.login_ssh(host_name, 'root', relogin=5, relogin_interval=0.2)
+                status = {}
+                if cpu:
+                    data = ssh.check_cpu_usage(print_mode=True)
+                    status['cpu'] = {k: v[0] for k, v in data.items()}
+                    status['cpu_memory'] = {k: round(v[1] * host_cpu_gb[host_name] / 100, 2) for k, v in data.items()}
+                if gpu:
+                    status['gpu_memory'] = ssh.check_gpu_usage(print_mode=True)
+                if disk and host_name not in {'xlpr4'}:  # 四卡服务器明确有问题，不检查磁盘空间大小
+                    # 检查磁盘空间会很慢，如果超时可以跳过。
+                    status['disk_memory'] = ssh.check_disk_usage(print_mode=True, timeout=7200)
+            except Exception as e:
+                status = {'error': f'{str(type(e))[8:-2]}: {e}'}
+                print(status)
+
+            if status:
+                self.insert_row('host_trace',
+                                {'host_name': host_name, 'status': status, 'update_time': utc_timestamp(8)})
+            print()
 
     def _get_host_trace_total(self, mode, title, yaxis_name, date_trunc, recent, host_attr):
         # CREATE INDEX ON gpu_trace (update_time);  -- update_time最好建个索引
