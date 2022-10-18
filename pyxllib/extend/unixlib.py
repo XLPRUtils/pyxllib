@@ -211,31 +211,6 @@ class XlSSHClient(paramiko.SSHClient):
 
         self.Path = Path
 
-    @classmethod
-    def login(cls, host_name, user_name, map_path=None, **kwargs):
-        r""" 使用XlprDb里存储的服务器、账号信息，进行登录
-        """
-        from pyxllib.data.pglib import XlprDb
-
-        with XlprDb.connect() as con:
-            if host_name.startswith('g_'):
-                host_ip = con.execute("SELECT host_ip FROM hosts WHERE host_name='xlpr0'").fetchone()[0]
-                pw, port = con.execute('SELECT (pgp_sym_decrypt(accounts, %s)::jsonb)[%s]::text, frpc_port'
-                                       ' FROM hosts WHERE host_name=%s',
-                                       (con.seckey, user_name, host_name[2:])).fetchone()
-            else:
-                port = 22
-                host_ip, pw = con.execute('SELECT host_ip, (pgp_sym_decrypt(accounts, %s)::jsonb)[%s]::text'
-                                          ' FROM hosts WHERE host_name=%s',
-                                          (con.seckey, user_name, host_name)).fetchone()
-
-        if map_path is None:
-            if sys.platform == 'win32':
-                map_path = {'C:/': '/'}
-            else:
-                map_path = {'/': '/'}
-        return cls(host_ip, user_name, pw[1:-1], port=port, map_path=map_path, **kwargs)
-
     def exec(self, command, *args, ignore_errors=False, pipe_in=None, **kwargs):
         """ exec_command的简化版
 
@@ -250,6 +225,7 @@ class XlSSHClient(paramiko.SSHClient):
         """
         # 这个命令有些交互性的操作，需要通过管道输入文本的机制来代替手动交互的过程
         if pipe_in:
+            self.exec('mkdir -p /tmp/pipeins')
             host_file = '/tmp/pipeins/' + XlPath.tempfile().name
             # os.makedirs(XlPath(host_file).parent, exist_ok=True)
             self.write_file(host_file, pipe_in, newline='\n')
