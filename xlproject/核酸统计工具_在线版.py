@@ -24,7 +24,7 @@ from PyQt5.QtWidgets import (QApplication, QMainWindow, QLabel, QGridLayout, QWi
                              QLineEdit, QToolButton, QFileDialog, QProgressBar)
 
 from pyxllib.file.xlsxlib import openpyxl
-from pyxllib.extend.qt import get_input_widget
+from pyxllib.ext.qt import get_input_widget
 from pyxllib.xl import TicToc, XlPath, matchpairs, get_etag
 
 from pyxlpr.ai.clientlib import XlAiClient

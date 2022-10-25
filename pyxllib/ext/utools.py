@@ -27,7 +27,7 @@ import pyautogui
 
 from pyxllib.prog.specialist import browser, TicToc, parse_datetime
 from pyxllib.file.specialist import File, Dir
-from pyxllib.extend.autogui import type_text, clipboard_decorator
+from pyxllib.ext.autogui import type_text, clipboard_decorator
 
 
 def _print_df_result(df, outfmt='text'):

@@ -13,6 +13,13 @@ import pandas as pd
 class SqlBase:
     """ Sql语法通用的功能 """
 
+    def __删(self):
+        pass
+
+    def clear_table(self, table_name):
+        """ 【DDL删】清空表格内容 """
+        self.execute(f'DELETE FROM {table_name}')
+
     def __改(self):
         pass
 
@@ -104,6 +111,7 @@ class Connection(sqlite3.Connection, SqlBase):
 
     def create_table(self, table_name, column_descs):
         """ 【DDL增】
+
         :param table_name:
         :param column_descs:
             str, 正常的列格式描述，例如 'c1 text, c2 blob'
@@ -121,12 +129,9 @@ class Connection(sqlite3.Connection, SqlBase):
         # 2 新建表格
         self.execute(f'CREATE TABLE {table_name}({column_descs})')
 
-    def clear_table(self, table_name):
-        """ 【DDL删】清空表格内容 """
-        self.execute(f'DELETE FROM {table_name}')
-
     def ensure_column(self, table_name, col_name, col_type='', *, col_ref_val=None):
         """ 【DDL改】添加字段
+
         :param table_name:
         :param col_name:
         :param col_type:
@@ -155,6 +160,7 @@ class Connection(sqlite3.Connection, SqlBase):
 
     def insert(self, table_name, cols, if_exists='IGNORE'):
         """ 【增】插入新数据
+
         :param table_name:
         :param cols: 一般是用字典表示的要插入的值
         :param if_exists: 如果已存在的处理策略
@@ -170,6 +176,7 @@ class Connection(sqlite3.Connection, SqlBase):
 
     def update(self, table_name, cols, where):
         """ 【改】更新数据
+
         :param table_name:
         :param dict cols: 要更新的字段及值
         :param dict where: 怎么匹配到对应记录
