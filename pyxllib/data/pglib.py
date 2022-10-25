@@ -214,7 +214,7 @@ class XlprDb(Connection):
         d = XlOsEnv.get('XlprDbAccount', decoding=True)
         if conninfo == '':
             conninfo = d['conninfo']
-        if seckey == '':
+        if seckey == '' and isinstance(d, dict) and 'seckey' in d:
             seckey = d['seckey']
         # 注意这里获取的是XlprDb类型
         con = super(XlprDb, cls).connect(conninfo, autocommit=autocommit, row_factory=row_factory, context=context,
@@ -256,9 +256,9 @@ class XlprDb(Connection):
                      (json.dumps(d, ensure_ascii=False), self.seckey, host_name))
         self.commit()
 
-    def login_ssh(self, host_name, user_name, map_path=None, **kwargs):
+    def login_ssh(self, host_name, user_name, map_path=None, **kwargs) -> 'XlSSHClient':
         """ 通过数据库里的服务器数据记录，直接登录服务器 """
-        from pyxllib.extend.unixlib import XlSSHClient
+        from pyxllib.ext.unixlib import XlSSHClient
 
         if host_name.startswith('g_'):
             host_ip = self.execute("SELECT host_ip FROM hosts WHERE host_name='xlpr0'").fetchone()[0]

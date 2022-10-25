@@ -280,6 +280,10 @@ class XlSSHClient(paramiko.SSHClient):
         """ 以下是为scp准备的功能 """
         pass
 
+    def get_scp(self):
+        scp = scplib.SCPClient(self.get_transport())
+        return scp
+
     def __local_dir(self, remote_path, local_dir):
         if local_dir is not None:
             return XlPath(local_dir)
@@ -674,6 +678,16 @@ class XlSSHClient(paramiko.SSHClient):
     def set_hostname(self, name):
         return self.exec(f'hostnamectl set-hostname {name}')
 
+    def restart_frps(self, frp_dir='/root/frp_0.37.0_linux_amd64'):
+        cmds = [
+            # 找到已有的 ./frpc 关闭
+            r"for i in $(ps -eo 'args,pid' | awk '/^.\/frps / {print $4}'); do kill ${i}; done",
+            # 重新启动 frps （注意：frps必须明确指定 frps.ini，否则用不了vhost_http_port。但frpc好像不用显式指定frpc.ini）
+            f"cd {frp_dir}; nohup ./frps -c ./frps.ini> /dev/null 2>&1 &"
+        ]
+        # 注意关闭和重启需要同时操作，不然在外网穿刺连接ssh，执行第1句后就断开连接了
+        self.exec('; '.join(cmds))
+
     def restart_frpc(self, frp_dir='/root/frp_0.37.0_linux_amd64'):
         """ 因为service不一定有效，这里通过暴力找frpc的方式来设置
 
@@ -681,9 +695,9 @@ class XlSSHClient(paramiko.SSHClient):
         """
         cmds = [
             # 找到已有的 ./frpc 关闭
-            r"for i in $(ps -eo 'args,pid' | awk '/^.\/frpc / {print $2}'); do kill ${i}; done",
+            r"for i in $(ps -eo 'args,pid' | awk '/^.\/frpc / {print $4}'); do kill ${i}; done",
             # 重新启动 frpc
-            f"cd {frp_dir}; nohup ./frpc > /dev/null 2>&1 &"
+            f"cd {frp_dir}; nohup ./frpc -c ./frpc.ini> /dev/null 2>&1 &"
         ]
         # 注意关闭和重启需要同时操作，不然在外网穿刺连接ssh，执行第1句后就断开连接了
         self.exec('; '.join(cmds))

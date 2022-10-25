@@ -383,13 +383,13 @@ class 网课考勤:
         # 5 第22课的处理
         if self.觉观禅课 and self.当天课次 == 23:
             name.append('第22课')
-            cel = ws.findcel('交易订单号').down()
-            while cel.value:
-                cols = [cel.value, self.视频返款[0],
-                        f'{self.返款标题}第{self.当天课次}课',
-                        f'{cel.value}_class22']  # 防止重复返款的校验码
-                ls.append(','.join(map(str, cols)))
-                cel = cel.down()
+            for r in ws.iterrows('用户ID'):
+                v = ws.cell2(r, '交易订单号').value
+                if v:
+                    cols = [v, self.视频返款[0],
+                            f'{self.返款标题}第{self.当天课次 - 1}课',
+                            f'{v}_class22']  # 防止重复返款的校验码
+                    ls.append(','.join(map(str, cols)))
 
         # 6 返款文件
         if ls:
@@ -629,7 +629,8 @@ class KqDb(Connection):
             # 1 确定表格存在
             if not self.has_table('观看记录'):
                 cols = ['课次名 text', '用户ID text', '用户昵称 text',
-                        '直播间停留秒数 integet', '累计观看秒数 integer', '直播观看秒数 integer', '回放观看秒数 integer',
+                        '直播间停留秒数 integet', '累计观看秒数 integer', '直播观看秒数 integer',
+                        '回放观看秒数 integer',
                         '首次进入时间 text', '最近进入时间 text', '记录时间点 text']
                 cols = ', '.join(cols)
                 self.execute(f'CREATE TABLE 观看记录 ({cols}, PRIMARY KEY (课次名, 用户ID, 直播间停留秒数))')
