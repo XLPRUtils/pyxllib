@@ -14,18 +14,19 @@ import sys
 from pyxllib.prog.pupil import check_install_package
 from pyxllib.file.specialist import XlPath, ensure_localdir
 
-if sys.platform == 'win32':
-    # windows系统中pg的默认安装位置
-    # https://www.yuque.com/xlpr/pyxllib/install_psycopg
-    pgdll_dir = XlPath('C:/Program Files/PostgreSQL/14/bin')
-    if not pgdll_dir.is_dir():  # 换一个自定义目录继续检查
-        pgdll_dir = XlPath.userdir() / '.xlpr/pgdll'
-    if not pgdll_dir.is_dir():
-        print('没有PostgreSQL对应的dll文件，自动下载：')
-        ensure_localdir(pgdll_dir, 'https://xmutpriu.com/download/pgdll_v14.zip')
-    os.environ['PATH'] += ';' + pgdll_dir.as_posix()
+# 使用binary安装，好像就不需要自己配置依赖了
+# if sys.platform == 'win32':
+#     # windows系统中pg的默认安装位置
+#     # https://www.yuque.com/xlpr/pyxllib/install_psycopg
+#     pgdll_dir = XlPath('C:/Program Files/PostgreSQL/14/bin')
+#     if not pgdll_dir.is_dir():  # 换一个自定义目录继续检查
+#         pgdll_dir = XlPath.userdir() / '.xlpr/pgdll'
+#     if not pgdll_dir.is_dir():
+#         print('没有PostgreSQL对应的dll文件，自动下载：')
+#         ensure_localdir(pgdll_dir, 'https://xmutpriu.com/download/pgdll_v14.zip')
+#     os.environ['PATH'] += ';' + pgdll_dir.as_posix()
 
-check_install_package('psycopg')
+check_install_package('psycopg', 'psycopg[binary]')
 
 import io
 from collections import Counter
@@ -46,13 +47,44 @@ from pyxllib.data.sqlite import SqlBase
 
 
 class Connection(psycopg.Connection, SqlBase):
-    def exec_col(self, query, params=None, *, prepare=None, binary=False):
-        """ 获得第1列的值，注意这个方法跟select_col很像，但更泛用，优先推荐使用exec_col
 
-        >> self.exec_col('SELECT id FROM skindata')
+    def __1_库(self):
+        pass
+
+    def __2_表格(self):
+        pass
+
+    def get_table_names(self):
+        # cmd = "SELECT table_name FROM information_schema.tables WHERE table_schema='public' AND table_type='BASE TABLE'"
+        cmd = "SELECT tablename FROM pg_tables WHERE schemaname='public'"
+        return [x[0] for x in self.execute(cmd)]
+
+    def has_table(self, table_name, schemaname='public'):
+        query = ["SELECT EXISTS (SELECT FROM pg_tables ",
+                 f"WHERE schemaname='{schemaname}' AND tablename='{table_name}')"]
+        res = self.execute(' '.join(query))
+        return res.fetchone()[0]
+
+    def get_column_names(self, table_name):
+        """ 【查】表格有哪些字段
         """
-        for row in self.execute(query, params, prepare=prepare, binary=binary):
-            yield row[0]
+        cmd = f"SELECT column_name FROM information_schema.columns WHERE table_name='{table_name}'"
+        return list(self.exec_col(cmd))
+
+    def ensure_column(self, table_name, col_name, *args, comment=None, **kwargs):
+        super(Connection, self).ensure_column(table_name, col_name, *args, **kwargs)
+        if comment:
+            self.set_column_comment(table_name, col_name, comment)
+
+    def set_column_comment(self, table_name, col_name, comment):
+        # 这里comment按%s填充会报错。好像是psycopg库的问题，这种情况因为没有表格字段参照类型，会不知道要把comment转成字符串。
+        # 然后使用py的f字符串填充的话，要避免comment有引号等特殊字符，就用了特殊的转义标记$zyzf$
+        # 暂时找不到更优雅的方式~~ 而且这个问题，可能以后其他特殊的sql语句也会遇到。。。
+        self.execute(f"COMMENT ON COLUMN {table_name}.{col_name} IS $zyzf${comment}$zyzf$")
+        self.commit()
+
+    def __3_execute(self):
+        pass
 
     def exec_nametuple(self, *args, **kwargs):
         cur = self.cursor(row_factory=psycopg.rows.namedtuple_row)
@@ -66,7 +98,7 @@ class Connection(psycopg.Connection, SqlBase):
         # cur.close()
         return data
 
-    def __增(self):
+    def __4_数据类型(self):
         pass
 
     @classmethod
@@ -77,8 +109,22 @@ class Connection(psycopg.Connection, SqlBase):
         return val
 
     @classmethod
-    def cvt_types(cls, vals):
-        return [cls.cvt_type(v) for v in vals]
+    def autotype(cls, val):
+        if isinstance(val, str):
+            return 'text'
+        elif isinstance(val, int):
+            return 'int4'  # int2、int8
+        elif isinstance(val, bool):
+            return 'boolean'
+        elif isinstance(val, float):
+            return 'float4'
+        elif isinstance(val, dict):
+            return 'jsonb'
+        else:  # 其他list等类型，可以用json.dumps或str转文本存储
+            return 'text'
+
+    def __5_增删改查(self):
+        pass
 
     def insert_row(self, table_name, cols, *, on_conflict='DO NOTHING', commit=True):
         """ 【增】插入新数据
@@ -133,37 +179,6 @@ class Connection(psycopg.Connection, SqlBase):
         self.execute(query, params)
         if commit:
             self.commit()
-
-    def __删(self):
-        pass
-
-    def __改(self):
-        pass
-
-    def update(self, table_name, cols, where, *, commit=True):
-        """ 【改】更新数据
-
-        :param dict cols: 要更新的字段及值
-        :param dict where: 怎么匹配到对应记录
-        :return:
-
-        >> xldb.update('xlapi', {'input': d}, {'id': x['id']})
-        """
-        kvs = ','.join([f'{k}=%s' for k in cols.keys()])
-        ops = ' AND '.join([f'{k}=%s' for k in where.keys()])
-        vals = list(cols.values()) + list(where.values())
-        self.execute(f'UPDATE {table_name} SET {kvs} WHERE {ops}', self.cvt_types(vals))
-        if commit:
-            self.commit()
-
-    def __查(self):
-        pass
-
-    def has_table(self, table_name, schemaname='public'):
-        query = ["SELECT EXISTS (SELECT FROM pg_tables ",
-                 f"WHERE schemaname='{schemaname}' AND tablename='{table_name}')"]
-        res = self.execute(' '.join(query))
-        return res.fetchone()[0]
 
 
 """
@@ -234,7 +249,7 @@ class XlprDb(Connection):
         if not self.execute('SELECT EXISTS (SELECT FROM hosts WHERE host_name=%s)', (host_name,)).fetchone()[0]:
             self.insert_row('hosts', {'host_name': host_name})
         if kwargs:
-            self.update('hosts', kwargs, {'host_name': host_name})
+            self.update_row('hosts', kwargs, {'host_name': host_name})
         if accounts:
             self.execute('UPDATE hosts SET accounts=pgp_sym_encrypt(%s, %s) WHERE host_name=%s',
                          (json.dumps(accounts, ensure_ascii=False), self.seckey, host_name))
@@ -524,14 +539,14 @@ class XlprDb(Connection):
 
         chart = Line()
         chart.set_title(title)
-        chart.options['xAxis'][0].update({'min': ls[0][0], 'type': 'time',
-                                          # 'minInterval': 3600 * 1000 * 24,
-                                          'name': '时间', 'nameGap': 50, 'nameLocation': 'middle'})
-        chart.options['yAxis'][0].update({'name': yaxis_name, 'nameGap': 50, 'nameLocation': 'middle'})
+        chart.options['xAxis'][0].update_row({'min': ls[0][0], 'type': 'time',
+                                              # 'minInterval': 3600 * 1000 * 24,
+                                              'name': '时间', 'nameGap': 50, 'nameLocation': 'middle'})
+        chart.options['yAxis'][0].update_row({'name': yaxis_name, 'nameGap': 50, 'nameLocation': 'middle'})
         # 目前是比较暴力的方法调整排版，后续要研究是不是能更自动灵活些
-        chart.options['legend'][0].update({'top': '6%', 'icon': 'pin'})
+        chart.options['legend'][0].update_row({'top': '6%', 'icon': 'pin'})
         chart.options['grid'] = [{'top': 55 + len(all_users_usaged) * 4, 'containLabel': True}]
-        chart.options['tooltip'].opts.update({'axisPointer': {'type': 'cross'}, 'trigger': 'item'})
+        chart.options['tooltip'].opts.update_row({'axisPointer': {'type': 'cross'}, 'trigger': 'item'})
 
         chart.add_series(f'total{pretty_val(ls[0][1]):g}', to_list([x[1] for x in ls]), areaStyle={})
         for user, usaged in all_users_usaged.most_common():
