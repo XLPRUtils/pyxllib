@@ -312,7 +312,7 @@ class 网课考勤:
 
         # 2 要过期的课程
         if 0 < self.结束课次 + 1 < 22:
-            msg.append(f'第{self.结束课次 + 1}课回放、打卡第{len(self.视频返款) - 1}天，还未完成学习的师兄们请抓紧时间。')
+            msg.append(f'第{self.结束课次 + 1}课回放、打卡第{len(self.视频返款) - 1}天，还未完成学习的同学们请抓紧时间。')
 
         # 3 回放
         回放课次 = self.当天课次 - 3
@@ -398,7 +398,7 @@ class 网课考勤:
 
         # 7 提示信息
         if name:
-            msg.append('+'.join(name) + '促学金已返款，师兄们请查收。')
+            msg.append('+'.join(name) + '促学金已返款，同学们请查收。')
         if self.觉观禅课 and self.当天课次 == 22:
             msg.append('今晚第22课答疑不考勤，明天统一返款')
         return msg
@@ -482,9 +482,9 @@ class 网课考勤:
         # 并计算当前的返款额
         desc = '/'.join(map(str, self.打卡返款))
         if self.当天课次 == 25:
-            msg.append('已生成截止目前的打卡数据，师兄们可以预先核对下，明天最后更新打卡数据后返款。'
+            msg.append('已生成截止目前的打卡数据，同学们可以预先核对下，明天最后更新打卡数据后返款。'
                        f'打卡达到"5/10/15"次，依次返回"{desc}"元。'
-                       '注：因技术原因，打卡数据无法精确计算，统计遵循宁可多算但无漏算的原则，所以部分师兄打卡数会超过21次。')
+                       '注：因技术原因，打卡数据无法精确计算，统计遵循宁可多算但无漏算的原则，所以部分同学打卡数会超过21次。')
         elif self.当天课次 == 26:
             # 生成打卡返款
             msg.append('已完成学修日志（打卡）促学金的返款。'
@@ -540,7 +540,7 @@ class 网课考勤:
         # 4 生成通知，及返款文件
         desc = '/'.join(map(str, self.打卡返款))
         if self.结束课次 == 20:
-            msg.append('已生成截止目前的打卡数据，师兄们可以预先核对下，明天最后更新打卡数据后返款。'
+            msg.append('已生成截止目前的打卡数据，同学们可以预先核对下，明天最后更新打卡数据后返款。'
                        f'打卡达到"5/10/15"次，依次返回"{desc}"元。')
         elif self.结束课次 == 21:
             # 生成打卡返款
@@ -655,7 +655,7 @@ class KqDb(Connection):
                      '最近进入时间': row['最近进入时间'].strip(),
                      '记录时间点': time_tag,
                      }
-                self.insert('观看记录', d)
+                self.insert_row('观看记录', d)
             self.commit()
 
         for f in XlPath('小鹅通下载表').glob('*直播观看详情*.csv'):
@@ -688,7 +688,7 @@ class KqDb(Connection):
                 # 有的是写成公式的'=手机号'
                 if isinstance(row[k], str) and '=' in row[k]:
                     row[k] = re.search(r'\d+', row[k]).group()
-            self.insert('用户列表', row.to_dict())
+            self.insert_row('用户列表', row.to_dict())
         self.commit()
 
     def 用户信息摘要(self, x):
