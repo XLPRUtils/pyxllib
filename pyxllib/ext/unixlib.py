@@ -494,7 +494,7 @@ class XlSSHClient(paramiko.SSHClient):
         except ScpLimitError:
             pass
 
-    def scp_put_brief(self, _dir):
+    def scp_put_brief(self, _dir, **kwargs):
         """ 过滤一些一般不同步的文件 """
         for p in XlPath(_dir).glob('*'):
             if p.name in ('.git', '.idea') or p.suffix == '.pyc':
@@ -502,10 +502,10 @@ class XlSSHClient(paramiko.SSHClient):
 
             if p.is_dir():
                 # 如果是目录，继续递归规则处理
-                self.scp_put_brief(p)
+                self.scp_put_brief(p, **kwargs)
             else:
                 # 否则是没被过滤的文件，直接上传
-                self.scp_put(p)
+                self.scp_put(p, **kwargs)
 
     def scp_sync(self, local_path, *, mkdir=True, info=True, limit_bytes=None):
         """ 服务器和本地目录的数据同步
