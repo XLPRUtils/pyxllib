@@ -20,7 +20,7 @@ from pyxllib.prog.pupil import DictTool, inject_members, dprint
 from pyxllib.prog.specialist import browser
 from pyxllib.algo.newbie import round_unit
 from pyxllib.algo.pupil import get_number_width
-from pyxllib.file.specialist import File, Dir, writefile, get_etag
+from pyxllib.file.specialist import XlPath, writefile, get_etag
 from pyxllib.cv.expert import xlcv, xlpil
 from pyxlpr.data.labelme import LabelmeDict
 
@@ -34,7 +34,7 @@ class FitzDoc:
     """
 
     def __init__(self, file):
-        self.src_file = File(file)
+        self.src_file = XlPath(file)
         self.doc = fitz.open(str(file))
 
     def to_images(self, dst_dir=None, file_fmt='{filestem}_{number}.jpg', num_width=None, *,
@@ -62,8 +62,8 @@ class FitzDoc:
 
         # 自动推导目标目录
         if dst_dir is None:
-            dst_dir = Dir(srcfile.stem, srcfile.parent) if n_page > 1 else Dir(srcfile.parent)
-        Dir(dst_dir).ensure_dir()
+            dst_dir = XlPath.init(srcfile.stem, srcfile.parent) if n_page > 1 else XlPath(srcfile.parent)
+        os.makedirs(dst_dir, exist_ok=True)
 
         # 域宽
         num_width = num_width or get_number_width(n_page)  # 根据总页数计算需要的对齐域宽
@@ -74,12 +74,12 @@ class FitzDoc:
             for i in range(n_page):
                 im = self.load_page(i).get_cv_image(scale)
                 number = ('{:0' + str(num_width) + 'd}').format(i + start)  # 前面的括号不要删，这样才是完整的一个字符串来使用format
-                f = xlcv.write(im, File(file_fmt.format(filestem=filestem, number=number), dst_dir))
+                f = xlcv.write(im, XlPath.init(file_fmt.format(filestem=filestem, number=number), dst_dir))
                 res.append(f)
             return res
         else:
             im = self.load_page(0).get_cv_image(scale)
-            return [xlcv.write(im, File(srcfile.stem + os.path.splitext(file_fmt)[1], dst_dir))]
+            return [xlcv.write(im, XlPath.init(srcfile.stem + os.path.splitext(file_fmt)[1], dst_dir))]
 
     def to_labelmes(self, imfiles, opt='dict', *, views=(0, 0, 1, 0), scale=1, indent=None):
         """ 生成图片对应的标注，常跟to_images配合使用 """
@@ -113,7 +113,7 @@ class FitzDoc:
                 ls.append(page.get_text('html'))
             data = '\n'.join(ls)
             etag = get_etag(data)
-            f = File(etag, Dir.TEMP, suffix='.html')
+            f = XlPath.init(etag, XlPath.tempdir(), suffix='.html')
             f.write(data)
             browser(f)
         else:
@@ -152,7 +152,7 @@ class XlFitzPage(fitz.fitz.Page):
 
     def to_image(self, outfile, *, scale=1, if_exists=None):
         """ 转成为文件 """
-        f = File(outfile)
+        f = XlPath(outfile)
         suffix = f.suffix.lower()
 
         if suffix == '.svg':
@@ -268,7 +268,7 @@ class XlFitzPage(fitz.fitz.Page):
             data = self.get_text('html')  # html、xhtml 可以转网页，虽然排版相对来说还是会乱一点
             data = ''.join(data)
             etag = get_etag(data)
-            f = File(etag, Dir.TEMP, suffix='.html')
+            f = XlPath.init(etag, XlPath.tempdir(), suffix='.html')
             f.write(data)
             browser(f)
         else:
@@ -308,7 +308,7 @@ class DemoFitz:
         toc = self.doc.getToC()
         toc[1][1] = '改标题名称'
         self.doc.setToC(toc)
-        file = File('a.pdf', Dir.TEMP).to_str()
+        file = XlPath('a.pdf', XlPath.tempdir()).to_str()
         self.doc.save(file, garbage=4)
         browser(file)
 
@@ -335,7 +335,7 @@ class DemoFitz:
     def rearrange_pages(self):
         """重新布局页面"""
         self.doc.select([0, 0, 1])  # 第1页展示两次后，再跟第2页
-        file = writefile(b'', 'a.pdf', root=Dir.TEMP, if_exists='replace')
+        file = writefile(b'', 'a.pdf', root=XlPath.tempdir(), if_exists='replace')
         self.doc.save(file, garbage=4)  # 注意要设置garbage，否则文档并没有实际删除内容压缩文件大小
         browser(file)
 
@@ -385,7 +385,7 @@ class DemoFitz:
         self.doc.select([0])
         page = self.doc.loadPage(0)
         # page.insertText(fitz.Point(100, 200), 'test\ntest')
-        file = File('a.pdf', Dir.TEMP).to_str()
+        file = str(XlPath.tempdir() / 'a.pdf')
         dprint(file)
         self.doc.save(file, garbage=4)
         browser(file)

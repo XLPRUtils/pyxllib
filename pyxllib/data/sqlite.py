@@ -137,13 +137,14 @@ class SqlBase:
     def __5_增删改查(self):
         pass
 
-    def update_row(self, table_name, cols, where, *, commit=True):
+    def update_row(self, table_name, cols, where, *, commit=False):
         """ 【改】更新数据
 
         虽然名称是update_row，但where条件满足时，是有可能批量替换多行的
 
         :param dict cols: 要更新的字段及值
         :param dict where: 怎么匹配到对应记录
+        :param commit: 建议减小commit频率，会极大降低性能
         :return:
 
         >> xldb.update('xlapi', {'input': d}, {'id': x['id']})

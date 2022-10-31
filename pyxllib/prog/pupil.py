@@ -231,7 +231,7 @@ class DictTool:
 
         inplace subtraction
 
-        keys可以输入另一个字典，也可以输入一个列表表示要删除的键值清单
+        :param keys: 可以输入另一个字典，也可以输入一个列表表示要删除的键值清单
 
         :return: dict_ -= keys
         """

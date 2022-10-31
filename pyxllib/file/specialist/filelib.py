@@ -1041,6 +1041,19 @@ class XlPath(type(pathlib.Path())):
             DictTool.ior(kwargs, {'ensure_ascii': False})
             json.dump(data, f, **kwargs)
 
+    def read_jsonl(self, encoding='utf8', *, errors='strict', return_mode: bool = False):
+        s, encoding = self.read_text(encoding=encoding, errors=errors, return_mode=True)
+
+        data = []
+        # todo 这一步可能不够严谨，不同的操作系统文件格式不同。但使用splitlines也不太好，在数据含有NEL等特殊字符时会多换行。
+        for line in s.split('\n'):
+            data.append(json.loads(line))
+
+        if return_mode:
+            return data, encoding
+        else:
+            return data
+
     def read_yaml(self, encoding='utf8', *, errors='strict', rich_return=False):
         s, encoding = self.read_text(encoding=encoding, errors=errors, return_mode=True)
         data = yaml.safe_load(s)
