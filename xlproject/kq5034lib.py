@@ -330,10 +330,11 @@ class 网课考勤:
                     t = int(re.search(r'第(\d+)天', v).group(1))
                     if self.视频返款[t]:
                         订单号 = ws.cell2(r, '交易订单号').value
-                        cols = [订单号, self.视频返款[t],
-                                f'{self.返款标题}第{回放课次}课第{t}天完成回放',
-                                f'{订单号}_class{回放课次:02}']  # 防止重复返款的校验码
-                        ls.append(','.join(map(str, cols)))
+                        if 订单号:
+                            cols = [订单号, self.视频返款[t],
+                                    f'{self.返款标题}第{回放课次}课第{t}天完成回放',
+                                    f'{订单号}_class{回放课次:02}']  # 防止重复返款的校验码
+                            ls.append(','.join(map(str, cols)))
                     else:
                         v = '未完成学习'
                 elif v in (f'不足{self.达标时长}分钟', '未开始学习'):
@@ -367,10 +368,11 @@ class 网课考勤:
                 v = ws.cell(r, col).value
                 if v == '完成当堂学习':
                     订单号 = ws.cell2(r, '交易订单号').value
-                    cols = [订单号, self.视频返款[0],
-                            f'{self.返款标题}第{self.当天课次}课完成当堂学习',
-                            f'{订单号}_class{self.当天课次:02}']  # 防止重复返款的校验码
-                    ls.append(','.join(map(str, cols)))
+                    if 订单号:
+                        cols = [订单号, self.视频返款[0],
+                                f'{self.返款标题}第{self.当天课次}课完成当堂学习',
+                                f'{订单号}_class{self.当天课次:02}']  # 防止重复返款的校验码
+                        ls.append(','.join(map(str, cols)))
                 else:
                     d.append(ws.cell(r, 1).value)
 
