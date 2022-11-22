@@ -54,7 +54,7 @@ class __NestEnvBase:
         start = 0
         for i, t in enumerate(fragments):
             if i % 2:  # 区间内
-                intervals.append([start, start+len(t)])
+                intervals.append([start, start + len(t)])
             start += len(t)
         return cls(''.join(fragments), intervals)
 
@@ -650,7 +650,7 @@ class NestEnv(__NestEnvBase):
 
 class LatexNestEnv(NestEnv):
     def includegraphics(self, part=0, invert=False):
-        r"""能抓取各种插图命令，使用inner可以只获得图片文件名
+        r""" 能抓取各种插图命令，使用inner可以只获得图片文件名
 
         :param part:
             0           全内容
@@ -675,7 +675,7 @@ class LatexNestEnv(NestEnv):
         return self.nest(core, invert)
 
     def lewis(self, inner=False, invert=False):
-        r"""电子式的匹配
+        r""" 电子式的匹配
         这个本身是有个命令的并不难，难的是实际情况中，往往两边会有拓展
 
         >>> LatexNestEnv(r'aa H\Lewis{0:2:4:6:,N}H bb').inside(r'\lewis').strings()
@@ -724,7 +724,7 @@ class LatexNestEnv(NestEnv):
     def latexcmd(self, name=r'[a-zA-Z]+', *, part=0, star=True, optional=True,
                  min_bracket=0, max_bracket=float('inf'), brackets=None,
                  linefeed=1, invert=False):
-        r"""匹配latex命令区间
+        r""" 匹配latex命令区间
 
         :param part: TODO 功能待开发~~
             0，整块内容
@@ -820,7 +820,7 @@ class LatexNestEnv(NestEnv):
                              linefeed=linefeed, invert=invert)
 
     def latexenv(self, head, tail=None, inner=False, invert=False):
-        r"""latex的\begin、\end环境匹配，支持嵌套定位
+        r""" latex的\begin、\end环境匹配，支持嵌套定位
 
         >>> s = r"\begin{center}\begin{tabular}\begin{tabular}\end{tabular}\end{tabular}\end{center}"
         >>> LatexNestEnv(s).latexenv('tabular').replace('x')
@@ -862,6 +862,7 @@ class LatexNestEnv(NestEnv):
 
     def latexcomment(self, include_pxmltag=False, invert=False):
         """ latex 的注释性代码
+
         :param include_pxmltag: 是否包含进百分注，默认不包含
         """
         if include_pxmltag:
@@ -870,23 +871,49 @@ class LatexNestEnv(NestEnv):
             pattern = r'(?<!\\)%(?!<).*'
         return self.search(pattern, invert=invert)
 
-    def formula(self, inner=False, invert=False):
-        r"""公式匹配
+    def formula(self, inner=False, invert=False, *, mode=3):
+        r""" 公式匹配
+
         >>> LatexNestEnv(r'aa$bb$cc').formula().strings()
         ['$bb$']
 
+        :param inner: 要定位获取的公式内容
+            False,0,默认值   取公式及其对应的定界符
+            True            只取公式内部的实际内容，不含公式定界符
+        :param mode: 匹配模式，由以下几个数值的二进制组合而成
+            1，$...$、$$...$$
+            2，$\begin{array}...\end{array}$
+            4，\[...\]
+            8，\(...\)
+
+            没有定界符的情况？（这个功能太复杂，只是一个初步设想，如果实现的话，还是后续放到另一个地方去）
+
         TODO 遇到 "$$ x xx $xx$"，前面的$$是中间漏了内容的，应该要有异常处理机制，至少报个错误位置吧
+        TODO \[...\]和\(...\)的公式情况没有处理
         """
 
         def core(s):
             if r'\\$' in s:
                 raise ValueError(r'内容中含有\\$，请先跑「refine_formula」加上空格')
             i = 'inner' if inner else 0
-            # 线上才要考虑转义情况，线下也有可能\\后面跟$是不用处理的
-            li1 = [m.span(i) for m in re.finditer(r'(?<!\\)(\$\$?)(?P<inner>.*?)(?<!\\)\1', s, flags=re.DOTALL)]
-            li2 = [m.span(i) for m in
-                   re.finditer(r'\$\s*\\begin{array}\s*(?P<inner>.*?)\s*\\end{array}\s*\$', s, flags=re.DOTALL)]
-            return Intervals(li1) + Intervals(li2)
+
+            res = Intervals()
+            if mode & 1:
+                # 线上才要考虑转义情况，线下也有可能\\后面跟$是不用处理的
+                li = [m.span(i) for m in re.finditer(r'(?<!\\)(\$\$?)(?P<inner>.*?)(?<!\\)\1', s, flags=re.DOTALL)]
+                res += Intervals(li)
+            if mode & 2:
+                li = [m.span(i) for m in
+                      re.finditer(r'\$\s*\\begin{array}\s*(?P<inner>.*?)\s*\\end{array}\s*\$', s, flags=re.DOTALL)]
+                res += Intervals(li)
+            if mode & 4:
+                li = [m.span(i) for m in re.finditer(r'\\\[(?P<inner>.*?)\\\]', s, flags=re.DOTALL)]
+                res += Intervals(li)
+            if mode & 8:
+                li = [m.span(i) for m in re.finditer(r'\\\((?P<inner>.*?)\\\)', s, flags=re.DOTALL)]
+                res += Intervals(li)
+
+            return res
 
         return self.nest(core, invert)
 

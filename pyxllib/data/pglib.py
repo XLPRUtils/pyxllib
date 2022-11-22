@@ -539,14 +539,14 @@ class XlprDb(Connection):
 
         chart = Line()
         chart.set_title(title)
-        chart.options['xAxis'][0].update_row({'min': ls[0][0], 'type': 'time',
+        chart.options['xAxis'][0].update({'min': ls[0][0], 'type': 'time',
                                               # 'minInterval': 3600 * 1000 * 24,
                                               'name': '时间', 'nameGap': 50, 'nameLocation': 'middle'})
-        chart.options['yAxis'][0].update_row({'name': yaxis_name, 'nameGap': 50, 'nameLocation': 'middle'})
+        chart.options['yAxis'][0].update({'name': yaxis_name, 'nameGap': 50, 'nameLocation': 'middle'})
         # 目前是比较暴力的方法调整排版，后续要研究是不是能更自动灵活些
-        chart.options['legend'][0].update_row({'top': '6%', 'icon': 'pin'})
+        chart.options['legend'][0].update({'top': '6%', 'icon': 'pin'})
         chart.options['grid'] = [{'top': 55 + len(all_users_usaged) * 4, 'containLabel': True}]
-        chart.options['tooltip'].opts.update_row({'axisPointer': {'type': 'cross'}, 'trigger': 'item'})
+        chart.options['tooltip'].opts.update({'axisPointer': {'type': 'cross'}, 'trigger': 'item'})
 
         chart.add_series(f'total{pretty_val(ls[0][1]):g}', to_list([x[1] for x in ls]), areaStyle={})
         for user, usaged in all_users_usaged.most_common():
