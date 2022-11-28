@@ -157,6 +157,7 @@ class xlcv(EnchantBase):
         """
         # BGR 转为 RGB
         if pic.ndim > 2 and pic.shape[2] >= 3:
+            pic = pic.copy()  # 221127周日20:47，发现一个天坑bug，如果没有这句copy修正，会修改原始的pic图片数据
             pic[:, :, [0, 1, 2]] = pic[:, :, [2, 1, 0]]
 
         # 以下是原版实现代码
@@ -477,7 +478,7 @@ class xlcv(EnchantBase):
 
             # 假设图片面积和文件大小成正比，如果r=4，表示长宽要各减小至1/(r**0.5)才能到目标文件大小
             rate = min(1 / (r ** 0.5), 0.95)  # 并且限制每轮至少要缩小至95%，避免可能会迭代太多轮
-            im = cv2.resize(im, (int(im.shape[0] * rate), int(im.shape[1] * rate)))
+            im = cv2.resize(im, (int(im.shape[1] * rate), int(im.shape[0] * rate)))
         return im
 
     @staticmethod

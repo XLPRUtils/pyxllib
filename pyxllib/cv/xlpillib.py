@@ -37,7 +37,7 @@ class PilImg(PIL.Image.Image):
         pass
 
     @classmethod
-    def read(cls, file, flags=None, **kwargs) -> 'PilImg':
+    def read(cls, file, flags=None, *, apply_exif_orientation=False, **kwargs) -> 'PilImg':
         if PilImg.is_pil_image(file):
             im = file
         elif xlcv.is_cv2_image(file):
@@ -46,6 +46,8 @@ class PilImg(PIL.Image.Image):
             im = PIL.Image.open(str(file), **kwargs)
         else:
             raise TypeError(f'类型错误或文件不存在：{type(file)} {file}')
+        if apply_exif_orientation:
+            im = PilImg.apply_exif_orientation(im)
         return PilImg.cvt_channel(im, flags)
 
     @classmethod
