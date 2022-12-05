@@ -395,7 +395,7 @@ class 网课考勤:
 
         # 6 返款文件
         if ls:
-            ls = [x for x in ls if ('无订单号' not in x and 'None' not in x)]
+            ls = [x for x in ls if ('订单号' not in x and 'None' not in x)]
             (self.root / (f'第{self.当天课次:02}天 ' + '+'.join(name) + '返款.csv')).write_text('\n'.join(ls))
 
         # 7 提示信息
