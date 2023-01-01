@@ -695,6 +695,35 @@ def grab_monitor(order=0):
         return PilImg.read(img).to_cv2_image()  # 返回是np矩阵
 
 
+def list_windows(mode=1):
+    """ 列出所有窗口
+
+    :param mode:
+        0, 列出所有窗口
+        1, 只列出有名称，有宽、高的窗口
+        str, 指定名称的窗口
+            注意，当结果有多个的时候，一般后面那个才是紧贴边缘的窗口位置
+
+    :return: [[窗口名, xywh], [窗口2, xywh]...]
+    """
+    import win32gui
+
+    ls = []
+    def callback(hwnd, extra):
+        l, t, r, b = win32gui.GetWindowRect(hwnd)
+        w, h = r - l, b - t
+        name = win32gui.GetWindowText(hwnd)
+        if mode == 0:
+            ls.append([name, [l, t, w, h]])
+        elif mode == 1 and name and w and h:
+            ls.append([name, [l, t, w, h]])
+        elif isinstance(mode, str) and name == mode:
+            ls.append([name, [l, t, w, h]])
+
+    win32gui.EnumWindows(callback, None)
+    return ls
+
+
 if __name__ == '__main__':
     with TicToc(__name__):
         agld = AutoGuiLabelData(r'D:\slns\py4101\py4101\touhou\label')
