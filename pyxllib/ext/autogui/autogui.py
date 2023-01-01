@@ -558,7 +558,7 @@ def type_text(text):
 
     相比pyautogui.write，这里支持中文等unicode格式
 
-    这种需求一般也可以用剪切板实现，是剪切板不够静默、quit
+    这种需求一般也可以用剪切板实现，但是剪切板不够独立轻量，可能会有意想不到的副作用
     """
     check_install_package('pynput')
     from pynput.keyboard import Controller

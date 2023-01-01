@@ -226,7 +226,10 @@ class __NestEnvBase:
         return lines
 
     def group(self, idx=0):
-        """第一个匹配区间，以match格式返回"""
+        """ 第idx个匹配区间，以match格式返回
+
+        注意子区间从0开始编号，注意这里0和re库group(0)的区别！
+        """
         if self.intervals and idx < len(self.intervals):
             r = self.intervals.li[idx]
             return ReMatch(r.regs, self.s, 0, len(self.s))
@@ -836,13 +839,14 @@ class LatexNestEnv(NestEnv):
             while True:
                 pos2 = s.find(head, pos1)
                 if pos2 == -1: break
+                # 处理嵌套环境，所以要计算区间里和t出现的次数
                 cnt1, cnt2, pos1 = 1, 0, pos2 + len(head)
-                while cnt1 != cnt2:
+                while cnt1 != cnt2:  # 当前pos2~pos1区间里，h和t的数量如果不配对，需要往后寻找下一个t
                     pos1 = s.find(t, pos1)
-                    if pos1 == -1:
+                    if pos1 == -1:  # 匹配失败，应该是数据有问题，不配对
                         break
                     else:
-                        pos1 += len(t)
+                        pos1 += len(t)  # 往右移动pos1
                     cnt1, cnt2 = s[:pos1].count(h), s[:pos1].count(t)
                 if pos1 != -1:
                     if inner:
@@ -857,6 +861,35 @@ class LatexNestEnv(NestEnv):
         if not tail and re.match(r'\\begin{[a-zA-Z]+}', head):  # latex类的环境匹配
             m = re.match(r'\\begin({[a-zA-Z]+})', head)
             tail = r'\end' + m.group(1)
+
+        return self.nest(core, invert)
+
+    def latexenv1(self, inner=False, invert=False):
+        """ 定位文本中所有最外层的 \begin、\end 环境
+
+        这个函数需要依赖基础功能latexenv来实现
+        """
+
+        def core(s):
+            parts = []
+
+            start_idx = 0
+            while True:
+                _s = s[start_idx:]
+                # 找文本中出现的第一个\begin{xxx}
+                m = re.search(r'\\begin{([a-zA-Z]+)}', _s)
+                if not m:
+                    break
+
+                # 找第一组配对的begin, end
+                name = m.group(1)
+                m = LatexNestEnv(_s).latexenv(name, inner=inner).group(0)
+                if not m:  # 配对的时候可能也会出现找不到的情景，这种情况其实可以考虑报警告日志
+                    break
+                parts.append([start_idx + m.start(), start_idx + m.end()])
+                start_idx += m.end()
+
+            return parts
 
         return self.nest(core, invert)
 

@@ -61,14 +61,14 @@ class 网课考勤:
         self.觉观禅课 = '觉观' in self.返款标题
         self.当天课次 = (self.today - self.开课日期).days + 1
         self.结束课次 = self.当天课次 - len(self.视频返款) + 1
-        self.用户列表 = pd.read_csv(self.get_file('小鹅通下载表/用户列表导出*.csv'))
+        self.用户列表 = pd.read_csv(self.get_file('数据表/用户列表导出*.csv'))
         # 用户列表 = 用户列表[用户列表['账号状态'] == '正常']
 
         self.考勤表出现次数 = Counter()
-        for f in self.root.glob('小鹅通下载表/**/*直播观看详情*.csv'):
+        for f in self.root.glob('数据表/**/*直播观看详情*.csv'):
             df = pd.read_csv(f, skiprows=1)
             self.考勤表出现次数 += Counter([x.strip() for x in df['用户ID']])
-        for f in self.root.glob('小鹅通下载表/**/*直播用户列表*.csv'):
+        for f in self.root.glob('数据表/**/*直播用户列表*.csv'):
             df = pd.read_csv(f)
             self.考勤表出现次数 += Counter([x.strip() for x in df['用户ID']])
 
@@ -190,7 +190,7 @@ class 网课考勤:
     def 获取每日统计表(self):
         ls = []
         columns = ['课次', '用户ID', '观看日期', '在线时长(分钟)']
-        for f in self.root.glob('小鹅通下载表/*.csv'):
+        for f in self.root.glob('数据表/*.csv'):
             if m := re.match(r'(\d{4}\-\d{2}\-\d{2}).+?课.*?(\d+).+?直播观看详情', f.stem):
                 stat_day, 课次 = date.fromisoformat(m.group(1)), int(m.group(2))
                 skiprows = 1
@@ -410,7 +410,7 @@ class 网课考勤:
         from openpyxl.styles import PatternFill
 
         # 1 至少两个目录才统计
-        dirs = list((self.root / '小鹅通下载表').glob_dirs('用户学习统计*'))
+        dirs = list((self.root / '数据表').glob_dirs('用户学习统计*'))
         if len(dirs) < 2:
             return
 
@@ -497,7 +497,7 @@ class 网课考勤:
         from openpyxl.styles import PatternFill
 
         # 1 有打卡统计表才计算
-        files = list((self.root / '小鹅通下载表').glob_files('*打卡*.csv'))
+        files = list((self.root / '数据表').glob_files('*打卡*.csv'))
         if len(files) < 1:
             return
 
@@ -660,13 +660,13 @@ class KqDb(Connection):
                 self.insert_row('观看记录', d)
             self.commit()
 
-        for f in XlPath('小鹅通下载表').glob('*直播观看详情*.csv'):
+        for f in XlPath('数据表').glob('*直播观看详情*.csv'):
             add_one_csv(f)
 
         # 2 打卡记录
         self.execute('DROP TABLE IF EXISTS 打卡记录')
         # 时间点最新的数据
-        f = list(XlPath('小鹅通下载表').glob('*打卡日记*.csv'))[-1]
+        f = list(XlPath('数据表').glob('*打卡日记*.csv'))[-1]
         df = pd.read_excel(f)
         df.columns = df.columns.str.replace('\t', '')  # 删除列名里的\t
         df = df.replace('\t', '', regex=True)  # 删除值里的\t
