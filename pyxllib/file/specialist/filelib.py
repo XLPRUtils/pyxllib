@@ -886,7 +886,7 @@ class XlPath(type(pathlib.Path())):
         初始化失败则返回None
         """
         try:
-            p = XlPath(arg_in)
+            p = XlPath(str(arg_in))
             p.is_file()  # 有些问题上一步不一定测的出来，要再补一个测试。具体存不存在是不是文件并不重要，而是使用这个能检查出问题。
             return p
         except (ValueError, TypeError, OSError, PermissionError):

@@ -489,8 +489,9 @@ def utc_now(offset_hours=8):
 
 
 def utc_timestamp(offset_hours=8):
-    """ mysql等数据库支持的日期格式 """
-    return utc_now(offset_hours).isoformat(timespec='seconds')
+    """ mysql等数据库支持的日期格式
+    """
+    return utc_now(offset_hours).isoformat(' ', timespec='seconds')
 
 
 class Timeout:
