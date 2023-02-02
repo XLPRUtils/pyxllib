@@ -15,6 +15,7 @@ from collections import defaultdict
 import json
 import os
 import time
+import random
 
 import mss
 import numpy as np
@@ -27,7 +28,7 @@ from pyxllib.prog.pupil import xlwait, DictTool, check_install_package
 from pyxllib.prog.specialist import TicToc
 from pyxllib.algo.geo import ComputeIou, ltrb2xywh, xywh2ltrb
 from pyxllib.algo.shapelylib import ShapelyPolygon
-from pyxllib.file.specialist import File, Dir
+from pyxllib.file.specialist import File, Dir, XlPath
 from pyxllib.cv.expert import xlcv, xlpil
 from pyxlpr.data.labelme import LabelmeDict
 
@@ -42,26 +43,27 @@ class AutoGuiLabelData:
                 label名称：对应属性dict1 （跟loc拼在一起，称为loclabel）
                 label2：dict2
         """
-        self.root = Dir(root)
+        self.root = XlPath(root)
         self.data = defaultdict(dict)
         self.imfiles = {}
 
-        for file in self.root.select_files('**/*.json'):
-            lmdict = file.read()
+        for file in self.root.rglob_files('*.json'):
+            lmdict = file.read_json()
             imfile = file.with_name(lmdict['imagePath'])
             img = xlcv.read(imfile)
-            loc = file.relpath(self.root).replace('\\', '/')[:-5]
+            loc = str(file.relpath(self.root)).replace('\\', '/')[:-5]
             self.imfiles[loc] = imfile
 
             for shape in lmdict['shapes']:
                 attrs = self.parse_shape(shape, img)
-                self.data[loc][attrs['label']] = attrs
+                self.data[loc][attrs['text']] = attrs
 
     @classmethod
     def parse_shape(cls, shape, image=None):
-        """ 解析一个shape的数据为dict字典 """
+        """ 解析一个shape的数据为dict字典，会把一些主要的几何特征也加进label字典字段中 """
         # 1 解析原label为字典
-        attrs = DictTool.json_loads(shape['label'], 'label')
+        # 如果是来自普通的label，会把原文本自动转换为text字段。如果是来自xllabelme，则一般默认就是字典值，带text字段。
+        attrs = DictTool.json_loads(shape['label'], 'text')
         attrs.update(DictTool.sub(shape, ['label']))
 
         # 2 中心点 center
@@ -153,6 +155,9 @@ class AutoGuiLabelData:
             self.write(loc)
 
     def __getitem__(self, loclabel):
+        """ 支持 self['主菜单/道友'] 的格式获取 self.data['主菜单']['道友'] 数据
+        """
+        # 注意功能效果：os.path.split('a/b/c') -> ('a/b', 'c')
         loc, label = os.path.split(loclabel)
         try:
             return self.data[loc][label]
@@ -180,11 +185,12 @@ class NamedLocate(AutoGuiLabelData):
     高级：wait，check_click，wait_click
     """
 
-    def __init__(self, root, *, grayscale=None, confidence=0.95, tolerance=20):
+    def __init__(self, root, *, region=None, grayscale=None, confidence=0.95, tolerance=20):
         """
 
         :param root: 标注数据所在文件夹
             有原图jpg、png和对应的json标注数据
+        :param region: 可以限定窗口位置 (xywh格式)
         :param grayscale: 转成灰度图比较
         :param confidence: 用于图片比较，相似度阈值
         :param tolerance: 像素比较时能容忍的误差变化范围
@@ -195,7 +201,28 @@ class NamedLocate(AutoGuiLabelData):
         self.grayscale = grayscale
         self.confidence = confidence
         self.tolerance = tolerance
+        self.region = region
         self.last_shot = self.update_shot()
+
+    def point_local2global(self, p):
+        """ 一个self.region中相对坐标点p，转换到全局坐标位置 """
+        if self.region:
+            x, y = p
+            x += self.region[0]
+            y += self.region[1]
+            return [x, y]
+        else:
+            return p
+
+    def point_global2local(self, p):
+        """ 一个self.region中相对坐标点p，转换到全局坐标位置 """
+        if self.region:
+            x, y = p
+            x -= self.region[0]
+            y -= self.region[1]
+            return [x, y]
+        else:
+            return p
 
     def screenshot(self, region=None):
         """
@@ -207,6 +234,7 @@ class NamedLocate(AutoGuiLabelData):
         return xlpil.to_cv2_image(im)
 
     def update_shot(self, region=None):
+        region = region or self.region
         self.last_shot = self.screenshot(region)
         return self.last_shot
 
@@ -290,7 +318,8 @@ class NamedLocate(AutoGuiLabelData):
                                     grayscale=grayscale,
                                     confidence=confidence)
         # 3 过滤掉重叠超过一半面积的框
-        return ComputeIou.nms_ltrb([xywh2ltrb(box) for box in list(boxes)])
+        rects = ComputeIou.nms_ltrb([xywh2ltrb(box) for box in list(boxes)])
+        return rects
 
     def img2rect(self, img, haystack=None, *, grayscale=None, confidence=None):
         """ img2rects的简化，只返回一个匹配框
@@ -313,11 +342,13 @@ class NamedLocate(AutoGuiLabelData):
                 haystack = self.last_shot
             return haystack[t:b, l:r]
 
-    def click(self, point, *, back=False, wait_change=False):
+    def click(self, point, *, random_bias=0, back=False, wait_change=False, wait_seconds=0):
         """
         :param back: 点击后鼠标移回原坐标位置
         :param wait_change: 点击后，等待画面产生变化，才结束函数
             point为 loclabel 才能用这个功能
+            注意这个只是比较loclabel的局部区域图片变化，不是全图的变化
+        :param int random_bias: 允许在一定范围内随机点击点
         """
         # 1 判断类型
         if isinstance(point, str):
@@ -326,9 +357,16 @@ class NamedLocate(AutoGuiLabelData):
         else:
             loclabel = ''
 
+        # 随机偏移点
+        if random_bias:
+            x, y = point
+            x += random.randint(-random_bias, +random_bias)
+            y += random.randint(-random_bias, +random_bias)
+            point = (x, y)
+
         # 2 鼠标移动
         pos0 = pyautogui.position()
-        pyautogui.click(*point)
+        pyautogui.click(*self.point_local2global(point))
         if back:
             pyautogui.moveTo(*pos0)  # 恢复鼠标原位置
 
@@ -337,13 +375,58 @@ class NamedLocate(AutoGuiLabelData):
             func = lambda: self.img_distance(self[loclabel]['img'],
                                              self.rect2img(loclabel)) > self.confidence
             xlwait(func)
+        if wait_seconds:
+            time.sleep(wait_seconds)
 
         return point
 
     def move_to(self, point):
         if isinstance(point, str):
             point = self[point]['center']
-        pyautogui.moveTo(*point)
+        pyautogui.moveTo(*self.point_local2global(point))
+
+    def drag_to(self, loclabel, direction=0, duration=1, *, to_tail=False, **kwargs):
+        """ 在loclabel区域内进行拖拽操作
+
+        :param direction: 方向，0123分别表示向"上/右/下/左"拖拽。
+        :param to_tail:
+            False，默认只拖拽一次
+            True，一直拖拽到末尾，即内容不再变化为止
+        """
+
+
+        def core():
+            x = self[loclabel]
+            l, t, r, b = x['ltrb']
+            x2, y2 = x['center']
+
+            self.move_to(loclabel)
+            if direction == 0:
+                y2 = (y2 + t) // 2
+            elif direction == 1:
+                x2 = (x2 + r) // 2
+            elif direction == 2:
+                y2 = (y2 + b) // 2
+            elif direction == 3:
+                x2 = (x2 + l) // 2
+            else:
+                raise ValueError
+
+            x2, y2 = self.point_local2global([x2, y2])
+            pyautogui.dragTo(x2, y2, duration=duration, **kwargs)
+
+        if to_tail:
+            last_im = self.rect2img(loclabel)
+            while True:
+                core()
+                time.sleep(1)
+                new_im = self.rect2img(loclabel)
+                if self.img_distance(last_im, new_im) > 0.95:  # 95%的像素相似
+                    break
+                last_im = new_im
+        else:
+            core()
+
 
     def wait(self, loclabel, *, fixpos=False, limit=None, interval=1):
         """ 封装的比较高层的功能 """
