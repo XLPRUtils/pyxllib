@@ -237,6 +237,25 @@ class XlprDb(Connection):
         con.seckey = seckey
         return con
 
+    @classmethod
+    def connect2(cls, name, passwd, database=None, **kwargs):
+        """ 简化的登录方式，并且自带优先尝试局域网连接，再公网连接
+
+        一般用在jupyter等对启动速度没有太高要求的场合，因为不断尝试localhost等需要耗费不少时间
+        """
+        if database is None:
+            database = name
+
+        xldb = None
+        for ip in ['localhost', '172.16.170.136', 'xmutpriu.com']:
+            try:
+                xldb = XlprDb.connect(f'postgresql://{name}:{passwd}@{ip}/{database}', **kwargs)
+                break
+            except psycopg.OperationalError:
+                pass
+
+        return xldb
+
     def __1_hosts相关数据表操作(self):
         pass
 

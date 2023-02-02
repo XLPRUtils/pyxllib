@@ -1014,7 +1014,7 @@ class XlAiClient:
 
     def common_ocr(self, image):
         r = requests.post(f'{self._priu_host}/api/common_ocr', headers=self._priu_header,
-                          json={'image': self._priu_read_image(image)})
+                          json={'image': self._priu_read_image(image, b64encode=True)})
         res = json.loads(r.text)
         return res
 
