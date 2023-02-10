@@ -198,6 +198,12 @@ def xlpivot(df, index=None, columns=None, values=None):
     :param values: 显示的值
         Callable[items, value]：输出一个函数
     :return: 数据透视表的表格
+
+    使用示例：
+    def func(items):
+        x = items.iloc[0]
+        return f'{x["precision"]:.0f}，{x["recall"]:.0f}，{x["hmean"]:.2f}，{x["fps"]}'
+    >> df2 = xlpivot(df, ['model_type'], ['dataset', 'total_frame'], {'precision，recall，hmean，fps': func})
     """
 
     # 1 将分组的格式标准化
