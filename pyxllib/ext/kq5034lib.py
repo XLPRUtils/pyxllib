@@ -40,13 +40,15 @@ class 网课考勤:
         self.在线表格 = 'https://docs.qq.com/sheet/DUlF1UnRackJ2Vm5U'  # 生成日报用
         self.开课日期 = '2022-01-08'
         self.视频返款 = [20, 15, 10, 5, 0, 0]  # 直播(当堂)/第1天（当天）/第2天/第3天/第4天/第5天，完成观看的依次返款额。
-        self.打卡返款 = [100, 150, 200]  # 打卡满5/10/15次的返款额
+        self.打卡返款 = {5: 100, 10: 150, 15: 200}  # 打卡满5/10/15次的返款额
         self._init(today)
 
     def _init(self, today=None):
         """ 可以手动指定today，适合某些场景下的调试 """
         self.课次数 = 21  # 课次一般都是固定21课，不用改
         self.达标时长 = 30  # 单位:分钟。在线听课的时长达到此标准以上，才计算为完成一节课的学习
+        # 一般是3天，因为回放第1、2、3天都会数额，第4天就没数额了，所以第4天返款
+        self.回放返款天数 = sum((x > 0) for x in self.视频返款[1:])
 
         self.root = XlPath(self.表格路径).parent
         self.wb = openpyxl.load_workbook(self.表格路径)
@@ -311,17 +313,21 @@ class 网课考勤:
                        '可以群里、私聊反馈给我修正。')
 
         # 2 要过期的课程
-        if 0 < self.结束课次 + 1 < 22:
+        if 0 < self.结束课次 + 1 <= self.课次数:
             msg.append(f'第{self.结束课次 + 1}课回放、打卡第{len(self.视频返款) - 1}天，还未完成学习的同学们请抓紧时间。')
 
         # 3 回放
-        回放课次 = self.当天课次 - 3
+        回放课次 = self.当天课次 - self.回放返款天数
         if 0 < 回放课次 <= self.课次数:
             title = f'第{回放课次}课回放'
             msg.append('【' + title + '名单】')
             if 回放课次 == 1:
-                msg[-1] += f'（第1课仍有{len(self.视频返款) - 4}天可以回放）'
-            d = {'第1天回放': [], '第2天回放': [], '第3天回放': [], '未完成学习': []}
+                msg[-1] += f'（第1课仍有{len(self.视频返款) - self.回放返款天数 - 1}天可以回放）'
+
+            d = {}
+            for i in range(1, self.回放返款天数 + 1):
+                d[f'第{i}天回放'] = []
+            d['未完成学习'] = []
 
             col = _col + 回放课次
             for r in ws.iterrows('用户ID'):
@@ -405,6 +411,22 @@ class 网课考勤:
             msg.append('今晚第22课答疑不考勤，明天统一返款')
         return msg
 
+    def 计算打卡返款(self, 打卡次数):
+        from bisect import bisect_right
+
+        ks = [0] + list(self.打卡返款.keys())
+        ks.sort()
+
+        def find_le(a, x):
+            'Find rightmost value less than or equal to x'
+            i = bisect_right(a, x)
+            if i:
+                return a[i - 1]
+            raise ValueError
+
+        k = find_le(ks, 打卡次数)
+        return self.打卡返款.get(k, 0)
+
     def 打卡统计(self, msg):
         """ 不知道平台有每个课程的打卡次数，自己用另外一个途径暴力搞的，220226周六15:59 现在应该没用了"""
         from openpyxl.styles import PatternFill
@@ -487,7 +509,7 @@ class 网课考勤:
             msg.append('已生成截止目前的打卡数据，同学们可以预先核对下，明天最后更新打卡数据后返款。'
                        f'打卡达到"5/10/15"次，依次返回"{desc}"元。'
                        '注：因技术原因，打卡数据无法精确计算，统计遵循宁可多算但无漏算的原则，所以部分同学打卡数会超过21次。')
-        elif self.当天课次 == 26:
+        elif self.当天课次 == self.课次数 + len(self.视频返款) - 1:
             # 生成打卡返款
             msg.append('已完成学修日志（打卡）促学金的返款。'
                        f'打卡达到"5/10/15"次，依次返回"{desc}"元。')
@@ -511,28 +533,35 @@ class 网课考勤:
         df = pd.read_csv(files[-1])  # 221005周三09:19，小鹅通又双叒更新了
         # df.columns = df.columns.str.replace('\t', '')
         # data = Counter([x.strip() for x in df['用户id']])
-        data = {row['用户id']: row['打卡次数'] for _, row in df.iterrows()}
+        try:
+            data = {row['用户id']: row['打卡次数'] for _, row in df.iterrows()}
+        except KeyError:  # 230202周四19:49，另一种实际是xlsx格式，然后再转出csv的情况
+            data = Counter([row['user_id'].strip() for _, row in df.iterrows()])
 
         # 3 将打卡次数写入表格
         ls = []  # 返款汇总
         ws = self.ws
-        color0 = [(255, 0, 0), (255, 255, 128), (255, 255, 0), (0, 255, 0)]
+        最高返款额 = max(self.打卡返款.values())
         for i in ws.iterrows('用户ID'):
             c1 = ws.cell2(i, ['打卡返款', '打卡数'])
-            v = c1.value = data.get(ws.cell2(i, '用户ID').value, 0)
-            v //= 5
-            if v:
-                money = self.打卡返款[min(v - 1, 2)]
+            打卡次数 = c1.value = data.get(ws.cell2(i, '用户ID').value, 0)
+            返款额 = self.计算打卡返款(打卡次数)
+
+            if 返款额 > 0:
                 订单号 = ws.cell2(i, '交易订单号').value
-                cols = [订单号, money, f'{self.返款标题}返学修日志促学金', f'{订单号}_journal']
+                cols = [订单号, 返款额, f'{self.返款标题}返学修日志促学金', f'{订单号}_journal']
                 ls.append(','.join(map(str, cols)))
-            else:
-                money = 0
 
             c2 = ws.cell2(i, ['打卡返款', '返款'])
-            c2.value = money
+            c2.value = 返款额
 
-            color = RgbFormatter(*color0[min(3, v)])
+            if 返款额 <= 0:
+                color = RgbFormatter(255, 0, 0)
+            elif 返款额 < 最高返款额:
+                color = RgbFormatter(255, 255, 0).light(1-返款额/最高返款额)
+            elif 返款额 == 最高返款额:  # 最高返款额
+                color = RgbFormatter(0, 255, 0)
+
             c1.fill = PatternFill(fgColor=color.hex[-6:], fill_type="solid")
             c2.fill = PatternFill(fgColor=color.hex[-6:], fill_type="solid")
 
@@ -540,26 +569,30 @@ class 网课考勤:
             ls = [x for x in ls if '无订单号' not in x]
 
         # 4 生成通知，及返款文件
-        desc = '/'.join(map(str, self.打卡返款))
-        if self.结束课次 == 20:
+        desc1 = '/'.join(map(str, self.打卡返款.keys()))
+        desc2 = '/'.join(map(str, self.打卡返款.values()))
+        if self.结束课次 == self.课次数 - 1:
             msg.append('已生成截止目前的打卡数据，同学们可以预先核对下，明天最后更新打卡数据后返款。'
-                       f'打卡达到"5/10/15"次，依次返回"{desc}"元。')
-        elif self.结束课次 == 21:
+                       f'打卡达到"{desc1}"次，依次返回"{desc2}"元。')
+        elif self.结束课次 == self.课次数:
             # 生成打卡返款
             msg.append('已完成学修日志（打卡）促学金的返款。'
-                       f'打卡达到"5/10/15"次，依次返回"{desc}"元。')
+                       f'打卡达到"{desc1}"次，依次返回"{desc2}"元。')
             (self.root / '学修日志返款.csv').write_text('\n'.join(ls))
 
     def write_返款总计(self):
         ws = self.ws
-        name2idx = {k: i for i, k in enumerate(['完成当堂学习', '第1天回放', '第2天回放', '第3天回放'])}
+        name2idx = {k: i for i, k in enumerate(['完成当堂学习', '第1天回放', '第2天回放', '第3天回放', '第4天回放'])}
         for i in ws.iterrows('用户ID'):
             total = 0
             for k in range(1, 22):
-                v = ws.cell2(i, f'第{k:02}课').value
+                cel = ws.cell2(i, f'第{k:02}课')
+                if not cel:
+                    continue
+                v = cel.value
                 if v in name2idx:
                     idx = name2idx[v]
-                    if idx and k > self.当天课次 - 3:  # 还没返款的回放金额
+                    if idx and k > self.当天课次 - self.回放返款天数:  # 还没返款的回放金额
                         continue
                     total += self.视频返款[idx]
             v2 = ws.cell2(i, ['打卡返款', '返款']).value
@@ -578,7 +611,7 @@ class 网课考勤:
         self.生成今日返款文件(msg)
 
         # 2 打卡返款
-        if journal or self.结束课次 == 21:
+        if journal or self.结束课次 == self.课次数:
             self.打卡统计2(msg)
         self.write_返款总计()
 

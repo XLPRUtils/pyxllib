@@ -34,7 +34,9 @@ setup(
     author='code4101',
     author_email='877362867@qq.com',
     url='https://github.com/XLPRUtils/pyxllib',
-    keywords=['pyxllib', 'pyxlpr', 'xlproject'],
+    keywords=['pyxllib',  # 通用工具
+              'pyxlpr',  # 模式识别相关功能
+              ],
     description='厦门理工模式识别团队通用python代码工具库',
     long_description=(_dir / 'README.md').read_text(),  # 偷懒，就不创建f然后close了~~
     long_description_content_type='text/markdown',
