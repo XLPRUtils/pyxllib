@@ -208,8 +208,12 @@ class Browser(Explorer):
 
     def html(self, arg, **kwargs):
         """ 将内容转为html展示 """
-        file = File(..., Dir.TEMP, suffix='.html').write(arg)
-        file = file.rename(get_etag(str(file)) + file.suffix, if_exists='replace')
+        if 'file' in kwargs:
+            file = File(kwargs['file'], Dir.TEMP, suffix='.html').write(arg)
+            del kwargs['file']
+        else:
+            file = File(..., Dir.TEMP, suffix='.html').write(arg)
+            file = file.rename(get_etag(str(file)) + file.suffix, if_exists='replace')
         self.__call__(arg, file, **kwargs)
 
     def __call__(self, arg, file=None, *, wait=True, clsmsg=True, to_html_args=None,

@@ -42,12 +42,21 @@ def excel_addr(n, m) -> str:
     return f'{get_column_letter(int(m))}{n}'
 
 
+def excel_addr2(n1, m1, n2, m2) -> str:
+    r""" excel_addr的扩展版，定位一个区间
+
+    >>> excel_addr2(2, 3, 4, 4)
+    'C2:D4'
+    """
+    return f'{get_column_letter(int(m1))}{n1}:{get_column_letter(int(m2))}{n2}'
+
+
 class XlCell(openpyxl.cell.cell.Cell):  # 适用于 openpyxl.cell.cell.MergedCell，但这里不能多重继承
 
     def in_range(self):
         """ 判断一个单元格所在的合并单元格
 
-        >> in_range(ws['C1'])
+        >> ws['C1'].in_range()
         <openpyxl.worksheet.cell_range.CellRange> A1:D3
         """
         ws = self.parent
@@ -71,8 +80,10 @@ class XlCell(openpyxl.cell.cell.Cell):  # 适用于 openpyxl.cell.cell.MergedCel
         else:
             return self
 
-    def celltype(self):
+    def celltype(self, *, return_mid_result=False):
         """
+        :param return_mid_result: 是否返回运算的中间结果信息
+            主要是在type=2的情景，有时候需要使用rng变量，可以这里直接返回，避免外部重复计算
         :return: 单元格类型
             0：普通单元格
             1：合并单元格其他衍生位置
@@ -80,14 +91,19 @@ class XlCell(openpyxl.cell.cell.Cell):  # 适用于 openpyxl.cell.cell.MergedCel
 
         TODO 这个函数还是可以看看能不能有更好的实现、提速
         """
+        result, mid_result = 0, {}
         if isinstance(self, MergedCell):
-            return 1
+            result = 1
         elif isinstance(self.offset(1, 0), MergedCell) or isinstance(self.offset(0, 1), MergedCell):
             # 这里只能判断可能是合并单元格，具体是不是合并单元格，还要
             rng = self.in_range()
-            return 2 if hasattr(rng, 'size') else 0
+            mid_result['rng'] = rng
+            result = 2 if hasattr(rng, 'size') else 0
+
+        if return_mid_result:
+            return result, mid_result
         else:
-            return 0
+            return result
 
     def isnone(self):
         """ 是普通单元格且值为None
@@ -96,6 +112,25 @@ class XlCell(openpyxl.cell.cell.Cell):  # 适用于 openpyxl.cell.cell.MergedCel
         """
         celltype = self.celltype()
         return celltype == 0 and self.value is None
+
+    def clear(self):
+        """ 清除数值、格式、合并单元格
+
+        注意，如果self是合并单元格，分两种清空
+            母格（左上角），会撤销合并到和母格数值、格式
+            衍生格，只会撤销合并单元格，但不会清除母格的数值、格式
+
+        :return: 涉及到合并单元格的情况，新单元格和原单元格已经不一样了，需要重新获取对象
+        """
+        ct, mid_result = self.celltype(return_mid_result=True)
+        x = self
+        if ct:  # 如果是合并单元格，取消该区域的合并单元格
+            rng = mid_result['rng'] if ('rng' in mid_result) else self.in_range()
+            self.parent.unmerge_cells(rng.coord)
+            x = self.parent[self.coordinate]
+        x.value = None
+        x.style = 'Normal'
+        return x
 
     def copy_cell_format(self, dst_cell):
         """ 单元格全格式复制，需要事先指定好新旧单元格的物理位置
@@ -119,9 +154,33 @@ class XlCell(openpyxl.cell.cell.Cell):  # 适用于 openpyxl.cell.cell.MergedCel
 
     def copy_cell(self, dst_cell):
         """ 单元格全格式、包括值的整体复制
+
+        注意合并单元格比较复杂，比如要把 'A1:C3' 复制到 'A2:D4'，是会出现问题的
+            在预先清空A2:D4数据的时候，会把
+            一般这种清空，推荐先将数据库复制到一个临时sheet，再复制回原sheet更安全
         """
-        dst_cell.value = self.value
-        self.copy_cell_format(dst_cell)
+        from itertools import product
+        ct, mid_result = self.celltype(return_mid_result=True)
+
+        if ct == 0:  # 普通单元格，只复制值和格式
+            dst_cell = dst_cell.clear()
+            dst_cell.value = self.value
+            self.copy_cell_format(dst_cell)
+        elif ct == 2:  # 合并单元格，除了值和格式，要考虑单元格整体性的复制替换
+            dst_cell = dst_cell.clear()
+            rng = mid_result['rng'] if ('rng' in mid_result) else self.in_range()  # CellRange类型
+            n, m = rng.size['rows'], rng.size['columns']  # 几行几列
+            # 先把目标位置里的区域清空
+            ws2 = dst_cell.parent
+            x2, y2 = dst_cell.row, dst_cell.column
+            for i, j in product(range(n), range(m)):
+                ws2.cell(x2 + i, y2 + j).clear()
+            # 拷贝数据
+            dst_cell.value = self.value
+            self.copy_cell_format(dst_cell)
+            ws2.merge_cells(start_row=x2, start_column=y2, end_row=x2 + n - 1, end_column=y2 + m - 1)
+        else:  # 合并单元格的衍生单元格复制时，不做任何处理
+            return
 
     def down(self, count=1):
         """ 输入一个单元格，向下移动一格
@@ -362,30 +421,65 @@ class XlWorksheet(openpyxl.worksheet.worksheet.Worksheet):
 
         return df
 
-    def copy_range(self, cell_range, rows=0, cols=0):
-        """ 同表格内的 range 复制操作
+    def copy_range(self, src_addr, dst_cell, *, temp_sheet=False, return_mid_result=False):
+        """ 将自身cell_range区间的内容、格式，拷贝到目标dst_cell里
 
-        Copy a cell range by the number of rows and/or columns:
-        down if rows > 0 and up if rows < 0
-        right if cols > 0 and left if cols < 0
-        Existing cells will be overwritten.
-        Formulae and references will not be updated.
+        :param str src_addr: 自身的一片单元格范围
+            支持输入格式：str --> cell
+            支持范式：普通单元格 --> 合并单元格
+        :param dst_cell: 要复制到的目标单元格位置
+            输入起点、单个位置
+            一般只有同个工作表ws要考虑赋值顺序问题，防止引用前已被更新覆盖
+                但有个极端情况：循环引用的公式计算，在跨ws的时候如果不考虑顺序也可能出错，但这种情况太复杂的，这里不可能去处理
+        :param temp_sheet: 当拷贝中涉及合并单元格等重叠位置问题时，建议开启该参数，用中间数据表过渡下
+
+        这个算法主要难点，是要考虑合并单元格的情况比较复杂。否则本身逻辑并不难。
+
+        >> ws1.copy_range('A1:C3', ws2.cell('C2'))  # 将ws1的A1:C3数据复制到ws2的C2里
         """
-        from openpyxl.worksheet.cell_range import CellRange
         from itertools import product
-        # 1 预处理
-        if isinstance(cell_range, str):
-            cell_range = CellRange(cell_range)
-        if not isinstance(cell_range, CellRange):
-            raise ValueError("Only CellRange objects can be copied")
-        if not rows and not cols:
-            return
-        min_col, min_row, max_col, max_row = cell_range.bounds
-        # 2 注意拷贝顺序跟移动方向是有关系的，要防止被误覆盖，复制了新的值，而非原始值
-        r = sorted(range(min_row, max_row + 1), reverse=rows > 0)
-        c = sorted(range(min_col, max_col + 1), reverse=cols > 0)
-        for row, column in product(r, c):
-            self.cell(row, column).copy_cell(self.cell(row + rows, column + cols))
+
+        # 0 中间表
+        mid_result = {}
+        if temp_sheet:
+            ws3 = self.parent.create_sheet('__copy_range')
+            mid_result = self.copy_range(src_addr, ws3['A1'], return_mid_result=True)
+            ws1 = ws3
+            src_addr = f'A1:{excel_addr(mid_result["n"], mid_result["m"])}'
+        else:
+            ws1 = self
+        ws2 = dst_cell.parent
+
+        # 1 坐标计算
+        # 用ws1[]比用CellRange更精准，还能处理"1:3"这种泛式定位，会根据max_column智能判定边界单元格
+        src_cells = ws1[src_addr]
+        # 强制转为n*m的二维tuple数组结构
+        if not isinstance(src_cells, tuple):
+            src_cells = (src_cells,)
+        if not isinstance(src_cells[0], tuple):
+            src_cells = (src_cells,)
+        # 关键信息
+        n, m = len(src_cells), len(src_cells[0])  # 待复制的数据是几行几列
+        src_cell = src_cells[0][0]
+        x1, y1 = src_cell.row, src_cell.column  # ws1数据起始位置，x是行，y是列
+        x2, y2 = dst_cell.row, dst_cell.column
+        bias_rows, bias_cols = x2 - x1, y2 - y1
+        mid_result['n'] = n
+        mid_result['m'] = m
+
+        # 2 将src内容拷贝过去
+        # 注意拷贝顺序跟移动方向是有关系的，要防止被误覆盖，复制了新的值，而非原始值
+        r = sorted(range(n), reverse=bias_rows > 0)  # 要拷贝的每行
+        c = sorted(range(m), reverse=bias_cols > 0)
+        for i, j in product(r, c):  # openpyxl好像没有复制range的功能？
+            ws1.cell(x1 + i, y1 + j).copy_cell(ws2.cell(x2 + i, y2 + j))
+
+        # 3 收尾
+        if temp_sheet:
+            self.parent.remove(ws1)
+
+        if return_mid_result:
+            return mid_result
 
     def reindex_columns(self, orders):
         """ 重新排列表格的列顺序
@@ -398,7 +492,7 @@ class XlWorksheet(openpyxl.worksheet.worksheet.Worksheet):
         max_row, max_column = self.max_row, self.max_column
         for j, col in enumerate(orders, 1):
             if not col: continue
-            self.copy_range(f'{col}1:{col}{max_row}', cols=max_column + j - column_index_from_string(col))
+            self.copy_range(f'{col}1:{col}{max_row}', self[excel_addr(1, max_column + j)])
         self.delete_cols(1, max_column)
 
     def to_html(self, *, border=1,
@@ -681,6 +775,8 @@ class XlWorksheet(openpyxl.worksheet.worksheet.Worksheet):
             column = column_index_from_string(column)
         else:
             column = self.findcol(column)
+            if not column:
+                return None
 
         # 3 单元格
         # cell = self.cell(row, column, value)  # 这种写法好像有bug，写长文本的时候，后丢掉后半部分
@@ -739,6 +835,35 @@ class XlWorksheet(openpyxl.worksheet.worksheet.Worksheet):
         else:
             return range(min_row, max_row + 1)
 
+    def find_head_data_range(self, ref_col_name):
+        """ 查找表格的表头、数据所在区域
+
+        可以把表格分成两大块：表头head，数据data
+        每块数据都是一个矩形，有四个边界：ltrb
+
+        :param ref_col_name: 参考的主列字段名字（如果是复合表头，需要表头最后一行的某个字段名）
+            用这个名字才能区分出表头、数据划分界限在哪
+
+        TODO right、bottom会多出一些空行、空列，怎么优化？
+        """
+        cel = self.findcel(ref_col_name)
+        data_start_row = cel.down().row
+
+        return {
+            # 1 关键字段所在位置
+            'cel': cel,
+            'row': cel.row,
+            'col': cel.column,
+            # 2 表格左右区间
+            'left': self.min_column,
+            'right': self.max_column,
+            # 3 表头和数据划分行
+            'head_top': self.min_row,
+            'head_bottom': data_start_row - 1,
+            'data_top': data_start_row,
+            'data_bottom': self.max_row,
+        }
+
 
 inject_members(XlWorksheet, openpyxl.worksheet.worksheet.Worksheet, white_list=['_cells_by_row'])
 
@@ -757,6 +882,107 @@ class XlWorkbook(openpyxl.Workbook):
             self.remove(self[name])
         self._sheets = [self[name] for name in new_sheetnames]
         return self
+
+    def merge_sheets_by_keycol(self, sheets, keycol, new_name=None, *, cmp_func=None):
+        """ 对多个工作表，按照关键列（主键）进行数据合并
+
+        :param sheets: 多个表格（可以不同工作薄），顺序有影响，以第0个表为主表
+        :param keycol: 关键字段
+        :param new_name: 新的sheets名称
+            todo new_name变为可选参数，不写时默认合并到第一个表格里
+        :param cmp_func: 自定义匹配规则
+            def cmp_func(主表已转str格式的键值, 副表已转str格式的键值):
+                return True匹配成功
+                return False匹配失败
+
+        完整版实现起来有点麻烦，会循序渐进，先实现简洁版
+
+        来自不同表的字段区分
+            原本是想修改head名称来实现，比如加上前缀"表1"、"表2"，但这样有点冗余难看
+            后来想到可以在每个表后面扩展一个列
+                __keycol0__、__keycol1__、...
+                即作为分割，也可以用于辅助计算
+
+            todo 或者在开头加上一个合并单元格，不同表格的区分？
+            todo 根据不同表格最大表头行数优化下，防止ws1表头太矮，后面有高表头的数据会复制缺失
+        """
+        if cmp_func is None:
+            def cmp_func(k1, k2):
+                return k1 == k2
+
+        # 1 新建表格，从sheets[0]拷贝
+        if new_name:
+            ws1 = self.copy_worksheet(sheets[0])
+            ws1.title = new_name
+        else:
+            ws1 = sheets[0]
+
+        # 2 添加__keycol0__
+        msg1 = ws1.find_head_data_range(keycol)
+        last_right = msg1['right'] + 1
+        ws1.cell(msg1['head_bottom'], last_right).value = '__keycol0__'
+
+        exists_key = set()
+
+        def write_new_key(row, column, value):
+            ws1.cell(row, column).value = value
+            if value in exists_key:
+                ws1.cell(row, column).fill_color([252, 157, 154])
+            else:
+                exists_key.add(value)
+
+        for i in range(msg1['data_top'], msg1['data_bottom'] + 1):
+            write_new_key(i, last_right, ws1.cell(i, msg1['col']).value)
+
+        # 3 依次把其他表添加到ws1
+        last_data_bottom = msg1['data_bottom']
+        for ws2_id, ws2 in enumerate(sheets[1:], start=1):
+            # 3.1 ws2关键信息
+            msg2 = ws2.find_head_data_range(keycol)
+            data2 = []
+            for i2 in range(msg2['data_top'], msg2['data_bottom'] + 1):
+                data2.append([i2, str(ws2.cell(i2, msg2['col']).value)])
+
+            # 3.2 复制表头（支持复合、合并单元格、多行格式的表头）
+            msg3 = {}  # ws2复制到ws1，新区间的各种位置
+            row_bias = msg2['head_bottom'] - msg1['head_bottom']  # 表头底部对齐需要的偏移行数
+            msg3['head_top'] = msg2['head_top'] - row_bias
+            msg3['left'] = last_right + 1
+            if msg3['head_top'] < 1:  # 表头无法整个复制过来，那就要缩小下ws2表头开始的位置
+                msg2['head_top'] += msg3['head_top'] + 1
+                msg3['head_top'] = 1
+            ws2.copy_range(excel_addr2(msg2['head_top'], msg2['left'], msg2['head_bottom'], msg2['right']),
+                           ws1[excel_addr(msg3['head_top'], last_right + 1)])
+
+            new_right = last_right + msg2['right'] - msg1['left'] + 2
+            ws1.cell(msg1['head_bottom'], new_right).value = f'__keycol{ws2_id}__'
+
+            # 3.4 先按ws1数据顺序模板填充数据
+            exists_key = set()
+
+            # trick: 配合后续f字符串的使用，把重复性的东西提前计算好了
+            ws2_row_tag = excel_addr2(1, msg2['left'], 1, msg2['right']).replace('1', '{0}')
+
+            # 考虑到可能存在重复值问题，所以这里算法是暴力双循环
+            for i1 in range(msg1['data_top'], last_data_bottom + 1):
+                k1 = str(ws1.cell(i1, last_right).value)
+                for _i, x in enumerate(data2):
+                    if cmp_func(k1, x[1]):  # todo 这里可以扩展自定义匹配规则的
+                        ws2.copy_range(ws2_row_tag.format(x[0]), ws1[excel_addr(i1, msg3['left'])])
+                        del data2[_i]
+                        break
+                else:  # ws2有，ws1没有的数据
+                    pass
+                write_new_key(i1, new_right, k1)
+
+            # 3.5 剩余的data2添加到末尾
+            for x in data2:
+                last_data_bottom += 1
+                ws2.copy_range(ws2_row_tag.format(x[0]), ws1[excel_addr(last_data_bottom, msg3['left'])])
+                write_new_key(last_data_bottom, new_right, x[1])
+
+            # 3.6 更新坐标
+            last_right = new_right
 
     @classmethod
     def from_html(cls, content) -> 'XlWorkbook':
@@ -797,63 +1023,3 @@ class XlWorkbook(openpyxl.Workbook):
 
 
 inject_members(XlWorkbook, openpyxl.Workbook)
-
-
-def demo_openpyxl():
-    # 一、新建一个工作薄
-    from openpyxl import Workbook
-    wb = Workbook()
-
-    # 取一个工作表
-    ws = wb.active  # wb['Sheet']，取已知名称、下标的表格，excel不区分大小写，这里索引区分大小写
-
-    # 1 索引单元格的两种方法，及可以用.value获取值
-    ws['A2'] = '123'
-    dprint(ws.cell(2, 1).value)  # 123
-
-    # 2 合并单元格
-    ws.merge_cells('A1:C2')
-    dprint(ws['A1'].value)  # None，会把原来A2的内容清除
-
-    # print(ws['A2'].value)  # AttributeError: 'MergedCell' object has no attribute 'value'
-
-    # ws.unmerge_cells('A1:A3')  # ValueError: list.remove(x): x not in list，必须标记完整的合并单元格区域，否则会报错
-    ws['A1'].value = '模块一'
-    ws['A3'].value = '属性1'
-    ws['B3'].value = '属性2'
-    ws['C3'].value = '属性3'
-
-    ws.merge_cells('D1:E2')
-    ws['D1'].value = '模块二'
-    ws['D3'].value = '属性1'
-    ws['E3'].value = '属性2'
-
-    dprint(ws['A1'].offset(1, 0).coordinate)  # A2
-    dprint(ws['A1'].down().coordinate)  # A3
-
-    # 3 设置单元格样式、格式
-    from openpyxl.comments import Comment
-    cell = ws['A3']
-    cell.font = Font(name='Courier', size=36)
-    cell.comment = Comment(text="A comment", author="Author's Name")
-
-    styles = [['Number formats', 'Comma', 'Comma [0]', 'Currency', 'Currency [0]', 'Percent'],
-              ['Informative', 'Calculation', 'Total', 'Note', 'Warning Text', 'Explanatory Text'],
-              ['Text styles', 'Title', 'Headline 1', 'Headline 2', 'Headline 3', 'Headline 4', 'Hyperlink',
-               'Followed Hyperlink', 'Linked Cell'],
-              ['Comparisons', 'Input', 'Output', 'Check Cell', 'Good', 'Bad', 'Neutral'],
-              ['Highlights', 'Accent1', '20 % - Accent1', '40 % - Accent1', '60 % - Accent1', 'Accent2', 'Accent3',
-               'Accent4', 'Accent5', 'Accent6', 'Pandas']]
-    for i, name in enumerate(styles, start=4):
-        ws.cell(i, 1, name[0])
-        for j, v in enumerate(name[1:], start=2):
-            ws.cell(i, j, v)
-            ws.cell(i, j).style = v
-
-    # 二、测试一些功能
-    dprint(ws.search('模块二').coordinate)  # D1
-    dprint(ws.search(['模块二', '属性1']).coordinate)  # D3
-
-    dprint(ws.findcol(['模块一', '属性1'], direction=1))  # 0
-
-    wb.save("demo_openpyxl.xlsx")
