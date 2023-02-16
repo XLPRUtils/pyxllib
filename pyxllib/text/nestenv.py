@@ -835,7 +835,7 @@ class LatexNestEnv(NestEnv):
         def core(s):
             pos1, parts = 0, []
             # 最外层的head支持有额外杂质（tail暂不支持杂质），但是内部的h、t不考虑杂质，但最好不要遇到、用到这么危险的小概率功能
-            h, t = re.match(r'\\begin{[a-zA-Z]+}', head).group(), re.match(r'\\end{[a-zA-Z]+}', tail).group()
+            h, t = re.match(r'\\begin{[a-zA-Z*]+}', head).group(), re.match(r'\\end{[a-zA-Z*]+}', tail).group()
             while True:
                 pos2 = s.find(head, pos1)
                 if pos2 == -1: break
@@ -856,10 +856,10 @@ class LatexNestEnv(NestEnv):
             return parts
 
         # 参数推算
-        if re.match(r'[a-zA-Z]+$', head):
+        if re.match(r'[a-zA-Z*]+$', head):
             head = r'\begin{' + head + '}'
-        if not tail and re.match(r'\\begin{[a-zA-Z]+}', head):  # latex类的环境匹配
-            m = re.match(r'\\begin({[a-zA-Z]+})', head)
+        if not tail and re.match(r'\\begin{[a-zA-Z*]+}', head):  # latex类的环境匹配
+            m = re.match(r'\\begin({[a-zA-Z*]+})', head)
             tail = r'\end' + m.group(1)
 
         return self.nest(core, invert)
@@ -877,7 +877,7 @@ class LatexNestEnv(NestEnv):
             while True:
                 _s = s[start_idx:]
                 # 找文本中出现的第一个\begin{xxx}
-                m = re.search(r'\\begin{([a-zA-Z]+)}', _s)
+                m = re.search(r'\\begin{([a-zA-Z*]+)}', _s)
                 if not m:
                     break
 
