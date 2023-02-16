@@ -421,7 +421,7 @@ class XlAiClient:
             3、看起来支持多表格
         """
         from bisect import bisect_left
-        from pyxllib.file.xlsxlib import Workbook
+        from pyxllib.file.xlsxlib import XlWorkbook
 
         # 1 单表处理功能
         def zoom_coords(table, ratio):
@@ -485,7 +485,7 @@ class XlAiClient:
 
             # 3 tables
             # 3.1 表格主体内容
-            wb = Workbook()
+            wb = XlWorkbook()
             ws = wb.active
             for sp in shapes:
                 x = sp['label']
