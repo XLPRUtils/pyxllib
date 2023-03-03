@@ -79,8 +79,8 @@ class ONProcess(metaclass=SingletonForEveryClass):
         # TODO 这里需要针对不同的OneNote版本做自动化兼容，不要让用户填版本
         #   因为让用户填版本，会存在多个实例化对象，使用get_xml会有各种问题
         # 目前是支持onenote2016的，但不知道其他版本onenote会怎样
-        self.process = win32com.client.gencache.EnsureDispatch('OneNote.Application')
-        # self.process = win32com.client.Dispatch('OneNote.Application')
+        # self.process = win32com.client.gencache.EnsureDispatch('OneNote.Application')
+        self.process = win32com.client.DispatchEx('OneNote.Application')
         self.namespace = "{http://schemas.microsoft.com/office/onenote/2013/onenote}"
 
         # 官方原版的实现，但我觉得可以去掉版本号

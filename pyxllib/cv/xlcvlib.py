@@ -511,6 +511,8 @@ class xlcv(EnchantBase):
         # 1 得到3*3的变换矩阵
         warp_mat = np.array(warp_mat)
         if warp_mat.shape[0] == 2:
+            if warp_mat.shape[1] == 2:
+                warp_mat = np.concatenate([warp_mat, [[0], [0]]], axis=1)
             warp_mat = np.concatenate([warp_mat, [[0, 0, 1]]], axis=0)
 
         # 2 view_rate，视野比例改变导致的变换矩阵规则变化

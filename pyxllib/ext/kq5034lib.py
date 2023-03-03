@@ -408,7 +408,7 @@ class 网课考勤:
         if name:
             msg.append('+'.join(name) + '促学金已返款，同学们请查收。')
         if self.觉观禅课 and self.当天课次 == 22:
-            msg.append('今晚第22课答疑不考勤，明天统一返款')
+            msg.append('今晚第22课答疑不考勤，明天统一返款。')
         return msg
 
     def 计算打卡返款(self, 打卡次数):

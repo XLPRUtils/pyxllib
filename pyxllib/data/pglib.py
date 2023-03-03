@@ -34,7 +34,6 @@ import json
 import json
 import textwrap
 import datetime
-import time
 
 import psycopg
 import psycopg.rows
@@ -341,7 +340,7 @@ class XlprDb(Connection):
             etag = get_etag(buffer)
 
         res = self.execute('SELECT etag FROM files WHERE etag=%s', (etag,)).fetchone()
-        if res:
+        if res:  # 已经做过记录的，不再重复记录
             return
 
         # 2 没有的图，做个备份
@@ -384,67 +383,6 @@ class XlprDb(Connection):
         print(kw)  # 监控谁在用api
         self.insert_row('xlserver', kw)
 
-    def run_api(self, func, buffer, options=None, *,
-                mode_name=None,
-                record_files=True,
-                use_exists_xlapi=True,
-                record_xlapi=True,
-                save_buffer_threshold_size=4 * 1024 ** 2):
-        """ 配合database数据库的情况下，调用API功能
-
-        :param func: 被封装的带执行的api函数
-        :param buffer: 图片数据
-        :param options: 执行api功能的配套采纳数
-        :param mode_name: 可以指定存入数据库的功能名，默认用func的名称
-
-        :param record_files: 是否保存数据文件
-        :param record_xlapi: 新结果是否记录到数据库
-        :param use_exists_xlapi: 如果数据库里已有记录，是否直接复用
-
-        :param save_buffer_threshold_size: buffer小余多少，才存储进数据库
-        """
-
-        # 1 预处理，参数标准化
-        options = options or {}
-        options = {k: options[k] for k in sorted(options.keys())}  # 对参数进行排序，方便去重
-
-        # 2 调百度识别接口
-        if use_exists_xlapi or record_xlapi:  # 有开数据库，并且复用和更新至少有项开启了
-            if mode_name is None:
-                mode_name = func.__name__
-
-            # 如果数据库里有处理过的记录，直接引用
-            im_etag = get_etag(buffer)
-            if use_exists_xlapi:
-                res = self.get_xlapi_record(mode=mode_name, image=im_etag, **options)
-            else:
-                res = None
-
-            # 否则调用百度的接口识别
-            # TODO 这里使用协程逻辑最合理但配置麻烦，需要func底层等做协程的适配支持
-            #   使用多线程测试了并没有更快，也发现主要耗时是post，数据库不会花太多时间，就先不改动了
-            #   等以后数据库大了，看运行是否会慢，可以再测试是否有必要弄协程
-            if res is None or 'error_code' in res:
-                tt = time.time()
-                res = func(buffer, **options)
-                elapse_ms = round_int(1000 * (time.time() - tt))
-
-                if record_files and len(buffer) < save_buffer_threshold_size:
-                    self.insert_row2files(buffer, etag=im_etag, name='.jpg')
-                if record_xlapi:
-                    input = {'mode': mode_name, 'image': im_etag}
-                    if options:
-                        input.update(options)
-                    xlapi_id = self.insert_row2xlapi(input, res, elapse_ms, on_conflict='REPLACE')
-                    res['xlapi_id'] = xlapi_id
-
-            if 'log_id' in res:  # 有xlapi_id的标记，就不用百度原本的log_id了
-                del res['log_id']
-        else:
-            res = func(buffer, **options)
-
-        return res
-
     def __3_host_trace相关可视化(self):
         """ TODO dbview 改名 host_trace """
         pass
@@ -474,7 +412,7 @@ class XlprDb(Connection):
                     status['cpu_memory'] = {k: round(v[1] * host_cpu_gb[host_name] / 100, 2) for k, v in data.items()}
                 if gpu:
                     status['gpu_memory'] = ssh.check_gpu_usage(print_mode=True)
-                if disk and host_name not in {'xlpr4'}:  # 四卡服务器明确有问题，不检查磁盘空间大小
+                if disk:
                     # 检查磁盘空间会很慢，如果超时可以跳过。
                     status['disk_memory'] = ssh.check_disk_usage(print_mode=True, timeout=7200)
             except Exception as e:
