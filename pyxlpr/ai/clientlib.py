@@ -16,6 +16,7 @@ import base64
 import json
 import pprint
 import statistics
+import time
 
 import cv2
 import numpy as np
@@ -25,7 +26,7 @@ from pyxllib.prog.newbie import round_int
 from pyxllib.prog.pupil import check_install_package, is_url
 from pyxllib.prog.specialist import XlOsEnv
 from pyxllib.algo.geo import xywh2ltrb, rect_bounds
-from pyxllib.file.specialist import XlPath
+from pyxllib.file.specialist import XlPath, get_etag
 from pyxllib.prog.specialist import TicToc
 from pyxllib.cv.expert import xlcv
 
@@ -65,8 +66,18 @@ def polygon2rect(pts):
 
 
 def zoom_point(pt, ratio):
+    """ 返回的还是{x: 123, y: 456}的字典结构 """
     if ratio != 1:
         return {k: round_int(v * ratio) for k, v in pt.items()}
+    return pt
+
+
+def zoom_point2(pt, ratio):
+    """ 输入x,y的字典坐标，返回的还是[123, 456]的list结构 """
+    pt = [pt['x'], pt['y']]
+    if ratio != 1:
+        return [round_int(v * ratio) for v in pt]
+    return pt
 
 
 def zoom_labelme(d, ratio):
@@ -177,6 +188,11 @@ class XlAiClient:
         目的1：合并输入文件和url的识别
         目的2：带透明底的png百度api识别不了，要先转成RGB格式
     """
+    META_OPTS_NAME = {'record_files',  # 是否记录传入的图片等数据
+                      'record_xlapi',  # 是否记录api处理结果
+                      'use_exists_xlapi',  # 是否使用已有的api结果
+                      'record_xlserver',  # 是否记录调用纪录
+                      }
 
     def __init__(self, auto_login=True, check=True):
         # 1 默认值
@@ -235,7 +251,7 @@ class XlAiClient:
         self._priu_header.update({'Token': token})
 
         if host is None:
-            # 优先尝试局域网链接，如果失败则尝试公网链接
+            # 优先尝试局域网链接，如果失败则尝试公网链接。公网默认用https，如果需要效率可以自己输入http的host。
             hosts = ['172.16.170.136', 'https://xmutpriu.com']
         elif isinstance(host, str):
             hosts = [host]
@@ -310,23 +326,84 @@ class XlAiClient:
         ratio = current_height / origin_height
         return im, ratio
 
-    def run_with_db(self, func, buffer, options=None, **kwargs):
-        """ 这一套主要是适配百度视觉api接口的情况，基本都是输入一个buffer和一个options
-        如果自己模型有特殊接口范式，可以额外定制，不一定要运行这个run_with_db
-        """
-        # 这里有几个特殊参数，如果配置在options里，会转接到kwargs参数里处理
-        for name in 'record_files record_xlapi record_xlserver use_exists_xlapi'.split():
+    def _divide_options_with_meta(self, options, meta_opts):
+        """ 会改变原始输入的两个字典值，但是新返回的才是真正有效的字典 """
+        for name in self.META_OPTS_NAME:
             if name in options:
-                kwargs[name] = options[name]
+                meta_opts[name] = options[name]
                 del options[name]
 
-        if self.db:
-            return self.db.run_api(func, buffer, options, **kwargs)
-        else:
+        options = options or {}
+        options = {k: options[k] for k in sorted(options.keys())}  # 对参数进行排序，方便记录到数据库后标记唯一
+
+        return options, meta_opts
+
+    def run_aipocr_with_db(self, func, buffer, options=None, **meta_opts):
+        """ 这一套主要是适配百度视觉api接口的情况，基本都是输入一个buffer和一个options
+        如果自己模型有特殊接口范式，可以额外定制，比如 run_textapi_with_db 等，可以拷贝这个函数后做定制微调
+
+        :param func: 被封装的带执行的api函数
+        :param buffer: 图片二进制数据
+        :param options: 执行api功能的配套采纳数
+        :param meta_opts:
+            record_files: 是否保存数据文件
+                False, 0，表示不存储
+                True，表示存储，但默认只存储4MB以内的文件
+                int，可以写一个整数，表示只存储多大Byte范围内的文件
+            record_xlapi: 新结果是否记录到数据库
+            use_exists_xlapi: 如果数据库里已有记录，是否直接复用
+                注意看函数实现，但这个机制生效已经获得res的时候，变不会显式执行record_files
+                这是出于效率的考虑，一般情况下，这种应该是已经存储过文件了
+                如果要怕以前执行过api但没存储files，可以关闭use_exists_xlapi，就可以显式重新执行保存一次
+            mode_name: 可以指定存入数据库的功能名，默认用func的名称
+        """
+        # 1 参数处理
+        options, meta_opts = self._divide_options_with_meta(options, meta_opts)
+        if self.db is None:  # 没有数据库的时候直接执行函数返回结果就好
             return func(buffer, options)
 
-    def regist_api(self, func):
-        pass
+        # 以下元参数默认值，根据不同的api接口需求，可以设置不同的默认值
+        record_files = meta_opts.get('record_files', True)  # 是否保存数据文件
+        if record_files is True:
+            record_files = 4 * 1024 ** 2
+        record_xlapi = meta_opts.get('record_xlapi', True)
+        use_exists_xlapi = meta_opts.get('use_exists_xlapi', True)
+        mode_name = meta_opts.get('mode_name', func.__name__)
+
+        image_etag = None  # 先不计算etag，只在需要的时候再计算
+        res = None  # api结果
+
+        # 2 核心函数
+        if use_exists_xlapi:  # 定义如何获取已有的识别结果
+            image_etag = image_etag or get_etag(buffer)  # trick: 使用这个机制确保etag从头到尾不会重复计算，需要的话只会计算一次
+            res = self.db.get_xlapi_record(mode=mode_name, image=image_etag, **options)
+
+        # 否则调用百度的接口识别
+        # TODO 这里使用协程逻辑最合理但配置麻烦，需要func底层等做协程的适配支持
+        #   使用多线程测试了并没有更快，也发现主要耗时是post，数据库不会花太多时间，就先不改动了
+        #   等以后数据库大了，看运行是否会慢，可以再测试是否有必要弄协程
+        if res is None or 'error_code' in res:
+            tt = time.time()
+            res = func(buffer, options)
+            elapse_ms = round_int(1000 * (time.time() - tt))
+
+            if len(buffer) < record_files:  # 定义数据的缓存方式
+                image_etag = image_etag or get_etag(buffer)
+                self.db.insert_row2files(buffer, etag=image_etag, name='.jpg')
+
+            if record_xlapi:  # 定义api的执行结果的保存方式
+                image_etag = image_etag or get_etag(buffer)
+                input = {'mode': mode_name, 'image': image_etag}
+                if options:
+                    input.update(options)
+                xlapi_id = self.db.insert_row2xlapi(input, res, elapse_ms, on_conflict='REPLACE')
+                res['xlapi_id'] = xlapi_id
+
+        # 3 收尾
+        if 'log_id' in res:  # 有xlapi_id的标记，就不用百度原本的log_id了
+            del res['log_id']
+
+        return res
 
     def __B1_通用(self):
         pass
@@ -338,7 +415,7 @@ class XlAiClient:
         注意只要ratio!=1涉及到缩放的，偏移误差是会变大的~~
         """
         buffer, ratio = self.adjust_image(image)
-        result_dict = self.run_with_db(self._aipocr.general, buffer, options)
+        result_dict = self.run_aipocr_with_db(self._aipocr.general, buffer, options)
         result_dict = ToLabelmeLike.list_word(result_dict, 1 / ratio, 'words_result', 'words_result_num')
         return result_dict
 
@@ -347,7 +424,7 @@ class XlAiClient:
         5万次/天赠送 + 超出按量计费
         """
         buffer, ratio = self.adjust_image(image)
-        result_dict = self.run_with_db(self._aipocr.basicGeneral, buffer, options)
+        result_dict = self.run_aipocr_with_db(self._aipocr.basicGeneral, buffer, options)
         result_dict = ToLabelmeLike.list_word(result_dict, 1 / ratio, 'words_result', 'words_result_num')
         return result_dict
 
@@ -355,7 +432,7 @@ class XlAiClient:
         """ 通用文字识别（高精度含位置版）: https://cloud.baidu.com/doc/OCR/s/tk3h7y2aq """
         sz = 10 * 1024 ** 2
         buffer, ratio = self.adjust_image(image, max_length=8192, limit_b64buffer_size=sz, to_buffer=True)
-        result_dict = self.run_with_db(self._aipocr.accurate, buffer, options, save_buffer_threshold_size=sz)
+        result_dict = self.run_aipocr_with_db(self._aipocr.accurate, buffer, options, save_buffer_threshold_size=sz)
         result_dict = ToLabelmeLike.list_word(result_dict, 1 / ratio, 'words_result', 'words_result_num')
         return result_dict
 
@@ -363,42 +440,42 @@ class XlAiClient:
         """ 通用文字识别（高精度版）: https://cloud.baidu.com/doc/OCR/s/1k3h7y3db """
         sz = 10 * 1024 ** 2
         buffer, ratio = self.adjust_image(image, max_length=8192, limit_b64buffer_size=sz, to_buffer=True)
-        result_dict = self.run_with_db(self._aipocr.basicAccurate, buffer, options, save_buffer_threshold_size=sz)
+        result_dict = self.run_aipocr_with_db(self._aipocr.basicAccurate, buffer, options, save_buffer_threshold_size=sz)
         result_dict = ToLabelmeLike.list_word(result_dict, 1 / ratio, 'words_result', 'words_result_num')
         return result_dict
 
     def webimageLoc(self, image, **options):
         """ 网络图片文字识别（含位置版）: https://cloud.baidu.com/doc/OCR/s/Nkaz574we """
         buffer, ratio = self.adjust_image(image)
-        result_dict = self.run_with_db(self._aipocr.webimageLoc, buffer, options)
+        result_dict = self.run_aipocr_with_db(self._aipocr.webimageLoc, buffer, options)
         result_dict = ToLabelmeLike.list_word(result_dict, 1 / ratio, 'words_result', 'words_result_num')
         return result_dict
 
     def webImage(self, image, **options):
         """ 网络图片文字识别: https://cloud.baidu.com/doc/OCR/s/Sk3h7xyad """
         buffer, ratio = self.adjust_image(image)
-        result_dict = self.run_with_db(self._aipocr.webImage, buffer, options)
+        result_dict = self.run_aipocr_with_db(self._aipocr.webImage, buffer, options)
         result_dict = ToLabelmeLike.list_word(result_dict, 1 / ratio, 'words_result', 'words_result_num')
         return result_dict
 
     def handwriting(self, image, **options):
         """ 手写文字识别: https://cloud.baidu.com/doc/OCR/s/hk3h7y2qq """
         buffer, ratio = self.adjust_image(image)
-        result_dict = self.run_with_db(self._aipocr.handwriting, buffer, options)
+        result_dict = self.run_aipocr_with_db(self._aipocr.handwriting, buffer, options)
         result_dict = ToLabelmeLike.list_word(result_dict, 1 / ratio, 'words_result', 'words_result_num')
         return result_dict
 
     def numbers(self, image, **options):
         """ 数字识别: https://cloud.baidu.com/doc/OCR/s/Ok3h7y1vo """
         buffer, ratio = self.adjust_image(image)
-        result_dict = self.run_with_db(self._aipocr.numbers, buffer, options)
+        result_dict = self.run_aipocr_with_db(self._aipocr.numbers, buffer, options)
         result_dict = ToLabelmeLike.list_word(result_dict, 1 / ratio, 'words_result', 'words_result_num')
         return result_dict
 
     def qrcode(self, image, **options):
         """ 二维码识别: https://cloud.baidu.com/doc/OCR/s/qk3h7y5o7 """
         buffer, ratio = self.adjust_image(image)
-        result_dict = self.run_with_db(self._aipocr.qrcode, buffer, options)
+        result_dict = self.run_aipocr_with_db(self._aipocr.qrcode, buffer, options)
 
         ls = result_dict['codes_result']
         shapes = []
@@ -491,7 +568,9 @@ class XlAiClient:
                 x = sp['label']
                 if x['category'] != 'body':
                     continue
-                ws.cell(x['row'], x['column'], x['text'])
+                # ws.cell(x['row'], x['column'], x['text'])
+                cel = ws.cell(x['row'], x['column']).mcell()
+                cel.value = (cel.value or '') + x['text']
                 if x['end_row'] - x['row'] + x['end_column'] - x['column'] > 0:
                     ws.merge_cells(start_row=x['row'], start_column=x['column'],
                                    end_row=x['end_row'], end_column=x['end_column'])
@@ -513,7 +592,7 @@ class XlAiClient:
         # 2 主体解析功能
 
         buffer, ratio = self.adjust_image(image)
-        result_dict = self.run_with_db(self._aipocr.form, buffer, options)
+        result_dict = self.run_aipocr_with_db(self._aipocr.form, buffer, options)
         shapes = []
         htmltables = []
         for table in result_dict['forms_result']:
@@ -533,14 +612,14 @@ class XlAiClient:
     def doc_analysis_office(self, image, **options):
         """ 办公文档识别: https://cloud.baidu.com/doc/OCR/s/ykg9c09ji """
         buffer, ratio = self.adjust_image(image)
-        result_dict = self.run_with_db(self._aipocr.doc_analysis_office, buffer, options)
+        result_dict = self.run_aipocr_with_db(self._aipocr.doc_analysis_office, buffer, options)
         result_dict = ToLabelmeLike.list_word2(result_dict, 1 / ratio, 'results', 'results_num')
         return result_dict
 
     def seal(self, image, **options):
         """ 印章识别: https://cloud.baidu.com/doc/OCR/s/Mk3h7y47a """
         buffer, ratio = self.adjust_image(image)
-        result_dict = self.run_with_db(self._aipocr.seal, buffer, options)
+        result_dict = self.run_aipocr_with_db(self._aipocr.seal, buffer, options)
 
         shapes = []
         for x in result_dict['result']:
@@ -568,7 +647,7 @@ class XlAiClient:
                                        options)
 
         buffer, ratio = self.adjust_image(image)
-        result_dict = self.run_with_db(idcard_front, buffer, options)
+        result_dict = self.run_aipocr_with_db(idcard_front, buffer, options)
         result_dict = ToLabelmeLike.dict_word(result_dict, 1 / ratio, 'words_result', 'words_result')
         return result_dict
 
@@ -579,63 +658,63 @@ class XlAiClient:
                                        options)
 
         buffer, ratio = self.adjust_image(image)
-        result_dict = self.run_with_db(func, buffer, options, mode_name='idcard_back')
+        result_dict = self.run_aipocr_with_db(func, buffer, options, mode_name='idcard_back')
         result_dict = ToLabelmeLike.dict_word(result_dict, 1 / ratio, 'words_result', 'words_result')
         return result_dict
 
     def bankcard(self, image, **options):
         """ 银行卡识别: https://cloud.baidu.com/doc/OCR/s/ak3h7xxg3 """
         buffer, ratio = self.adjust_image(image)
-        result_dict = self.run_with_db(self._aipocr.bankcard, buffer, options)
+        result_dict = self.run_aipocr_with_db(self._aipocr.bankcard, buffer, options)
         result_dict = ToLabelmeLike.dict_str(result_dict, 1 / ratio, 'result', 'words_result_num')
         return result_dict
 
     def businessLicense(self, image, **options):
         """ 营业执照识别: https://cloud.baidu.com/doc/OCR/s/sk3h7y3zs """
         buffer, ratio = self.adjust_image(image)
-        result_dict = self.run_with_db(self._aipocr.businessLicense, buffer, options)
+        result_dict = self.run_aipocr_with_db(self._aipocr.businessLicense, buffer, options)
         result_dict = ToLabelmeLike.dict_word(result_dict, 1 / ratio, 'words_result', 'words_result_num')
         return result_dict
 
     def businessCard(self, image, **options):
         """ 名片识别: https://cloud.baidu.com/doc/OCR/s/5k3h7xyi2 """
         buffer, ratio = self.adjust_image(image)
-        result_dict = self.run_with_db(self._aipocr.businessCard, buffer, options)
+        result_dict = self.run_aipocr_with_db(self._aipocr.businessCard, buffer, options)
         result_dict = ToLabelmeLike.dict_strs(result_dict, 1 / ratio, 'words_result')
         return result_dict
 
     def passport(self, image, **options):
         """ 护照识别: https://cloud.baidu.com/doc/OCR/s/Wk3h7y1gi """
         buffer, ratio = self.adjust_image(image)
-        result_dict = self.run_with_db(self._aipocr.passport, buffer, options)
+        result_dict = self.run_aipocr_with_db(self._aipocr.passport, buffer, options)
         result_dict = ToLabelmeLike.dict_word(result_dict, 1 / ratio, 'words_result', 'words_result_num')
         return result_dict
 
     def HKMacauExitentrypermit(self, image, **options):
         """ 港澳通行证识别: https://cloud.baidu.com/doc/OCR/s/4k3h7y0ly """
         buffer, ratio = self.adjust_image(image)
-        result_dict = self.run_with_db(self._aipocr.HKMacauExitentrypermit, buffer, options)
+        result_dict = self.run_aipocr_with_db(self._aipocr.HKMacauExitentrypermit, buffer, options)
         result_dict = ToLabelmeLike.dict_word(result_dict, 1 / ratio, 'words_result', 'words_result_num')
         return result_dict
 
     def taiwanExitentrypermit(self, image, **options):
         """ 台湾通行证识别: https://cloud.baidu.com/doc/OCR/s/kk3h7y2yc """
         buffer, ratio = self.adjust_image(image)
-        result_dict = self.run_with_db(self._aipocr.taiwanExitentrypermit, buffer, options)
+        result_dict = self.run_aipocr_with_db(self._aipocr.taiwanExitentrypermit, buffer, options)
         result_dict = ToLabelmeLike.dict_word(result_dict, 1 / ratio, 'words_result', 'words_result_num')
         return result_dict
 
     def householdRegister(self, image, **options):
         """ 户口本识别: https://cloud.baidu.com/doc/OCR/s/ak3h7xzk7 """
         buffer, ratio = self.adjust_image(image)
-        result_dict = self.run_with_db(self._aipocr.householdRegister, buffer, options)
+        result_dict = self.run_aipocr_with_db(self._aipocr.householdRegister, buffer, options)
         result_dict = ToLabelmeLike.dict_word(result_dict, 1 / ratio, 'words_result', 'words_result_num')
         return result_dict
 
     def birthCertificate(self, image, **options):
         """ 出生医学证明识别: https://cloud.baidu.com/doc/OCR/s/mk3h7y1o6 """
         buffer, ratio = self.adjust_image(image)
-        result_dict = self.run_with_db(self._aipocr.birthCertificate, buffer, options)
+        result_dict = self.run_aipocr_with_db(self._aipocr.birthCertificate, buffer, options)
         result_dict = ToLabelmeLike.dict_word(result_dict, 1 / ratio, 'words_result', 'words_result_num')
         return result_dict
 
@@ -645,23 +724,26 @@ class XlAiClient:
     def vehicleLicense(self, image, **options):
         """ 行驶证识别: https://cloud.baidu.com/doc/OCR/s/yk3h7y3ks """
         buffer, ratio = self.adjust_image(image)
-        result_dict = self.run_with_db(self._aipocr.vehicleLicense, buffer, options)
+        result_dict = self.run_aipocr_with_db(self._aipocr.vehicleLicense, buffer, options)
         result_dict = ToLabelmeLike.dict_word(result_dict, 1 / ratio, 'words_result', 'words_result_num')
         return result_dict
 
     def drivingLicense(self, image, **options):
         """ 驾驶证识别: https://cloud.baidu.com/doc/OCR/s/Vk3h7xzz7 """
         buffer, ratio = self.adjust_image(image)
-        result_dict = self.run_with_db(self._aipocr.drivingLicense, buffer, options)
+        result_dict = self.run_aipocr_with_db(self._aipocr.drivingLicense, buffer, options)
         result_dict = ToLabelmeLike.dict_word(result_dict, 1 / ratio, 'words_result', 'words_result_num')
         return result_dict
 
     def licensePlate(self, image, **options):
         """ 车牌识别: https://cloud.baidu.com/doc/OCR/s/ck3h7y191 """
         buffer, ratio = self.adjust_image(image)
-        result_dict = self.run_with_db(self._aipocr.licensePlate, buffer, options)
+        result_dict = self.run_aipocr_with_db(self._aipocr.licensePlate, buffer, options)
 
-        d = result_dict['words_result']
+        if 'words_result' in result_dict:
+            d = result_dict['words_result']
+        else:
+            d = {'number': '', 'color': '', 'probability': [0], 'vertexes_location': []}
 
         # 近似key_text，但有点不太一样
         # 已测试过 车牌 只能识别一个
@@ -669,38 +751,39 @@ class XlAiClient:
                  'color': d['color']}
         shape = {'label': label,
                  'score': sum(d['probability']) / len(d['probability']),
-                 'points': [zoom_point(pt, 1 / ratio) for pt in d['vertexes_location']],
+                 'points': [zoom_point2(pt, 1 / ratio) for pt in d['vertexes_location']],
                  'shape_type': 'polygon'}
         result_dict['shapes'] = [shape]
 
-        del result_dict['words_result']
+        if 'words_result' in result_dict:
+            del result_dict['words_result']
         return result_dict
 
     def vinCode(self, image, **options):
         """ VIN码识别: https://cloud.baidu.com/doc/OCR/s/zk3h7y51e """
         buffer, ratio = self.adjust_image(image)
-        result_dict = self.run_with_db(self._aipocr.vinCode, buffer, options)
+        result_dict = self.run_aipocr_with_db(self._aipocr.vinCode, buffer, options)
         result_dict = ToLabelmeLike.list_word(result_dict, 1 / ratio, 'words_result', 'words_result_num')
         return result_dict
 
     def vehicleInvoice(self, image, **options):
         """ 机动车销售发票识别: https://cloud.baidu.com/doc/OCR/s/vk3h7y4tx """
         buffer, ratio = self.adjust_image(image)
-        result_dict = self.run_with_db(self._aipocr.vehicleInvoice, buffer, options)
+        result_dict = self.run_aipocr_with_db(self._aipocr.vehicleInvoice, buffer, options)
         result_dict = ToLabelmeLike.dict_str(result_dict, 1 / ratio, 'words_result', 'words_result_num')
         return result_dict
 
     def vehicleCertificate(self, image, **options):
         """ 车辆合格证识别: https://cloud.baidu.com/doc/OCR/s/yk3h7y3sc """
         buffer, ratio = self.adjust_image(image)
-        result_dict = self.run_with_db(self._aipocr.vehicleCertificate, buffer, options)
+        result_dict = self.run_aipocr_with_db(self._aipocr.vehicleCertificate, buffer, options)
         result_dict = ToLabelmeLike.dict_str(result_dict, 1 / ratio, 'words_result', 'words_result_num')
         return result_dict
 
     def raw_mixed_multi_vehicle(self, image, **options):
         """ 车辆证照混贴识别: https://cloud.baidu.com/doc/OCR/s/Kksfsbngb """
         buffer, ratio = self.adjust_image(image)
-        result_dict = self.run_with_db(self._aipocr.mixed_multi_vehicle, buffer, options)
+        result_dict = self.run_aipocr_with_db(self._aipocr.mixed_multi_vehicle, buffer, options)
 
         if ratio != 1:
             for x in result_dict['words_result']:
@@ -729,14 +812,14 @@ class XlAiClient:
     def vehicle_registration_certificate(self, image, **options):
         """ 机动车登记证书识别: https://cloud.baidu.com/doc/OCR/s/qknzs5zzo """
         buffer, ratio = self.adjust_image(image)
-        result_dict = self.run_with_db(self._aipocr.vehicle_registration_certificate, buffer, options)
+        result_dict = self.run_aipocr_with_db(self._aipocr.vehicle_registration_certificate, buffer, options)
         result_dict = ToLabelmeLike.dict_word(result_dict, 1 / ratio, 'words_result', 'words_result_num')
         return result_dict
 
     def weightNote(self, image, **options):
         """ 磅单识别: https://cloud.baidu.com/doc/OCR/s/Uksfp9far """
         buffer, ratio = self.adjust_image(image)
-        result_dict = self.run_with_db(self._aipocr.weightNote, buffer, options)
+        result_dict = self.run_aipocr_with_db(self._aipocr.weightNote, buffer, options)
 
         shapes = []
         for x in result_dict['words_result']:
@@ -756,7 +839,7 @@ class XlAiClient:
     def multipleInvoice(self, image, **options):
         """ 智能财务票据识别: https://cloud.baidu.com/doc/OCR/s/7ktb8md0j """
         buffer, ratio = self.adjust_image(image)
-        result_dict = self.run_with_db(self._aipocr.multipleInvoice, buffer, options)
+        result_dict = self.run_aipocr_with_db(self._aipocr.multipleInvoice, buffer, options)
 
         shapes = []
         for x in result_dict['words_result']:
@@ -772,14 +855,14 @@ class XlAiClient:
     def quotaInvoice(self, image, **options):
         """ 定额发票识别: https://cloud.baidu.com/doc/OCR/s/lk3h7y4ev """
         buffer, ratio = self.adjust_image(image)
-        result_dict = self.run_with_db(self._aipocr.quotaInvoice, buffer, options)
+        result_dict = self.run_aipocr_with_db(self._aipocr.quotaInvoice, buffer, options)
         result_dict = ToLabelmeLike.dict_str(result_dict, 1 / ratio, 'words_result', 'words_result_num')
         return result_dict
 
     def invoice(self, image, **options):
         """ 通用机打发票识别: https://cloud.baidu.com/doc/OCR/s/Pk3h7y06q """
         buffer, ratio = self.adjust_image(image)
-        result_dict = self.run_with_db(self._aipocr.invoice, buffer, options)
+        result_dict = self.run_aipocr_with_db(self._aipocr.invoice, buffer, options)
 
         shapes = []
         for k, v in result_dict['words_result'].items():
@@ -798,21 +881,21 @@ class XlAiClient:
     def trainTicket(self, image, **options):
         """ 火车票识别: https://cloud.baidu.com/doc/OCR/s/Ok3h7y35u """
         buffer, ratio = self.adjust_image(image)
-        result_dict = self.run_with_db(self._aipocr.trainTicket, buffer, options)
+        result_dict = self.run_aipocr_with_db(self._aipocr.trainTicket, buffer, options)
         result_dict = ToLabelmeLike.dict_str(result_dict, 1 / ratio, 'words_result', 'words_result_num')
         return result_dict
 
     def taxiReceipt(self, image, **options):
         """ 出租车票识别: https://cloud.baidu.com/doc/OCR/s/Zk3h7xxnn """
         buffer, ratio = self.adjust_image(image)
-        result_dict = self.run_with_db(self._aipocr.taxiReceipt, buffer, options)
+        result_dict = self.run_aipocr_with_db(self._aipocr.taxiReceipt, buffer, options)
         result_dict = ToLabelmeLike.dict_str(result_dict, 1 / ratio, 'words_result', 'words_result_num')
         return result_dict
 
     def airTicket(self, image, **options):
         """ 飞机行程单识别: https://cloud.baidu.com/doc/OCR/s/Qk3h7xzro """
         buffer, ratio = self.adjust_image(image)
-        result_dict = self.run_with_db(self._aipocr.airTicket, buffer, options)
+        result_dict = self.run_aipocr_with_db(self._aipocr.airTicket, buffer, options)
         result_dict = ToLabelmeLike.dict_str(result_dict, 1 / ratio, 'words_result', 'words_result_num')
         return result_dict
 
@@ -823,7 +906,7 @@ class XlAiClient:
             return self._aipocr.onlineTaxiItinerary(image)
 
         buffer, ratio = self.adjust_image(image)
-        result_dict = self.run_with_db(func, buffer, options, mode_name='onlineTaxiItinerary')
+        result_dict = self.run_aipocr_with_db(func, buffer, options, mode_name='onlineTaxiItinerary')
 
         shapes = []
         for k, v in result_dict['words_result'].items():
@@ -843,7 +926,7 @@ class XlAiClient:
     def receipt(self, image, **options):
         """ receipt: https://cloud.baidu.com/doc/OCR/s/6k3h7y11b """
         buffer, ratio = self.adjust_image(image)
-        result_dict = self.run_with_db(self._aipocr.receipt, buffer, options)
+        result_dict = self.run_aipocr_with_db(self._aipocr.receipt, buffer, options)
         result_dict = ToLabelmeLike.list_word(result_dict, 1 / ratio, 'words_result', 'words_result_num')
         return result_dict
 
@@ -853,28 +936,30 @@ class XlAiClient:
     def raw_medicalInvoice(self, image, **options):
         """ 医疗发票识别: https://cloud.baidu.com/doc/OCR/s/yke30j1hq """
         buffer, ratio = self.adjust_image(image)
-        result_dict = self.run_with_db(self._aipocr.medicalInvoice, buffer, options)
+        result_dict = self.run_aipocr_with_db(self._aipocr.medicalInvoice, buffer, options)
         return result_dict
 
     def raw_medicalDetail(self, image, **options):
         """ 医疗费用明细识别: https://cloud.baidu.com/doc/OCR/s/Bknjnwlyj """
         buffer, ratio = self.adjust_image(image)
-        result_dict = self.run_with_db(self._aipocr.medicalDetail, buffer, options)
+        result_dict = self.run_aipocr_with_db(self._aipocr.medicalDetail, buffer, options)
         return result_dict
 
     def raw_insuranceDocuments(self, image, **options):
         """ 保险单识别: https://cloud.baidu.com/doc/OCR/s/Wk3h7y0eb """
         buffer, ratio = self.adjust_image(image)
-        result_dict = self.run_with_db(self._aipocr.insuranceDocuments, buffer, options)
+        result_dict = self.run_aipocr_with_db(self._aipocr.insuranceDocuments, buffer, options)
         return result_dict
 
     def __B6_教育(self):
         pass
 
     def docAnalysis(self, image, **options):
-        """ 试卷分析与识别: https://cloud.baidu.com/doc/OCR/s/jk9m7mj1l """
+        """ 试卷分析与识别: https://cloud.baidu.com/doc/OCR/s/jk9m7mj1l
+        总量1000次
+        """
         buffer, ratio = self.adjust_image(image)
-        result_dict = self.run_with_db(self._aipocr.docAnalysis, buffer, options)
+        result_dict = self.run_aipocr_with_db(self._aipocr.docAnalysis, buffer, options)
 
         shapes = []
         for x in result_dict['results']:
@@ -889,9 +974,11 @@ class XlAiClient:
         return result_dict
 
     def formula(self, image, **options):
-        """ 公式识别: https://cloud.baidu.com/doc/OCR/s/Ok3h7xxva """
+        """ 公式识别: https://cloud.baidu.com/doc/OCR/s/Ok3h7xxva
+        总共1000次
+        """
         buffer, ratio = self.adjust_image(image)
-        result_dict = self.run_with_db(self._aipocr.formula, buffer, options)
+        result_dict = self.run_aipocr_with_db(self._aipocr.formula, buffer, options)
         result_dict = ToLabelmeLike.list_word(result_dict, 1 / ratio, 'words_result', 'words_result_num')
         return result_dict
 
@@ -901,14 +988,14 @@ class XlAiClient:
     def meter(self, image, **options):
         """ 仪器仪表盘读数识别: https://cloud.baidu.com/doc/OCR/s/Jkafike0v """
         buffer, ratio = self.adjust_image(image)
-        result_dict = self.run_with_db(self._aipocr.meter, buffer, options)
+        result_dict = self.run_aipocr_with_db(self._aipocr.meter, buffer, options)
         result_dict = ToLabelmeLike.list_word(result_dict, 1 / ratio, 'words_result', 'words_result_num')
         return result_dict
 
     def raw_facade(self, image, **options):
         """ 门脸文字识别: https://cloud.baidu.com/doc/OCR/s/wk5hw3cvo """
         buffer, ratio = self.adjust_image(image)
-        result_dict = self.run_with_db(self._aipocr.facade, buffer, options)
+        result_dict = self.run_aipocr_with_db(self._aipocr.facade, buffer, options)
         return result_dict
 
     def facade(self, image, **options):
@@ -953,7 +1040,7 @@ class XlAiClient:
          'request_id': '2022_05_28_762803ab687ff5ba1d80g'}
         """
 
-        def func(buffer, options=None):
+        def func(buffer, options):
             image_uri = f'data:image/jpg;base64,' + base64.b64encode(buffer).decode()
             r = requests.post('https://api.mathpix.com/v3/latex',
                               data=json.dumps({'src': image_uri}),
@@ -962,7 +1049,7 @@ class XlAiClient:
 
         # mathpix的接口没有说限制图片大小，但我还是按照百度的规范处理下更好
         buffer, ratio = self.adjust_image(image)
-        result_dict = self.run_with_db(func, buffer, options, mode_name='mathpix_latex')
+        result_dict = self.run_aipocr_with_db(func, buffer, options, mode_name='mathpix_latex')
         result_dict['position'] = zoom_point(result_dict['position'], ratio)
         return result_dict
 
@@ -975,11 +1062,11 @@ class XlAiClient:
         buffer, ratio = self.adjust_image(image,
                                           min_length=min_length, max_length=max_length,
                                           limit_b64buffer_size=limit_b64buffer_size,
-                                          b64encode=b64encode, **kwargs)
+                                          b64encode=True, **kwargs)
         assert ratio == 1, f'本地不做缩放，由服务器进行缩放处理'
         return buffer.decode()
 
-    def priu_api(self, mode, image=None, texts=None, options=None, **kwargs):
+    def priu_api(self, mode, image=None, texts=None, options=None, **meta_opts):
         """ 借助服务器来调用该类中含有的其他函数接口
 
         使用该接口的时候，因为服务器一般会有图片等的备份，所以本接口默认不对图片进行备份
@@ -987,7 +1074,14 @@ class XlAiClient:
 
         :param mode: 使用的api接口名称
         :param image: image、texts、options都是比较常用的几个参数键值，所以显式地写出来
-        :param kwargs: 也可以自己额外扩展一些键值，兼容一些特殊的输入范式的api接口
+        :param options: 有时候为了严谨，api相关的参数可能要单独打包
+            但其实这里的参数混入meta_opts也没事，底层会有divide拆分函数，能区分开不同的参数类型
+        :param meta_opts: 也可以自己额外扩展一些键值，兼容一些特殊的输入范式的api接口
+            use_exists_xlapi: 是否复用已有的识别结果，避免重复运算，节约api成本
+            record_files: 是否保存图片等数据
+            record_xlapi: 是否保存api执行结果
+            record_xlserver: 是否保存本次调用纪录
+            根据不同的api，这些参数有不同的默认值，但一般都是True
         """
         # 1 统一输入参数的范式
         data = {}
@@ -995,10 +1089,10 @@ class XlAiClient:
             data['image'] = self._priu_read_image(image, b64encode=True)
         if texts is not None:
             data['texts'] = texts
-        if options:
+        if options:  # 支持对算法的参数打包，但其实也支持从kwargs直接零散输入
             data['options'] = options
-        if kwargs:
-            data.update(kwargs)
+        if meta_opts:
+            data.update(meta_opts)
         r = requests.post(f'{self._priu_host}/api/{mode}', json=data, headers=self._priu_header)
         if r.status_code == 200:
             res = json.loads(r.text)
@@ -1012,14 +1106,20 @@ class XlAiClient:
         else:
             return res
 
-    def common_ocr(self, image):
+    def common_ocr(self, image, **options):
+        """ 通用文字识别 """
+        options.update({'image': self._priu_read_image(image, b64encode=True)})
         r = requests.post(f'{self._priu_host}/api/common_ocr', headers=self._priu_header,
-                          json={'image': self._priu_read_image(image, b64encode=True)})
+                          json=options)
         res = json.loads(r.text)
         return res
 
     def ocr2texts(self, image, mode='common_ocr', **options):
-        """ 通用的识别一张图的所有文本 """
+        """ 通用的识别一张图的所有文本
+
+        >> xlapi.ocr2texts(im)
+        ['OCR文字识别软件', '如何将图片转换成Word', '文章来源：OCR文字识别软件', 'OCR']
+        """
         texts = []  # 因图片太小等各种原因，没有识别到结果，默认就设空值
         try:
             d = self.priu_api(mode, image, options=options)
@@ -1035,11 +1135,17 @@ class XlAiClient:
         return ' '.join(texts)
 
     def hesuan_layout(self, image):
+        """ 核酸版面分析 """
         r = requests.post(f'{self._priu_host}/api/hesuan_layout', headers=self._priu_header,
                           json={'image': self._priu_read_image(image)})
         return json.loads(r.text)
 
     def lexical_analysis(self, texts, options=None, return_mode=None):
+        """ 词法分析，有分词的效果
+
+        >> lexical_analysis(["今天是个好日子", "天气预报说今天要下雨"])
+        [['今天', '是', '个', '好日子'], ['天气预报', '说', '今天', '要', '下雨']]
+        """
         # TODO 可以增加接口参数，配置返回值类型。其他api同理。
         data = {'texts': texts}
         if options:
@@ -1054,6 +1160,12 @@ class XlAiClient:
         return res
 
     def sentiment_classify(self, texts, options=None):
+        """ 情感分析
+
+        返回的值越大表示句子的情感越积极
+        >> sentiment_classify(['今天是个好日子', '天气预报说今天要下雨'])
+        [0.4555, 0.2513]
+        """
         data = {'texts': texts}
         if options:
             data['options'] = options
@@ -1071,10 +1183,21 @@ class XlAiClient:
         return new_im
 
     def det_face(self, image):
+        """ 人脸识别 """
         lmdict = self.priu_api('ultra_light_fast_generic_face_detector_1mb_640', image)
         return lmdict
 
+    def super_resolution(self, image, times=1):
+        """ 超分辨率（把图片变高清）
+
+        :param times: 放大多少次，每次放大2倍（长宽个放大2倍）
+        """
+        for _ in range(times):
+            image = self.priu_api('falsr_c', image)
+        return image
+
     def rec_speech(self, audio_file):
+        """ 语音识别 """
         if os.path.isfile(audio_file):
             audio = base64.b64encode(XlPath(audio_file).read_bytes()).decode()
         else:
