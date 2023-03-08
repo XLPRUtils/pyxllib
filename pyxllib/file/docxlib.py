@@ -21,7 +21,7 @@ import docx.table
 import docx.enum
 
 from pyxllib.prog.pupil import DictTool, inject_members, run_once
-from pyxllib.prog.specialist import File, Dir, get_etag, browser
+from pyxllib.prog.specialist import get_etag, browser, XlPath
 from pyxllib.text.pupil import strwidth
 
 
@@ -71,7 +71,7 @@ class DocxTools:
 
             # 2 拷贝完整的内容
             if file:
-                file = File(file)
+                file = XlPath(file)
                 member_doc = app.open_doc(file)
                 member_doc.Activate()
 
@@ -105,16 +105,16 @@ class Document:
                 None：在临时文件夹生成一个默认的word文件
         """
         if docx_file is None:
-            self.docx_file = File(..., Dir.TEMP, suffix='.docx')
+            self.docx_file = XlPath.tempfile('.docx')
         else:
-            self.docx_file = File(docx_file)
+            self.docx_file = XlPath(docx_file)
         if self.docx_file:
             self.doc = docx.Document(str(docx_file))
         else:
             self.doc = docx.Document()
 
     def write(self):
-        Dir(self.docx_file.parent).ensure_dir()
+        XlPath(self.docx_file.parent).mkdir(exist_ok=True)
         self.doc.save(str(self.docx_file))
 
     def to_pdf(self, pdf_file=None):
@@ -359,16 +359,19 @@ class XlWin32WordApplication:
     def check_close(self, outfile):
         """ 检查是否有指定名称的文件被打开，将其关闭，避免new_doc等操作出现问题
         """
-        outfile = File(outfile)
+        outfile = XlPath(outfile)
         for x in self.Documents:
             # 有可能文件来自onedrive，这里用safe_init更合理
-            if File.safe_init(x.Name, x.Path) == outfile:
+            if XlPath.init(x.Name, x.Path) == outfile:
                 x.Close()
 
     def open_doc(self, file_name):
         """ 打开已有的文件
+
+        原傻逼底层接口，默认都是读取用户目录下的，我给改成默认打开当前工作目录的文件
+        后文的save接口也是同理
         """
-        doc = self.Documents.Open(str(file_name))
+        doc = self.Documents.Open(str(XlPath.init(file_name, os.getcwd())))
         return doc
 
     def new_doc(self, file=None):
@@ -382,9 +385,9 @@ class XlWin32WordApplication:
         使用该函数，会自动执行XlWin32WordDocument扩展。
         """
         if file is None:
-            file = File(..., Dir.TEMP, suffix='.docx')
+            file = XlPath.tempfile('.docx')
         else:
-            file = File(file)
+            file = XlPath(file)
 
         doc = self.Documents.Add()  # 创建新的word文档
         doc.save(file)
@@ -446,34 +449,34 @@ class XlWin32WordDocument:
         if isinstance(fmt, str):
             fmt = fmt.lower().lstrip('.')
         elif file_name is not None:
-            fmt = File(file_name).suffix[1:].lower()
+            fmt = XlPath(file_name).suffix[1:].lower()
         elif self.Path:
             fmt = os.path.splitext(self.Name)[1][1:].lower()
         else:
             fmt = 'docx'
 
         # 3 保存一份原始的文件路径
-        origin_file = File(self.Name, self.Path) if self.Path else None
+        origin_file = XlPath.init(self.Name, self.Path) if self.Path else None
 
         # 4 如果有指定保存文件路径
         if file_name is not None:
-            outfile = File(file_name)
+            outfile = XlPath.init(file_name, os.getcwd())
             if outfile.suffix[1:].lower() != fmt:
                 # 已有文件名，但这里指定的fmt不同于原文件，则认为是要另存为一个同名的不同格式文件
-                outfile = File(outfile.stem, outfile.parent, suffix=fmt)
+                outfile = XlPath(outfile.stem, outfile.parent, suffix=fmt)
             self.SaveAs2(str(outfile), save_format(fmt), **kwargs)
         # 5 如果没指定保存文件路径
         else:
             if self.Path:
-                outfile = File(self.Name, self.Path, suffix='.' + fmt)
+                outfile = XlPath.init(self.Name, self.Path, suffix='.' + fmt)
                 self.SaveAs2(str(outfile), save_format(outfile.suffix), **kwargs)
             else:
                 etag = get_etag(self.Content)
-                outfile = File(etag, Dir.TEMP, suffix=fmt)
+                outfile = XlPath.init(etag, XlPath.tempdir(), suffix=fmt)
                 self.SaveAs2(str(outfile), save_format(fmt), **kwargs)
 
         # 6 是否恢复原doc
-        cur_file = File(self.Name, self.Path)  # 当前文件不一定是目标文件f，如果是pdf等格式也不会切换过去
+        cur_file = XlPath.init(self.Name, self.Path)  # 当前文件不一定是目标文件f，如果是pdf等格式也不会切换过去
         if retain and origin_file and origin_file != cur_file:
             app = self.Application
             self.Close()
@@ -492,7 +495,8 @@ class XlWin32WordDocument:
 
     @property
     def n_page(self):
-        return self.ActiveWindow.Panes(1).Pages.Count
+        return self.ComputeStatistics(2)
+        # return self.ActiveWindow.Panes(1).Pages.Count  # 这样计算也行
 
     def browser(self, file_name=None, fmt='html', retain=False):
         """ 这个函数可能会导致原doc指向对象被销毁，建议要不追返回值doc继续使用
@@ -711,7 +715,7 @@ def rebuild_document_by_word(fmt='html', translate=False, navigation=False, visi
     from pyxllib.text.xmllib import BeautifulSoup, html_bitran_template, MakeHtmlNavigation
 
     # 1 保存的临时文件名采用etag
-    f = File(get_etag(pyperclip.paste()), Dir.TEMP, suffix=fmt)
+    f = XlPath.init(get_etag(pyperclip.paste()), XlPath.tempdir(), suffix=fmt)
     app = XlWin32WordApplication.get_app(visible=visible)
     app.check_close(f)
     doc = app.new_doc(f)
