@@ -1256,21 +1256,3 @@ def demo_aipocr():
             break
         else:
             break
-
-
-def demo_priu():
-    xlapi = XlAiClient()
-    # xlapi._priu_host = 'localhost:5003'
-
-    # d = xlapi.common_ocr('/home/chenkunze/data/aipocr_test/01通用/general/1.jpg')
-    # d = xlapi.hesuan_layout('/home/chenkunze/data/hesuan/data/test.jpg')
-    # d = xlapi.priu_api('general', '/home/chenkunze/data/aipocr_test/01通用/general/1.jpg')
-    d = xlapi.rec_singleline('/home/chenkunze/data/aipocr_test/01通用/general/1.jpg')
-
-    pprint.pprint(d)
-
-
-if __name__ == '__main__':
-    with TicToc(__name__):
-        # demo_aipocr()
-        demo_priu()

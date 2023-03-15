@@ -575,6 +575,10 @@ def inject_members(from_obj, to_obj, member_list=None, *,
     :param ignore_case: 忽略方法的大小写情况，一般用于win32com接口
     :param Sequence[str] white_list: 白名单。无论是否重名，这里列出的方法都会被添加
     :param Sequence[str] black_list: 黑名单。这里列出的方法不会被添加
+
+    # 把XlDocxTable的成员方法绑定到docx.table.Table里
+    >> inject_members(XlDocxTable, docx.table.Table)
+
     """
     # 1 整理需要注入的方法清单
     dst = set(dir(to_obj))

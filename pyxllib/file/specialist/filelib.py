@@ -1252,7 +1252,7 @@ class XlPath(type(pathlib.Path())):
         return self.rename2(dst, if_exists)
 
     def rename2(self, dst, if_exists=None):
-        """ 相比原版的reanme，搞了更多骚操作，但性能也会略微下降，所以重写一个功能名 """
+        """ 相比原版的rename，搞了更多骚操作，但性能也会略微下降，所以重写一个功能名 """
         if not self.exists():
             return
 

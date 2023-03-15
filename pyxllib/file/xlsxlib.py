@@ -286,7 +286,7 @@ class XlWorksheet(openpyxl.worksheet.worksheet.Worksheet):
         # target_ws.freeze_panes = origin_ws.freeze_panes
 
     def _cells_by_row(self, min_col, min_row, max_col, max_row, values_only=False):
-        """openpyxl的这个迭代器，遇到合并单元格会有bug
+        """ openpyxl的这个迭代器，遇到合并单元格会有bug
         所以我把它重新设计一下~~
         """
         for row in range(min_row, max_row + 1):
