@@ -129,6 +129,8 @@ class ImageClasDataset(paddle.io.Dataset):
             0，一般是读取没有label标签的测试集，所有的类别，统一用0占位
             1，root下每个直接子目录是一个类别，每个类别目录里如果有嵌套目录，都会归为可用图片
             2，root下每个目录均被视为一个类别，这些类别在目录结构上虽然有嵌套结构，但在模型上先用线性类别模式处理
+
+        注：空目录相当于没有该类别数据，会跳过，不会进入分类清单。比如8个类别的目录，但是有2个空的，那么实际只会生成6分类模型。
         """
 
         def run_mode0():
@@ -520,7 +522,9 @@ class XlModel(paddle.Model):
             data_shape = [1, 3, 256, 256]
             # TODO 可以尝试从train_data、eval_data等获取尺寸
         data = paddle.zeros(data_shape, dtype='float32')
-        paddle.jit.save(paddle.jit.to_static(self.network), str(self.get_save_dir() / 'infer/inference'), [data])
+        infer_dir = self.get_save_dir() / 'infer/inference'
+        infer_dir.mkdir(exist_ok=True)
+        paddle.jit.save(paddle.jit.to_static(self.network), infer_dir.as_posix(), [data])
 
 
 def __7_部署():
@@ -552,7 +556,7 @@ class ImageClasPredictor:
         device = paddle.get_device()
 
         if device.startswith('gpu'):
-            config.enable_use_gpu(0, device.split(':')[1])
+            config.enable_use_gpu(0, int(device.split(':')[1]))
 
         # 根据Config创建预测对象
         predictor = paddle_infer.create_predictor(config)
