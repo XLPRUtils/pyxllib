@@ -109,6 +109,37 @@ class xlcv(EnchantBase):
         return xlcv.read_from_buffer(content, flags, b64decode=b64decode)
 
     @staticmethod
+    def read_from_strokes(strokes, margin=10, color=(0, 0, 0), bgcolor=(255, 255, 255), thickness=2):
+        """ 将联机手写笔划数据转成图片
+
+        :param margin: 图片边缘
+        :param color: 前景笔划颜色，默认黑色
+        :param bgcolor: 背景颜色，默认白色
+        :param thickness: 笔划粗度
+        """
+        # 1 边界
+        minx = min([p[0] for s in strokes for p in s])
+        miny = min([p[1] for s in strokes for p in s])
+        for stroke in strokes:
+            for p in stroke:
+                p[0] -= minx - margin
+                p[1] -= miny - margin
+
+        maxx = max([p[0] for s in strokes for p in s])
+        maxy = max([p[1] for s in strokes for p in s])
+
+        # 2 画出图片
+        canvas = np.zeros((maxy + margin, maxx + margin, 3), dtype=np.uint8)
+        canvas[:, :] = bgcolor
+
+        # 画出每个笔划轨迹
+        for stroke in strokes:
+            for i in range(len(stroke) - 1):
+                cv2.line(canvas, stroke[i], stroke[i + 1], color, thickness=thickness)
+
+        return canvas
+
+    @staticmethod
     def __2_attrs():
         pass
 

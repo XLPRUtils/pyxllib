@@ -375,7 +375,7 @@ class XlprDb(Connection):
         return self.execute('SELECT id FROM xlapi WHERE input=%s', (input,)).fetchone()[0]
 
     def insert_row2xlserver(self, request, xlapi_id=0, **kwargs):
-        kw = {'remote_addr': request.remote_addr,
+        kw = {'remote_addr': request.headers.get('X-Real-IP', request.remote_addr),
               'route': '/'.join(request.base_url.split('/')[3:]),
               'update_time': utc_timestamp(8),
               'xlapi_id': xlapi_id}

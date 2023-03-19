@@ -1042,15 +1042,19 @@ class XlAiClient:
 
         def func(buffer, options):
             image_uri = f'data:image/jpg;base64,' + base64.b64encode(buffer).decode()
-            r = requests.post('https://api.mathpix.com/v3/latex',
-                              data=json.dumps({'src': image_uri}),
-                              headers=self._mathpix_header)
-            return json.loads(r.text)
+            try:
+                r = requests.post('https://api.mathpix.com/v3/latex',
+                                  data=json.dumps({'src': image_uri}),
+                                  headers=self._mathpix_header)
+                return json.loads(r.text)
+            except requests.exceptions.ConnectionError:
+                return {'latex': '', 'error': 'requests.exceptions.ConnectionError'}
 
         # mathpix的接口没有说限制图片大小，但我还是按照百度的规范处理下更好
         buffer, ratio = self.adjust_image(image)
         result_dict = self.run_aipocr_with_db(func, buffer, options, mode_name='mathpix_latex')
-        result_dict['position'] = zoom_point(result_dict['position'], ratio)
+        if 'position' in result_dict:
+            result_dict['position'] = zoom_point(result_dict['position'], ratio)
         return result_dict
 
     def __D_福建省模式识别与图像理解重点实验室(self):
