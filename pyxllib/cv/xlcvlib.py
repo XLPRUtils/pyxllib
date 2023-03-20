@@ -129,7 +129,7 @@ class xlcv(EnchantBase):
         maxy = max([p[1] for s in strokes for p in s])
 
         # 2 画出图片
-        canvas = np.zeros((maxy + margin, maxx + margin, 3), dtype=np.uint8)
+        canvas = np.zeros((maxy + margin*2, maxx + margin*2, 3), dtype=np.uint8)
         canvas[:, :] = bgcolor
 
         # 画出每个笔划轨迹
