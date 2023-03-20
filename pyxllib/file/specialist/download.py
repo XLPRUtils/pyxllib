@@ -162,6 +162,10 @@ def get_font_file(name):
     """
     from pyxllib.file.specialist import ensure_localfile, XlPath
 
+    # 0 当前目录有，则优先返回当前目录的文件
+    if p := XlPath(name):
+        return p
+
     # 1 windows直接找系统的字体目录
     font_file = XlPath(f'C:/Windows/Fonts/{name}')
     if font_file.is_file():
