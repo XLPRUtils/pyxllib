@@ -163,7 +163,8 @@ def get_font_file(name):
     from pyxllib.file.specialist import ensure_localfile, XlPath
 
     # 0 当前目录有，则优先返回当前目录的文件
-    if p := XlPath(name):
+    p = XlPath(name)
+    if p.is_file():
         return p
 
     # 1 windows直接找系统的字体目录
