@@ -523,7 +523,7 @@ class XlModel(paddle.Model):
             # TODO 可以尝试从train_data、eval_data等获取尺寸
         data = paddle.zeros(data_shape, dtype='float32')
         infer_dir = self.get_save_dir() / 'infer/inference'
-        infer_dir.mkdir(exist_ok=True)
+        infer_dir.mkdir(parents=True, exist_ok=True)
         paddle.jit.save(paddle.jit.to_static(self.network), infer_dir.as_posix(), [data])
 
 
