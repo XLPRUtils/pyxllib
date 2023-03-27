@@ -1097,6 +1097,7 @@ class XlAiClient:
             data['options'] = options
         if meta_opts:
             data.update(meta_opts)
+        # TODO 增加超时timeout=seconds参数？
         r = requests.post(f'{self._priu_host}/api/{mode}', json=data, headers=self._priu_header)
         if r.status_code == 200:
             res = json.loads(r.text)
