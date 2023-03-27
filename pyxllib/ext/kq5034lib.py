@@ -252,6 +252,8 @@ class 网课考勤:
             # 优先使用修订的标记
             value = self.异常data.get((f'第{课次:02}课', 用户ID), value)
             cel = ws.cell2(id2row[用户ID], f'第{课次:02}课')
+            if cel is None:
+                return
             cel.value = value
             color = None
             if '完成当堂学习' in value:
@@ -309,8 +311,7 @@ class 网课考勤:
         if self.当天课次 < 4:
             msg.append('第1次建议大家都查看下完整考勤表，记一下自己的学号，方便以后核对考勤数据。'
                        '以后群里统一以学号的方式汇报异常的考勤数据，未列出则都是"正常完成当堂学习"的学员。')
-            msg.append('如果发现自己考勤数据不对（特别手机号、昵称有更改可能导致用户ID匹配错），'
-                       '可以群里、私聊反馈给我修正。')
+            msg.append('如果发现自己考勤数据不对，可以群里、私聊反馈给我修正。')
 
         # 2 要过期的课程
         if 0 < self.结束课次 + 1 <= self.课次数:
