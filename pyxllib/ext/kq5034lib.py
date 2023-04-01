@@ -20,6 +20,7 @@ import datetime
 import math
 import os
 import re
+import time
 
 import fire
 import pandas as pd
@@ -32,6 +33,8 @@ from pyxllib.prog.specialist import parse_datetime, browser, TicToc
 from pyxllib.cv.rgbfmt import RgbFormatter
 from pyxllib.data.sqlite import Connection
 
+from pyxllib.ext.seleniumlib import XlChrome
+
 
 class 网课考勤:
     def __init__(self, today=None):
@@ -43,9 +46,14 @@ class 网课考勤:
         self.打卡返款 = {5: 100, 10: 150, 15: 200}  # 打卡满5/10/15次的返款额
         self._init(today)
 
+        self.driver = None  # 浏览器脚本
+
+    def __1_基础数据处理(self):
+        pass
+
     def _init(self, today=None):
         """ 可以手动指定today，适合某些场景下的调试 """
-        self.课次数 = 21  # 课次一般都是固定21课，不用改
+        self.课次数 = len(self.课程链接) - 1  # 课次一般都是固定21课，不用改
         self.达标时长 = 30  # 单位:分钟。在线听课的时长达到此标准以上，才计算为完成一节课的学习
         # 一般是3天，因为回放第1、2、3天都会数额，第4天就没数额了，所以第4天返款
         self.回放返款天数 = sum((x > 0) for x in self.视频返款[1:])
@@ -61,8 +69,8 @@ class 网课考勤:
         self.开课日期 = date.fromisoformat(self.开课日期)
         # self.觉观禅课 = (self.开课日期.day == 1)
         self.觉观禅课 = '觉观' in self.返款标题
-        self.当天课次 = (self.today - self.开课日期).days + 1
-        self.结束课次 = self.当天课次 - len(self.视频返款) + 1
+        self.当天课次 = min((self.today - self.开课日期).days + 1, self.课次数)
+        self.结束课次 = max(0, self.当天课次 - len(self.视频返款) + 1)
         self.用户列表 = pd.read_csv(self.get_file('数据表/用户列表导出*.csv'))
         # 用户列表 = 用户列表[用户列表['账号状态'] == '正常']
 
@@ -530,14 +538,29 @@ class 网课考勤:
         # for idx, row in df.iterrows():
         #     data[row['用户id']] = row['打卡次数']
 
-        # df = pd.read_excel(files[-1])  # 220804周四08:28，小鹅通更新了模板
-        df = pd.read_csv(files[-1])  # 221005周三09:19，小鹅通又双叒更新了
-        # df.columns = df.columns.str.replace('\t', '')
-        # data = Counter([x.strip() for x in df['用户id']])
+        df = None
+        try:
+            df = pd.read_excel(files[-1])  # 220804周四08:28，小鹅通更新了模板
+        except ValueError:
+            pass
+
+        if df is None:
+            try:
+                df = pd.read_csv(files[-1])  # 221005周三09:19，小鹅通又双叒更新了
+            except UnicodeDecodeError:
+                pass
+
+        if df is None:
+            raise ValueError
+
+        df = df.applymap(lambda x: x.strip() if isinstance(x, str) else x)
+        df.columns = df.columns.map(lambda x: x.strip() if isinstance(x, str) else x)
+
+        # data = Counter([x for x in df['用户id']])
         try:
             data = {row['用户id']: row['打卡次数'] for _, row in df.iterrows()}
         except KeyError:  # 230202周四19:49，另一种实际是xlsx格式，然后再转出csv的情况
-            data = Counter([row['user_id'].strip() for _, row in df.iterrows()])
+            data = Counter([row['user_id'] for _, row in df.iterrows()])
 
         # 3 将打卡次数写入表格
         ls = []  # 返款汇总
@@ -645,6 +668,77 @@ class 网课考勤:
 
     def __call__(self, *args, **kwargs):
         print('程序测试通过，可正常使用')
+
+    def 表格内容对齐(self, ws_name1, ws_name2, col_name):
+        wb = self.wb
+        wb.merge_sheets_by_keycol([wb[ws_name1], wb[ws_name2]], col_name)
+
+        # 保存。一般不用重新再加载self.wb、self.ws，因为这里需求本来基本都是要分段重新执行程序的。
+        wb.save(self.表格路径)
+
+    def __2_自动浏览网页(self):
+        pass
+
+    def ensure_driver(self):
+        if not self.driver:
+            self.driver = XlChrome()
+        return self.driver
+
+    def 登录小鹅通(self, name, passwd):
+        # 登录小鹅通
+        driver = self.ensure_driver()
+        driver.get('https://admin.xiaoe-tech.com/t/login#/acount')
+        driver.locate('//*[@id="common_template_mounted_el_container"]'
+                    '/div/div[1]/div[3]/div/div[4]/div/div[1]/div[1]/div/div[2]/input').send_keys(name)
+        driver.locate('//*[@id="common_template_mounted_el_container"]'
+                    '/div/div[1]/div[3]/div/div[4]/div/div[1]/div[2]/div/div/input').send_keys(passwd)
+        driver.click('//*[@id="common_template_mounted_el_container"]/div/div[1]/div[3]/div/div[4]/div/div[2]')
+
+        # 然后自己手动操作验证码
+        # 以及选择"店铺"
+
+    def 登录微信支付(self):
+        driver = self.ensure_driver()
+        driver.get('https://pay.weixin.qq.com/index.php/core/home/login')
+
+    def 下载课次考勤数据(self, 起始课=None, 终止课=None):
+        if 起始课 is None:
+            起始课 = self.结束课次
+        if 终止课 is None:
+            终止课 = self.当天课次
+
+        # 1 遍历课程下载表格
+        driver = self.driver
+        for i in range(起始课, 终止课 + 1):
+            print(f'第{i}课', self.课程链接[i])
+            driver.get('https://admin.xiaoe-tech.com/t/data_center/index')  # 必须要找个过渡页，不然不会更新课程链接
+            driver.get(self.课程链接[i])
+            driver.locate_text('//*[@id="app"]/div/div/div[1]/div[2]/div[1]/div[2]', f'第{i}课')  # 检查页面
+
+            driver.click('//*[@id="tab-studentTab"]/span')  # 直播间用户
+            driver.click('//*[@id="pane-studentTab"]/div/div[2]/div[2]/form/div[2]/button[2]/span/span')  # 导出列表
+            driver.click('//*[@id="data-export-container"]/div/div[2]/div/div[2]/div[2]/button[2]/span/span')  # 导出
+            time.sleep(1)
+
+        # 2 下载表格
+        time.sleep(3)  # 最后一份导出还要稍微多等一会。TODO 写成智能判断，能下载后马上下载。
+        driver.get('https://admin.xiaoe-tech.com/t/basic-platform/downloadCenter')
+        for i in range(1, 终止课 - 起始课 + 2):
+            driver.click(f'//*[@id="downloadsCenter"]/div[4]/div/div[4]/div[2]/table/tbody/tr[{i}]/td[9]/div/div/span[1]')
+            time.sleep(1)
+
+    def 批量退款(self):
+        self.driver.get('https://pay.weixin.qq.com/index.php/xphp/cbatchrefund/batch_refund#/pages/index/index')
+
+    def 申请单条退款(self, 凭证号, 退款金额=0, 退款原因=''):
+        driver = self.ensure_driver()
+        driver.get('https://pay.weixin.qq.com/index.php/core/refundapply')
+        driver.locate('//*[@id="app"]/div/div[2]/div[2]/div[2]/div/span/input').send_keys(凭证号)
+        driver.click('//*[@id="applyRefundBtn"]')  # 申请退款
+        driver.locate('//*[@id="app"]/div/div[2]/div[2]/div[3]/div[2]/div/div[1]/div/span[1]/input').send_keys(
+            str(退款金额))
+        driver.locate('//*[@id="textInput"]').send_keys(退款原因)
+        # driver.click('//*[@id="commitRefundApplyBtn"]')  # 建议手动点"提交申请"
 
 
 class KqDb(Connection):
