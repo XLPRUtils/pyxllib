@@ -273,7 +273,7 @@ class XlAiClient:
                         self._priu_host = host
                         connent = True
                         break
-                except requests.exceptions.ConnectionError:
+                except (requests.exceptions.ConnectionError, requests.exceptions.ReadTimeout):
                     continue
 
             if not connent:
@@ -1042,12 +1042,15 @@ class XlAiClient:
 
         def func(buffer, options):
             image_uri = f'data:image/jpg;base64,' + base64.b64encode(buffer).decode()
-            try:
-                r = requests.post('https://api.mathpix.com/v3/latex',
-                                  data=json.dumps({'src': image_uri}),
-                                  headers=self._mathpix_header)
-                return json.loads(r.text)
-            except requests.exceptions.ConnectionError:
+            for i in range(10):  # 尝试10次，10次都失败就无语了~
+                try:
+                    r = requests.post('https://api.mathpix.com/v3/latex',
+                                      data=json.dumps({'src': image_uri}),
+                                      headers=self._mathpix_header)
+                    return json.loads(r.text)
+                except requests.exceptions.ConnectionError:
+                    pass
+            else:
                 return {'latex': '', 'error': 'requests.exceptions.ConnectionError'}
 
         # mathpix的接口没有说限制图片大小，但我还是按照百度的规范处理下更好
@@ -1097,6 +1100,7 @@ class XlAiClient:
             data['options'] = options
         if meta_opts:
             data.update(meta_opts)
+
         # TODO 增加超时timeout=seconds参数？
         r = requests.post(f'{self._priu_host}/api/{mode}', json=data, headers=self._priu_header)
         if r.status_code == 200:
