@@ -29,7 +29,7 @@ from tqdm import tqdm
 from pyxllib.text.pupil import chinese2digits, grp_chinese_char
 from pyxllib.file.xlsxlib import openpyxl
 from pyxllib.file.specialist import XlPath
-from pyxllib.prog.specialist import parse_datetime, browser, TicToc
+from pyxllib.prog.specialist import parse_datetime, browser, TicToc, dprint
 from pyxllib.cv.rgbfmt import RgbFormatter
 from pyxllib.data.sqlite import Connection
 
@@ -69,8 +69,10 @@ class 网课考勤:
         self.开课日期 = date.fromisoformat(self.开课日期)
         # self.觉观禅课 = (self.开课日期.day == 1)
         self.觉观禅课 = '觉观' in self.返款标题
-        self.当天课次 = min((self.today - self.开课日期).days + 1, self.课次数)
-        self.结束课次 = max(0, self.当天课次 - len(self.视频返款) + 1)
+        self.当天课次 = (self.today - self.开课日期).days + 1  # 这是用于逻辑运算的，可能超过实际课次数
+        self.当天课次2 = min(self.当天课次, self.课次数)
+        self.结束课次 = self.当天课次 - len(self.视频返款) + 1  # 这是用于逻辑运算的，可能有负值
+        self.结束课次2 = max(0, self.结束课次)
         self.用户列表 = pd.read_csv(self.get_file('数据表/用户列表导出*.csv'))
         # 用户列表 = 用户列表[用户列表['账号状态'] == '正常']
 
@@ -582,7 +584,7 @@ class 网课考勤:
             if 返款额 <= 0:
                 color = RgbFormatter(255, 0, 0)
             elif 返款额 < 最高返款额:
-                color = RgbFormatter(255, 255, 0).light(1-返款额/最高返款额)
+                color = RgbFormatter(255, 255, 0).light(1 - 返款额 / 最高返款额)
             elif 返款额 == 最高返款额:  # 最高返款额
                 color = RgbFormatter(0, 255, 0)
 
@@ -689,9 +691,9 @@ class 网课考勤:
         driver = self.ensure_driver()
         driver.get('https://admin.xiaoe-tech.com/t/login#/acount')
         driver.locate('//*[@id="common_template_mounted_el_container"]'
-                    '/div/div[1]/div[3]/div/div[4]/div/div[1]/div[1]/div/div[2]/input').send_keys(name)
+                      '/div/div[1]/div[3]/div/div[4]/div/div[1]/div[1]/div/div[2]/input').send_keys(name)
         driver.locate('//*[@id="common_template_mounted_el_container"]'
-                    '/div/div[1]/div[3]/div/div[4]/div/div[1]/div[2]/div/div/input').send_keys(passwd)
+                      '/div/div[1]/div[3]/div/div[4]/div/div[1]/div[2]/div/div/input').send_keys(passwd)
         driver.click('//*[@id="common_template_mounted_el_container"]/div/div[1]/div[3]/div/div[4]/div/div[2]')
 
         # 然后自己手动操作验证码
@@ -701,11 +703,11 @@ class 网课考勤:
         driver = self.ensure_driver()
         driver.get('https://pay.weixin.qq.com/index.php/core/home/login')
 
-    def 下载课次考勤数据(self, 起始课=None, 终止课=None):
+    def 下载课次考勤数据(self, 起始课=None, 终止课=None, 文件名前缀=''):
         if 起始课 is None:
-            起始课 = self.结束课次
+            起始课 = max(1, self.结束课次)
         if 终止课 is None:
-            终止课 = self.当天课次
+            终止课 = min(self.当天课次, self.课次数)
 
         # 1 遍历课程下载表格
         driver = self.driver
@@ -721,11 +723,36 @@ class 网课考勤:
             time.sleep(1)
 
         # 2 下载表格
-        time.sleep(3)  # 最后一份导出还要稍微多等一会。TODO 写成智能判断，能下载后马上下载。
-        driver.get('https://admin.xiaoe-tech.com/t/basic-platform/downloadCenter')
+        # 2.1 等待下载文件生成完毕
+        while True:
+            driver.get('https://admin.xiaoe-tech.com/t/basic-platform/downloadCenter')
+            if '任务撤回' in driver.locate('//*[@id="downloadsCenter"]/div[4]/div/div[4]/div[2]/table/tbody/tr[1]/'
+                                       'td[9]/div/div/span').text:
+                time.sleep(1)
+            else:
+                break
+
+        # 2.2 下载表格
+        files = []
         for i in range(1, 终止课 - 起始课 + 2):
-            driver.click(f'//*[@id="downloadsCenter"]/div[4]/div/div[4]/div[2]/table/tbody/tr[{i}]/td[9]/div/div/span[1]')
+            driver.click(f'//*[@id="downloadsCenter"]/div[4]/div/div[4]/div[2]/table/tbody/tr[{i}]/'
+                         f'td[9]/div/div/span[1]')
+            file = driver.locate(f'//*[@id="downloadsCenter"]/div[4]/div/div[3]/table/tbody/tr[{i}]/'
+                                 f'td[1]/div/div/div').text + '.csv'  # 下载后还会再多一个csv后缀
+            files.append(file)
             time.sleep(1)
+
+        # 2.3 移动表格
+        time.sleep(1)
+        download_path = XlPath(os.path.join(os.environ['USERPROFILE'], 'Downloads'))
+        for file in files:
+            src_file = (download_path / file)
+            while True:
+                if src_file.is_file():
+                    src_file.move(self.root / '数据表' / (文件名前缀 + file), if_exists='replace')
+                    break
+                else:
+                    time.sleep(1)
 
     def 批量退款(self):
         self.driver.get('https://pay.weixin.qq.com/index.php/xphp/cbatchrefund/batch_refund#/pages/index/index')
