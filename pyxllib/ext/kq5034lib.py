@@ -234,7 +234,10 @@ class 网课考勤:
         print(*set(df['用户ID']), sep='\n')
 
     def 修订(self, 学号, 课次, 完成标记, *args):
-        user_id = self.ws.cell2({'学号': 学号}, '用户ID').value
+        try:
+            user_id = self.ws.cell2({'学号': 学号}, '用户ID').value
+        except ValueError:
+            return
         if isinstance(课次, int):
             课次 = f'第{课次:02}课'
         self.异常data[课次, user_id] = 完成标记
@@ -395,9 +398,9 @@ class 网课考勤:
 
             if d:
                 msg[-1] += '\n' + ','.join(map(str, d))
-                name.append(f'第{self.当天课次}课当堂')
             else:
                 msg[-1] = title + '满勤！！！'
+            name.append(f'第{self.当天课次}课当堂')
 
         # 5 第22课的处理
         if self.觉观禅课 and self.当天课次 == 23:
@@ -642,7 +645,7 @@ class 网课考勤:
         self.write_返款总计()
 
         # 3 结课
-        if self.当天课次 == (20 + len(self.视频返款)):
+        if self.当天课次 == (self.课次数 + len(self.视频返款) - 1):
             msg.append('考勤返款工作已全部完成，若对自己促学金还有疑问的近日可以再跟我反馈。')
 
         # 4 输出日报
@@ -730,6 +733,7 @@ class 网课考勤:
                                        'td[9]/div/div/span').text:
                 time.sleep(1)
             else:
+                time.sleep(2)  # 不能下载太快，还是要稍微等一会
                 break
 
         # 2.2 下载表格
@@ -744,6 +748,7 @@ class 网课考勤:
 
         # 2.3 移动表格
         time.sleep(1)
+        # 这样应该也不是很泛用，有的人浏览器下载可能会放到各种自定义的其他地方
         download_path = XlPath(os.path.join(os.environ['USERPROFILE'], 'Downloads'))
         for file in files:
             src_file = (download_path / file)

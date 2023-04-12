@@ -42,6 +42,7 @@ class XlChrome(webdriver.Chrome):
         if isinstance(locator, str):
             locator = (By.XPATH, locator)
         element = WebDriverWait(self, seconds).until(EC.element_to_be_clickable(locator))
+        time.sleep(0.5)  # 最好稍微等一下再点击
         try:
             element.click()
         except ElementClickInterceptedException:

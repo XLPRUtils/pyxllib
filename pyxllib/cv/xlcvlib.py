@@ -112,6 +112,7 @@ class xlcv(EnchantBase):
     def read_from_strokes(strokes, margin=10, color=(0, 0, 0), bgcolor=(255, 255, 255), thickness=2):
         """ 将联机手写笔划数据转成图片
 
+        :param strokes: n个笔划，每个笔画包含不一定要一样长的m个点，每个点是(x, y)的结构
         :param margin: 图片边缘
         :param color: 前景笔划颜色，默认黑色
         :param bgcolor: 背景颜色，默认白色
@@ -265,9 +266,11 @@ class xlcv(EnchantBase):
         return im
 
     @staticmethod
-    def write(im, file, if_exists=None):
+    def write(im, file, if_exists=None, ext=None):
         file = XlPath(file)
-        data = cv2.imencode(ext=file.suffix, img=im)[1]
+        if ext is None:
+            ext = file.suffix
+        data = cv2.imencode(ext=ext, img=im)[1]
         if file.exist_preprcs(if_exists):
             file.write_bytes(data.tobytes())
         return file
