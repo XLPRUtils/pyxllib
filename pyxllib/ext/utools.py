@@ -26,7 +26,7 @@ import pandas as pd
 import pyautogui
 
 from pyxllib.prog.specialist import browser, TicToc, parse_datetime
-from pyxllib.file.specialist import File, Dir
+from pyxllib.file.specialist import XlPath
 from pyxllib.ext.autogui import type_text, clipboard_decorator
 
 
@@ -125,13 +125,13 @@ class UtoolsBase:
 
         suffix = self.cmds.get('subinput', None)
         try:
-            f1 = File('left', Dir.TEMP, suffix=suffix)
-            f2 = File('right', Dir.TEMP, suffix=suffix)
+            f1 = XlPath.init('left', XlPath.tempdir(), suffix=suffix)
+            f2 = XlPath.init('right', XlPath.tempdir(), suffix=suffix)
         except OSError:  # 忽略错误的扩展名
-            f1 = File('left', Dir.TEMP)
-            f2 = File('right', Dir.TEMP)
-        f1.write(suffix)
-        f2.write(self.cmds['ClipText'])
+            f1 = XlPath.init('left', XlPath.tempdir())
+            f2 = XlPath.init('right', XlPath.tempdir())
+        f1.write_text(suffix)
+        f2.write_text(self.cmds['ClipText'])
         bcompare(f1, f2, wait=False)
 
 
@@ -172,7 +172,7 @@ class UtoolsFile(UtoolsBase):
         """
         from functools import reduce
         try:
-            from xlproject.kzconfig import KzDataSync
+            from xlproject.xyz.kzconfig import KzDataSync
             from pyxlpr.data.labelme import reduce_labelme_jsonfile
         except ModuleNotFoundError:
             pass
@@ -190,17 +190,17 @@ class UtoolsFile(UtoolsBase):
         # 一级目录下选中的文件
         paths = self.paths
         # 用正则判断一些智能参数是否要计算，注意不能只判断files，如果出现file，也是要引用files的
-        files = [File(p) for p in paths if p.is_file()] if re.search(r'files? ', keywords) else []
+        files = [XlPath(p) for p in paths if p.is_file()] if re.search(r'files? ', keywords) else []
         imfiles = [f for f in files if self.is_image(f)] if re.search(r' imfiles? ', keywords) else []
         # 出现r系列的递归操作，都是要计算出dirs的
-        dirs = [Dir(p) for p in paths if p.is_dir()] if re.search(r' (dirs?|r[a-zA-Z_]+) ', keywords) else []
+        dirs = [XlPath(p) for p in paths if p.is_dir()] if re.search(r' (dirs?|r[a-zA-Z_]+) ', keywords) else []
 
         # 递归所有的文件
         rpaths = reduce(lambda x, y: x + y.select('**/*').subpaths(), [paths] + dirs) \
             if re.search(r' (r[a-zA-Z_]+) ', keywords) else []
-        rfiles = [File(p) for p in rpaths if p.is_file()] if re.search(r' (r(im)?files?) ', keywords) else []
+        rfiles = [XlPath(p) for p in rpaths if p.is_file()] if re.search(r' (r(im)?files?) ', keywords) else []
         rimfiles = [f for f in rfiles if self.is_image(f)] if re.search(r' rimfiles? ', keywords) else []
-        rdirs = [Dir(p) for p in rpaths if p.is_dir()] if re.search(r' (rdirs?) ', keywords) else []
+        rdirs = [XlPath(p) for p in rpaths if p.is_dir()] if re.search(r' (rdirs?) ', keywords) else []
 
         # 3 判断是否要智能开循环处理
         m = re.search(r' (r?(path|(im)?file|dir)) ', keywords)

@@ -561,6 +561,10 @@ def filesmatch(patter, *, root=os.curdir, **kwargs) -> list:
     elif isinstance(patter, (list, tuple, set)):
         res = []
         for p in patter: res += filesmatch(p, root=root)
+    # 5 可调用对象
+    elif callable(patter):
+        from pyxllib.file.specialist import XlPath
+        res = [f.relpath(root).as_posix() for f in XlPath(root).rglob('*') if patter(f)]
     else:
         raise TypeError
 

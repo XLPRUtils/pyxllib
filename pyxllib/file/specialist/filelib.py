@@ -19,7 +19,8 @@ import shutil
 import subprocess
 import tempfile
 import ujson
-from collections import defaultdict
+from collections import defaultdict, Counter
+import math
 
 import chardet
 import qiniu
@@ -30,6 +31,7 @@ from more_itertools import chunked
 import filetype
 from tqdm import tqdm
 
+from pyxllib.prog.newbie import round_int
 from pyxllib.prog.pupil import is_url, is_file, DictTool
 from pyxllib.algo.pupil import Groups
 from pyxllib.file.pupil import struct_unpack, gen_file_filter
@@ -840,6 +842,10 @@ class File(PathBase):
         return self._path.exists()
 
 
+def make_filter():
+    """ 从filesmatch """
+
+
 class XlPath(type(pathlib.Path())):
 
     @classmethod
@@ -921,6 +927,7 @@ class XlPath(type(pathlib.Path())):
         return int(os.stat(self).st_mtime)
 
     def size(self, *, human_readable=False):
+        """ 获取文件/目录的大小 """
         if self.is_file():
             sz = os.path.getsize(self)
         elif self.is_dir():
@@ -1238,6 +1245,7 @@ class XlPath(type(pathlib.Path())):
         return need_run
 
     def copy(self, dst, if_exists=None):
+        """ 用于一般的文件、目录拷贝 """
         if not self.exists():
             return
 
@@ -1350,19 +1358,27 @@ class XlPath(type(pathlib.Path())):
             False, 保留第1个文件，删除其他文件
             TODO，添加其他删除模式
         :param print_mode:
-            TODO 支持html富文本显示，带超链接
+            0，不输出
+            'str'，普通文本输出（即返回的msg）
+            'html'，TODO 支持html富文本显示，带超链接
         """
         from humanfriendly import format_size
 
         def printf(*args, **kwargs):
-            if print_mode:
+            if print_mode == 'html':
+                raise NotImplementedError
+            elif print_mode:
                 print(*args, **kwargs)
+            msg.append(' '.join(args))
 
+        fmtsize = lambda x: format_size(x, binary=True)
+
+        msg = []
         files = self.glob_repeat_files(pattern, sort_mode=sort_mode, print_mode=print_mode,
                                        files=files, hash_func=hash_func)
         for i, (etag, files, _size) in enumerate(files, start=1):
             n = len(files)
-            printf(f'{i}、{etag}\t{format_size(_size)} × {n} ≈ {format_size(_size * n)}')
+            printf(f'{i}、{etag}\t{fmtsize(_size)} × {n} ≈ {fmtsize(_size * n)}')
 
             for j, f in enumerate(files, start=1):
                 if debug:
@@ -1376,15 +1392,17 @@ class XlPath(type(pathlib.Path())):
             if print_mode:
                 printf()
 
+        return msg
+
     def check_repeat_files(self, pattern='**/*', **kwargs):
         if 'debug' not in kwargs:
             kwargs['debug'] = True
-        self.delete_repeat_files(pattern, **kwargs)
+        return self.delete_repeat_files(pattern, **kwargs)
 
     def check_repeat_name_files(self, pattern='**/*', **kwargs):
         if 'hash_func' not in kwargs:
             kwargs['hash_func'] = lambda p: p.name.lower()
-        self.check_repeat_files(pattern, **kwargs)
+        return self.check_repeat_files(pattern, **kwargs)
 
     def __5_文件后缀相关功能(self):
         """ 检查目录里的各种文件情况 """
@@ -1419,6 +1437,8 @@ class XlPath(type(pathlib.Path())):
             if not t:
                 continue
             ext = '.' + t.extension
+            if ext == '.zip' and f.suffix == '.docx':
+                continue
             if ext != f.suffix:
                 yield f, ext  # 原文件名，实际解析出的文件格式
 
@@ -1430,6 +1450,228 @@ class XlPath(type(pathlib.Path())):
             if not debug:
                 f2 = f1.with_suffix(suffix2)
                 f1.rename2(f2, if_exists=if_exists)
+
+    def __6_文件夹分析诊断(self):
+        pass
+
+    def check_size(self):
+        import pandas as pd
+
+        msg = []
+        file_sizes = {}  # 缓存文件大小，避免重复计算
+        suffix_counts = Counter()
+        suffix_sizes = defaultdict(int)
+
+        def fmtsize(n):
+            for u in ['Bytes', 'KB', 'MB', 'GB']:
+                if n < 1024:
+                    return f'{round_int(n)}{u}'
+                else:
+                    n /= 1024
+            else:
+                return f'{round_int(n)}TB'
+
+        dir_count, file_count = 0, 0
+        for root, dirs, files in os.walk(self):
+            dir_count += len(dirs)
+            file_count += len(files)
+            for file in files:
+                file_size = os.path.getsize(os.path.join(root, file))
+                file_sizes[(root, file)] = file_size
+
+                _, suffix = os.path.splitext(file)
+                suffix_counts[suffix] += 1
+                suffix_sizes[suffix] += file_size
+
+        sz = fmtsize(sum(file_sizes.values()))
+        # 这里的目录指"子目录"数，不包含self
+        msg.append(f'一、目录数：{dir_count}，文件数：{file_count}，总大小：{sz}')
+
+        data = []
+        for suffix, count in suffix_counts.most_common():
+            size = suffix_sizes[suffix]
+            data.append([suffix, count, size])
+        data.sort(key=lambda x: (-x[2], -x[1], x[0]))  # 先按文件数，再按文件名排序
+        df = pd.DataFrame(data, columns=['suffix', 'count', 'size'])
+        df['size'] = [fmtsize(x) for x in df['size']]
+        df.reset_index(inplace=True)
+        df['index'] += 1
+        msg.append('\n二、各后缀文件数')
+        msg.append(df.to_string(index=False))
+
+        return msg
+
+    def check_summary(self, print_mode=False):
+        """ 对文件夹情况进行通用的状态检查 """
+        if not self.is_dir():
+            return ''
+
+        def printf(s):
+            if print_mode:
+                print(s)
+            msg.append(s)
+
+        # 一 目录大小，二 各后缀文件大小
+        msg = []
+        printf('【' + self.as_posix() + '】目录检查')
+        printf('\n'.join(self.check_size()))
+
+        # 三 重名文件
+        printf('\n三、重名文件（忽略大小写，跨目录检查name重复情况）')
+        printf('\n'.join(self.check_repeat_name_files(print_mode=False)))
+
+        # 四 重复文件
+        printf('\n四、重复文件（etag相同）')
+        printf('\n'.join(self.check_repeat_files(print_mode=False)))
+
+        # 五 错误扩展名
+        printf('\n五、错误扩展名')
+        for i, (f1, suffix2) in enumerate(self.xglob_faker_suffix_files('**/*'), start=1):
+            printf(f'{i}、{f1.relpath(self)} -> {suffix2}')
+
+        # 六 文件配对
+        printf('\n六、文件配对（检查每个目录里stem名称是否配对，列出文件组成不单一的目录结构，请重点检查落单未配对的情况）')
+        prompt = False
+        for root, dirs, files in os.walk(self):
+            suffix_counts = defaultdict(list)
+            for file in files:
+                stem, suffix = os.path.splitext(file)
+                suffix_counts[stem].append(suffix)
+            suffix_counts = {k: tuple(sorted(v)) for k, v in suffix_counts.items()}
+            suffix_counts2 = {v: k for k, v in suffix_counts.items()}  # 反向存储，如果有重复v会进行覆盖
+            ct = Counter(suffix_counts.values())
+            if len(ct.keys()) > 1:
+                printf(root)
+                for k, v in ct.most_common():
+                    tag = f'\t{k}: {v}'
+                    if v == 1:
+                        tag += f'，{suffix_counts2[k]}'
+                    if len(k) > 1 and not prompt:
+                        tag += f'\t标记注解：有{v}组stem相同文件，配套有{k}这些后缀。其他标记同理。'
+                        prompt = True
+                    printf(tag)
+
+        return '\n'.join(msg)
+
+    def __7_目录复合操作(self):
+        """ 比较高级的一些目录操作功能 """
+
+    def flatten_directory(self, clear_empty_subdir=True):
+        """ 将子目录的文件全部取出来，放到外面的目录里
+
+        :param clear_empty_subdir: 移除文件后，删除空子目录
+        """
+        # 1 检查是否有重名文件，如果有重名文件则终止操作
+        if msg := self.check_repeat_name_files(print_mode=False):
+            print('\n'.join(msg))
+            raise ValueError('有重名文件，终止操作')
+
+        # 2 操作
+        for subdir_name in os.listdir(self):
+            subdir_path = os.path.join(self, subdir_name)
+
+            if os.path.isdir(subdir_path):
+                for filename in os.listdir(subdir_path):
+                    file_path = os.path.join(subdir_path, filename)
+                    destination_path = os.path.join(self, filename)
+
+                    if os.path.isfile(file_path):
+                        shutil.move(file_path, destination_path)
+                if clear_empty_subdir:
+                    shutil.rmtree(subdir_path)
+
+    def nest_directory(self, min_files_per_batch=None, groupby=None, batch_name=None):
+        """ 将直接子文件按照一定规则拆分成多个batch子目录
+        注意这个功能和flatten_directory是对称的，所以函数名也是对称的
+
+        :param min_files_per_batch: 每个batch最少含有的文件数
+            None，相当于int=1的效果
+            int, 如果输入一个整数，则按照这个数量约束分成多个batch
+        :param groupby: 默认已经会把stem.lower()相同的归到一组
+            def groupby(p: XlPath) -> 分组用的key，相同key会归到同一组
+        :param batch_name: 设置batch的名称，默认 'batch{}'
+        """
+        from pyxllib.algo.pupil import Groups, natural_sort
+
+        # 1 按stem分组，确定分组数
+        file_names = list(self.glob_files('*'))
+        if groupby is None:
+            groupby = lambda p: p.stem.lower()
+        file_groups = Groups.groupby(file_names, groupby).data
+
+        if min_files_per_batch is None:
+            min_files_per_batch = 1
+
+        # 2 将文件组合并为多个分组，每组至少包含 min_files_per_batch 个文件
+        result_groups, current_group = [], []
+        for stem in natural_sort(file_groups.keys()):  # 注意这里需要对取到的key按照自然序排序
+            current_group += file_groups[stem]
+            if len(current_group) >= min_files_per_batch:
+                result_groups.append(current_group)
+                current_group = []
+        if current_group:
+            result_groups.append(current_group)
+
+        # 3 整理实际的文件
+        if batch_name is None:
+            group_num = len(result_groups)
+            width = len(str(group_num))
+            batch_name = f'batch{{:0{width}}}'
+        for i, group in enumerate(result_groups, start=1):
+            d = self / batch_name.format(i)
+            d.mkdir(exist_ok=True)
+            for f in group:
+                f.move(d / f.name)
+
+    def copy_file_filter(self, dst, pos_filter=None, *, neg_filter=None, if_exists=None):
+        """ 只能用于目录，在复制文件的时候，进行一定的筛选，而不是完全拷贝
+
+        :param dst: 目标目录
+        :param pos_filter: 对文件的筛选规则
+            其实常用的就'*.json'这种通配符
+            支持自定义函数，def pos_filter(p: XlPath)
+            参数详细用法参考 filesmatch，注意这里筛选器只对file启用，不会对dir启用，否则复制逻辑会非常乱
+        :param neg_filter:
+
+        注意！这个功能还是有点特殊的，不建议和XlPath.copy的接口做合并。
+
+        正向、反向两个过滤器可以组合使用，逻辑上是先用正向获取全部文件，然后扣除掉反向。
+        正向默认全选，反向默认不扣除。
+
+        注意：这样过滤后，空目录不会被拷贝。
+            如果有拷贝目录的需求，请自己另外写逻辑实现。
+            如果只是拷贝空目录结构的需求，可以使用 copy_dir_structure
+
+        >> p = XlPath('build')
+        >> p.copy_filter('build2', '*.toc')  # 复制直接子目录下的所有toc文件
+        >> p.copy_filter('build2', '**/*.toc')  # 复制所有toc文件
+        >> p.copy_filter('build2', lambda p: p.suffix == '.toc')  # 复制所有toc文件
+        """
+        from pyxllib.file.specialist.dirlib import Dir
+
+        d = Dir(self)
+        if pos_filter is None:
+            # 基于filesmatch的底层来实现，速度会比较慢一些，但功能丰富，不用重复造轮子
+            d = d.select('**/*', type_='file')
+        else:
+            d = d.select(pos_filter, type_='file')
+        if neg_filter is not None:
+            d = d.exclude(neg_filter)
+
+        dst = XlPath(dst)
+        for f in d.subs:
+            dst2 = dst / f
+            dst2.parent.mkdir(exist_ok=True)
+            (self / f).copy(dst2, if_exists=if_exists)
+
+    def copy_dir_structure(self, dst):
+        """ 只复制目录结构，不复制文件内容 """
+        dst = XlPath(dst)
+        for root, dirs, _ in os.walk(self):
+            # 构造目标路径
+            dst_dir = dst / XlPath(root).relative_to(self)
+            # 创建目录
+            dst_dir.mkdir(parents=True, exist_ok=True)
 
 
 def demo_file():

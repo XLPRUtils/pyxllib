@@ -111,14 +111,14 @@ class BasicLabelDataset:
         else:  # 否则直接写入
             file.write_auto(data, **kwargs)
 
-    def writes(self, *, max_workers=8, prt=False, **kwargs):
+    def writes(self, *, max_workers=8, print_mode=False, **kwargs):
         """ 重新写入每份标注文件
 
         可能是内存里修改了数据，需要重新覆盖
         也可能是从coco等其他格式初始化，转换而来的内存数据，需要生成对应的新标注文件
         """
         mtqdm(lambda x: self.write(x, **kwargs), self.rp2data.keys(), desc=f'{self.__class__.__name__}写入标注数据',
-              max_workers=max_workers, disable=not prt)
+              max_workers=max_workers, disable=not print_mode)
 
 
 def __1_labelme():
@@ -152,7 +152,24 @@ def reduce_labelme_jsonfile(jsonpath):
 
     if is_labelme_json_data(data) and data['imageData']:
         data['imageData'] = None
-        XlPath(p).write_auto(data, encoding=encoding, if_exists='replace')
+        XlPath(p).write_json(data, encoding=encoding, if_exists='replace')
+
+
+def reduce_labelme_dir(d, print_mode=False):
+    """ 精简一个目录里的所有labelme json文件 """
+
+    def printf(*args, **kwargs):
+        if print_mode:
+            print(*args, **kwargs)
+
+    i = 0
+    for f in XlPath(d).rglob_files('*.json'):
+        data = f.read_json()
+        if data.get('imageData'):
+            data['imageData'] = None
+            f.write_json(data)
+            i += 1
+            printf(i, f)
 
 
 class ToLabelmeJson:
