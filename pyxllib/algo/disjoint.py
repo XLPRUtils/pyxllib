@@ -8,6 +8,8 @@
 并查集相关功能
 """
 
+from tqdm import tqdm
+
 from pyxllib.prog.pupil import check_install_package
 
 check_install_package('disjoint_set', 'disjoint-set==0.6.3')
@@ -17,7 +19,7 @@ from itertools import combinations
 from disjoint_set import DisjointSet
 
 
-def disjoint_set(items, join_checker):
+def disjoint_set(items, join_checker, print_mode=False):
     """ 按照一定的相连规则分组
 
     :param items: 项目清单
@@ -38,7 +40,7 @@ def disjoint_set(items, join_checker):
         ds.find(i)
 
     # 2 连接、分组
-    for i, j in combinations(range(n), 2):
+    for i, j in tqdm(combinations(range(n), 2), disable=not print_mode):
         if join_checker(items[i], items[j]):
             ds.union(i, j)
 
