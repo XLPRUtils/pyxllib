@@ -279,3 +279,27 @@ class WaitMessageBox(QMessageBox):
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.finished.emit()
+
+
+def show_message_box(text, title=None, icon=None, detail=None, buttons=QMessageBox.Ok):
+    """ 显示一个提示框
+
+    :param text: 提示框的文本内容
+    :param title: 提示框的标题，默认值为 "提示"
+    :param icon: 提示框的图标，默认值为 QMessageBox.Information
+    :param detail: 提示框的详细信息，默认值为 None
+    :param buttons: 提示框的按钮，默认值为 QMessageBox.Ok
+
+    :return: 选择的按钮
+    """
+    if title is None:
+        title = "提示"
+
+    if icon is None:
+        icon = QMessageBox.Information
+
+    msg_box = QMessageBox(icon, title, text)
+    if detail is not None:
+        msg_box.setDetailedText(detail)
+    msg_box.setStandardButtons(buttons)
+    return msg_box.exec_()
