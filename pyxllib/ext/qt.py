@@ -15,7 +15,9 @@ import time
 
 from PyQt5.QtCore import pyqtSignal
 from qtpy import QtWidgets, QtGui
-from qtpy.QtWidgets import QFrame, QInputDialog, QApplication, QMainWindow, QMessageBox
+from qtpy.QtWidgets import QFrame, QInputDialog, QApplication, QMainWindow
+from PyQt5.QtWidgets import QMessageBox, QVBoxLayout, QLabel
+from PyQt5.QtCore import Qt
 
 from pyxllib.prog.newbie import CvtType
 
@@ -291,15 +293,38 @@ def show_message_box(text, title=None, icon=None, detail=None, buttons=QMessageB
     :param buttons: 提示框的按钮，默认值为 QMessageBox.Ok
 
     :return: 选择的按钮
+
+    实现上，本来应该依据setMinimumWidth可以搞定的事，但不知道为什么就是会有bug问题，总之最后问gpt靠实现一个类来解决了
+
     """
+    class CustomMessageBox(QMessageBox):
+        def __init__(self, icon, title, text):
+            super().__init__(icon, title, "")
+            self.init_ui(title, text)
+
+        def init_ui(self, title, text):
+            layout = QVBoxLayout()
+
+            label = QLabel(text)
+            label.setWordWrap(True)
+            label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+
+            # 根据标题长度计算最小宽度
+            min_width = max(len(title) * 15, 200)
+            label.setMinimumWidth(min_width)
+
+            layout.addWidget(label)
+            self.layout().addLayout(layout, 1, 1)
+
     if title is None:
         title = "提示"
 
     if icon is None:
         icon = QMessageBox.Information
 
-    msg_box = QMessageBox(icon, title, text)
+    msg_box = CustomMessageBox(icon, title, text)
     if detail is not None:
         msg_box.setDetailedText(detail)
     msg_box.setStandardButtons(buttons)
+
     return msg_box.exec_()
