@@ -4,6 +4,10 @@
 # @Email  : 877362867@qq.com
 # @Date   : 2021/08/25 15:57
 
+from pyxllib.prog.pupil import check_install_package
+
+check_install_package('deskew')
+
 import base64
 
 import PIL.Image
@@ -12,6 +16,8 @@ import filetype
 import humanfriendly
 import numpy as np
 import requests
+
+from deskew import determine_skew  # 用来做图像倾斜矫正的，这个库不大，就自动安装了
 
 from pyxllib.prog.newbie import round_int, RunOnlyOnce
 from pyxllib.prog.pupil import EnchantBase, EnchantCvt
@@ -786,6 +792,18 @@ class xlcv(EnchantBase):
         if isinstance(images[0], list):
             images = [hstack(imgs) for imgs in images]
         return vstack(images)
+
+    @classmethod
+    def deskew_image(cls, image):
+        """ 歪斜图像矫正 """
+        gray = xlcv.reduce_area(xlcv.read(image, 0), 1000*1000)  # 转成灰度图，并且可以适当缩小计算图片
+        angle = determine_skew(gray)  # 计算图像的倾斜角度
+        (h, w) = image.shape[:2]  # 获取图像尺寸
+        center = (w // 2, h // 2)  # 计算图像中心（默认按中心旋转了，以后如果有需要按非中心点旋转的，可以再改）
+        M = cv2.getRotationMatrix2D(center, angle, 1.0)  # 计算旋转矩阵
+        # 旋转图像
+        deskewed_image = cv2.warpAffine(image, M, (w, h), flags=cv2.INTER_CUBIC, borderMode=cv2.BORDER_REPLICATE)
+        return deskewed_image  # 返回纠偏后的图像
 
     def __6_替换颜色(self):
         pass
