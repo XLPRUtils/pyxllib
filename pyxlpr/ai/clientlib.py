@@ -277,7 +277,7 @@ class XlAiClient:
                     continue
 
             if not connent:
-                raise ConnectionError('PRIU接口登录失败')
+                raise requests.exceptions.ConnectionError('PRIU接口登录失败')
             return connent
         else:
             self._priu_host = hosts[0]  # 不检查的场景，一般都是局域网内使用
@@ -1106,7 +1106,7 @@ class XlAiClient:
         if r.status_code == 200:
             res = json.loads(r.text)
         else:  # TODO 正常状态码不只200，可能还有重定向等某些不一定是错误的状态
-            raise ConnectionError(r.text)
+            raise requests.exceptions.ConnectionError(r.text)
 
         # 2 统一返回值的范式，默认都是dict。 有些特殊格式表示是图片，这里会自动做后处理解析。
         if isinstance(res, dict) and len(res) == 1 and 'imageData' in res:
