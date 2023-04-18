@@ -310,7 +310,7 @@ def show_message_box(text, title=None, icon=None, detail=None, buttons=QMessageB
             label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
 
             # 根据标题长度计算最小宽度
-            min_width = max(len(title) * 15, 200)
+            min_width = max(len(title) * 15, 600)
             label.setMinimumWidth(min_width)
 
             layout.addWidget(label)
