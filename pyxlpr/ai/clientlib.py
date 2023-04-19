@@ -24,10 +24,9 @@ import requests
 
 from pyxllib.prog.newbie import round_int
 from pyxllib.prog.pupil import check_install_package, is_url
-from pyxllib.prog.specialist import XlOsEnv
+from pyxllib.prog.xlosenv import XlOsEnv
 from pyxllib.algo.geo import xywh2ltrb, rect_bounds
 from pyxllib.file.specialist import XlPath, get_etag
-from pyxllib.prog.specialist import TicToc
 from pyxllib.cv.expert import xlcv
 
 
