@@ -474,21 +474,3 @@ def showdir(c, *, to_html=None, printf=True, width=200):
 # 注册进builtins，可以在任意地方直接使用
 setattr(builtins, 'browser', browser)
 setattr(builtins, 'showdir', showdir)
-
-
-def render_echart(ob, name, show=False):
-    """ 渲染显示echart图表
-
-    https://www.yuque.com/xlpr/pyxllib/render_echart
-
-    :param ob: 一个echart图表对象
-    :param name: 存储的文件名
-    :param show: 是否要立即在浏览器显示
-    :return: 存储的文件路径
-    """
-    # 如果没有设置页面标题，则默认采用文件名作为标题
-    if not ob.page_title or ob.page_title == 'Awesome-pyecharts':
-        ob.page_title = name
-    f = ob.render(str(File(f'{name}.html', Dir.TEMP)))
-    if show: browser(f)
-    return f

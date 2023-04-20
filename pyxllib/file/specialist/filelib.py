@@ -31,7 +31,7 @@ from more_itertools import chunked
 import filetype
 from tqdm import tqdm
 
-from pyxllib.prog.newbie import round_int
+from pyxllib.prog.newbie import round_int, human_readable_size
 from pyxllib.prog.pupil import is_url, is_file, DictTool
 from pyxllib.algo.pupil import Groups
 from pyxllib.file.pupil import struct_unpack, gen_file_filter
@@ -1462,15 +1462,6 @@ class XlPath(type(pathlib.Path())):
         suffix_counts = Counter()
         suffix_sizes = defaultdict(int)
 
-        def fmtsize(n):
-            for u in ['Bytes', 'KB', 'MB', 'GB']:
-                if n < 1024:
-                    return f'{round_int(n)}{u}'
-                else:
-                    n /= 1024
-            else:
-                return f'{round_int(n)}TB'
-
         dir_count, file_count = 0, 0
         for root, dirs, files in os.walk(self):
             dir_count += len(dirs)
@@ -1483,7 +1474,7 @@ class XlPath(type(pathlib.Path())):
                 suffix_counts[suffix] += 1
                 suffix_sizes[suffix] += file_size
 
-        sz = fmtsize(sum(file_sizes.values()))
+        sz = human_readable_size(sum(file_sizes.values()))
         # 这里的目录指"子目录"数，不包含self
         msg.append(f'一、目录数：{dir_count}，文件数：{file_count}，总大小：{sz}')
 
@@ -1493,7 +1484,7 @@ class XlPath(type(pathlib.Path())):
             data.append([suffix, count, size])
         data.sort(key=lambda x: (-x[2], -x[1], x[0]))  # 先按文件数，再按文件名排序
         df = pd.DataFrame(data, columns=['suffix', 'count', 'size'])
-        df['size'] = [fmtsize(x) for x in df['size']]
+        df['size'] = [human_readable_size(x) for x in df['size']]
         df.reset_index(inplace=True)
         df['index'] += 1
         msg.append('\n二、各后缀文件数')
@@ -1823,12 +1814,12 @@ def cache_file(file, make_data_func: Callable[[], Any] = None, *, reset=False, *
 
     def decorator(func):
         def wrapper(*args2, **kwargs2):
-            f = File(file)
+            f = XlPath.init(file, XlPath.tempdir())
             if f.exists() and not reset:  # 文件存在，直接读取返回
-                data = f.read(**kwargs)
+                data = f.read_auto(**kwargs)
             else:  # 文件不存在则要生成一份数据
                 data = func(*args2, **kwargs2)
-                f.write(data, **kwargs)
+                f.write_auto(data, **kwargs)
             return data
 
         return wrapper
