@@ -11,17 +11,21 @@ from pyxllib.prog.specialist.bc import *
 from pyxllib.prog.specialist.tictoc import *
 from pyxllib.prog.specialist.datetime import *
 
-import base64
 import concurrent.futures
-import json
 import os
 import re
 import subprocess
 import time
+from statistics import mean
 
 from tqdm import tqdm
+import requests
+from humanfriendly import parse_size
 
+from pyxllib.prog.newbie import human_readable_size
+from pyxllib.prog.pupil import get_installed_packages
 from pyxllib.prog.xlosenv import XlOsEnv
+from pyxllib.file.specialist import cache_file
 
 
 def mtqdm(func, iterable, *args, max_workers=1, check_per_seconds=0.01, **kwargs):
@@ -124,3 +128,50 @@ def distribute_package(root, version=None, repository=None, *,
 
         # 这个不能删，不然importlib会读取不到模块的版本号
         # [d.delete() for d in XlPath('.').select_dirs(r'*.egg-info')]
+
+
+def estimate_package_size(package):
+    """ 估计一个库占用的存储大小 """
+
+    # 将cache文件存储到临时目录中，避免重复获取网页
+    def get_size(package):
+        r = requests.get(f'https://pypi.org/project/{package}/#files')
+        if r.status_code == 404:
+            return '(0 MB'  # 找不到的包默认按0MB计算
+        else:
+            return r.text
+
+    s = cache_file(package + '.pypi', lambda: get_size(package))
+    # 找出所有包大小，计算平均值作为这个包大小的预估
+    # 注意，这里进位是x1000，不是x1024
+    v = mean(list(map(parse_size, re.findall(r'\((\d+(?:\.\d+)?\s*\wB(?:ytes)?)', s))) or [0])
+    return v
+
+
+def estimate_pip_packages(*, print_mode=False):
+    """ 检查pip list中包的大小，从大到小排序
+
+    :param print_mode:
+        0，不输出，只返回运算结果，[(package_name, package_size), ...]
+        1，输出最后的美化过的运算表格
+        2，输出中间计算过程
+    """
+
+    def printf(*args, **kwargs):
+        # dm表示mode增量
+        if print_mode > 1:
+            print(*args, **kwargs)
+
+    packages = get_installed_packages()
+    package_sizes = []
+    for package_name in packages:
+        package_size = estimate_package_size(package_name)
+        package_sizes.append((package_name, package_size))
+        printf(f"{package_name}: {human_readable_size(package_size)}")
+
+    package_sizes.sort(key=lambda x: (-x[1], x[0]))
+    if print_mode > 0:
+        if print_mode > 1: print('- ' * 20)
+        for package_name, package_size in package_sizes:
+            print(f"{package_name}: {human_readable_size(package_size)}")
+    return package_sizes

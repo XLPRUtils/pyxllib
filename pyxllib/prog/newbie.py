@@ -240,6 +240,17 @@ def round_int(x, *, ndim=0):
         return int(round(x, 0))
 
 
+def human_readable_size(n):
+    """ 我个人习惯常用的size显示方式 """
+    for u in ['Bytes', 'KB', 'MB', 'GB']:
+        if n < 1024:
+            return f'{round_int(n)}{u}'
+        else:
+            n /= 1024
+    else:
+        return f'{round_int(n)}TB'
+
+
 class CvtType:
     """ 这些系列的转换函数，转换失败统一报错为ValueError
 

@@ -1041,7 +1041,7 @@ class XlAiClient:
 
         def func(buffer, options):
             image_uri = f'data:image/jpg;base64,' + base64.b64encode(buffer).decode()
-            for i in range(10):  # 尝试10次，10次都失败就无语了~
+            for i in range(3):  # 尝试3次
                 try:
                     r = requests.post('https://api.mathpix.com/v3/latex',
                                       data=json.dumps({'src': image_uri}),

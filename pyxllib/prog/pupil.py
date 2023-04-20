@@ -862,3 +862,10 @@ def hide_console_window():
     SW_HIDE = 0
     hWnd = kernel32.GetConsoleWindow()
     user32.ShowWindow(hWnd, SW_HIDE)
+
+
+def get_installed_packages():
+    """ 使用pip list获取当前环境安装了哪些包 """
+    output = subprocess.check_output(["pip", "list"], universal_newlines=True)
+    packages = [line.split()[0] for line in output.split("\n")[2:] if line]
+    return packages
