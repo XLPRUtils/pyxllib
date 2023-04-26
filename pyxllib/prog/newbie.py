@@ -242,7 +242,7 @@ def round_int(x, *, ndim=0):
 
 def human_readable_size(n):
     """ 我个人习惯常用的size显示方式 """
-    for u in ['Bytes', 'KB', 'MB', 'GB']:
+    for u in [' B', 'KB', 'MB', 'GB']:
         if n < 1024:
             return f'{round_int(n)}{u}'
         else:

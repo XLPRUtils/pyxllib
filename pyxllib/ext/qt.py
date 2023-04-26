@@ -283,7 +283,9 @@ class WaitMessageBox(QMessageBox):
         self.finished.emit()
 
 
-def show_message_box(text, title=None, icon=None, detail=None, buttons=QMessageBox.Ok):
+def show_message_box(text, title=None, icon=None, detail=None,
+                     buttons=QMessageBox.Ok | QMessageBox.Cancel,
+                     default_button=QMessageBox.Ok):
     """ 显示一个提示框
 
     :param text: 提示框的文本内容
@@ -326,5 +328,6 @@ def show_message_box(text, title=None, icon=None, detail=None, buttons=QMessageB
     if detail is not None:
         msg_box.setDetailedText(detail)
     msg_box.setStandardButtons(buttons)
+    msg_box.setDefaultButton(default_button)
 
     return msg_box.exec_()

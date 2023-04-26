@@ -30,6 +30,8 @@ def disjoint_set(items, join_checker, print_mode=False):
 
     >>> disjoint_set([-1, -2, 2, 0, 0, 1], lambda x, y: x*y>0)
     [[-1, -2], [2, 1], [0], [0]]
+
+    注意：因为会两两进行运算，所以数据量大的时候计算会特别慢。
     """
 
     # 1 添加元素

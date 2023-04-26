@@ -825,3 +825,42 @@ class LabelmeDataset(BasicLabelDataset):
         :param reset: 目标目录存在则重置
         """
         pass
+
+
+class ItemFormula:
+    """ 为m2302中科院题库准备的labelme数据相关处理算法
+    如果写到labelme中，其他脚本就复用不了了，所以把核心算法功能写到这里
+
+    line_id的功能是动态计算的，参考了与上一个shape的区别，这里暂时不提供静态算法。
+    """
+
+    @classmethod
+    def check_label(cls, shapes):
+        """ 检查数据异常 """
+        # "删除" 是否都为手写，并且text为空
+
+    @classmethod
+    def joint_label(cls, shapes):
+        """ 将shapes的label拼接成一篇文章
+
+        :return: [line1, line2, ...]
+        """
+        last_line_id = 1
+        paper_text = []
+        line_text = []
+        for sp in shapes:
+            label = json.loads(sp['label'])
+            if label['line_id'] != last_line_id:
+                last_line_id = label['line_id']
+                paper_text.append(' '.join(line_text))
+                line_text = []
+
+            if label['content_class'] == '公式':
+                t = '$' + label['text'] + '$'
+            else:
+                t = label['text']
+            line_text.append(t)
+
+        paper_text.append(' '.join(line_text))
+
+        return paper_text
