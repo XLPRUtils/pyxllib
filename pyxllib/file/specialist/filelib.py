@@ -1547,6 +1547,38 @@ class XlPath(type(pathlib.Path())):
     def __7_目录复合操作(self):
         """ 比较高级的一些目录操作功能 """
 
+    def delete_empty_subdir(self, recursive=True, topdown=False):
+        """ 删除指定目录下的所有空目录。
+
+        :param recursive: 是否递归删除所有子目录。
+        :param topdown: 是否从顶部向下遍历目录结构。
+            默认False，要先删除内部目录，再删除外部目录。
+        """
+        def _delete_empty_dirs(dir_path):
+            for dir_name in os.listdir(dir_path):
+                dir_fullpath = os.path.join(dir_path, dir_name)
+                if os.path.isdir(dir_fullpath):
+                    # 递归删除子目录中的空目录
+                    _delete_empty_dirs(dir_fullpath)
+                    if not os.listdir(dir_fullpath):
+                        # 删除空目录
+                        os.rmdir(dir_fullpath)
+
+        if not recursive:
+            for dirname in os.listdir(self):
+                dir_fullpath = os.path.join(self, dirname)
+                if os.path.isdir(dir_fullpath) and not os.listdir(dir_fullpath):
+                    os.rmdir(dir_fullpath)
+        else:
+            for dirpath, dirnames, filenames in os.walk(self, topdown=topdown):
+                for dirname in dirnames:
+                    dir_fullpath = os.path.join(dirpath, dirname)
+                    if not os.listdir(dir_fullpath):
+                        os.rmdir(dir_fullpath)
+                # 如果不递归删除子目录，则直接跳过
+                if not recursive:
+                    break
+
     def flatten_directory(self, clear_empty_subdir=True):
         """ 将子目录的文件全部取出来，放到外面的目录里
 

@@ -506,7 +506,8 @@ class 网课考勤:
                 money = self.打卡返款[min(v - 1, 2)]
                 订单号 = ws.cell2(i, '交易订单号').value
                 cols = [订单号, money, f'{self.返款标题}返学修日志促学金', f'{订单号}_journal']
-                ls.append(','.join(map(str, cols)))
+                if cols[0]:
+                    ls.append(','.join(map(str, cols)))
             else:
                 money = 0
 
@@ -595,7 +596,7 @@ class 网课考勤:
             c2.fill = PatternFill(fgColor=color.hex[-6:], fill_type="solid")
 
         if ls:
-            ls = [x for x in ls if '无订单号' not in x]
+            ls = [x for x in ls if ('无订单号' not in x and 'None' not in x)]
 
         # 4 生成通知，及返款文件
         desc1 = '/'.join(map(str, self.打卡返款.keys()))
