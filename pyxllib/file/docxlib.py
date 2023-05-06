@@ -731,7 +731,7 @@ def rebuild_document_by_word(fmt='html', translate=False, navigation=False, visi
     # 3 html格式扩展功能
     if fmt == 'html':
         # 3.1 默认扩展功能
-        s = file.read(encoding='gbk')
+        s = file.read_text(encoding='gbk')
         # s = s.replace('\xa0', '')  # 不知道这样去除\xa0行不行，等下次遇到尝试
         bs = BeautifulSoup(s, 'lxml')
         bs.head_add_number()  # 给标题加上编号
@@ -748,7 +748,7 @@ def rebuild_document_by_word(fmt='html', translate=False, navigation=False, visi
 
         # 原文是gbk，但到谷歌默认是utf8，所以改一改
         # 这样改后问题是word可能又反而有问题了，不过word本来只是跳板，并不是要用word编辑html
-        file.write(content, encoding='utf8')
+        file.write_text(content, encoding='utf8')
 
         # 3.3 导航栏功能
         # 作为临时使用可以开，如果要复制到word，并没有必要

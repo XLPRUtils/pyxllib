@@ -1262,7 +1262,7 @@ class XlPath(type(pathlib.Path())):
     def rename2(self, dst, if_exists=None):
         """ 相比原版的rename，搞了更多骚操作，但性能也会略微下降，所以重写一个功能名 """
         if not self.exists():
-            return
+            return self
 
         dst = XlPath(dst)
         if self == dst:
@@ -1274,6 +1274,7 @@ class XlPath(type(pathlib.Path())):
                 tmp.rename(dst)
         elif dst.exist_preprcs(if_exists):
             self.rename(dst)
+        return dst
 
     def delete(self):
         if self.is_file():
@@ -1579,7 +1580,7 @@ class XlPath(type(pathlib.Path())):
                 if not recursive:
                     break
 
-    def flatten_directory(self, clear_empty_subdir=True):
+    def flatten_directory(self, *, clear_empty_subdir=True):
         """ 将子目录的文件全部取出来，放到外面的目录里
 
         :param clear_empty_subdir: 移除文件后，删除空子目录
@@ -1603,16 +1604,17 @@ class XlPath(type(pathlib.Path())):
                 if clear_empty_subdir:
                     shutil.rmtree(subdir_path)
 
-    def nest_directory(self, min_files_per_batch=None, groupby=None, batch_name=None):
+    def nest_directory(self, min_files_per_batch=None, groupby=None, batch_name=None, bias=0):
         """ 将直接子文件按照一定规则拆分成多个batch子目录
         注意这个功能和flatten_directory是对称的，所以函数名也是对称的
 
         :param min_files_per_batch: 每个batch最少含有的文件数
             None，相当于int=1的效果
             int, 如果输入一个整数，则按照这个数量约束分成多个batch
-        :param groupby: 默认已经会把stem.lower()相同的归到一组
+        :param groupby: 默认会把stem.lower()相同的强制归到一组
             def groupby(p: XlPath) -> 分组用的key，相同key会归到同一组
         :param batch_name: 设置batch的名称，默认 'batch{}'
+        :param bias: 希望用不到这个参数，只有中途出bug，需要继续处理的时候，用来自动增加编号
         """
         from pyxllib.algo.pupil import Groups, natural_sort
 
@@ -1641,10 +1643,25 @@ class XlPath(type(pathlib.Path())):
             width = len(str(group_num))
             batch_name = f'batch{{:0{width}}}'
         for i, group in enumerate(result_groups, start=1):
-            d = self / batch_name.format(i)
+            d = self / batch_name.format(i+bias)
             d.mkdir(exist_ok=True)
             for f in group:
                 f.move(d / f.name)
+
+    def select_file(self, pos_filter=None, *, neg_filter=None):
+        from pyxllib.file.specialist.dirlib import Dir
+
+        d = Dir(self)
+        if pos_filter is None:
+            # 基于filesmatch的底层来实现，速度会比较慢一些，但功能丰富，不用重复造轮子
+            d = d.select('**/*', type_='file')
+        else:
+            d = d.select(pos_filter, type_='file')
+        if neg_filter is not None:
+            d = d.exclude(neg_filter)
+
+        files = [(self / f) for f in d.subs]
+        return files
 
     def copy_file_filter(self, dst, pos_filter=None, *, neg_filter=None, if_exists=None):
         """ 只能用于目录，在复制文件的时候，进行一定的筛选，而不是完全拷贝
@@ -1670,19 +1687,10 @@ class XlPath(type(pathlib.Path())):
         >> p.copy_filter('build2', '**/*.toc')  # 复制所有toc文件
         >> p.copy_filter('build2', lambda p: p.suffix == '.toc')  # 复制所有toc文件
         """
-        from pyxllib.file.specialist.dirlib import Dir
-
-        d = Dir(self)
-        if pos_filter is None:
-            # 基于filesmatch的底层来实现，速度会比较慢一些，但功能丰富，不用重复造轮子
-            d = d.select('**/*', type_='file')
-        else:
-            d = d.select(pos_filter, type_='file')
-        if neg_filter is not None:
-            d = d.exclude(neg_filter)
+        files = self.select_file(pos_filter, neg_filter=neg_filter)
 
         dst = XlPath(dst)
-        for f in d.subs:
+        for f in files:
             dst2 = dst / f
             dst2.parent.mkdir(exist_ok=True)
             (self / f).copy(dst2, if_exists=if_exists)
