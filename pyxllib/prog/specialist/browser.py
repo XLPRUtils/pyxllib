@@ -21,7 +21,7 @@ from pyxllib.prog.pupil import dprint, func_input_message, is_url, is_file
 from pyxllib.prog.specialist.common import TypeConvert, NestedDict, KeyValuesCounter, dataframe_str
 from pyxllib.prog.specialist.tictoc import TicToc
 from pyxllib.text.pupil import ensure_gbk, shorten
-from pyxllib.file.specialist.dirlib import File, Dir, get_etag
+from pyxllib.file.specialist.dirlib import File, Dir, get_etag, XlPath
 
 
 def getasizeof(*objs, **opts):
@@ -199,6 +199,8 @@ class Browser(Explorer):
                 file = File(name, Dir.TEMP, suffix='.html').to_str()
             arg.render(path=str(file))
         else:  # 不在预设格式里的数据，转成普通的txt查看
+            # if File.safe_init(arg).exists():
+            #     file = arg
             if file is None:
                 file = File(..., Dir.TEMP, suffix='.txt').write(arg)
                 file = file.rename(get_etag(str(file)) + file.suffix, if_exists='replace')
@@ -223,7 +225,10 @@ class Browser(Explorer):
         :param file: 默认可以不输入，会按七牛的etag哈希值生成临时文件
             如果输入，则按照指定的名称生成文件
         """
-        file = str(self.to_brower_file(arg, file, clsmsg=clsmsg, to_html_args=to_html_args))
+        if XlPath.safe_init(arg).is_file():
+            file = arg
+        else:
+            file = str(self.to_brower_file(arg, file, clsmsg=clsmsg, to_html_args=to_html_args))
         super().__call__(str(file), wait=wait, **kwargs)
 
 

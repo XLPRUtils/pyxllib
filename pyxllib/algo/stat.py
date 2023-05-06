@@ -10,11 +10,11 @@
 """
 
 import sys
-from collections import defaultdict
+from collections import defaultdict, Counter
 
 import pandas as pd
 
-from pyxllib.prog.pupil import dprint
+from pyxllib.prog.pupil import dprint, typename
 
 
 def treetable(childreds, parents, arg3=None, nodename_colname=None):
@@ -289,7 +289,7 @@ def pareto_accumulate(weights, accuracy=0.01, *, print_mode=False):
     :param accuracy: 累计精度，当统计到末尾时，可能有大量权重过小的数值
         此时不频繁进行累计权重计算，而是但更新权重累计达到accuracy，才会更新一个记录点
     :param print_mode: 是否直接展示可视化结果
-    :return: [(累计数量, ≥当前阈值, 累计权重), ...]
+    :return: [(累计数值数量, ≥当前阈值, 累计权重), ...]
 
     >>> pareto_accumulate([1, 2, 3, 9, 8, 7, 4, 6, 5])
     [(1, 9, 9), (2, 8, 17), (3, 7, 24), (4, 6, 30), (5, 5, 35), (6, 4, 39), (7, 3, 42), (8, 2, 44), (9, 1, 45)]
@@ -338,3 +338,14 @@ def pareto_accumulate(weights, accuracy=0.01, *, print_mode=False):
             print(*labels, sep='\n')
 
     return pts, labels
+
+
+class XlDataFrame(pd.DataFrame):
+    def check_dtypes(self):
+        """ 检查数据类型
+        第1列是列名，第2列是原本dtypes显示的类型看，第3列是我扩展的统计的实际数据类型
+        """
+        d = self.dtypes
+        ls = [[k, d[k], Counter([typename(x) for x in v]).most_common()] for k, v in self.iteritems()]
+        df = pd.DataFrame.from_records(ls, columns=['name', 'type', 'detail'])
+        return df
