@@ -14,7 +14,7 @@ from pyxllib.prog.pupil import check_install_package
 
 check_install_package('fire')  # 自动安装依赖包
 
-from collections import Counter
+from collections import Counter, defaultdict
 from datetime import date
 import datetime
 import math
@@ -28,7 +28,7 @@ from tqdm import tqdm
 
 from pyxllib.text.pupil import chinese2digits, grp_chinese_char
 from pyxllib.file.xlsxlib import openpyxl
-from pyxllib.file.specialist import XlPath
+from pyxllib.file.specialist import XlPath, get_encoding
 from pyxllib.prog.specialist import parse_datetime, browser, TicToc, dprint
 from pyxllib.cv.rgbfmt import RgbFormatter
 from pyxllib.data.sqlite import Connection
@@ -206,7 +206,7 @@ class 网课考勤:
             if m := re.match(r'(\d{4}\-\d{2}\-\d{2}).+?课.*?(\d+).+?直播观看详情', f.stem):
                 stat_day, 课次 = date.fromisoformat(m.group(1)), int(m.group(2))
                 skiprows = 1
-            elif m := re.search(r'\d+届.+?(\d+).+?直播用户列表.+?(\d{4}\-\d{2}\-\d{2})', f.stem):
+            elif m := re.search(r'\d+届.+?(\d+).+?直播用户列表.+?(\d{4}\-\d{2}\-\d{2})', f.stem):  # 新版格式
                 stat_day, 课次 = date.fromisoformat(m.group(2)), int(m.group(1))
                 skiprows = 0
             else:
@@ -1193,3 +1193,91 @@ class KqDb(Connection):
 
         # 4.2 每天打卡情况
         self.wb.save(self.outwb)
+
+
+class 课次数据:
+    """ 读取课次数据 """
+
+    def __init__(self):
+        # 将各种不同来源的数据，按用户ID分组存储起来
+        self.用户观看数据 = defaultdict(list)  # 每个用户的观看数据情况
+
+    def add_files(self, path, pattern):
+        files = XlPath(path).select_file(pattern)
+        for f in files:
+            self.add_考勤数据(f)
+
+    def add_考勤数据(self, file):
+        """
+        保存的用户数据，存储三元数值（观看时长，进度）
+            150，表示观看时间满30分钟
+            0~100，表示有进度数据，0%~100%
+        """
+        # 0 有普通考勤表，和从圈子下载的表格两种
+        df = pd.read_csv(file, encoding=get_encoding(file.read_bytes()), encoding_errors='ignore')
+
+        if '参与状态' in df.columns:
+            self.add_圈子进度表(file)
+        else:
+            self.add_小鹅通考勤表(file)
+
+    def add_小鹅通考勤表(self, file):
+        file = XlPath(file)
+
+        df = pd.read_csv(file, encoding='utf8')
+        assert '直播观看时长(秒)' in df.columns, f'好像下载到空数据表 {file}'
+
+        for idx, x in df.iterrows():
+            data = {'文件名': XlPath(file).stem}
+            data['直播分钟'] = int(x['直播观看时长(秒)']) // 60
+            data['回放分钟'] = int(x['回放观看时长(秒)']) // 60
+            self.用户观看数据[x['用户ID']].append(data)
+
+    def add_圈子进度表(self, file):
+        """ 圈子的考勤数据比较特别，需要独立的一个体系来存储
+        大部分会有播放进度，
+        """
+        file = XlPath(file)
+        # 圈子数据目前是gbk编码，这样会有些问题。但可能哪天平台就改成utf8编码了，所以这里提前做好兼容。
+        df = pd.read_csv(file, encoding=get_encoding(file.read_bytes()), encoding_errors='ignore')
+
+        for idx, x in df.iterrows():
+            data = {'文件名': file.stem}
+
+            if '播放进度' in x:  # 一般会有详细的播放进度
+                data['百分比进度'] = int(re.search(r'\d+', x['播放进度']).group())
+            else:  # 如果没有，也可以通过参与状态知道是否完成
+                data['百分比进度'] = 100 if x['参与状态'] == '已完成' else 0
+
+            self.用户观看数据[x['用户ID']].append(data)
+
+    def 禅宗考勤结果(self, user_id):
+        """ 禅宗考勤是比较简单的，不用考虑回放情况，只要在所有数据中，判断出有完成就行
+        当然，细节考虑，也还是可以详细区分不同情况。
+
+        :return:
+            str，一般是返回字符串，表示结论
+            dict，但也可以返回一个字典，表示特殊的格式设置，这种是用于单元格颜色设置
+        """
+        直播分钟, 回放分钟, 百分比进度 = 0, 0, 0
+
+        if user_id not in self.用户观看数据:
+            return {'value': f'未开始', 'color': '白色'}
+
+        # 1 遍历所有文件数据，获得所有最大值
+        data = self.用户观看数据[user_id]
+        for x in data:
+            直播分钟 = max(直播分钟, x.get('直播分钟', 0))
+            回放分钟 = max(回放分钟, x.get('回放分钟', 0))
+            百分比进度 = max(百分比进度, x.get('百分比进度', 0))
+
+        # 2 归纳出本课次考勤结论
+        yellow = RgbFormatter.from_name('鲜黄')
+        if 百分比进度 == 100 or 回放分钟 >= 30:
+            return {'value': '已完成', 'color': '鲜绿色'}
+        elif 百分比进度:
+            return {'value': f'进度{百分比进度}%', 'color': yellow.light((100 - 百分比进度) / 100)}
+        elif 回放分钟:
+            return {'value': f'观看{回放分钟}分钟', 'color': yellow.light((100 - 回放分钟) / 30)}
+        else:
+            return {'value': f'未开始', 'color': '白色'}
