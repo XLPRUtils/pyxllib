@@ -1302,7 +1302,7 @@ class RgbFormatter:
     def light(self, ratio=1):
         """ 把颜色变浅
 
-        :param ratio: 原值权重是1，这里可以设置白色的权重
+        :param ratio: 这里可以设置白色的权重，默认1，再和原值权重1中和，默认就是变淡一半
         :return:
 
         >>> RgbFormatter(0, 0, 0).light()
