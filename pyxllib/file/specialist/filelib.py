@@ -22,7 +22,8 @@ import ujson
 from collections import defaultdict, Counter
 import math
 
-import chardet
+# import chardet
+import charset_normalizer
 import qiniu
 import requests
 import yaml
@@ -105,97 +106,25 @@ def __3_chardet():
     pass
 
 
-def get_encoding_old(bstr):
-    """ 输入二进制字符串或文本文件，返回字符编码
+def get_encoding(data,
+                 cp_isolation=('utf_8', 'gbk', 'utf_16'),
+                 preemptive_behaviour=True,
+                 explain=False):
+    """ 从字节串中检测编码类型
 
-    https://www.yuque.com/xlpr/pyxllib/get_encoding
-
-    :param bstr: 二进制字符串、文本文件
-    :return: utf8, utf-8-sig, gbk, utf16
+    :param bytes data: 要检测的字节串
+    :param List[str] cp_isolation: 指定要检测的字符集编码类型列表，只检测该列表中指定的编码类型，而不是所有可能的编码类型，默认为 None
+        注意charset_normalizer是无法识别utf-8-sig的情况的。但要获得解析后的文本内容，其实也不用通过get_encoding来中转。
+    :param bool preemptive_behaviour: 指定预处理行为，如果设置为 True，将在检测之前对数据进行预处理，例如去除 BOM、转换大小写等操作，默认为 True
+    :param bool explain: 指定是否打印出检测过程的详细信息，如果设置为 True，将打印出每个 chunk 的检测结果和置信度，默认为 False
+    :return str: 检测到的编码类型，返回字符串表示
     """
-
-    # 0 检查工具
-    def inner_detect(bdata):
-        """ https://mp.weixin.qq.com/s/gSXNf3K_JWydhej8KpyhMg """
-        from chardet.universaldetector import UniversalDetector
-        detector = UniversalDetector()
-        for part in bdata.split():
-            detector.feed(part)
-            if detector.done:
-                break
-        detector.close()
-        return detector.result['encoding']
-
-    # 1 读取编码
-    if isinstance(bstr, bytes):  # 如果输入是一个二进制字符串流则直接识别
-        # encoding = chardet.detect(bstr[:maxn])['encoding']  # 截断一下，不然太长了，太影响速度
-        encoding = inner_detect(bstr)  # 截断一下，不然太长了，太影响速度
-    elif is_file(bstr):  # 如果是文件，则按二进制打开
-        # 如果输入是一个文件名则进行读取
-        if bstr.endswith('.pdf'):
-            print('二进制文件，不应该进行编码分析，暂且默认返回utf8', bstr)
-            return 'utf8'
-        with open(bstr, 'rb') as f:  # 以二进制读取文件，注意二进制没有\r\n的值
-            bstr = f.read()
-        # encoding = chardet.detect(bstr[:maxn])['encoding']
-        encoding = inner_detect(bstr)
-    else:  # 其他类型不支持
-        return 'utf8'
-    # 检测结果存储在encoding
-
-    # 2 智能适应优化，最终应该只能是gbk、utf8两种结果中的一种
-    if encoding in ('ascii', 'utf-8', 'ISO-8859-1'):
-        # 对ascii类编码，理解成是utf-8编码；ISO-8859-1跟ASCII差不多
-        encoding = 'utf8'
-    elif encoding in ('GBK', 'GB2312'):
-        encoding = 'gbk'
-    elif encoding == 'UTF-16':
-        encoding = 'utf16'
-    elif encoding == 'UTF-8-SIG':
-        # 保留原值的一些正常识别结果
-        encoding = 'utf-8-sig'
-    elif bstr.strip():  # 如果不在预期结果内，且bstr非空，则用常见的几种编码尝试
-        # print('encoding=', encoding)
-        type_ = ('utf8', 'gbk', 'utf16')
-
-        def try_encoding(bstr, encoding):
-            try:
-                bstr.decode(encoding)
-                return encoding
-            except UnicodeDecodeError:
-                return None
-
-        for t in type_:
-            encoding = try_encoding(bstr, t)
-            if encoding: break
-    else:
-        encoding = 'utf8'
-
-    return encoding
-
-
-def get_encoding(bstr, *, maxn=1000):
-    # 1 从第一个大于127的字节开始判断
-    for start_idx in range(len(bstr)):
-        if bstr[start_idx] > 127:
-            break
-    else:  # 没有>127的字节
-        return 'utf8'
-
-    # 只要截取部分子节就能大概分析出了
-    enc = chardet.detect(bstr[start_idx:start_idx + maxn])['encoding']
-
-    # 2 转换为常见编码名
-    if enc in ('utf-8', 'ascii', 'ISO-8859-1', 'Windows-1252', 'Windows-1254', 'ISO-8859-9', 'IBM866'):
-        return 'utf8'
-    elif enc in ('UTF-8-SIG',):
-        return 'utf-8-sig'
-    elif enc in ('GB2312', 'GBK'):
-        return 'gbk'
-    elif enc in ('UTF-16',):
-        return 'utf16'
-    else:
-        raise ValueError(f"{enc}: Can't get file encoding")
+    result = charset_normalizer.from_bytes(data,
+                                           cp_isolation=cp_isolation,
+                                           preemptive_behaviour=preemptive_behaviour,
+                                           explain=explain)
+    best_match = result.best()
+    return best_match.encoding
 
 
 def __4_file():
@@ -977,9 +906,17 @@ class XlPath(type(pathlib.Path())):
         pass
 
     def read_text(self, encoding='utf8', errors='strict', return_mode: bool = False):
-        bstr = self.read_bytes()
-        if not encoding: encoding = get_encoding(bstr)
-        s = bstr.decode(encoding=encoding, errors=errors)
+        """
+        :param encoding: 效率拷贝，默认是设成utf8，但也可以设成None变成自动识别编码
+        """
+        if not encoding:
+            result = charset_normalizer.from_path(self, cp_isolation=('utf_8', 'gbk', 'utf_16'))
+            best_match = result.best()
+            s = str(best_match)
+            encoding = best_match.encoding
+        else:
+            with open(self, 'r', encoding=encoding) as f:
+                s = f.read()
 
         # 如果用\r\n作为换行符会有一些意外不好处理
         if '\r' in s:
@@ -1002,10 +939,8 @@ class XlPath(type(pathlib.Path())):
             注意返回的每行str，末尾都带'\n'
             但最后一行视情况可能有\n，可能没有\n
 
-        注，开发指南：不然扩展支持batch_size=-1获取所有数据，因为
-
+        注，开发指南：不然扩展支持batch_size=-1获取所有数据
         """
-
         f = open(self, 'r', encoding=encoding)
         return chunked(f, batch_size)
 
@@ -1555,6 +1490,7 @@ class XlPath(type(pathlib.Path())):
         :param topdown: 是否从顶部向下遍历目录结构。
             默认False，要先删除内部目录，再删除外部目录。
         """
+
         def _delete_empty_dirs(dir_path):
             for dir_name in os.listdir(dir_path):
                 dir_fullpath = os.path.join(dir_path, dir_name)
@@ -1643,7 +1579,7 @@ class XlPath(type(pathlib.Path())):
             width = len(str(group_num))
             batch_name = f'batch{{:0{width}}}'
         for i, group in enumerate(result_groups, start=1):
-            d = self / batch_name.format(i+bias)
+            d = self / batch_name.format(i + bias)
             d.mkdir(exist_ok=True)
             for f in group:
                 f.move(d / f.name)

@@ -1,5 +1,5 @@
 arrow
-chardet
+charset-normalizer
 requests
 qiniu
 pyyaml
