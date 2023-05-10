@@ -21,6 +21,7 @@ import math
 import os
 import re
 import time
+from io import StringIO
 
 import fire
 import pandas as pd
@@ -1214,7 +1215,8 @@ class 课次数据:
             0~100，表示有进度数据，0%~100%
         """
         # 0 有普通考勤表，和从圈子下载的表格两种
-        df = pd.read_csv(file, encoding=get_encoding(file.read_bytes()), encoding_errors='ignore')
+        # df = pd.read_csv(file, encoding=get_encoding(file.read_bytes()), encoding_errors='ignore')
+        df = pd.read_csv(StringIO(XlPath(file).read_text(None)))
 
         if '参与状态' in df.columns:
             self.add_圈子进度表(file)
@@ -1239,7 +1241,8 @@ class 课次数据:
         """
         file = XlPath(file)
         # 圈子数据目前是gbk编码，这样会有些问题。但可能哪天平台就改成utf8编码了，所以这里提前做好兼容。
-        df = pd.read_csv(file, encoding=get_encoding(file.read_bytes()), encoding_errors='ignore')
+        # df = pd.read_csv(file, encoding=get_encoding(file.read_bytes()), encoding_errors='ignore')
+        df = pd.read_csv(StringIO(file.read_text(None)))
 
         for idx, x in df.iterrows():
             data = {'文件名': file.stem}
