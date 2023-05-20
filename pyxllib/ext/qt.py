@@ -4,20 +4,15 @@
 # @Email  : 877362867@qq.com
 # @Date   : 2021/05/26 17:24
 
-from pyxllib.prog.pupil import check_install_package
-
-check_install_package('qtpy', 'QtPy')
-
-import json
 import os.path as osp
 import sys
 import time
 
-from PyQt5.QtCore import pyqtSignal
-from qtpy import QtWidgets, QtGui
-from qtpy.QtWidgets import QFrame, QInputDialog, QApplication, QMainWindow
-from PyQt5.QtWidgets import QMessageBox, QVBoxLayout, QLabel
-from PyQt5.QtCore import Qt
+from PyQt5 import QtWidgets
+from PyQt5.QtCore import pyqtSignal, Qt
+from PyQt5.QtWidgets import QApplication, QMainWindow
+from PyQt5.QtWidgets import QFrame, QInputDialog, QMessageBox, QVBoxLayout, QTextEdit, QSizePolicy, QLabel
+from PyQt5.QtGui import QTextOption
 
 from pyxllib.prog.newbie import CvtType
 
@@ -270,7 +265,7 @@ class WaitMessageBox(QMessageBox):
         if text:
             self.setText(text)
         self.setStyleSheet("QLabel{min-width: 350px;}")
-        self.setWindowTitle('WaitMessageBox（任务完成后会自动退出该窗口）')
+        self.setWindowTitle('任务执行中等待窗口...（任务完成后会自动退出该窗口）')
         self.setStandardButtons(QMessageBox.NoButton)
         self.finished.connect(self.accept)
 
@@ -281,11 +276,44 @@ class WaitMessageBox(QMessageBox):
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.finished.emit()
+        # 这个退出默认是一个"警告"声，可以改成自定义声音，不过要找wav文件等很麻烦，先不弄
+
+
+class CustomMessageBox(QMessageBox):
+    def __init__(self, icon, title, text, copyable):
+        super().__init__(icon, title, "")
+        self.init_ui(title, text, copyable)
+
+    def init_ui(self, title, text, copyable=False):
+        layout = QVBoxLayout()
+
+        if copyable:
+            widget = QTextEdit()
+            widget.setText(text)
+            widget.setReadOnly(True)
+            widget.setWordWrapMode(QTextOption.WrapAnywhere)
+            widget.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+            widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+            widget.document().documentLayout().documentSizeChanged.connect(
+                lambda: widget.setMinimumHeight(min(widget.document().size().height(), 700))
+            )
+            widget.setMinimumHeight(100)
+            widget.setMaximumHeight(700)
+        else:
+            widget = QLabel()
+            widget.setText(text)
+            widget.setWordWrap(True)
+
+        min_width = max(len(title) * 15, 600)
+        widget.setMinimumWidth(min_width)
+
+        layout.addWidget(widget)
+        self.layout().addLayout(layout, 1, 1)
 
 
 def show_message_box(text, title=None, icon=None, detail=None,
                      buttons=QMessageBox.Ok | QMessageBox.Cancel,
-                     default_button=QMessageBox.Ok):
+                     default_button=QMessageBox.Ok, copyable=False):
     """ 显示一个提示框
 
     :param text: 提示框的文本内容
@@ -293,38 +321,21 @@ def show_message_box(text, title=None, icon=None, detail=None,
     :param icon: 提示框的图标，默认值为 QMessageBox.Information
     :param detail: 提示框的详细信息，默认值为 None
     :param buttons: 提示框的按钮，默认值为 QMessageBox.Ok
+    :param copyable: 消息窗中的文本是否可复制
 
     :return: 选择的按钮
 
     实现上，本来应该依据setMinimumWidth可以搞定的事，但不知道为什么就是会有bug问题，总之最后问gpt靠实现一个类来解决了
 
     """
-    class CustomMessageBox(QMessageBox):
-        def __init__(self, icon, title, text):
-            super().__init__(icon, title, "")
-            self.init_ui(title, text)
-
-        def init_ui(self, title, text):
-            layout = QVBoxLayout()
-
-            label = QLabel(text)
-            label.setWordWrap(True)
-            label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
-
-            # 根据标题长度计算最小宽度
-            min_width = max(len(title) * 15, 600)
-            label.setMinimumWidth(min_width)
-
-            layout.addWidget(label)
-            self.layout().addLayout(layout, 1, 1)
-
     if title is None:
         title = "提示"
 
     if icon is None:
         icon = QMessageBox.Information
 
-    msg_box = CustomMessageBox(icon, title, text)
+    msg_box = CustomMessageBox(icon, title, text, copyable)
+
     if detail is not None:
         msg_box.setDetailedText(detail)
     msg_box.setStandardButtons(buttons)
