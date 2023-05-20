@@ -107,7 +107,7 @@ def __3_chardet():
 
 
 def get_encoding(data,
-                 cp_isolation=('utf_8', 'gbk', 'utf_16'),
+                 cp_isolation=('utf_8', 'gbk', 'gb18030', 'utf_16'),
                  preemptive_behaviour=True,
                  explain=False):
     """ 从字节串中检测编码类型
@@ -124,7 +124,10 @@ def get_encoding(data,
                                            preemptive_behaviour=preemptive_behaviour,
                                            explain=explain)
     best_match = result.best()
-    return best_match.encoding
+    if best_match:
+        return best_match.encoding
+    else:  # 注意，这个实现是有可能会找不到编码的，此时默认返回None
+        return
 
 
 def __4_file():
@@ -1180,7 +1183,10 @@ class XlPath(type(pathlib.Path())):
         return need_run
 
     def copy(self, dst, if_exists=None):
-        """ 用于一般的文件、目录拷贝 """
+        """ 用于一般的文件、目录拷贝
+
+        不返回结果文件，是因为 if_exists 的逻辑比较特殊，比如skip的时候，这里不好实现返回的是最后的目标文件
+        """
         if not self.exists():
             return
 

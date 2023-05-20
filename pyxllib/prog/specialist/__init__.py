@@ -17,6 +17,7 @@ import re
 import subprocess
 import time
 from statistics import mean
+from threading import Thread
 
 from tqdm import tqdm
 import requests
@@ -175,3 +176,40 @@ def estimate_pip_packages(*, print_mode=False):
         for package_name, package_size in package_sizes:
             print(f"{package_name}: {human_readable_size(package_size)}")
     return package_sizes
+
+
+class ProgressBar:
+    """ 对运行可能需要较长时间的任务，添加进度条显示
+
+    # 示例用法
+    with ProgressBar(100) as pb:
+        for i in range(100):
+            time.sleep(0.1)  # 模拟耗时工作
+            pb.progress = i + 1  # 更新进度
+    """
+    def __init__(self, total):
+        self.total = total  # 总进度
+        self.progress = 0  # 当前进度
+        self.stop_flag = False  # 停止标志
+
+    def __enter__(self):
+        # 启动进度显示线程
+        self.progress_thread = Thread(target=self.display_progress)
+        self.progress_thread.start()
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        # 强制将进度设置为100%
+        self.progress = self.total
+        # 停止进度显示线程
+        self.stop_flag = True
+        self.progress_thread.join()
+
+    def display_progress(self):
+        with tqdm(total=self.total) as pbar:
+            while not self.stop_flag:
+                pbar.n = self.progress
+                pbar.refresh()
+                time.sleep(1)
+            pbar.n = self.progress
+            pbar.refresh()
