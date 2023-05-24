@@ -7,11 +7,12 @@
 import os.path as osp
 import sys
 import time
+from datetime import datetime, timedelta
 
 from PyQt5 import QtWidgets
-from PyQt5.QtCore import pyqtSignal, Qt
-from PyQt5.QtWidgets import QApplication, QMainWindow
-from PyQt5.QtWidgets import QFrame, QInputDialog, QMessageBox, QVBoxLayout, QTextEdit, QSizePolicy, QLabel
+from PyQt5.QtCore import QTimer, Qt, QThread, pyqtSignal, QEventLoop
+from PyQt5.QtWidgets import QApplication, QMainWindow, QFrame, QInputDialog, QMessageBox, QVBoxLayout, \
+    QTextEdit, QSizePolicy, QLabel, QProgressBar, QDialog
 from PyQt5.QtGui import QTextOption
 
 from pyxllib.prog.newbie import CvtType
@@ -245,38 +246,140 @@ def qt_clipboard_monitor(func=None, verbose=1, *, cooldown=0.5):
     app.exec_()
 
 
-class XlMainWindow(QMainWindow):
-    """ 根据自己开发app经验，封装一些常用的功能接口，简化代码量 """
-    pass
+class XlThreadWorker(QThread):
+    result = pyqtSignal(object)  # 运行结果信号
+    error = pyqtSignal(Exception)  # 错误信号
+    progress = pyqtSignal(int)  # 进度信号
+
+    def __init__(self, func, *args, use_progress=False, **kwargs):
+        super().__init__()
+        self.func = func
+        self.args = args
+        self.kwargs = kwargs
+        if use_progress:
+            self.kwargs['progress_callback'] = lambda v: self.progress.emit(v)
+
+    def run(self):
+        try:
+            result = self.func(*self.args, **self.kwargs)
+            self.result.emit(result)  # Emit the result when done
+        except Exception as e:
+            self.error.emit(e)
 
 
-class WaitMessageBox(QMessageBox):
-    """ 在执行需要一定时长的程序时，弹出提示窗，并在执行完功能后自动退出提示窗
+class WaitDialog(QDialog):
 
-    【示例】
-    with WaitMessageBox(self.mainwin, 'PaddleOCR模型初始化中，请稍等一会...'):
-        from pyxlpr.paddleocr import PaddleOCR
-        self.ppocr = PaddleOCR.build_ppocr()
-    """
-    finished = pyqtSignal()
-
-    def __init__(self, parent=None, text=None):
+    def __init__(self, parent=None, text='', title='正在执行任务...', delay_seconds=5):
         super().__init__(parent)
-        if text:
-            self.setText(text)
-        self.setStyleSheet("QLabel{min-width: 350px;}")
-        self.setWindowTitle('任务执行中等待窗口...（任务完成后会自动退出该窗口）')
-        self.setStandardButtons(QMessageBox.NoButton)
-        self.finished.connect(self.accept)
+        self.base_text = text
+        self.setWindowTitle(title)
+
+        self.timer = QTimer()
+        self.timer.timeout.connect(self.update_text)
+        self.start_time = None
+        self.result = None
+        self.worker = None
+        self.error = None
+
+        self.delay_milliseconds = delay_seconds * 1000  # 延迟弹窗
+        self.is_running = False
+
+        self.layout = QVBoxLayout()  # 布局
+        self.label = QLabel(self.base_text)  # 标签
+        self.layout.addWidget(self.label)
+        self.pbar = QProgressBar()  # 进度条
+        self.layout.addWidget(self.pbar)
+        self.setLayout(self.layout)
+
+    def handle_result(self, result):
+        self.result = result
+        self.is_running = False
+
+    def handle_error(self, error):
+        self.error = error
+        self.label.setText(f"{self.base_text}\n运行出现错误: {error}")
+        self.is_running = False
+
+    def handle_progress(self, progress):
+        self.pbar.setValue(progress)
+
+    def update_text(self):
+        elapsed_time = int((datetime.now() - self.start_time).total_seconds()) + self.delay_milliseconds // 1000
+        self.label.setText(f"{self.base_text}\n已运行 {elapsed_time} 秒")
+
+    def run(self, func, *args, **kwargs):
+        """
+        def func():
+            ...  # 程序功能
+
+        msg = WaitDialog().run(func)  # 开一个等待窗口等程序运行
+        """
+        self.worker = XlThreadWorker(func, *args, **kwargs)
+        self.worker.result.connect(self.handle_result)
+        self.worker.error.connect(self.handle_error)
+        self.is_running = True
+        self.worker.start()
+
+        QTimer.singleShot(self.delay_milliseconds, self.check_and_show)
+
+        # 阻塞主线程，直到子线程完成
+        while self.is_running:
+            QApplication.processEvents()  # 刷新UI，保持其响应性
+            time.sleep(0.1)  # 等待一段时间，以减少CPU使用率
+
+        self.timer.stop()
+        self.accept()
+
+        return self.result
+
+    def run_with_progress(self, func, *args, **kwargs):
+        """
+        def func(progress_callback):
+            progress_callback(50)  # 可以在运行中设置进度，进度值为0~100
+            ...  # 其他功能
+
+        msg = WaitDialog().run_with_progress(func)  # 运行完获得返回值
+        """
+        self.worker = XlThreadWorker(func, *args, use_progress=True, **kwargs)
+        self.worker.result.connect(self.handle_result)
+        self.worker.error.connect(self.handle_error)
+        self.worker.progress.connect(self.handle_progress)
+        self.is_running = True
+        self.worker.start()
+
+        QTimer.singleShot(self.delay_milliseconds, self.check_and_show)
+
+        # 阻塞主线程，直到子线程完成
+        while self.is_running:
+            QApplication.processEvents()  # 刷新UI，保持其响应性
+            time.sleep(0.1)  # 等待一段时间，以减少CPU使用率
+
+        self.timer.stop()
+        self.accept()
+
+        return self.result
+
+    def start_timer(self):
+        self.start_time = datetime.now()
+        self.timer.start(1000)
+
+    def check_and_show(self):
+        if self.is_running:
+            self.show()
+            self.start_timer()
 
     def __enter__(self):
+        """ with写法比较简洁，但不太推荐这种使用方法，这样并不工程化
+        这样会把要运行的功能变成主线程，这个提示窗口会被挂起
+
+        这里功能设计上也比较简单些，不考虑写的很完善强大了。
+        """
         self.show()
         QApplication.processEvents()
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        self.finished.emit()
-        # 这个退出默认是一个"警告"声，可以改成自定义声音，不过要找wav文件等很麻烦，先不弄
+        self.accept()
 
 
 class CustomMessageBox(QMessageBox):
@@ -318,7 +421,9 @@ def show_message_box(text, title=None, icon=None, detail=None,
 
     :param text: 提示框的文本内容
     :param title: 提示框的标题，默认值为 "提示"
-    :param icon: 提示框的图标，默认值为 QMessageBox.Information
+    :param icon: 提示框的图标，默认值为 QMessageBox.NoIcon
+        注意Information、Warning、Critical等都会附带一个提示音
+        而Question是不带提示音的，默认的NoIcon也是不带提示音的
     :param detail: 提示框的详细信息，默认值为 None
     :param buttons: 提示框的按钮，默认值为 QMessageBox.Ok
     :param copyable: 消息窗中的文本是否可复制
@@ -332,7 +437,7 @@ def show_message_box(text, title=None, icon=None, detail=None,
         title = "提示"
 
     if icon is None:
-        icon = QMessageBox.Information
+        icon = QMessageBox.NoIcon
 
     msg_box = CustomMessageBox(icon, title, text, copyable)
 

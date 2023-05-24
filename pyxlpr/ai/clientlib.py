@@ -1072,7 +1072,7 @@ class XlAiClient:
         assert ratio == 1, f'本地不做缩放，由服务器进行缩放处理'
         return buffer.decode()
 
-    def priu_api(self, mode, image=None, texts=None, options=None, **meta_opts):
+    def priu_api(self, mode, image=None, texts=None, options=None, timeout=30, **meta_opts):
         """ 借助服务器来调用该类中含有的其他函数接口
 
         使用该接口的时候，因为服务器一般会有图片等的备份，所以本接口默认不对图片进行备份
@@ -1082,6 +1082,7 @@ class XlAiClient:
         :param image: image、texts、options都是比较常用的几个参数键值，所以显式地写出来
         :param options: 有时候为了严谨，api相关的参数可能要单独打包
             但其实这里的参数混入meta_opts也没事，底层会有divide拆分函数，能区分开不同的参数类型
+        :param timeout: 超时30秒的限制，有些特殊情况可以设置的更短
         :param meta_opts: 也可以自己额外扩展一些键值，兼容一些特殊的输入范式的api接口
             use_exists_xlapi: 是否复用已有的识别结果，避免重复运算，节约api成本
             record_files: 是否保存图片等数据
@@ -1100,8 +1101,13 @@ class XlAiClient:
         if meta_opts:
             data.update(meta_opts)
 
-        # TODO 增加超时timeout=seconds参数？
-        r = requests.post(f'{self._priu_host}/api/{mode}', json=data, headers=self._priu_header)
+        try:
+            r = requests.post(f'{self._priu_host}/api/{mode}',
+                              json=data, headers=self._priu_header, timeout=timeout)
+        except requests.exceptions.Timeout:
+            # 为了方便处理，统一也返回ConnectionError
+            raise requests.exceptions.ConnectionError(r.text)
+
         if r.status_code == 200:
             res = json.loads(r.text)
         else:  # TODO 正常状态码不只200，可能还有重定向等某些不一定是错误的状态
