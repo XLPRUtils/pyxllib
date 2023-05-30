@@ -1396,7 +1396,7 @@ class XlPath(type(pathlib.Path())):
     def __6_文件夹分析诊断(self):
         pass
 
-    def check_size(self):
+    def check_size(self, return_mode='str'):
         import pandas as pd
 
         msg = []
@@ -1432,7 +1432,12 @@ class XlPath(type(pathlib.Path())):
         msg.append('\n二、各后缀文件数')
         msg.append(df.to_string(index=False))
 
-        return msg
+        if return_mode == 'str':
+            return '\n'.join(msg)
+        elif return_mode == 'list':
+            return msg
+        else:
+            return msg
 
     def check_summary(self, print_mode=False):
         """ 对文件夹情况进行通用的状态检查 """
@@ -1447,7 +1452,7 @@ class XlPath(type(pathlib.Path())):
         # 一 目录大小，二 各后缀文件大小
         msg = []
         printf('【' + self.as_posix() + '】目录检查')
-        printf('\n'.join(self.check_size()))
+        printf('\n'.join(self.check_size('list')))
 
         # 三 重名文件
         printf('\n三、重名文件（忽略大小写，跨目录检查name重复情况）')
