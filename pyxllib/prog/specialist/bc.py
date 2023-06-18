@@ -80,11 +80,11 @@ class BCompare(Explorer):
         files = self.to_bcompare_files(*args, files=files)
 
         if sameoff and len(files) > 1:
-            if files[0].read_text() == files[1].read_text():
+            if files[0].read_auto() == files[1].read_auto():
                 return
         super().__call__(*([str(f) for f in files]), wait=wait, **kwargs)
         # bc软件操作中可能会修改原文内容，所以这里需要重新读取，不能用前面算过的结果
-        return XlPath(files[0]).read_text()
+        return XlPath(files[0]).read_auto()
 
 
 bcompare = BCompare()  # nowatch: 调试阶段，不需要自动watch的变量

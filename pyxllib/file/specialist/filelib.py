@@ -1037,6 +1037,8 @@ class XlPath(type(pathlib.Path())):
             read_func = getattr(self, 'read_' + mode, None)
             if read_func:
                 return read_func(*args, **kwargs)
+            elif mode in ('jpg', 'png'):  # 常见的一些二进制数据
+                return self.read_bytes()
             else:
                 return self.read_text(*args, **kwargs)
         else:  # 非文件对象
@@ -1369,20 +1371,39 @@ class XlPath(type(pathlib.Path())):
                     f1.rename2(f2, if_exists=if_exists)
                 j += 1
 
+    def _check_faker_suffix(self, file_list):
+        """ 检查文件扩展名是否匹配实际内容类型，并迭代文件列表进行处理。
+
+        :param file_list: 文件列表
+        :return: 迭代器，产生文件路径和相应的信息
+        """
+        for file_path in file_list:
+            t = filetype.guess(file_path)
+            if not t:
+                continue
+
+            ext = '.' + t.extension
+            ext0 = file_path.suffix
+
+            if ext0 in ('.docx', '.xlsx', '.pptx'):
+                ext0 = '.zip'
+            elif ext0 in ('.JPG', '.jpeg'):
+                ext0 = '.jpg'
+
+            if ext != ext0:
+                yield file_path, ext
+
     def xglob_faker_suffix_files(self, pattern='*'):
-        """ 检查文件扩展名是不是跟实际内容不匹配，有问题
+        """ 检查文件扩展名是不是跟实际内容类型不匹配，有问题
 
         注：推荐先运行 refine_files_suffix，本函数是大小写敏感，并且不会区分jpeg和jpg
         """
-        for f in self.glob_files(pattern):
-            t = filetype.guess(f)
-            if not t:
-                continue
-            ext = '.' + t.extension
-            if ext == '.zip' and f.suffix == '.docx':
-                continue
-            if ext != f.suffix:
-                yield f, ext  # 原文件名，实际解析出的文件格式
+        return self._check_faker_suffix(self.glob_files(pattern))
+
+    def xglob_faker_suffix_images(self, pattern='*'):
+        """ 只检查原本就是图片名称标记的文件的相关数据正误
+        """
+        return self._check_faker_suffix(self.glob_images(pattern))
 
     def rename_faker_suffix_files(self, pattern='*', *, print_mode=True, if_exists=None, debug=False):
         for i, (f1, suffix2) in enumerate(self.xglob_faker_suffix_files(pattern), start=1):
@@ -1439,8 +1460,12 @@ class XlPath(type(pathlib.Path())):
         else:
             return msg
 
-    def check_summary(self, print_mode=False):
-        """ 对文件夹情况进行通用的状态检查 """
+    def check_summary(self, print_mode=False, hash_func=None):
+        """ 对文件夹情况进行通用的状态检查
+
+        :param hash_func: 可以传入自定义的hash函数，用于第四块的重复文件运算
+            其实默认的get_etag就没啥问题，只是有时候为了性能考虑，可能会传入一个支持，提前有缓存知道etag的函数
+        """
         if not self.is_dir():
             return ''
 
@@ -1460,7 +1485,7 @@ class XlPath(type(pathlib.Path())):
 
         # 四 重复文件
         printf('\n四、重复文件（etag相同）')
-        printf('\n'.join(self.check_repeat_files(print_mode=False)))
+        printf('\n'.join(self.check_repeat_files(print_mode=False, hash_func=hash_func)))
 
         # 五 错误扩展名
         printf('\n五、错误扩展名')
@@ -1538,20 +1563,51 @@ class XlPath(type(pathlib.Path())):
             raise ValueError('有重名文件，终止操作')
 
         # 2 操作
-        for subdir_name in os.listdir(self):
-            subdir_path = os.path.join(self, subdir_name)
+        self._flatten_directory_recursive(self, clear_empty_subdir)
 
-            if os.path.isdir(subdir_path):
-                for filename in os.listdir(subdir_path):
-                    file_path = os.path.join(subdir_path, filename)
-                    destination_path = os.path.join(self, filename)
+    def _flatten_directory_recursive(self, current_dir, clear_empty_subdir):
+        for name in os.listdir(current_dir):
+            path = os.path.join(current_dir, name)
 
-                    if os.path.isfile(file_path):
-                        shutil.move(file_path, destination_path)
+            if os.path.isdir(path):
+                # If it's a directory, recursively flatten it
+                self._flatten_directory_recursive(path, clear_empty_subdir)
                 if clear_empty_subdir:
-                    shutil.rmtree(subdir_path)
+                    shutil.rmtree(path)
+            elif os.path.isfile(path):
+                # If it's a file, move it to the top-level directory
+                destination_path = os.path.join(self, name)
+                shutil.move(path, destination_path)
 
-    def nest_directory(self, min_files_per_batch=None, groupby=None, batch_name=None, bias=0):
+    def _nest_directory_core(self, file_names, min_files_per_batch=None, groupby=None):
+        """ 核心方法：将文件列表按照指定规则进行分组
+
+        :param file_names: 文件列表
+        :param min_files_per_batch: 每个批次最少包含的文件数，默认为 None，即不限制最少文件数
+        :param groupby: 分组函数，用于指定按照哪个属性进行分组，默认为 None
+        :return: 分组结果列表
+        """
+        from pyxllib.algo.pupil import Groups, natural_sort
+
+        if groupby is None:
+            groupby = lambda p: p.stem.lower()
+        file_groups = Groups.groupby(file_names, groupby).data
+
+        if min_files_per_batch is None:
+            min_files_per_batch = 1
+
+        result_groups, current_group = [], []
+        for stem in natural_sort(file_groups.keys()):
+            current_group += file_groups[stem]
+            if len(current_group) >= min_files_per_batch:
+                result_groups.append(current_group)
+                current_group = []
+        if current_group:
+            result_groups.append(current_group)
+
+        return result_groups
+
+    def nest_directory(self, min_files_per_batch=None, groupby=None, batch_name=None, bias=0, tail_limit=None):
         """ 将直接子文件按照一定规则拆分成多个batch子目录
         注意这个功能和flatten_directory是对称的，所以函数名也是对称的
 
@@ -1560,10 +1616,12 @@ class XlPath(type(pathlib.Path())):
             int, 如果输入一个整数，则按照这个数量约束分成多个batch
         :param groupby: 默认会把stem.lower()相同的强制归到一组
             def groupby(p: XlPath) -> 分组用的key，相同key会归到同一组
+            这个不仅用于分组，返回的字符串，也会作为字典序排序的依据，如果想用自然序，记得加natural_sort_key进行转换
         :param batch_name: 设置batch的名称，默认 'batch{}'
         :param bias: 希望用不到这个参数，只有中途出bug，需要继续处理的时候，用来自动增加编号
+        :param tail_limit: 限制数量少于多少的batch，合并到上一个batch中
         """
-        from pyxllib.algo.pupil import Groups, natural_sort
+        from pyxllib.algo.pupil import Groups
 
         # 1 按stem分组，确定分组数
         file_names = list(self.glob_files('*'))
@@ -1576,13 +1634,19 @@ class XlPath(type(pathlib.Path())):
 
         # 2 将文件组合并为多个分组，每组至少包含 min_files_per_batch 个文件
         result_groups, current_group = [], []
-        for stem in natural_sort(file_groups.keys()):  # 注意这里需要对取到的key按照自然序排序
+        for stem in sorted(file_groups.keys()):  # 注意这里需要对取到的key按照自然序排序
             current_group += file_groups[stem]
             if len(current_group) >= min_files_per_batch:
                 result_groups.append(current_group)
                 current_group = []
         if current_group:
-            result_groups.append(current_group)
+            if tail_limit is None:
+                tail_limit = min_files_per_batch // 10
+
+            if len(current_group) < tail_limit and result_groups:
+                result_groups[-1] += current_group
+            else:
+                result_groups.append(current_group)
 
         # 3 整理实际的文件
         if batch_name is None:

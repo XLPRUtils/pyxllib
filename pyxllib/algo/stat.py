@@ -15,6 +15,7 @@ from collections import defaultdict, Counter
 import pandas as pd
 
 from pyxllib.prog.pupil import dprint, typename
+from pyxllib.file.specialist import XlPath
 
 
 def treetable(childreds, parents, arg3=None, nodename_colname=None):
@@ -167,26 +168,75 @@ def treetable_flatten(df, *, reverse=False, childid_colname='id', parentid_colna
     return df
 
 
-def dataframes_to_excel(outfile, dataframes):
-    """ 将多个dataframe表格写入一个excel文件
+def write_dataframes_to_excel(outfile, dataframes, order_mode='序号'):
+    """ 将多个DataFrame表格写入一个Excel文件，并添加序号列
 
-    >> dataframes_to_excel('test.xlsx', {'images': df1, 'annotations': df2})
+    :param str outfile: 输出的Excel文件路径
+    :param dict dataframes: 包含要保存的DataFrame的字典，键为sheet名，值为DataFrame
+    :param str order_mode: 序号模式，可选值为 'default' 或 '序号'，默认为 '序号'
+
+    >> write_dataframes_to_excel('test.xlsx', {'images': df1, 'annotations': df2})
 
     # TODO 存成表格后，可以使用openpyxl等库再打开表格精修
+
+    实现上，尽可能在一些常见结构上，进行一些格式美化。但对费常规结构，就保留df默认排版效果，不做特殊处理。
     """
     with pd.ExcelWriter(str(outfile)) as writer:
-        # 标题比正文11号大1号，并且蓝底白字，左对齐，上下垂直居中
         head_format = writer.book.add_format({'font_size': 12, 'font_color': 'blue',
                                               'align': 'left', 'valign': 'vcenter'})
-        for k, v in dataframes.items():
-            # 设置首行冻结
-            v.to_excel(writer, sheet_name=k, freeze_panes=(1, 0))
-            # 首行首列特殊标记  （这个不能随便加，对group、mul index、含名称index等场合不适用）
-            if isinstance(v.index, pd.core.indexes.range.RangeIndex):
-                writer.sheets[k].write('A1', '_order', head_format)
-            # 特殊标记第一行的格式
-            if isinstance(v.columns, pd.core.indexes.base.Index):
-                writer.sheets[k].set_row(0, cell_format=head_format)  # 这个不知道为什么不起作用~~
+        for sheet_name, df in dataframes.items():
+            if df.index.nlevels == 1 and df.columns.nlevels == 1:
+                if order_mode == '序号':
+                    # 写入带有序号列的数据表格
+                    if '序号' not in df.columns:
+                        df = df.copy()
+                        df.insert(0, '序号', range(1, len(df) + 1))
+                else:
+                    df = df.reset_index()
+                    df.columns = ['_index'] + list(df.columns[1:])
+                df.to_excel(writer, sheet_name=sheet_name, freeze_panes=(1, 0), index=False)
+            else:
+                # 写入普通的数据表格
+                df.to_excel(writer, sheet_name=sheet_name, freeze_panes=(1, df.index.nlevels))
+
+            # 设置表头格式
+            if df.columns.nlevels == 1:
+                start = df.index.nlevels
+                if start == 1: start = 0
+                for col_num, value in enumerate(df.columns, start=start):
+                    writer.sheets[sheet_name].write(0, col_num, value, head_format)
+
+
+def read_dataframes_from_excel(infile):
+    """ 从Excel文件读取多个DataFrame表格
+
+    :param str infile: Excel文件路径
+    :return: 包含读取的DataFrame的字典，键为工作表名，值为DataFrame
+    :rtype: dict
+
+    注意这个函数不太适用于与读取多级index和多级columns的情况，建议遇到这种情况，手动读取，
+        read_excel可以设置header=[0,1]、index=[0,1,2]的形式来定制表头所在位置。
+    """
+    dataframes = {}
+    with pd.ExcelFile(infile) as xls:
+        sheet_names = xls.sheet_names
+        for sheet_name in sheet_names:
+            df = pd.read_excel(xls, sheet_name=sheet_name)
+            if '_index' in df.columns:
+                df = df.drop('_index', axis=1)
+            dataframes[sheet_name] = df
+    return dataframes
+
+
+def update_dataframes_to_excel(outfile, dataframes, order_mode='序号'):
+    """ 更新xlsx文件中的sheets数据 """
+    outfile = XlPath(outfile)
+    if outfile.is_file():
+        data = read_dataframes_from_excel(outfile)
+    else:
+        data = {}
+    data.update(dataframes)
+    write_dataframes_to_excel(outfile, data, order_mode)
 
 
 def xlpivot(df, index=None, columns=None, values=None):

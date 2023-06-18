@@ -517,7 +517,8 @@ def html_bitran_template(htmlcontent):
             s2 = x.prettify()
         elif x.name in ('div', 'pre'):
             # 实际使用体验，想了下，代码块还是不如保留原样最方便，不用拷贝翻译
-            s2 = ''
+            # s2 = x.prettify()
+            s2 = ''  # 复制方式很有技巧
         # 如果p没有文本字符串，也不拷贝
         if not x.get_text().strip():
             s2 = ''
