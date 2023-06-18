@@ -869,3 +869,60 @@ def get_installed_packages():
     output = subprocess.check_output(["pip", "list"], universal_newlines=True)
     packages = [line.split()[0] for line in output.split("\n")[2:] if line]
     return packages
+
+
+class OutputLogger(logging.Logger):
+    """
+    我在jupyter写代码，经常要print输出一些中间结果。
+    但是当结果很多的时候，又要转存到文件里保存起来查看。
+    要保存到文件时，和普通的print写法是不一样的，一般要新建立一个ls = []的变量。
+    然后print改成ls.append操作，会很麻烦。
+
+    就想着能不能自己定义一个类，支持.print方法，不仅能实现正常的输出控制台的功能。
+    也能在需要的时候指定文件路径，会自动将结果存储到文件中。
+    """
+    def __init__(self, name='OutputLogger', log_file=None, output_to_console=True):
+        """
+        :param str name: 记录器的名称。默认为 'OutputLogger'。
+        :param log_file: 日志文件的路径。默认为 None，表示不输出到文件。
+        :param bool output_to_console: 是否输出到命令行。默认为 True。
+        """
+        super().__init__(name)
+
+        self.output_to_console = output_to_console
+        self.log_file = log_file
+
+        self.setLevel(logging.INFO)
+        # 创建格式化器
+        formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(filename)s/%(lineno)d - %(message)s',
+                                      '%Y-%m-%d %H:%M:%S')
+
+        # 提前重置为空文件
+        with open(log_file, 'w') as f:
+            f.write('')
+
+        # 创建文件日志处理器
+        if log_file:
+            file_handler = logging.FileHandler(log_file, encoding='utf-8')
+            file_handler.setLevel(logging.INFO)
+            file_handler.setFormatter(formatter)
+            self.addHandler(file_handler)
+
+        # 创建命令行日志处理器
+        if output_to_console:
+            console_handler = logging.StreamHandler()
+            console_handler.setLevel(logging.INFO)
+            console_handler.setFormatter(formatter)
+            self.addHandler(console_handler)
+
+    def print(self, *args, **kwargs):
+        msg = print2string(*args, **kwargs)
+
+        if self.output_to_console:
+            print(msg, end='')
+
+        if self.log_file:
+            with open(self.log_file, 'a', encoding='utf-8') as f:
+                f.write(msg)
+
+        return msg

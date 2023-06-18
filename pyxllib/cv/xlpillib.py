@@ -95,7 +95,7 @@ class PilImg(PIL.Image.Image):
         if p.exist_preprcs(if_exists):
             os.makedirs(p.parent, exist_ok=True)
             suffix = p.suffix[1:]
-            if suffix == 'jpg':
+            if suffix.lower() == 'jpg':
                 suffix = 'jpeg'
             if self.mode in ('RGBA', 'P') and suffix == 'jpeg':
                 im = self.convert('RGB')
@@ -191,34 +191,39 @@ class PilImg(PIL.Image.Image):
         # 注意pil图像尺寸接口都是[w,h]，跟标准的[h,w]相反
         return self.resize(size[::-1], **kwargs)
 
+    def evaluate_image_file_size(self, suffix='.jpeg'):
+        """ 评估图像存成文件后的大小
+
+        :param suffix: 使用的图片类型
+        :return int: 存储后的文件大小，单位为字节
+        """
+        im = self
+
+        # save接口不支持jpg参数
+        if suffix[0] == '.':
+            suffix = suffix[1:]
+        if suffix.lower() == 'jpg':
+            suffix = 'jpeg'
+
+        file = io.BytesIO()
+        if im.mode in ('RGBA', 'P') and suffix == 'jpeg':
+            im = im.convert('RGB')
+        im.save(file, suffix)
+        return len(file.getvalue())
+
     def reduce_filesize(self, filesize=None, suffix='.jpeg'):
         """ 按照保存后的文件大小来压缩im
 
         :param filesize: 单位Bytes
-            可以用 300*1024 来表示 300KB
-            可以不输入，默认读取后按原尺寸返回，这样看似没变化，其实图片一读一写，是会对手机拍照的很多大图进行压缩的
-        :param suffix: 使用的图片类型
+            int, 可以用 300*1024 来表示 300KB
+            None, 可以不输入，默认读取后按原尺寸返回，这样看似没变化，其实图片一读一写，是会对手机拍照的很多大图进行压缩的
 
         >> reduce_filesize(im, 300*1024, 'jpg')
         """
         im = self
-        # 1 工具
-        # save接口不支持jpg参数
-        if suffix[0] == '.':
-            suffix = suffix[1:]
-        if suffix == 'jpg':
-            suffix = 'jpeg'
-
-        def get_file_size(im):
-            file = io.BytesIO()
-            if im.mode in ('RGBA', 'P') and suffix == 'jpeg':
-                im = im.convert('RGB')
-            im.save(file, suffix)
-            return len(file.getvalue())
-
-        # 2 然后开始循环处理
+        # 循环处理
         while filesize:
-            r = get_file_size(im) / filesize
+            r = xlpil.evaluate_image_file_size(im, suffix) / filesize
             if r <= 1:
                 break
 
@@ -282,15 +287,15 @@ class PilImg(PIL.Image.Image):
 
     def flip_direction(self, direction):
         """
-        :param direction: 逆时针旋转几个90度
+        :param direction: 顺时针旋转几个90度
             标记现在图片是哪个方向：0是正常，1是向右翻转，2是向下翻转，3是向左翻转
         """
         im = self
         direction = direction % 4
         if direction:
-            im = im.transpose({1: PIL.Image.ROTATE_90,
+            im = im.transpose({1: PIL.Image.ROTATE_270,
                                2: PIL.Image.ROTATE_180,
-                               3: PIL.Image.ROTATE_270}[direction])
+                               3: PIL.Image.ROTATE_90}[direction])
         return im
 
     def apply_exif_orientation(self):

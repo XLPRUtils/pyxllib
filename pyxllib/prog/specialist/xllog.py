@@ -93,7 +93,7 @@ class Iterate:
     def _step1_check_number(self, pinterval, func):
         if pinterval:
             sys.stdout.flush()  # 让逻辑在前的标准输出先print出来，但其实这句也不一定能让print及时输出的~~可能会被日志提前抢输出了
-            self.xllog.info(f"使用 {func} 处理 {self.n_items} 个数据 {shorten(str(self.items), 30)}")
+            self.xllog.info(f"使用 {func.__name__} 处理 {self.n_items} 个数据 {shorten(str(self.items), 30)}")
 
     def _step2_check_range(self, start, end):
         if start:
