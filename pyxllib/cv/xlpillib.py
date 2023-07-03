@@ -66,11 +66,9 @@ class PilImg(PIL.Image.Image):
     def __2_attrs(self):
         pass
 
-    @property
     def imsize(self):
         return self.size[::-1]
 
-    @property
     def n_channels(self):
         """ 通道数 """
         return len(self.getbands())
@@ -115,7 +113,7 @@ class PilImg(PIL.Image.Image):
 
     def to_buffer(self, ext='.jpg', *, b64encode=False):
         # 主要是偷懒，不想重写一遍，就直接去调用cv版本的实现了
-        return self.to_cv2_image().to_buffer(ext, b64encode=b64encode)
+        return xlcv.to_buffer(self.to_cv2_image(), ext, b64encode=b64encode)
 
     def display(self):
         """ 在jupyter中展示 """

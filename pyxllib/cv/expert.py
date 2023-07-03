@@ -182,6 +182,20 @@ class ImagesDir(XlPath):
             kwargs['hash_func'] = lambda p: dhash(p)
         self.check_repeat_files(pattern, **kwargs)
 
+    def clear_exif(self):
+        """ 清除图片中的exif标记 """
+        cnt = 0
+        for file in tqdm(self.rglob_images()):
+            im = xlpil.read(file)
+            exif = xlpil.get_exif(im)
+            if exif:
+                orientation = exif.get("Orientation", None)
+                if orientation:
+                    cnt += 1
+                    im = xlpil.apply_exif_orientation(im)
+                    xlpil.write(im, file)
+        print(f'处理了{cnt}份exif')
+
 
 def find_modified_images(dirs, print_mode=False):
     """ 查找可能被修改过的图片

@@ -32,6 +32,8 @@ def phash(image, *args, **kwargs):
 
 def dhash(image, *args, **kwargs):
     """ 修改了官方接口，这里输入的image支持泛用格式
+
+    官方比较推荐使用，性能速度又快的，就是dhash
     """
     im = xlpil.read(image)
     return imagehash.dhash(im, *args, **kwargs)

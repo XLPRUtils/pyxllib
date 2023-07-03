@@ -137,7 +137,7 @@ class xlcv(EnchantBase):
         # 画出每个笔划轨迹
         for stroke in strokes:
             for i in range(len(stroke) - 1):
-                cv2.line(canvas, stroke[i], stroke[i + 1], color, thickness=thickness)
+                cv2.line(canvas, tuple(stroke[i]), tuple(stroke[i + 1]), color, thickness=thickness)
 
         return canvas
 
