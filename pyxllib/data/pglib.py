@@ -35,6 +35,8 @@ import json
 import textwrap
 import datetime
 
+from tqdm import tqdm
+
 import psycopg
 import psycopg.rows
 
@@ -497,8 +499,8 @@ class XlprDb(Connection):
         chart = Line()
         chart.set_title(title)
         chart.options['xAxis'][0].update({'min': ls[0][0], 'type': 'time',
-                                              # 'minInterval': 3600 * 1000 * 24,
-                                              'name': '时间', 'nameGap': 50, 'nameLocation': 'middle'})
+                                          # 'minInterval': 3600 * 1000 * 24,
+                                          'name': '时间', 'nameGap': 50, 'nameLocation': 'middle'})
         chart.options['yAxis'][0].update({'name': yaxis_name, 'nameGap': 50, 'nameLocation': 'middle'})
         # 目前是比较暴力的方法调整排版，后续要研究是不是能更自动灵活些
         chart.options['legend'][0].update({'top': '6%', 'icon': 'pin'})
@@ -608,3 +610,31 @@ class XlprDb(Connection):
 
         h = render_echart_html('gpu_memory', body='<br/>'.join(htmltexts))
         return h
+
+    def __4_一些数据更新操作(self):
+        """ 比如一些扩展字段，在调用api的时候为了性能并没有进行计算，则可以这里补充更新 """
+
+    def update_files_dhash(self, print_mode=True):
+        """ 更新files表中的dhash字段值 """
+        from pyxllib.cv.imhash import dhash
+        from pyxllib.xlcv import xlpil
+
+        # 获取总图片数
+        total_count = self.execute("SELECT COUNT(*) FROM files WHERE dhash IS NULL").fetchall()[0][0]
+
+        # 执行查询语句，获取dhash为NULL的记录
+
+        # 初始化进度条
+        progress_bar = tqdm(total=total_count, disable=not print_mode)
+
+        while True:
+            result = self.execute("SELECT id, data FROM files WHERE dhash IS NULL LIMIT 5")
+            if not result:
+                break
+            for row in result:
+                file_id = row[0]
+                im = xlpil.read_from_buffer(row[1])
+                computed_dhash = str(dhash(im))
+                self.update_row('files', {'dhash': computed_dhash}, {'id': file_id})
+                progress_bar.update(1)
+            self.commit()

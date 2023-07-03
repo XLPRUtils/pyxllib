@@ -901,6 +901,21 @@ class XlPath(type(pathlib.Path())):
         """
         return XlPath(os.path.relpath(self, str(ref_dir)))
 
+    def __contains__(self, item):
+        """ 判断item的路径是否是在self里的，不考虑item是目录、文件，还是不存在文件的路径
+        以前缀判断为准，有需要的话请自行展开resolve、expanduser再判断
+        """
+        if not self.is_file():
+            # 根据操作系统判断路径分隔符
+            separator = '\\' if os.name == 'nt' else '/'
+
+            # 获取路径对象的字符串形式
+            abs_path_str = str(self) + separator
+            item_str = str(XlPath(item))
+
+            # 判断路径字符串是否包含相对路径字符串
+            return item_str.startswith(abs_path_str) or abs_path_str == item_str
+
     def __1_read_write(self):
         """ 参考标准库的
         read_bytes、read_text
@@ -2122,3 +2137,77 @@ def mygetfiles(root, filter_rule=None, recur=True):
     for root, _, files in myoswalk(root, filter_rule, recur):
         for f in files:
             yield root + '\\' + f
+
+
+def __6_high():
+    """ 一些高级的路径功能 """
+
+
+class DirsFileFinder:
+    """ 多目录里的文件检索类 """
+
+    def __init__(self, *dirs):
+        """ 支持按优先级输入多个目录dirs，会对这些目录里的文件进行统一检索 """
+        self.names = defaultdict(list)
+        self.stems = defaultdict(list)
+
+        for d in dirs:
+            self.add_dir(d)
+
+    def add_dir(self, p):
+        """ 添加备用检索目录
+        当前面的目录找不到匹配项的时候，会使用备用目录的文件
+        备用目录可以一直添加，有多个，优先级逐渐降低
+        """
+        files = list(XlPath(p).rglob_files())
+        for f in files:
+            self.names[f.name].append(f)
+            self.stems[f.stem].append(f)
+
+    def find_name(self, name):
+        """ 返回第一个匹配的结果 """
+        names = self.find_names(name)
+        if names:
+            return names[0]
+
+    def find_names(self, name):
+        """ 返回所有匹配的结果 """
+        return self.find_names(name)
+
+    def find_stem(self, stem):
+        stems = self.find_stems(stem)
+        if stems:
+            return stems[0]
+
+    def find_stems(self, stem):
+        return self.stems[stem]
+
+
+class TwinDirs:
+    def __init__(self, src_dir, dst_dir):
+        """ 一对'孪生'目录，一般是有一个src_dir，还有个同结构的dst_dir。
+        但dst_dir往往并不存在，是准备从src_dir处理过来的。
+        """
+        self.src_dir = XlPath(src_dir)
+        self.dst_dir = XlPath(dst_dir)
+
+    def reset_dst_dir(self):
+        """ 重置目标目录 """
+        self.dst_dir.delete()
+        self.dst_dir.mkdir()
+
+    def copy_file(self, src_file, if_exists=None):
+        """ 从src复制一个文件到dst里
+
+        :param XlPath src_file: 原文件位置（其实输入目录类型也是可以的，内部实现逻辑一致的）
+        """
+        _src_file = src_file.relpath(src_file)
+        dst_file = self.dst_dir / _src_file
+        dst_dir = dst_file.parent
+        dst_dir.mkdir(exist_ok=True, parents=True)  # 确保目录结构存在
+        src_file.copy(dst_file, if_exists=if_exists)
+        return dst_file
+
+    def copy_dir_structure(self):
+        """ 复制目录结构 """
+        self.src_dir.copy_dir_structure(self.dst_dir)
