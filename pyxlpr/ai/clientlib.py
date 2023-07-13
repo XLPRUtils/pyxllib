@@ -327,6 +327,9 @@ class XlAiClient:
 
     def _divide_options_with_meta(self, options, meta_opts):
         """ 会改变原始输入的两个字典值，但是新返回的才是真正有效的字典 """
+        options = options or {}  # 这里也要先处理，防止options是None类型
+        meta_opts = meta_opts or {}  # 这里也要先处理，防止是None类型
+
         for name in self.META_OPTS_NAME:
             if name in options:
                 meta_opts[name] = options[name]
@@ -1150,7 +1153,7 @@ class XlAiClient:
 
     def hesuan_layout(self, image):
         """ 核酸版面分析 """
-        r = requests.post(f'{self._priu_host}/api/hesuan_layout', headers=self._priu_header,
+        r = requests.post(f'{self._priu_host}/api/hesuan/layout', headers=self._priu_header,
                           json={'image': self._priu_read_image(image)})
         return json.loads(r.text)
 

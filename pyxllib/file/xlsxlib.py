@@ -253,14 +253,13 @@ class XlCell(openpyxl.cell.cell.Cell):  # 适用于 openpyxl.cell.cell.MergedCel
             color = RgbFormatter(*color)
         self.fill = PatternFill(fgColor=color.to_hex()[1:], fill_type=fill_type, **kwargs)
 
-    def set_rich_value(self, value, color=None, bgcolor=None):
+    def set_rich_value(self, value, color=None):
         """ 因为我经常文本和单元格背景色一起设置，所以这里封装一个接口
         如果只是普通的设置value，用cell.value就行，这个函数主要是设置富文本
         """
         self.value = value
         if color:
             self.fill_color(color)
-        # bgcolor还没写
         # todo 可以考虑扩展更多富文本样式，在这里统一设置
 
 
