@@ -1015,6 +1015,10 @@ class XlPath(type(pathlib.Path())):
         else:
             return data
 
+    def write_jsonl(self, list_data):
+        content = '\n'.join([json.dumps(x, ensure_ascii=False) for x in list_data])
+        self.write_text(content)
+
     def read_csv(self, encoding='utf8', *, errors='strict', return_mode: bool = False,
                  delimiter=',', quotechar='"', **kwargs):
         """
@@ -2172,7 +2176,7 @@ class DirsFileFinder:
 
     def find_names(self, name):
         """ 返回所有匹配的结果 """
-        return self.find_names(name)
+        return self.names[name]
 
     def find_stem(self, stem):
         stems = self.find_stems(stem)
@@ -2190,6 +2194,7 @@ class TwinDirs:
         """
         self.src_dir = XlPath(src_dir)
         self.dst_dir = XlPath(dst_dir)
+        self.src_dir_finder = None
 
     def reset_dst_dir(self):
         """ 重置目标目录 """
@@ -2201,11 +2206,38 @@ class TwinDirs:
 
         :param XlPath src_file: 原文件位置（其实输入目录类型也是可以的，内部实现逻辑一致的）
         """
-        _src_file = src_file.relpath(src_file)
+        _src_file = src_file.relpath(self.src_dir)
         dst_file = self.dst_dir / _src_file
         dst_dir = dst_file.parent
         dst_dir.mkdir(exist_ok=True, parents=True)  # 确保目录结构存在
         src_file.copy(dst_file, if_exists=if_exists)
+        return dst_file
+
+    def copy_ext_file(self, ext_file, if_exists=None):
+        """ 和copy_file区别，这里输入的ext_file是来自其他目录的文件
+        但是要在src_file里找到位置，按照结构复制到dst_dir
+        """
+        # 1 找到原始文件位置
+        ext_file = XlPath(ext_file)
+        if self.src_dir_finder is None:
+            self.src_dir_finder = DirsFileFinder(self.src_dir)
+
+        src_files = self.src_dir_finder.find_names(ext_file.name)
+        assert len(src_files) < 2, '出现多种匹配可能性，请检查目录'
+
+        if len(src_files) == 0:
+            src_files = self.src_dir_finder.find_stems(ext_file.stem)
+            assert len(src_files), '没有找到可匹配的文件'
+
+        src_file = src_files[0]
+
+        # 2 复制文件
+        _src_file = src_file.relpath(self.src_dir)
+        dst_file = self.dst_dir / _src_file
+        dst_dir = dst_file.parent
+        dst_dir.mkdir(exist_ok=True, parents=True)  # 确保目录结构存在
+        ext_file.copy(dst_file, if_exists=if_exists)
+        print(ext_file, '->', dst_file)
         return dst_file
 
     def copy_dir_structure(self):
