@@ -4,15 +4,87 @@
 # @Email  : 877362867@qq.com
 # @Date   : 2023/07/13 14:26
 
-import json
+import html
+import random
 
 from pyxllib.prog.specialist import browser
 from pyxllib.algo.pupil import ValuesStat
 from pyxllib.text.pupil import strwidth
-from pyxllib.file.specialist import XlPath
+from pyxllib.file.specialist import XlPath, JsonlDataFile
 
 
-class GPTQADataBatch:
+class Tokenizer:
+    _tokenizer = None
+
+    @classmethod
+    def get_tokenizer(cls):
+        """ 获取tokenizer，第一次调用时进行初始化 """
+        from transformers import GPT2TokenizerFast
+
+        if Tokenizer._tokenizer is None:
+            Tokenizer._tokenizer = GPT2TokenizerFast.from_pretrained("gpt2")
+        return Tokenizer._tokenizer
+
+    @classmethod
+    def tokenize(cls, paragraph, max_length=500):
+        """ 对段落进行tokenize
+
+        :param str paragraph: 待分词的段落
+        :param int max_length: 单次处理的最大分词数，为了防止超过GPT2的限制，默认设置为500
+        :return list: 分词后的列表
+
+        >>> Tokenizer.tokenize('Hello, world! 汉字 123.14 35')
+        ['Hello', ',', 'Ġworld', '!', 'Ġæ', '±', 'ī', 'åŃ', 'Ĺ', 'Ġ123', '.', '14', 'Ġ35']
+        """
+        tokenizer = Tokenizer.get_tokenizer()
+
+        # 对段落进行切分
+        paragraph_slices = [paragraph[i:i + max_length] for i in range(0, len(paragraph), max_length)]
+
+        # 对每个切分的子段进行分词，并将结果拼接在一起
+        tokens = []
+        for slice in paragraph_slices:
+            tokens += tokenizer.tokenize(slice)
+
+        return tokens
+
+    @classmethod
+    def count_tokens(cls, paragraph, max_length=500):
+        """ 获取段落的token数量
+
+        :param str paragraph: 待分词的段落
+        :param int max_length: 单次处理的最大分词数，为了防止超过GPT2的限制，默认设置为500
+        :return int: token的数量
+
+        >>> Tokenizer.count_tokens('Hello, world!')
+        5
+        """
+        return len(cls.tokenize(paragraph, max_length))
+
+
+def print_statistics(data, indent_level=2, price_base=0.0015):
+    """
+    :param price_base: 每1K token对应的美元单价
+    """
+    data = list(data)
+    # 使用 ValuesStat 类统计数据并输出摘要
+    stat_len = ValuesStat([len(x) for x in data])
+    stat_strwith = ValuesStat([strwidth(x) for x in data])
+    # 算token的机制很慢，只能抽查一部分估算
+    samples = random.sample(data, min(len(data), 500))
+    stat_tokens = ValuesStat([Tokenizer.count_tokens(x) for x in samples])
+
+    fmts = ['g', '.0f', '.0f', 'd', 'd']
+
+    indent = "\t" * indent_level
+    print(f"{indent}     len {stat_len.summary(fmts)}")
+    print(f"{indent}strwidth {stat_strwith.summary(fmts)}")
+    # 官方gpt3.5价格，/1000是除1K token，*7.1388是美元兑换人民币基本价格（浮动，不定期更新）
+    price = stat_tokens.mean * len(data) / 1000 * price_base * 7.1388
+    print(f"{indent}  tokens {stat_tokens.summary(fmts)} gpt3_price=￥{price:.0f}")
+
+
+class GptQuestionJsonl(JsonlDataFile):
     """ GPT问答批量执行脚本的jsonl生成、读取器 """
 
     def __init__(self, file=None, *, start_id=None):
@@ -23,17 +95,16 @@ class GPTQADataBatch:
         else:
             self.start_id = start_id
 
-        self.sessions = []
-
+        super().__init__()
         if file is not None:
             self.read_jsonl(file)
 
     def read_jsonl(self, file):
         """ 从一个文件加载数据
         """
-        self.sessions = XlPath(file).read_jsonl()
+        self.records = XlPath(file).read_jsonl()
         try:
-            self.start_id = self.sessions[-1]['id']
+            self.start_id = self.records[-1]['id']
         except KeyError:
             pass
 
@@ -98,7 +169,17 @@ class GPTQADataBatch:
         fragments = [gen_prompt(n, i, x).rstrip() for i, x in enumerate(fragments)]
         return fragments
 
-    def set_session(self, texts, *, id_=0, max_word_length=None, prompt=None):
+    def split_texts(self, texts, max_word_length=None, prompt=None):
+        """ 长对话自动拆分成多轮对话 """
+        if isinstance(texts, str):
+            texts = [texts]
+        new_texts = []
+        for text in texts:
+            new_texts += self.split_and_add_prompt(text, max_word_length=max_word_length, prompt=prompt)
+        texts = new_texts
+        return texts
+
+    def add_record(self, texts, *, id_=0, max_word_length=None, prompt=None):
         """
         :param texts:
             可以输入list，原本配置的多轮对话
@@ -112,22 +193,33 @@ class GPTQADataBatch:
         """
         self.start_id += 1
 
-        if isinstance(texts, str):
-            texts = [texts]
-
-        new_texts = []
-        for text in texts:
-            new_texts += self.split_and_add_prompt(text, max_word_length=max_word_length, prompt=prompt)
-        texts = new_texts
+        if max_word_length:
+            texts = self.split_texts(texts, max_word_length=max_word_length, prompt=prompt)
 
         item = {'id': id_ or self.start_id,
-                'text': texts, 'first_text_length': len(texts[0])}
-        self.sessions.append(item)
+                'text': texts,
+                'first_text_length': len(texts[0])}
+        self.records.append(item)
+        return item
 
-    def browser_session(self, i):
+    def find_indices_by_qlength(self):
+        """ 返回提问(q,question)内容从短到长的数据下标 """
+        lens = [(i, len(''.join(x['text']))) for i, x in enumerate(self.records)]
+        # 根据长度进行排序，得到的元组的第一个元素为原列表的下标，第二个元素为对应的长度
+        sorted_lens = sorted(lens, key=lambda x: x[1])
+        # 取出排序后的下标
+        sorted_indexs = [i for i, _ in sorted_lens]
+        return sorted_indexs
+
+    def browse_record(self, index=None, paths=None, **kwargs):
         """ 检查第i次会话的内容
         """
-        session = self.sessions[i]
+        # 如果未提供索引，则尝试使用查询参数找到第一个匹配的记录
+        if index is None:
+            index = self.find_index(paths, **kwargs)
+            if index is None:
+                raise ValueError('No matching record found')
+        session = self.records[index]
 
         # 构建HTML内容
         html_content = "<html><body>"
@@ -137,7 +229,7 @@ class GPTQADataBatch:
         html_content += "<ul>"
         for key, value in session.items():
             if key not in ["text", "all_answers"]:
-                html_content += f"<li>{key}: {value}</li>"
+                html_content += f"<li>{html.escape(key)}: {html.escape(str(value))}</li>"
         html_content += "</ul>"
 
         # 输出text和all_answers的内容
@@ -148,60 +240,59 @@ class GPTQADataBatch:
         for idx in range(max_length):
             html_content += f"<h3>第{idx + 1}次询问：</h3>"
             if idx < len(text):
-                html_content += f"<pre>{text[idx]}</pre>"
+                html_content += f"<pre>{html.escape(text[idx])}</pre>"
             if idx < len(all_answers):
                 html_content += f"<h3>第{idx + 1}次回答：</h3>"
-                html_content += f"<pre>{all_answers[idx]}</pre>"
+                html_content += f"<pre>{html.escape(all_answers[idx])}</pre>"
 
         html_content += "</body></html>"
-        html_file = (XlPath.tempdir() / (str(session.get('id', i)) + '.html'))
+        html_file = (XlPath.tempdir() / (str(session.get('id', index)) + '.html'))
         html_file.write_text(html_content)
         browser.html(html_file)
 
-        # 或者返回HTML字符串
+        # 返回HTML字符串
         return html_content
 
-    def check_sessions(self):
-        def print_statistics(data, indent_level=2):
-            # 使用 ValuesStat 类统计数据并输出摘要
-            stat_len = ValuesStat([len(x) for x in data])
-            stat_strwith = ValuesStat([strwidth(x) for x in data])
-
-            indent = "\t" * indent_level
-            print(f"{indent}     len {stat_len.summary()}")
-            print(f"{indent}strwidth {stat_strwith.summary()}")
-
+    def check_records(self):
         # 单次 QA 的长度信息
         qa_texts = []
         qa_answers = []
-        for session in self.sessions:
+        for session in self.records:
             texts = session.get("text", [])
             all_answers = session.get("all_answers", [])
             qa_texts.extend(texts)
             qa_answers.extend(all_answers)
 
         print("单次 QA 的长度信息:")
-        print('\ttext')
+        print('\ttext（提问）')
         print_statistics(qa_texts)
         if qa_answers:
-            print('\tall_answers')
-            print_statistics(qa_answers)
+            print('\tall_answers（回答）')
+            print_statistics(qa_answers, price_base=0.002)
 
         # 单次 session 的长度信息
         session_texts = []
         session_answers = []
-        for session in self.sessions:
+        for session in self.records:
             texts = session.get("text", [])
             all_answers = session.get("all_answers", [])
             session_texts.append("".join(texts))
             session_answers.append("".join(all_answers))
 
         print("单次 session 的长度信息(如果只有单轮qa，则统计跟上面是一样的):")
-        print('\ttext')
+        print('\ttext（提问）')
         print_statistics(session_texts)
-        print('\tall_answers')
+        print('\tall_answers（回答）')
         print_statistics(session_answers)
 
-    def save_jsonl(self, filename):
-        content = '\n'.join([json.dumps(x, ensure_ascii=False) for x in self.sessions])
-        XlPath(filename).write_text(content)
+    def filter_records_without_answers(self):
+        """ 过滤掉没有 'all_answers' 字段的sessions """
+
+        # 输出过滤前的sessions数量
+        print(f"过滤前的sessions数量：{len(self.records)}")
+
+        # 使用列表推导式过滤出包含 'all_answers' 字段的sessions
+        self.records = [s for s in self.records if 'all_answers' in s]
+
+        # 输出过滤后的sessions数量
+        print(f"过滤后的sessions数量：{len(self.records)}")

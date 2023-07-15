@@ -723,7 +723,7 @@ class 网课考勤:
             driver.get('https://admin.xiaoe-tech.com/t/data_center/index')  # 必须要找个过渡页，不然不会更新课程链接
             driver.get(self.课程链接[i])
             # 不能写'第{i}课'，会有叫'第{i}堂'等其他情况
-            driver.locate_text('//*[@id="app"]/div/div/div[1]/div[2]/div[1]/div[2]', f'第{i}')  # 检查页面
+            driver.locate_text('//*[@id="app"]/div/div/div[1]/div[2]/div[1]/div[2]', f'{i}')  # 检查页面
 
             driver.click('//*[@id="tab-studentTab"]/span')  # 直播间用户
             driver.click('//*[@id="pane-studentTab"]/div/div[2]/div[2]/form/div[2]/button[2]/span/span')  # 导出列表
