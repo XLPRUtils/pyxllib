@@ -1109,7 +1109,7 @@ class XlAiClient:
                               json=data, headers=self._priu_header, timeout=timeout)
         except requests.exceptions.Timeout:
             # 为了方便处理，统一也返回ConnectionError
-            raise requests.exceptions.ConnectionError(r.text)
+            raise requests.exceptions.ConnectionError()
 
         if r.status_code == 200:
             res = json.loads(r.text)

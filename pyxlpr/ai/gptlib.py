@@ -4,6 +4,10 @@
 # @Email  : 877362867@qq.com
 # @Date   : 2023/07/13 14:26
 
+from pyxllib.prog.pupil import check_install_package
+
+check_install_package('transformers', 'transformers')
+
 import html
 import random
 
@@ -193,6 +197,9 @@ class GptQuestionJsonl(JsonlDataFile):
         """
         self.start_id += 1
 
+        if isinstance(texts, str):
+            texts = [texts]
+
         if max_word_length:
             texts = self.split_texts(texts, max_word_length=max_word_length, prompt=prompt)
 
@@ -283,7 +290,7 @@ class GptQuestionJsonl(JsonlDataFile):
         print('\ttext（提问）')
         print_statistics(session_texts)
         print('\tall_answers（回答）')
-        print_statistics(session_answers)
+        print_statistics(session_answers, price_base=0.002)
 
     def filter_records_without_answers(self):
         """ 过滤掉没有 'all_answers' 字段的sessions """
@@ -292,7 +299,7 @@ class GptQuestionJsonl(JsonlDataFile):
         print(f"过滤前的sessions数量：{len(self.records)}")
 
         # 使用列表推导式过滤出包含 'all_answers' 字段的sessions
-        self.records = [s for s in self.records if 'all_answers' in s]
+        self.records = [s for s in self.records if (''.join(s.get('all_answers', [])))]
 
         # 输出过滤后的sessions数量
         print(f"过滤后的sessions数量：{len(self.records)}")
