@@ -966,6 +966,10 @@ class XlPath(type(pathlib.Path())):
         with open(self, 'w', encoding=encoding, errors=errors, newline=newline) as f:
             return f.write(data)
 
+    def write_text_unix(self, data, encoding='utf8', errors=None, newline='\n'):
+        with open(self, 'w', encoding=encoding, errors=errors, newline=newline) as f:
+            return f.write(data)
+
     def read_pkl(self):
         with open(self, 'rb') as f:
             return pickle.load(f)
@@ -1015,9 +1019,10 @@ class XlPath(type(pathlib.Path())):
         else:
             return data
 
-    def write_jsonl(self, list_data):
-        content = '\n'.join([json.dumps(x, ensure_ascii=False) for x in list_data])
-        self.write_text(content)
+    def write_jsonl(self, list_data, ensure_ascii=False):
+        """ 由于这种格式主要是跟商汤这边对接，就尽量跟它们的格式进行兼容 """
+        content = '\n'.join([json.dumps(x, ensure_ascii=ensure_ascii) for x in list_data])
+        self.write_text_unix(content + '\n')
 
     def read_csv(self, encoding='utf8', *, errors='strict', return_mode: bool = False,
                  delimiter=',', quotechar='"', **kwargs):

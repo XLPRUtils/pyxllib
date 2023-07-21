@@ -881,6 +881,7 @@ class OutputLogger(logging.Logger):
     就想着能不能自己定义一个类，支持.print方法，不仅能实现正常的输出控制台的功能。
     也能在需要的时候指定文件路径，会自动将结果存储到文件中。
     """
+
     def __init__(self, name='OutputLogger', log_file=None, output_to_console=True):
         """
         :param str name: 记录器的名称。默认为 'OutputLogger'。

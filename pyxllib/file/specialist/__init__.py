@@ -29,11 +29,13 @@ class JsonlDataFile:
             self.infile = XlPath(filepath)
             self.records = self.infile.read_jsonl()
 
-    def save(self, outfile=None):
+    def save(self, outfile=None, ensure_ascii=False):
         """ 将当前数据保存到指定的jsonl文件中 """
         if outfile is None:  # 默认保存回原文件
             outfile = self.infile
-        XlPath(outfile).write_jsonl(self.records)
+        p = XlPath(outfile)
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_jsonl(self.records, ensure_ascii=ensure_ascii)
 
     def browse_record(self, index=None, paths=None, **kwargs):
         """ 在浏览器中显示指定记录的内容 """
