@@ -51,6 +51,46 @@ def excel_addr2(n1, m1, n2, m2) -> str:
     return f'{get_column_letter(int(m1))}{n1}:{get_column_letter(int(m2))}{n2}'
 
 
+def is_valid_excel_cell(cell):
+    """ 判断输入的字符串是否是一个合法的Excel单元格地址
+
+    :param str cell: 输入的字符串
+    :return bool: 如果是合法的Excel单元格地址返回True，否则返回False
+    """
+    match = re.fullmatch(r'[A-Z]+[1-9][0-9]*', cell)
+    return match is not None
+
+
+def is_valid_excel_range(range):
+    """ 判断输入的字符串是否是一个合法的Excel单元格范围
+
+    :param str range: 输入的字符串
+    :return bool: 如果是合法的Excel单元格范围返回True，否则返回False
+    """
+    if ':' in range:
+        start, end = range.split(':')
+        return (is_valid_excel_cell(start) or start.isdigit() or re.fullmatch(r'[A-Z]+', start)) and \
+               (is_valid_excel_cell(end) or end.isdigit() or re.fullmatch(r'[A-Z]+', end)) and \
+               start <= end
+    else:
+        return is_valid_excel_cell(range)
+
+
+def is_valid_excel_address(address):
+    """ 判断输入的字符串是否是一个合法的Excel地址定位
+
+    :param str address: 输入的字符串
+    :return bool: 如果是合法的Excel地址定位返回True，否则返回False
+
+    注意，严格来说，'A1,A3'这种定位也是可以的，但是这个函数暂不考虑这种情况，
+        如果需要，可以另外写is_valid_excel_address2
+    """
+    if ':' in address:
+        return is_valid_excel_range(address)
+    else:
+        return is_valid_excel_cell(address)
+
+
 class XlCell(openpyxl.cell.cell.Cell):  # 适用于 openpyxl.cell.cell.MergedCell，但这里不能多重继承
 
     def in_range(self):

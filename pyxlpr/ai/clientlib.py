@@ -794,10 +794,11 @@ class XlAiClient:
         return result_dict
 
     def mixed_multi_vehicle(self, image, **options):
-        result_dict = self.raw_mixed_multi_vehicle(image, options)
+        result_dict = self.raw_mixed_multi_vehicle(image, **options)
+        pprint.pprint(result_dict)
 
         shapes = []
-        for x in result_dict['words_result']:
+        for x in result_dict.get('words_result', []):
             shape = {'label': {}}
             shape.update(loc2points(x['location']))
             shape['label']['text'] = json.dumps({w['word_name']: w['word'] for w in x['license_info']},
@@ -807,8 +808,10 @@ class XlAiClient:
             shapes.append(shape)
 
         result_dict['shapes'] = shapes
-        del result_dict['words_result']
-        del result_dict['words_result_num']
+        if 'words_result' in result_dict:
+            del result_dict['words_result']
+        if 'words_result_num' in result_dict:
+            del result_dict['words_result_num']
         return result_dict
 
     def vehicle_registration_certificate(self, image, **options):
