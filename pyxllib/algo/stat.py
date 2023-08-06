@@ -399,3 +399,15 @@ class XlDataFrame(pd.DataFrame):
         ls = [[k, d[k], Counter([typename(x) for x in v]).most_common()] for k, v in self.iteritems()]
         df = pd.DataFrame.from_records(ls, columns=['name', 'type', 'detail'])
         return df
+
+
+class ModifiableRow:
+    def __init__(self, df, index):
+        self.df = df
+        self.index = index
+
+    def __getitem__(self, item):
+        return self.df.at[self.index, item]
+
+    def __setitem__(self, key, value):
+        self.df.at[self.index, key] = value
