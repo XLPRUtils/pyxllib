@@ -411,7 +411,7 @@ def check_install_package(package, speccal_install_name=None, *, user=False):
 
 
 def run_once(distinct_mode=0, *, limit=1):
-    """
+    """ 装饰器，装饰的函数在一次程序里其实只会运行一次
     :param int|str distinct_mode:
         0，默认False，不区分输入的参数值（包括cls、self），强制装饰的函数只运行一次
         'str'，设为True或1时，仅以字符串化的差异判断是否是重复调用，参数不同，会判断为不同的调用，每种调用限制最多执行limit次
@@ -422,7 +422,7 @@ def run_once(distinct_mode=0, *, limit=1):
             使用该模式，首参数会ignore忽略，只比较第2个开始之后的参数
         func等callable类型的对象也行，是使用run_once装饰器的简化写法
     :param limit: 默认只会执行一次，该参数可以提高限定的执行次数，一般用不到，用于兼容旧的 limit_call_number 装饰器
-    Returns: 返回decorator
+    returns: 返回decorator
     """
     if callable(distinct_mode):
         # @run_once，没写括号的时候去装饰一个函数，distinct_mode传入的是一个函数func
@@ -927,3 +927,44 @@ class OutputLogger(logging.Logger):
                 f.write(msg)
 
         return msg
+
+
+class MultiProcessLauncher:
+    """ 注意这个类暂时只有linux能使用 """
+
+    def __init__(self):
+        self.workers = []
+
+    def add_process(self, cmd, name=None, **kwargs):
+        if name is None:
+            name = cmd.split()[0]
+
+        p = subprocess.Popen(cmd.split(), preexec_fn=self._set_pdeathsig(signal.SIGTERM))
+        worker = {'name': name, 'process': p, 'command': cmd}
+        worker.update(kwargs)
+        self.workers.append(worker)
+
+    def add_python_module(self, module, args='', name=None):
+        """ 添加并启动一个Python模块作为后台进程。
+
+        :param module: 要执行的Python模块名（python -m 后面的部分）
+        :param args: 模块的参数
+        :param name: 进程的名称，默认为模块名
+        """
+        cmd = f'{sys.executable} -m {module} {args}'
+        self.add_process(cmd, name=name)
+
+    def stop_all(self):
+        """停止所有后台进程"""
+        for worker in self.workers:
+            worker.process.terminate()
+        self.workers = []
+
+    def _set_pdeathsig(self, sig=signal.SIGTERM):
+        """ 在主服务退出时，这些进程也会全部自动关闭 """
+
+        def callable():
+            libc = ctypes.CDLL("libc.so.6")
+            return libc.prctl(1, sig)
+
+        return callable

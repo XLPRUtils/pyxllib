@@ -3,6 +3,9 @@
 # @Author : 陈坤泽
 # @Email  : 877362867@qq.com
 # @Date   : 2023/07/13 14:26
+import ast
+import json
+import re
 
 from pyxllib.prog.pupil import check_install_package
 
@@ -11,10 +14,17 @@ check_install_package('transformers', 'transformers')
 import html
 import random
 
+import pandas as pd
+from transformers import GPT2TokenizerFast
+
 from pyxllib.prog.specialist import browser
 from pyxllib.algo.pupil import ValuesStat
 from pyxllib.text.pupil import strwidth
 from pyxllib.file.specialist import XlPath, JsonlDataFile
+
+
+def __1_生成提问数据():
+    pass
 
 
 class Tokenizer:
@@ -23,7 +33,6 @@ class Tokenizer:
     @classmethod
     def get_tokenizer(cls):
         """ 获取tokenizer，第一次调用时进行初始化 """
-        from transformers import GPT2TokenizerFast
 
         if Tokenizer._tokenizer is None:
             Tokenizer._tokenizer = GPT2TokenizerFast.from_pretrained("gpt2")
@@ -71,6 +80,11 @@ def print_statistics(data, indent_level=2, price_base=0.0015):
     :param price_base: 每1K token对应的美元单价
     """
     data = list(data)
+    for i, x in enumerate(data):
+        if isinstance(x, dict):
+            x = x.get('content', str(x))
+        data[i] = html.unescape(x)
+
     # 使用 ValuesStat 类统计数据并输出摘要
     stat_len = ValuesStat([len(x) for x in data])
     stat_strwith = ValuesStat([strwidth(x) for x in data])
@@ -183,12 +197,13 @@ class GptQuestionJsonl(JsonlDataFile):
         texts = new_texts
         return texts
 
-    def add_record(self, texts, *, id_=0, max_word_length=None, prompt=None):
+    def add_record(self, texts, *, file_path=None,
+                   record_id=0, max_word_length=None, prompt=None):
         """
         :param texts:
             可以输入list，原本配置的多轮对话
             也可以只输入一个str，默认一轮对话
-        :param id_: 可以自定义这个session的id
+        :param record_id: 可以自定义这个session的id
         :param max_word_length: 是否设置一个约束长度，自动切分会话
         :param prompt: 自动分段后
             None，自动配置的一套提示
@@ -203,9 +218,17 @@ class GptQuestionJsonl(JsonlDataFile):
         if max_word_length:
             texts = self.split_texts(texts, max_word_length=max_word_length, prompt=prompt)
 
-        item = {'id': id_ or self.start_id,
+        texts = [x.strip() for x in texts]
+        if file_path:
+            t = texts[-1]
+            texts[-1] = {'content': t, 'file_path': XlPath(file_path).name}
+        else:
+            for i, x in enumerate(texts):
+                texts[i] = {'content': x}
+        item = {'id': record_id or self.start_id,
                 'text': texts,
-                'first_text_length': len(texts[0])}
+                'first_text_length': len(texts[0])
+                if isinstance(texts[0], str) else len(texts[0]['content'])}
         self.records.append(item)
         return item
 
@@ -240,17 +263,17 @@ class GptQuestionJsonl(JsonlDataFile):
         html_content += "</ul>"
 
         # 输出text和all_answers的内容
-        text = session.get("text", [])
-        all_answers = session.get("all_answers", [])
+        texts = self.get_text_texts(session.get("text", []))
+        all_answers = self.get_all_answers_texts(session.get("all_answers", []))
 
-        max_length = max(len(text), len(all_answers))
+        max_length = max(len(texts), len(all_answers))
         for idx in range(max_length):
             html_content += f"<h3>第{idx + 1}次询问：</h3>"
-            if idx < len(text):
-                html_content += f"<pre>{html.escape(text[idx])}</pre>"
+            if idx < len(texts):
+                html_content += f"<pre>{html.escape(texts[idx])}</pre>"
             if idx < len(all_answers):
                 html_content += f"<h3>第{idx + 1}次回答：</h3>"
-                html_content += f"<pre>{html.escape(all_answers[idx])}</pre>"
+                html_content += f"<pre>{html.escape(str(all_answers[idx]))}</pre>"
 
         html_content += "</body></html>"
         html_file = (XlPath.tempdir() / (str(session.get('id', index)) + '.html'))
@@ -260,13 +283,34 @@ class GptQuestionJsonl(JsonlDataFile):
         # 返回HTML字符串
         return html_content
 
+    def get_text_texts(self, text):
+        """ 从text字段获得所有的文本内容
+        因为里面可能是dict
+        """
+        ls = []
+        for t in text:
+            if isinstance(t, str):
+                ls.append(t)
+            else:
+                if "file_path" in t:
+                    ls.append(("filep_path=" + t["file_path"] + "\n\n") + t["content"])
+                else:
+                    ls.append(t["content"])
+        return ls
+
+    def get_all_answers_texts(self, all_answers):
+        ls = []
+        for t in all_answers:
+            ls.append(str(t))
+        return ls
+
     def check_records(self):
         # 单次 QA 的长度信息
         qa_texts = []
         qa_answers = []
         for session in self.records:
-            texts = session.get("text", [])
-            all_answers = session.get("all_answers", [])
+            texts = self.get_text_texts(session.get("text", []))
+            all_answers = self.get_all_answers_texts(session.get("all_answers", []))
             qa_texts.extend(texts)
             qa_answers.extend(all_answers)
 
@@ -281,8 +325,8 @@ class GptQuestionJsonl(JsonlDataFile):
         session_texts = []
         session_answers = []
         for session in self.records:
-            texts = session.get("text", [])
-            all_answers = session.get("all_answers", [])
+            texts = self.get_text_texts(session.get("text", []))
+            all_answers = self.get_all_answers_texts(session.get("all_answers", []))
             session_texts.append("".join(texts))
             session_answers.append("".join(all_answers))
 
@@ -299,7 +343,123 @@ class GptQuestionJsonl(JsonlDataFile):
         print(f"过滤前的sessions数量：{len(self.records)}")
 
         # 使用列表推导式过滤出包含 'all_answers' 字段的sessions
-        self.records = [s for s in self.records if (''.join(s.get('all_answers', [])))]
+        self.records = [s for s in self.records
+                        if (''.join(map(str, s.get('all_answers', []))))]
 
         # 输出过滤后的sessions数量
         print(f"过滤后的sessions数量：{len(self.records)}")
+
+
+def __2_数据后处理():
+    """ 一些常用的文本、后处理功能也放到这里 """
+
+
+def try_eval_json(resp_json):
+    try:
+        resp_json = ast.literal_eval(resp_json)
+        if isinstance(resp_json, dict):
+            resp_json = resp_json[resp_json.keys()[0]]
+    except:
+        pass
+    return resp_json
+
+
+def try_load_json(resp_json):
+    if isinstance(resp_json, str):
+        try:
+            resp_json = json.loads(resp_json)
+            if isinstance(resp_json, dict):
+                resp_json = resp_json[resp_json.keys()[0]]
+        except:
+            pass
+    return resp_json
+
+
+def try_parse_json(resp_json):
+    if isinstance(resp_json, dict):
+        try:
+            resp_json = '\n'.join(resp_json['contents'][-1]['message']['content'].get('parts', []))
+        except TypeError:
+            return ''
+
+    resp_json = try_eval_json(resp_json)
+    if isinstance(resp_json, str):
+        return try_load_json(resp_json)
+    return resp_json
+
+
+def extract_code_blocks_from_md(markdown_text):
+    """ 可以输入str，也可以输入list[str] """
+    if isinstance(markdown_text, str):
+        markdown_text = [markdown_text]
+
+    matches = []
+    pattern = re.compile(r'^```[^\n]*\n(.+?)^```', re.MULTILINE | re.DOTALL)
+    for text in markdown_text:
+        matches += pattern.findall(text)
+    return matches
+
+
+def __3_生成最后训练用的数据():
+    pass
+
+
+class GptTrainJsonl(JsonlDataFile):
+    """
+    record: dict
+        messages: list
+          dict: role='user', content=...
+          dict: role='assistant', content=...
+    """
+
+    def analyze_text_length(self):
+        ls = []
+        columns = ['role', 'content']
+        for x in self.records:
+            for t in x['messages']:
+                ls.append([t['role'], t['content']])
+        df = pd.DataFrame.from_records(ls, columns=columns)
+
+        print('【user和assistant】')
+        print_statistics(df['content'])
+        print('【user】')
+        print_statistics(df[df['role'] == 'user']['content'])
+        print('【assistant】')
+        print_statistics(df[df['role'] == 'assistant']['content'])
+
+    def browse_record(self, index=None, paths=None, **kwargs):
+        """ 显示第i次会话的内容 """
+        # 如果未提供索引，则尝试使用查询参数找到第一个匹配的记录
+        if index is None:
+            index = self.find_index(paths, **kwargs)
+            if index is None:
+                raise ValueError('No matching record found')
+        session = self.records[index]
+
+        # 构建HTML内容
+        html_content = "<html><body>"
+
+        # 输出除了messages以外的所有键值信息
+        html_content += "<h2>会话信息：</h2>"
+        html_content += "<ul>"
+        for key, value in session.items():
+            if key != "messages":
+                html_content += f"<li>{html.escape(key)}: {html.escape(str(value))}</li>"
+        html_content += "</ul>"
+
+        # 输出messages的内容
+        messages = session.get("messages", [])
+
+        for idx, message in enumerate(messages):
+            role = message.get('role', 'unknown')
+            content = message.get('content', '')
+            html_content += f"<h3>第{(idx // 2) + 1}次{role}的发言：</h3>"
+            html_content += f"<pre>{html.escape(content)}</pre>"
+
+        html_content += "</body></html>"
+        html_file = (XlPath.tempdir() / (f'session_{index}.html'))  # 创建临时文件名，防止覆盖现有文件
+        html_file.write_text(html_content)
+        browser.html(html_file)  # 在浏览器中打开HTML文件
+
+        # 或者返回HTML字符串
+        return html_content

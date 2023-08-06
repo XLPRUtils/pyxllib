@@ -57,7 +57,7 @@ def shorten(s, width=200, placeholder='...'):
 
 
 def strfind(fullstr, objstr, *, start=None, times=0, overlap=False):
-    r"""进行强大功能扩展的的字符串查找函数
+    r""" 进行强大功能扩展的的字符串查找函数
 
     TODO 性能有待优化
 

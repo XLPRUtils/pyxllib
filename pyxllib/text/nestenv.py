@@ -444,7 +444,7 @@ class NestEnv(__NestEnvBase):
         >>> NestEnv(r'xx\teste{aa}{bb}').search(r'\\test[a-z]*').strings()
         ['\\teste']
 
-        TODO 如果需要用iner可以用命名组 (?P<inner>.*?)，含inner组名时，inner默认值为True
+        TODO 如果需要用inner可以用命名组 (?P<inner>.*?)，含inner组名时，inner默认值为True
         """
 
         def core(s):

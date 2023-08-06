@@ -12,6 +12,7 @@ import os
 import subprocess
 import sys
 import datetime
+import platform
 
 import pandas as pd
 from bs4 import BeautifulSoup
@@ -145,17 +146,24 @@ class Browser(Explorer):
         :param shell:
         """
         if app is None:
-            # 智能判断环境变量，选择存在的浏览器，我的偏好 chrome > msedge
-            paths = os.environ['PATH']
-            # 220107周五10:34，不能写完整路径，有x86和x64版本，路径会有区别
-            chrome_dir = r'Google\Chrome\Application'
-            msedge_dir = r'Microsoft\Edge\Application'
-            if chrome_dir in paths:
-                app = 'chrome'
-            elif msedge_dir in paths:
-                app = 'msedge'
-            else:  # 默认使用谷歌。之前试过explorer不行~~
-                app = 'C:/Program Files/Google/Chrome/Application/chrome.exe'
+            if platform.system() == 'Windows':
+                paths = os.environ['PATH']
+                chrome_dir = r'Google\Chrome\Application'
+                msedge_dir = r'Microsoft\Edge\Application'
+                if chrome_dir in paths:
+                    app = 'chrome'
+                elif msedge_dir in paths:
+                    app = 'msedge'
+                else:  # 默认使用谷歌。之前试过explorer不行~~
+                    app = 'C:/Program Files/Google/Chrome/Application/chrome.exe'
+            elif platform.system() == 'Linux':  # Linux系统（包括Ubuntu）
+                # 可以在这里添加对应的Unix-like系统浏览器的命令行名称
+                # 这里默认设置为 'google-chrome'，如果你想使用其他的浏览器，例如Firefox，可以修改为 'firefox'
+                app = 'google-chrome'
+            else:
+                # 其他系统的处理
+                pass
+        super().__init__(app, shell)
         super().__init__(app, shell)
 
     @classmethod
