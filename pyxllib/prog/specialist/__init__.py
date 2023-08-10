@@ -4,6 +4,7 @@
 # @Email  : 877362867@qq.com
 # @Date   : 2021/06/06 18:40
 
+
 from pyxllib.prog.specialist.common import *
 from pyxllib.prog.specialist.xllog import *
 from pyxllib.prog.specialist.browser import *
@@ -187,6 +188,7 @@ class ProgressBar:
             time.sleep(0.1)  # 模拟耗时工作
             pb.progress = i + 1  # 更新进度
     """
+
     def __init__(self, total):
         self.total = total  # 总进度
         self.progress = 0  # 当前进度

@@ -20,7 +20,6 @@ from transformers import GPT2TokenizerFast
 
 from pyxllib.prog.specialist import browser
 from pyxllib.algo.pupil import ValuesStat
-from pyxllib.text.pupil import strwidth
 from pyxllib.file.specialist import XlPath, JsonlDataFile
 
 
