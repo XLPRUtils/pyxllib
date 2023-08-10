@@ -174,3 +174,35 @@ def unpack_archive(filename, extract_dir=None, format=None, *, wrap=0):
     else:
         # 其他还没扩展的格式，不支持wrap功能，但仍然可以使用shutil标准的接口解压
         shutil.unpack_archive(filename, extract_dir, format)
+
+
+def compress_to_zip(source_path, target_zip_path=None):
+    """
+    压缩指定的文件或文件夹为ZIP格式。
+
+    :param str source_path: 要压缩的文件或文件夹路径
+    :param str target_zip_path: 目标ZIP文件路径（可选）
+    """
+    # 根据输入路径生成默认的目标ZIP文件路径
+    if target_zip_path is None:
+        # 获取输入路径的基本名称（文件名或文件夹名）
+        base_name = os.path.basename(source_path)
+        # 为基本名称添加'.zip'后缀
+        target_zip_path = os.path.join(os.path.dirname(source_path), f"{base_name}.zip")
+
+    # 创建一个ZipFile对象来写入压缩文件
+    with XlZipFile(target_zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
+        # 如果是文件夹，则遍历文件夹中的所有文件和子文件夹
+        if os.path.isdir(source_path):
+            for root, _, files in os.walk(source_path):
+                for file in files:
+                    file_path = os.path.join(root, file)
+                    # 计算文件在ZIP中的相对路径
+                    arcname = os.path.relpath(file_path, source_path)
+                    zipf.write(file_path, arcname)
+        # 如果是文件，则直接将文件添加到ZIP中
+        elif os.path.isfile(source_path):
+            arcname = os.path.basename(source_path)
+            zipf.write(source_path, arcname)
+
+    return target_zip_path
