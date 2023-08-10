@@ -14,8 +14,10 @@ check_install_package('openpyxl')
 check_install_package('premailer')
 check_install_package('xlrd2')
 check_install_package('yattag')
+check_install_package('jsonpickle')
 
 import datetime
+import json
 import re
 
 import openpyxl
@@ -23,8 +25,9 @@ from openpyxl.cell.cell import MergedCell
 from openpyxl.styles import Font
 from openpyxl.utils.cell import get_column_letter, column_index_from_string
 import pandas as pd
+import jsonpickle
 
-from pyxllib.prog.pupil import inject_members, dprint
+from pyxllib.prog.pupil import inject_members, dprint, xlmd5
 from pyxllib.prog.specialist import browser
 from pyxllib.algo.specialist import product
 
@@ -1070,5 +1073,72 @@ class XlWorkbook(openpyxl.Workbook):
             li.append(ws.to_latex())
         return '\n'.join(li)
 
+    def to_json(self, reduction_degree=0):
+        """
+        :param reduction_degree: 对json进行处理的程度级别
+            0: 最原始的json
+            1: 删除易变的配置，剩下的一些属性索引使用hash值存储
+            2: todo，在跨软件应用的时候，excel整体框架可能会有大改，
+                此时只比较更基础性的属性，而不进行较完整的全内容比较
+        """
+        # 1 将对象先序列化
+        s = jsonpickle.encode(self)
+        data = json.loads(s)
+
+        if reduction_degree == 0:
+            return data
+
+        # 2 将复合结构hash化
+        for name in ['font', 'border', 'fill']:
+            ls = data[f'_{name}s']['py/seq']
+            for i, x in enumerate(ls):
+                ls[i] = xlmd5(json.dumps(x))
+
+        # 3 将id引用改成其对应的hash值
+        def traverse_json(obj, path=""):
+            """ 递归遍历JSON对象，模拟Python字典和列表的索引机制来显示路径。
+            """
+            if isinstance(obj, dict):
+                for k, v in obj.items():
+                    for name in ['font', 'border', 'fill']:
+                        if k == f'{name}Id':
+                            obj[k] = data[f'_{name}s']['py/seq'][v]
+
+                    new_path = f"{path}['{k}']" if path else k
+                    traverse_json(v, new_path)
+            elif isinstance(obj, list):
+                for i, v in enumerate(obj):
+                    new_path = f"{path}[{i}]"
+                    traverse_json(v, new_path)
+            else:
+                pass  # 对于基本数据类型，不需要进一步处理
+
+        traverse_json(data)
+
+        # 4 去掉不需要对比的差异项
+        def del_volatile_attrs():
+            del data['properties']['modified']
+            del data['properties']['created']
+
+            del data['_fonts']  # 字体格式
+            del data['_borders']  # 边框格式
+            del data['_fills']  # 填充格式
+
+            del data['_named_styles']  # 命名样式
+            del data['_cell_styles']  # 单元格样式
+
+        del_volatile_attrs()
+
+        return data
+
+    def to_md5(self, reduction_degree=1):
+        """ 基于to_json计算的md5，一般用来判断不同workbook间是否相同 """
+        return xlmd5(json.dumps(self.to_json(reduction_degree)))
+
 
 inject_members(XlWorkbook, openpyxl.Workbook)
+
+
+def excel2md5(file, reduction_degree=1):
+    wb = openpyxl.load_workbook(file)
+    return wb.to_md5(reduction_degree)

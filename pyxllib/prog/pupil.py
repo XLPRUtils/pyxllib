@@ -11,6 +11,7 @@ from collections import Counter
 import ctypes
 import datetime
 import functools
+import hashlib
 import inspect
 import io
 import itertools
@@ -968,3 +969,15 @@ class MultiProcessLauncher:
             return libc.prctl(1, sig)
 
         return callable
+
+
+def xlmd5(content):
+    if isinstance(content, str):
+        content = content.encode('utf-8')
+    elif not isinstance(content, bytes):
+        content = str(content).encode('utf-8')
+
+    if len(content) <= 32:  # 32位以下的字符串，直接返回
+        return content
+    else:
+        return hashlib.md5(content).hexdigest()
