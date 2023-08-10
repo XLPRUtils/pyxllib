@@ -239,7 +239,7 @@ class XlprDb(Connection):
         return con
 
     @classmethod
-    def connect2(cls, name, passwd, database=None, **kwargs):
+    def connect2(cls, name, passwd, database=None, ip_list=None, **kwargs):
         """ 简化的登录方式，并且自带优先尝试局域网连接，再公网连接
 
         一般用在jupyter等对启动速度没有太高要求的场合，因为不断尝试localhost等需要耗费不少时间
@@ -248,7 +248,9 @@ class XlprDb(Connection):
             database = name
 
         xldb = None
-        for ip in ['localhost', '172.16.170.136', 'xmutpriu.com']:
+        if ip_list is None:
+            ip_list = ['localhost', '172.16.170.136', 'xmutpriu.com']
+        for ip in ip_list:
             try:
                 xldb = XlprDb.connect(f'postgresql://{name}:{passwd}@{ip}/{database}', **kwargs)
                 break

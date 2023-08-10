@@ -3,16 +3,17 @@
 # @Author : 陈坤泽
 # @Email  : 877362867@qq.com
 # @Date   : 2023/07/13 14:26
-import ast
-import json
-import re
 
 from pyxllib.prog.pupil import check_install_package
 
 check_install_package('transformers', 'transformers')
 
+import ast
+import json
+import re
 import html
 import random
+from urllib.parse import unquote
 
 import pandas as pd
 from transformers import GPT2TokenizerFast
@@ -75,7 +76,7 @@ class Tokenizer:
         return len(cls.tokenize(paragraph, max_length))
 
 
-def print_statistics(data, indent_level=2, price_base=0.0015):
+def print_statistics(data, indent_level=1, price_base=0.0015):
     """
     :param price_base: 每1K token对应的美元单价
     """
@@ -86,8 +87,8 @@ def print_statistics(data, indent_level=2, price_base=0.0015):
         data[i] = html.unescape(x)
 
     # 使用 ValuesStat 类统计数据并输出摘要
-    stat_len = ValuesStat([len(x) for x in data])
-    stat_strwith = ValuesStat([strwidth(x) for x in data])
+    # stat_len = ValuesStat([len(x) for x in data])
+    # stat_strwith = ValuesStat([strwidth(x) for x in data])
     # 算token的机制很慢，只能抽查一部分估算
     samples = random.sample(data, min(len(data), 500))
     stat_tokens = ValuesStat([Tokenizer.count_tokens(x) for x in samples])
@@ -95,14 +96,14 @@ def print_statistics(data, indent_level=2, price_base=0.0015):
     fmts = ['g', '.0f', '.0f', 'd', 'd']
 
     indent = "\t" * indent_level
-    print(f"{indent}     len {stat_len.summary(fmts)}")
-    print(f"{indent}strwidth {stat_strwith.summary(fmts)}")
+    # print(f"{indent}     len {stat_len.summary(fmts)}")
+    # print(f"{indent}strwidth {stat_strwith.summary(fmts)}")
     # 官方gpt3.5价格，/1000是除1K token，*7.1388是美元兑换人民币基本价格（浮动，不定期更新）
     price = stat_tokens.mean * len(data) / 1000 * price_base * 7.1388
     print(f"{indent}  tokens {stat_tokens.summary(fmts)} gpt3_price=￥{price:.0f}")
 
 
-class GptQuestionJsonl(JsonlDataFile):
+class GptChatJsonl(JsonlDataFile):
     """ GPT问答批量执行脚本的jsonl生成、读取器 """
 
     def __init__(self, file=None, *, start_id=None):
@@ -128,7 +129,7 @@ class GptQuestionJsonl(JsonlDataFile):
 
     def split_and_add_prompt(self, text, max_word_length=None, prompt=None):
         """
-        :param text: 要插入的文本
+        :param text: 要插入的文本（纯文本，不能是字典格式的 {'content': ...}）
         :param max_word_length: 如果设置了该值，则会对输入内容进行长度控制，拆成多个片段
             之前测试，全英文长度大概在32500，中文在5000内
         :param prompt: max_word_length开启时才会生效，每个part要附加的提示规则
@@ -189,15 +190,15 @@ class GptQuestionJsonl(JsonlDataFile):
 
     def split_texts(self, texts, max_word_length=None, prompt=None):
         """ 长对话自动拆分成多轮对话 """
-        if isinstance(texts, str):
-            texts = [texts]
         new_texts = []
         for text in texts:
-            new_texts += self.split_and_add_prompt(text, max_word_length=max_word_length, prompt=prompt)
-        texts = new_texts
-        return texts
+            pure_text = text['content']
+            new_texts += self.split_and_add_prompt(pure_text, max_word_length=max_word_length, prompt=prompt)
+            if 'file_path' in text:  # 如果有文件，自动放在最后一轮插入
+                new_texts[-1]['file_path'] = XlPath(text['file_path']).name
+        return new_texts
 
-    def add_record(self, texts, *, file_path=None,
+    def add_record(self, texts, *,
                    record_id=0, max_word_length=None, prompt=None):
         """
         :param texts:
@@ -210,25 +211,27 @@ class GptQuestionJsonl(JsonlDataFile):
             '', 不用提示
         :return:
         """
-        self.start_id += 1
-
+        # 1 变成标准的list + 字典结构，方便后面统一处理
         if isinstance(texts, str):
             texts = [texts]
 
+        for i, text in enumerate(texts):
+            if isinstance(text, str):
+                texts[i] = {'content': text}
+
+        # 2 如果设置了每次最大会话长度，要进行拆分
         if max_word_length:
             texts = self.split_texts(texts, max_word_length=max_word_length, prompt=prompt)
 
-        texts = [x.strip() for x in texts]
-        if file_path:
-            t = texts[-1]
-            texts[-1] = {'content': t, 'file_path': XlPath(file_path).name}
-        else:
-            for i, x in enumerate(texts):
-                texts[i] = {'content': x}
+        self.start_id += 1
+
+        for i, text in enumerate(texts):
+            texts[i]['content'] = text['content'].strip()
+
+        # 3 添加会话conversation
         item = {'id': record_id or self.start_id,
                 'text': texts,
-                'first_text_length': len(texts[0])
-                if isinstance(texts[0], str) else len(texts[0]['content'])}
+                'first_text_length': len(texts[0]['content'])}
         self.records.append(item)
         return item
 
@@ -314,27 +317,12 @@ class GptQuestionJsonl(JsonlDataFile):
             qa_texts.extend(texts)
             qa_answers.extend(all_answers)
 
-        print("单次 QA 的长度信息:")
-        print('\ttext（提问）')
+        print("消息messages长度统计信息:")
+        print('\t提问', end='\t')
         print_statistics(qa_texts)
         if qa_answers:
-            print('\tall_answers（回答）')
+            print('\t回答', end='\t')
             print_statistics(qa_answers, price_base=0.002)
-
-        # 单次 session 的长度信息
-        session_texts = []
-        session_answers = []
-        for session in self.records:
-            texts = self.get_text_texts(session.get("text", []))
-            all_answers = self.get_all_answers_texts(session.get("all_answers", []))
-            session_texts.append("".join(texts))
-            session_answers.append("".join(all_answers))
-
-        print("单次 session 的长度信息(如果只有单轮qa，则统计跟上面是一样的):")
-        print('\ttext（提问）')
-        print_statistics(session_texts)
-        print('\tall_answers（回答）')
-        print_statistics(session_answers, price_base=0.002)
 
     def filter_records_without_answers(self):
         """ 过滤掉没有 'all_answers' 字段的sessions """
@@ -348,6 +336,31 @@ class GptQuestionJsonl(JsonlDataFile):
 
         # 输出过滤后的sessions数量
         print(f"过滤后的sessions数量：{len(self.records)}")
+
+    def parse_answer_contents(self):
+        """ 简化解释器返回结果中，contents的结构信息 """
+        for record in self.records:
+            for answer in record['all_answers']:
+                if isinstance(answer, dict) and 'contents' in answer:
+                    content = answer['contents'][-1]['message']['content']
+                    if 'parts' in content:
+                        content = '\n'.join(content['parts'])
+                    else:
+                        content = content['text']
+                    answer['contents'] = content
+
+    def parse_answer_downloads(self):
+        """ 解析，简化下载链接的表达形式 """
+        for record in self.records:
+            for answer in record['all_answers']:
+                if 'downloads' in answer:
+                    for i, link in enumerate(answer['downloads']):
+                        m = re.search(r'filename%3D(.+?)&sig=', link)
+                        if m:
+                            answer['downloads'][i] = unquote(m.group(1))
+
+
+GptQuestionJsonl = GptChatJsonl  # 名称向下兼容
 
 
 def __2_数据后处理():

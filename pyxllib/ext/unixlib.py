@@ -441,6 +441,8 @@ class XlSSHClient(paramiko.SSHClient):
         except ScpLimitError:
             pass
 
+        return local_path
+
     def scp_put(self, local_path, remote_dir=None, *, mkdir=True, print_mode=True, limit_bytes=None, if_exists=None):
         """ 将本地的local_path上传到服务器的remote_path
 
@@ -493,6 +495,8 @@ class XlSSHClient(paramiko.SSHClient):
             self.__scp_base(scp.put, progress, local_path, remote_dir, remote_path, if_exists)
         except ScpLimitError:
             pass
+
+        return remote_path
 
     def scp_put_brief(self, _dir, **kwargs):
         """ 过滤一些一般不同步的文件 """

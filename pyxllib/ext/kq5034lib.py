@@ -30,10 +30,10 @@ from tqdm import tqdm
 from pyxllib.text.pupil import chinese2digits, grp_chinese_char
 from pyxllib.file.xlsxlib import openpyxl
 from pyxllib.file.specialist import XlPath, get_encoding
+from pyxllib.prog.pupil import run_once
 from pyxllib.prog.specialist import parse_datetime, browser, TicToc, dprint
 from pyxllib.cv.rgbfmt import RgbFormatter
 from pyxllib.data.sqlite import Connection
-
 from pyxllib.ext.seleniumlib import XlChrome
 
 
@@ -1205,6 +1205,7 @@ class 课次数据:
     def __init__(self):
         # 将各种不同来源的数据，按用户ID分组存储起来
         self.用户观看数据 = defaultdict(list)  # 每个用户的观看数据情况
+        self.start_day = None  # 记录所有加载文件中，最早的时间戳，大概率就是这个课次的开课时间
 
     def add_files(self, path, pattern):
         files = XlPath(path).select_file(pattern)
@@ -1212,7 +1213,7 @@ class 课次数据:
             self.add_考勤数据(f)
 
     def add_考勤数据(self, file):
-        """
+        """ 推荐使用这个综合接口，代替专用接口，这个接口能实现一些综合性的操作
         保存的用户数据，存储三元数值（观看时长，进度）
             150，表示观看时间满30分钟
             0~100，表示有进度数据，0%~100%
@@ -1225,6 +1226,12 @@ class 课次数据:
             self.add_圈子进度表(file)
         else:
             self.add_小鹅通考勤表(file)
+
+        dates = re.findall(r'(\d{4}-\d{2}-\d{2})_\d{2}-\d{2}-\d{2}', file.stem)
+        if dates:
+            file_day = datetime.datetime.strptime(dates[-1], "%Y-%m-%d").date()
+            if self.start_day is None or self.start_day > file_day:
+                self.start_day = file_day
 
     def add_小鹅通考勤表(self, file):
         file = XlPath(file)
@@ -1290,3 +1297,126 @@ class 课次数据:
             return {'value': f'观看{回放分钟}分钟', 'color': yellow.light((100 - 回放分钟) / 30)}
         else:
             return {'value': f'未开始', 'color': '白色'}
+
+    def 小鹅通考勤结果(self, user_id, 需求分钟=30):
+        """ 一般是把一个课次的多天数据添加到一起用，用这个接口获得该课次的观看状态
+        比如是当堂，还是第1天回放等
+
+        :param user_id: 要获得的用户信息
+        :param 需求分钟: 判断完成的依据分钟数
+        """
+        # 1 检查文件日期
+        if user_id not in self.用户观看数据:
+            return '未开始学习'
+
+        data = self.用户观看数据[user_id]
+
+        # 理论上这里文件名就应该是排好序的
+        filenames = [x['文件名'] for x in data]
+
+        for i, filename in enumerate(filenames):
+            # 后面一串是时分秒，并不提取，但是用来限定格式匹配，避免匹配错
+            dates = re.findall(r'(\d{4}-\d{2}-\d{2})_\d{2}-\d{2}-\d{2}', filename)
+            if not dates:  # 找不到时间戳的不处理
+                continue
+
+            file_date_obj = datetime.datetime.strptime(dates[0], "%Y-%m-%d").date()
+            delta_day = (file_date_obj - self.start_day).days
+
+            # 2 按顺序提取时间
+            if delta_day == 0 and data[i]['直播分钟'] >= 需求分钟:
+                return '完成当堂学习'
+            elif delta_day > 0 and data[i]['直播分钟'] + data[i]['回放分钟'] >= 需求分钟:
+                return f'第{delta_day}天回放'
+
+        if data[-1]['直播分钟'] + data[-1]['回放分钟']:
+            return f'不足{需求分钟}分钟'
+        else:
+            return '未开始学习'
+
+    def 小鹅通考勤结果2(self, user_id, 返款梯度, 需求分钟=30):
+        """ 输入视频返款的梯度，这个函数相比`小鹅通考勤结果`，还会返回单元格颜色格式，对应的返款额 """
+        # 1 判断课程回放是不是结束了
+        text = self.小鹅通考勤结果(user_id, 需求分钟)
+        if text == '未开始学习' or '不足' in text:  # 判断该课次是否已经结束了
+            delta_day = datetime.timedelta(days=len(返款梯度))
+            if (delta_day + self.start_day) <= datetime.date.today():
+                text = '未完成学习'
+
+        if text == '完成当堂学习':
+            return text, '鲜绿色', 返款梯度[0]
+        elif m := re.match(r'第(\d+)天回放', text):
+            t = int(m.group(1))
+            money = 返款梯度[t]
+            if money:
+                color = RgbFormatter.from_name('黄色')
+                color = color.light((返款梯度[0] - money) / money)  # 根据返款额度自动变浅
+            else:
+                color = '灰色'
+            return text, color, money
+        elif text == '未开始学习' or '不足' in text:
+            return text, '白色', 0
+        elif text == '未完成学习':
+            return text, '红色', 0
+        else:
+            raise ValueError
+
+
+def get_driver(_driver_store=[None]):  # trick
+    """ 考勤这边固定一个driver来使用 """
+    if _driver_store[0] is None:
+        _driver_store[0] = XlChrome()
+    if not _driver_store[0]:  # 如果驱动没了，重新启动
+        _driver_store[0] = XlChrome()
+    return _driver_store[0]
+
+
+def 登录小鹅通(name, passwd):
+    # 登录小鹅通
+    driver = get_driver()
+    driver.get('https://admin.xiaoe-tech.com/t/login#/acount')
+    driver.locate('//*[@id="common_template_mounted_el_container"]'
+                  '/div/div[1]/div[3]/div/div[4]/div/div[1]/div[1]/div/div[2]/input').send_keys(name)
+    driver.locate('//*[@id="common_template_mounted_el_container"]'
+                  '/div/div[1]/div[3]/div/div[4]/div/div[1]/div[2]/div/div/input').send_keys(passwd)
+    driver.click('//*[@id="common_template_mounted_el_container"]/div/div[1]/div[3]/div/div[4]/div/div[2]')
+
+    # 然后自己手动操作验证码
+    # 以及选择"店铺"
+
+
+def 下载课次考勤数据(课程链接, 检查文本=''):
+    # 1 遍历课程下载表格
+    driver = get_driver()
+    driver.get('https://admin.xiaoe-tech.com/t/data_center/index')  # 必须要找个过渡页，不然不会更新课程链接
+    driver.get(课程链接)
+    # 不能写'第{i}课'，会有叫'第{i}堂'等其他情况
+    if 检查文本:  # 出现指定的文本才操作下一步
+        driver.locate_text('//*[@id="app"]/div/div/div[1]/div[2]/div[1]/div[2]', 检查文本)
+    else:  # 默认等待3秒
+        time.sleep(3)
+
+    driver.click('//*[@id="tab-studentTab"]/span')  # 直播间用户
+    driver.click('//*[@id="pane-studentTab"]/div/div[2]/div[2]/form/div[2]/button[2]/span/span')  # 导出列表
+    driver.click('//*[@id="data-export-container"]/div/div[2]/div/div[2]/div[2]/button[2]/span/span')  # 导出
+
+
+def 登录微信支付():
+    driver = get_driver()
+    driver.get('https://pay.weixin.qq.com/index.php/core/home/login')
+
+
+def 聚合读取考勤数据(data_dir, name, judge_minute=30):
+    """
+    1、在目录"data_folder"下，找前缀包含name的所有文件
+    2、并将其按日期排序，整理考勤数据，判断当堂、第一天完成等
+    3、课次完成的标记，是judge_minute要满足特定分钟数
+    """
+    # 理论上获得的第一份就是当堂数据，第二份则是回放数据
+    files = list(XlPath(data_dir).rglob_files(f'*{name}*'))
+    data = 课次数据()
+    for f in files:
+        data.add_考勤数据(f)
+
+    for user_id in data.用户观看数据:
+        print(data.小鹅通考勤结果2(user_id, [100, 90, 80, 70, 0, 0]))

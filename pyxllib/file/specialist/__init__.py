@@ -37,15 +37,15 @@ class JsonlDataFile:
         p = XlPath(outfile)
 
         # 如果文件名包含'_？k_'，则替换'？'为self.records的数量
-        if m := re.search(r'_(\？)k_', p.name):
+        if m := re.search(r'(\？)k', p.name):
             n = len(self.records)
             if n < 500:
-                replace_str = f'_{n}_'  # 数量小于500，直接给出数量
+                replace_str = f'{n}'  # 数量小于500，直接给出数量
             else:
                 v = int(round(n / 1000))  # 数量大于等于500，以"千"为单位'k'，四舍五入计算
-                replace_str = f'_{v}k_'
+                replace_str = f'{v}k'
             # 用新字符串替换原来的字符串
-            new_name = re.sub(r'_(\？)k_', replace_str, p.name)
+            new_name = re.sub(r'(\？)k', replace_str, p.name)
             p = p.with_name(new_name)  # 更改文件名
 
         p.parent.mkdir(parents=True, exist_ok=True)
