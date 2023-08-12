@@ -269,6 +269,7 @@ class JLineViewer(QMainWindow):
         if not self.allItemsLoaded:
             start_time = time.time()
             self.listWidget.addItems([f'{i + 1}. {line.strip()}' for i, line in enumerate(self.lines[1000:])])
+            QApplication.processEvents()
             self.statusBar.showMessage(f"全部加载完毕, 总条目数: {len(self.lines)}, 加载耗时: {time.time() - start_time:.2f} 秒")
 
             # 加载完所有项目后，设置 allItemsLoaded 变量为 True

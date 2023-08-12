@@ -197,7 +197,7 @@ class GptChatJsonl(JsonlDataFile):
                 new_texts[-1]['file_path'] = XlPath(text['file_path']).name
         return new_texts
 
-    def add_record(self, texts, *,
+    def add_record(self, texts, *, extra=None,
                    record_id=0, max_word_length=None, prompt=None):
         """
         :param texts:
@@ -231,6 +231,8 @@ class GptChatJsonl(JsonlDataFile):
         item = {'id': record_id or self.start_id,
                 'text': texts,
                 'first_text_length': len(texts[0]['content'])}
+        if extra:
+            item['extra'] = extra
         self.records.append(item)
         return item
 
