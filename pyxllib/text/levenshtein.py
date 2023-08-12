@@ -83,6 +83,16 @@ class MatchSimString:
             i += 1
         return idx, sim
 
+    def match_many(self, s, count=1):
+        """跟候选字符串进行匹配，返回多个最佳匹配结果
+        :param str s: 待匹配的字符串
+        :param int count: 需要返回的匹配数量
+        :return: 匹配结果列表，列表中的元素为(idx, sim)对
+        """
+        scores = [(i, Levenshtein.ratio(self.key_str[i], s)) for i in range(len(self))]
+        # 根据相似度排序并返回前count个结果
+        return sorted(scores, key=lambda x: x[1], reverse=True)[:count]
+
     def match_test(self, s, count=-1, showstr=lambda x: x[:50]):
         """输入一个字符串s，和候选项做近似匹配
 

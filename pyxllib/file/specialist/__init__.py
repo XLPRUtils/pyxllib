@@ -20,15 +20,43 @@ def merge_jsonl(*infiles):
 class JsonlDataFile:
     """ 通用的jsonl文件处理类 """
 
-    def __init__(self, filepath=None):
-        """ 从指定的jsonl文件中读取数据 """
+    def __init__(self, filepath=None, num_records=None):
+        """
+        从指定的jsonl文件中读取数据。可以选择读取全部数据或只读取前N条数据。
+
+        :param str filepath: jsonl文件的路径
+        :param int num_records: 指定读取的记录数量，如果为None则读取全部数据
+        """
         self.infile = None
         self.records = []
 
         if filepath is not None:
-            self.infile = XlPath(filepath)
-            if self.infile.is_file():
-                self.records = self.infile.read_jsonl()
+            filepath = XlPath(filepath)
+            if '?k' in filepath.name:  # 如果文件名中有'?'，则需要进行模式匹配检索
+                new_name = filepath.name.replace('?k', '*')
+                filepaths = list(filepath.parent.glob(new_name))
+                if filepaths:
+                    filepath = filepaths[0]  # 找到第1个匹配的文件
+                    self.infile = XlPath(filepath)
+
+        if self.infile is not None:
+            if num_records is None:
+                # 读取全部数据
+                if self.infile.is_file():
+                    self.records = self.infile.read_jsonl()
+            else:
+                # 只读取部分数据
+                self.read_partial_records(num_records)
+
+    def read_partial_records(self, num_records):
+        """ 从jsonl文件中只读取指定数量的记录 """
+        if self.infile and self.infile.is_file():
+            with open(self.infile, 'r', encoding='utf-8') as file:
+                for _ in range(num_records):
+                    line = file.readline().strip()
+                    if not line:
+                        break  # 如果已经读完文件，跳出循环
+                    self.records.append(json.loads(line))
 
     def save(self, outfile=None, ensure_ascii=False):
         """ 将当前数据保存到指定的jsonl文件中 """
@@ -36,8 +64,8 @@ class JsonlDataFile:
             outfile = self.infile
         p = XlPath(outfile)
 
-        # 如果文件名包含'_？k_'，则替换'？'为self.records的数量
-        if m := re.search(r'(\？)k', p.name):
+        # 如果文件名包含'?k'，则替换'?'为self.records的数量
+        if m := re.search(r'\?k', p.name):
             n = len(self.records)
             if n < 500:
                 replace_str = f'{n}'  # 数量小于500，直接给出数量
@@ -45,7 +73,7 @@ class JsonlDataFile:
                 v = int(round(n / 1000))  # 数量大于等于500，以"千"为单位'k'，四舍五入计算
                 replace_str = f'{v}k'
             # 用新字符串替换原来的字符串
-            new_name = re.sub(r'(\？)k', replace_str, p.name)
+            new_name = re.sub(r'\?k', replace_str, p.name)
             p = p.with_name(new_name)  # 更改文件名
 
         p.parent.mkdir(parents=True, exist_ok=True)
@@ -163,7 +191,7 @@ class JsonlDataFile:
         src_files = [str(file_path) for file_path in src_dir.glob('*.jsonl')]
         return cls.read_from_files(src_files)
 
-    def split_to_dir(self, num_split_files, dst_dir=None):
+    def split_to_dir(self, split_files_num, dst_dir=None):
         """ 将数据拆分到多个文件中，如果提供了目标目录，则将拆分的文件保存到目标目录，否则保存到当前工作目录 """
         if dst_dir is None:
             # 如果未提供目标目录，则拆分的文件保存到当前工作目录
@@ -173,11 +201,11 @@ class JsonlDataFile:
             dst_dir = XlPath(dst_dir)
 
         dst_dir.mkdir(parents=True, exist_ok=True)
-        chunk_size = len(self.records) // num_split_files
+        chunk_size = len(self.records) // split_files_num
         # 格式化字符串，使得编号部分的长度和总文件数量的位数相同
-        filename_format = "{:0" + str(len(str(num_split_files))) + "d}"
+        filename_format = "{:0" + str(len(str(split_files_num))) + "d}"
         split_files = []  # 用于保存拆分的文件路径
-        for i in range(num_split_files):
+        for i in range(split_files_num):
             chunk_records = self.records[i * chunk_size:(i + 1) * chunk_size]
             outfile = dst_dir / f"{self.infile.stem}_{filename_format.format(i)}.jsonl"
             XlPath(outfile).write_jsonl(chunk_records, ensure_ascii=False)
