@@ -105,17 +105,15 @@ def print_statistics(data, indent_level=1, price_base=0.0015):
 class GptChatJsonl(JsonlDataFile):
     """ GPT问答批量执行脚本的jsonl生成、读取器 """
 
-    def __init__(self, file=None, *, start_id=None):
+    def __init__(self, file=None, num_records=None, *, start_id=None):
         from datetime import date
+
+        super().__init__(file, num_records)
         if start_id is None:
             today = date.today().strftime("%Y%m%d")
             self.start_id = int(today + "00000000")
         else:
             self.start_id = start_id
-
-        super().__init__()
-        if file is not None:
-            self.read_jsonl(file)
 
     def read_jsonl(self, file):
         """ 从一个文件加载数据
@@ -238,7 +236,7 @@ class GptChatJsonl(JsonlDataFile):
 
     def find_indices_by_qlength(self):
         """ 返回提问(q,question)内容从短到长的数据下标 """
-        lens = [(i, len(''.join(x['text']))) for i, x in enumerate(self.records)]
+        lens = [(i, len(''.join([t['content'] for t in x['text']]))) for i, x in enumerate(self.records)]
         # 根据长度进行排序，得到的元组的第一个元素为原列表的下标，第二个元素为对应的长度
         sorted_lens = sorted(lens, key=lambda x: x[1])
         # 取出排序后的下标
@@ -343,7 +341,16 @@ class GptChatJsonl(JsonlDataFile):
         for record in self.records:
             for answer in record['all_answers']:
                 if isinstance(answer, dict) and 'contents' in answer:
-                    content = answer['contents'][-1]['message']['content']
+                    n = len(answer['contents'])
+                    for i in range(n - 1, -1, -1):
+                        message = answer['contents'][i]['message']
+                        if message and 'content' in message and 'error' not in message:
+                            break
+                    else:
+                        answer['contents'] = ''
+                        continue
+
+                    content = message['content']
                     if 'parts' in content:
                         content = '\n'.join(content['parts'])
                     else:
@@ -358,7 +365,7 @@ class GptChatJsonl(JsonlDataFile):
                     for i, link in enumerate(answer['downloads']):
                         m = re.search(r'filename%3D(.+?)&sig=', link)
                         if m:
-                            answer['downloads'][i] = unquote(m.group(1))
+                            answer['downloads'][i] = unquote(unquote(m.group(1)))
 
 
 GptQuestionJsonl = GptChatJsonl  # 名称向下兼容

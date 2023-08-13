@@ -84,14 +84,6 @@ def is_file(arg, exists=True):
     return os.path.isfile(arg)
 
 
-def get_hostname():
-    return socket.getfqdn()
-
-
-def get_username():
-    return os.path.split(os.path.expanduser('~'))[-1]
-
-
 def len_in_dim2_min(arr):
     """ 计算类List结构在第2维上的最小长度
 
@@ -981,3 +973,13 @@ def xlmd5(content):
         return content
     else:
         return hashlib.md5(content).hexdigest()
+
+
+@run_once()
+def get_hostname():
+    return socket.getfqdn()
+
+
+@run_once()
+def get_username():
+    return os.path.split(os.path.expanduser('~'))[-1]

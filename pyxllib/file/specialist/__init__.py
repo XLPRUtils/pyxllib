@@ -38,6 +38,8 @@ class JsonlDataFile:
                 if filepaths:
                     filepath = filepaths[0]  # 找到第1个匹配的文件
                     self.infile = XlPath(filepath)
+            else:
+                self.infile = filepath
 
         if self.infile is not None:
             if num_records is None:
