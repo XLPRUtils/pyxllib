@@ -3,6 +3,7 @@
 # @Author : 陈坤泽
 # @Email  : 877362867@qq.com
 # @Date   : 2023/07/13 14:26
+import copy
 
 from pyxllib.prog.pupil import check_install_package
 
@@ -20,7 +21,7 @@ from transformers import GPT2TokenizerFast
 
 from pyxllib.prog.specialist import browser
 from pyxllib.algo.pupil import ValuesStat
-from pyxllib.file.specialist import XlPath, JsonlDataFile
+from pyxllib.file.specialist import XlPath, JsonlDataFile, TwinDirs
 
 
 def __1_生成提问数据():
@@ -295,7 +296,7 @@ class GptChatJsonl(JsonlDataFile):
                 ls.append(t)
             else:
                 if "file_path" in t:
-                    ls.append(("filep_path=" + t["file_path"] + "\n\n") + t["content"])
+                    ls.append(("filep_path=" + str(t["file_path"]) + "\n\n") + t["content"])
                 else:
                     ls.append(t["content"])
         return ls
@@ -336,36 +337,124 @@ class GptChatJsonl(JsonlDataFile):
         # 输出过滤后的sessions数量
         print(f"过滤后的sessions数量：{len(self.records)}")
 
+    @classmethod
+    def _parse_single_record_answer_contents(cls, record):
+        """ 注意本函数不做record备份 """
+        for answer in record.get('all_answers', []):
+            if isinstance(answer, dict) and 'contents' in answer:
+                n = len(answer['contents'])
+                for i in range(n - 1, -1, -1):
+                    message = answer['contents'][i]['message']
+                    if message and 'content' in message and 'error' not in message:
+                        break
+                else:
+                    answer['contents'] = ''
+                    continue
+
+                content = message['content']
+                if 'parts' in content:
+                    content = '\n'.join(content['parts'])
+                else:
+                    content = content['text']
+                answer['contents'] = content
+
+    @classmethod
+    def _parse_single_record_answer_downloads(cls, record):
+        for answer in record.get('all_answers', []):
+            if 'downloads' in answer:
+                for i, link in enumerate(answer['downloads']):
+                    m = re.search(r'filename%3D(.+?)&sig=', link)
+                    if m:
+                        answer['downloads'][i] = unquote(unquote(m.group(1)))
+
+    @classmethod
+    def parse_single_record_answer(cls, record):
+        cls._parse_single_record_answer_contents(record)
+        cls._parse_single_record_answer_downloads(record)
+
     def parse_answer_contents(self):
         """ 简化解释器返回结果中，contents的结构信息 """
         for record in self.records:
-            for answer in record['all_answers']:
-                if isinstance(answer, dict) and 'contents' in answer:
-                    n = len(answer['contents'])
-                    for i in range(n - 1, -1, -1):
-                        message = answer['contents'][i]['message']
-                        if message and 'content' in message and 'error' not in message:
-                            break
-                    else:
-                        answer['contents'] = ''
-                        continue
-
-                    content = message['content']
-                    if 'parts' in content:
-                        content = '\n'.join(content['parts'])
-                    else:
-                        content = content['text']
-                    answer['contents'] = content
+            self._parse_single_record_answer_contents(record)
 
     def parse_answer_downloads(self):
         """ 解析，简化下载链接的表达形式 """
         for record in self.records:
-            for answer in record['all_answers']:
-                if 'downloads' in answer:
-                    for i, link in enumerate(answer['downloads']):
-                        m = re.search(r'filename%3D(.+?)&sig=', link)
-                        if m:
-                            answer['downloads'][i] = unquote(unquote(m.group(1)))
+            self._parse_single_record_answer_downloads(record)
+
+        # 目录里的文件名也同理做精简
+        for f in self.infile.parent.glob_files():
+            if f.name.startswith('OpenAI-download-'):
+                f.rename2(f.parent / re.sub(r'OpenAI-download-\d+-', '', f.name),
+                          if_exists='replace')
+
+    def filter_to_rechat(self, check_func, rechat_path=None):
+        """ 筛选失败的数据到一个新的目录，常用于对chatted数据筛选出未成功的样例，上池子重跑
+        这个不是简单的找出得不到all_answers的，而是可以很精细，包含复杂post、verify的情况
+
+        :param check_func: 一个函数，接收一个record，返回True或False
+            True，表示这个record是对的
+            False，表示这个record是错的，要挑选出来
+        :param rechat_path: 把挑选出来的数据放到新路径
+        """
+        if rechat_path is None:
+            rechat_path = XlPath(self.infile.parent.as_posix() + '_rechat/in.jsonl')
+
+        rechat_path = XlPath(rechat_path)
+        td = TwinDirs(self.infile.parent, rechat_path.parent)
+
+        gcj = type(self)()
+        for record in self.records:
+            if not check_func(record):
+                record2 = {}
+                for k in ['id', 'text', 'first_text_length', 'extra']:
+                    record2[k] = record[k]
+                gcj.records.append(record2)
+                for x in record['text']:
+                    if 'file_path' in x:
+                        td.copy_file(td.src_dir / x['file_path'])
+
+        gcj.save(rechat_path)
+        return gcj
+
+    def update_from_rechat(self, check_func, rechat_path=None):
+        """ 从另一份rechat的数据，更新回主master数据
+
+        :param check_func: 原chatted没过，但是rechatted通过的，需要把数据更新过来
+        :param rechat_path: 注意只能传路径，因为可能涉及到文件操作，需要知道目录所在
+            依据这个文件里的record记录更新回self
+        """
+        if rechat_path is None:
+            rechat_path = XlPath(self.infile.parent.as_posix() + '_rechat') / 'out.jsonl'
+
+        rechat_path = XlPath(rechat_path)
+        td = TwinDirs(rechat_path.parent, self.infile.parent)
+
+        id2index = {x['id']: i for i, x in enumerate(self.records)}
+
+        gcj = type(self)(rechat_path)
+        gcj.parse_answer_contents()
+        gcj.parse_answer_downloads()
+
+        # 需要处理下下载链接名称
+        self.parse_answer_downloads()
+        gcj.parse_answer_downloads()
+
+        for y in gcj.records:
+            index = id2index[y['id']]
+            x = self.records[index]
+            if not check_func(x) and check_func(y):
+                # 先把x相关的数据删掉
+                if 'all_answers' in x:
+                    for answer in x['all_answers']:
+                        for fname in answer.get('downloads', []):
+                            (XlPath(self.infile.parent) / fname).delete()
+                # 再把y拷贝过来
+                for answer in y['all_answers']:
+                    for fname in answer.get('downloads', []):
+                        td.copy_file(td.src_dir / fname)
+                self.records[index] = y
+        return gcj
 
 
 GptQuestionJsonl = GptChatJsonl  # 名称向下兼容
@@ -484,3 +573,101 @@ class GptTrainJsonl(JsonlDataFile):
 
         # 或者返回HTML字符串
         return html_content
+
+
+def __4_综合集成类():
+    pass
+
+
+class GptChatDir:
+    """ 一个目录，包含了一个任务的所有数据，包括in、out、post等文件 """
+
+    def __init__(self, root):
+        self.root = root = XlPath(root)
+
+        self.chat_file = root / 'in.jsonl'
+        self.chatted_file = root / 'out.jsonl'
+        self.post_file = root / 'post.jsonl'
+
+        self.upload_files_dir = root / 'upload_files'
+        self.download_files_dir = root / 'download_files'
+
+        for dir_path in [self.root, self.upload_files_dir, self.download_files_dir]:
+            if not dir_path.is_dir():
+                dir_path.mkdir(parents=True, exist_ok=True)
+
+    def init(self):
+        """ 一些基础处理 """
+        # 1 chat信息
+        if self.chatted_file.is_file():
+            gcj1 = GptChatJsonl(self.chatted_file)
+        elif self.chat_file.is_file():
+            gcj1 = GptChatJsonl(self.chat_file)
+        else:
+            print('请确认是否有生成初始的chat数据')
+            return
+
+        print(f'【{self.root.name}】')
+        n = len(gcj1.records)
+        m = sum([len(x['text']) for x in gcj1.records])
+        print(f'1、chat：{n}条会话*{m / n:.2g}条消息')
+        gcj1.check_records()
+        print()
+
+        # 2 chatted信息
+        filter_records = [x for x in gcj1.records if 'all_answers' in x]
+        if filter_records:
+            print(f'2、chatted：已获得{len(filter_records)}条会话')
+        else:
+            print('2、chatted：暂未获得生成数据')
+
+        # 3 post信息
+        if filter_records and not self.post_file.is_file():  # 待生成后处理文件
+            gcj2 = GptChatJsonl()
+            gcj2.infile = self.post_file
+            gcj2.records = filter_records
+            gcj2.parse_answer_contents()
+            gcj2.parse_answer_downloads()
+            gcj2.save()
+        elif self.post_file.is_file():  # 已经有后处理文件
+            gcj2 = GptChatJsonl(self.post_file)
+        else:
+            return
+
+        print(f'3、post：{len(gcj2.records)}条会话')
+
+    def merge_rechatted(self, check_func, rechat_dir):
+        """ 从另一份重跑的数据，更新数据回来
+
+        :param check_func: 原chatted没过，但是rechatted通过的，需要把数据更新过来
+        :param rechat_dir: 注意是传另一份数据所在的目录
+
+        TODO 这个函数还没写完
+        """
+        rechat_dir = XlPath(rechat_dir)
+        td = TwinDirs(rechat_dir, self.root)
+
+        gcj1 = GptChatJsonl(self.chatted_file)
+        gcj2 = type(self)(rechat_dir / 'out.jsonl')
+
+        id2index = {x['id']: i for i, x in enumerate(gcj1.records)}
+
+        # 需要处理下下载链接名称
+        gcj2.parse_answer_downloads()
+
+        for y in gcj2.records:
+            index = id2index[y['id']]
+            x = gcj1.records[index]
+            x2 = copy.deepcopy(x)
+            gcj1.parse_single_record_answer(x2)
+            if not check_func(x2) and check_func(y):
+                # 先把x相关的数据删掉
+                if 'all_answers' in x2:
+                    for answer in x2['all_answers']:
+                        for fname in answer.get('downloads', []):
+                            (self.root / (str(x['id']) + '-' + fname)).delete()
+                # 再把y拷贝过来
+                for answer in y['all_answers']:
+                    for fname in answer.get('downloads', []):
+                        td.copy_file(td.src_dir / fname)
+                gcj1.records[index] = y

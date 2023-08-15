@@ -1334,10 +1334,10 @@ class 课次数据:
         else:
             return '未开始学习'
 
-    def 小鹅通考勤结果2(self, user_id, 返款梯度, 需求分钟=30):
+    def 小鹅通考勤结果2(self, user_id, 返款梯度, 要求在线分钟=30):
         """ 输入视频返款的梯度，这个函数相比`小鹅通考勤结果`，还会返回单元格颜色格式，对应的返款额 """
         # 1 判断课程回放是不是结束了
-        text = self.小鹅通考勤结果(user_id, 需求分钟)
+        text = self.小鹅通考勤结果(user_id, 要求在线分钟)
         if text == '未开始学习' or '不足' in text:  # 判断该课次是否已经结束了
             delta_day = datetime.timedelta(days=len(返款梯度))
             if (delta_day + self.start_day) <= datetime.date.today():

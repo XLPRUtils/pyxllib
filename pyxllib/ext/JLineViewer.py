@@ -75,7 +75,7 @@ class TextEditDelegate(QItemDelegate):
 
     def sizeHint(self, option, index):
         size = super().sizeHint(option, index)
-        size.setHeight(20)  # 限制最大高度为20像素
+        size.setHeight(20)  # 限制最大高度为20像素，限定每个条目只展示一行
         return size
 
     def setModelData(self, editor, model, index):
@@ -173,13 +173,14 @@ class JLineViewer(QMainWindow):
         self.setWindowTitle('JLineEditor')
         self.treeView.setAlternatingRowColors(True)
         self.treeView.setIndentation(20)
-        self.treeView.setSortingEnabled(True)
-        self.treeView.setStyleSheet(LargeStrings.treeViewStyles)
+        # self.treeView.setSortingEnabled(True)
+        # self.treeView.setStyleSheet(LargeStrings.treeViewStyles)
         self.plainTextEdit.setWordWrapMode(QTextOption.WordWrap)
         self.plainTextEdit.setReadOnly(True)
         self.showMaximized()
 
         self.treeView.setSortingEnabled(False)  # 禁止排序
+        self.treeView.setAnimated(False)
         self.plainTextEdit.textChanged.connect(self.updateJson)  # 连接 textChanged 信号到新的槽函数
 
     def addPane(self, widget, title):

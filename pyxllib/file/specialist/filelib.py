@@ -2211,6 +2211,7 @@ class TwinDirs:
 
         :param XlPath src_file: 原文件位置（其实输入目录类型也是可以的，内部实现逻辑一致的）
         """
+        src_file = XlPath(src_file)
         _src_file = src_file.relpath(self.src_dir)
         dst_file = self.dst_dir / _src_file
         dst_dir = dst_file.parent
