@@ -975,11 +975,10 @@ class XlPath(type(pathlib.Path())):
 
         # 3 重新设置文件名的对齐宽度
         new_filename_format = "{:0" + str(len(str(len(split_files)))) + "d}"
-        if new_filename_format != filename_format:
-            for i, old_file in enumerate(split_files):
-                new_name = dst_dir / f"{new_filename_format.format(i)}{suffix}"
-                os.rename(old_file, new_name)
-                split_files[i] = new_name
+        for i, old_file in enumerate(split_files):
+            new_name = dst_dir / f"{new_filename_format.format(i)}{suffix}"
+            os.rename(old_file, new_name)
+            split_files[i] = new_name
 
         # 返回拆分的文件路径列表
         return split_files
