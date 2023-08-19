@@ -215,6 +215,46 @@ class JsonlDataFile:
         # 返回拆分的文件路径列表
         return split_files
 
+    @classmethod
+    def split_file_to_dir(cls, infile, lines_per_file, dst_dir=None):
+        """ 将数据拆分到多个文件中，如果提供了目标目录，则将拆分的文件保存到目标目录，否则保存到当前工作目录
+
+        :param str infile: 输入文件名
+        :param int lines_per_file: 打算拆分的每个新文件的行数
+        :param str dst_dir: 目标目录
+        :return list: 拆分的文件路径列表
+        """
+        if dst_dir is None:
+            # 如果未提供目标目录，则拆分的文件保存到当前工作目录
+            dst_dir = XlPath(infile).parent / f"{XlPath(infile).stem}_split"
+        else:
+            # 如果提供了目标目录，将拆分的文件保存到目标目录
+            dst_dir = XlPath(dst_dir)
+
+        dst_dir.mkdir(parents=True, exist_ok=True)
+        split_files = []  # 用于保存拆分的文件路径
+        outfile = None
+        filename_format = "{:03d}"
+        outfile_index = 0
+        line_counter = 0
+
+        with open(infile, 'r', encoding='utf-8') as f:
+            for line in f:
+                if line_counter % lines_per_file == 0:
+                    if outfile is not None:
+                        outfile.close()
+                    outfile_path = dst_dir / f"{XlPath(infile).stem}_{filename_format.format(outfile_index)}.jsonl"
+                    outfile = open(outfile_path, 'w', encoding='utf-8')
+                    split_files.append(str(outfile_path))
+                    outfile_index += 1
+                outfile.write(line)
+                line_counter += 1
+
+        if outfile is not None:
+            outfile.close()
+        # 返回拆分的文件路径列表
+        return split_files
+
     def __add__(self, other):
         """ 实现类加法操作，合并两个JsonlDataFile的records """
         if not isinstance(other, JsonlDataFile):
@@ -253,10 +293,12 @@ class JsonlDataFile:
         if print_mode == 1:
             records = tqdm(records)
 
-        new_records = [func(record) for record in records if func(record) is not None]
+        # new_records = [func(record) for record in records if func(record) is not None]
+        new_records = [func(record) for record in records]
 
         if inplace:
             self.records = new_records
+            return self.records
         else:
             new_data_file = JsonlDataFile()
             new_data_file.records = new_records
