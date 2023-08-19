@@ -916,6 +916,17 @@ class XlPath(type(pathlib.Path())):
             # 判断路径字符串是否包含相对路径字符串
             return item_str.startswith(abs_path_str) or abs_path_str == item_str
 
+    def get_line_count(self):
+        """ 统计文件的行数 """
+        with open(self, 'rb') as file:
+            line_count = 0
+            while True:
+                chunk = file.read(10 * 1024 * 1024)  # 读取 10MB 的数据块
+                if not chunk:
+                    break
+                line_count += chunk.count(b'\n')  # 计算换行符数量
+        return line_count + 1  # 添加最后一行
+
     def __1_read_write(self):
         """ 参考标准库的
         read_bytes、read_text
