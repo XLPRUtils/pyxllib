@@ -927,6 +927,63 @@ class XlPath(type(pathlib.Path())):
                 line_count += chunk.count(b'\n')  # 计算换行符数量
         return line_count + 1  # 添加最后一行
 
+    def split_to_dir(self, lines_per_file, dst_dir=None, encoding='utf-8'):
+        """ 将文件按行拆分到多个子文件中
+
+        :param int lines_per_file: 打算拆分的每个新文件的行数
+        :param str dst_dir: 目标目录，未输入的时候，输出到同stem明的目录下
+        :return list: 拆分的文件路径列表
+            拆分后文件名类似如下： 01.jsonl, 02.jsonl, ...
+        """
+        # 1 检查输入参数
+        if dst_dir is None:
+            # 如果未提供目标目录，则拆分的文件保存到当前工作目录
+            dst_dir = self.parent / f"{self.stem}"
+        else:
+            # 如果提供了目标目录，将拆分的文件保存到目标目录
+            dst_dir = XlPath(dst_dir)
+
+        if dst_dir.is_dir():
+            raise FileExistsError(f"目标目录已存在，若确定要重置目录，请先删除目录：{dst_dir}")
+
+        dst_dir.mkdir(parents=True, exist_ok=True)
+
+        # 2 拆分文件
+        split_files = []  # 用于保存拆分的文件路径
+        tmp_files = []  # 用于保存临时文件路径
+        outfile = None
+        filename_format = "{:04d}"
+        outfile_index = 0
+        line_counter = 0
+        suffix = self.suffix
+
+        with open(self, 'r', encoding=encoding) as f:
+            for line in f:
+                if line_counter % lines_per_file == 0:
+                    if outfile is not None:
+                        outfile.close()
+                    outfile_path = dst_dir / f"{self.stem}_{filename_format.format(outfile_index)}{suffix}"
+                    outfile = open(outfile_path, 'w', encoding='utf-8')
+                    tmp_files.append(str(outfile_path))
+                    split_files.append(outfile_path)  # 先占位，后面再填充
+                    outfile_index += 1
+                outfile.write(line)
+                line_counter += 1
+
+        if outfile is not None:
+            outfile.close()
+
+        # 3 重新设置文件名的对齐宽度
+        new_filename_format = "{:0" + str(len(str(len(split_files)))) + "d}"
+        if new_filename_format != filename_format:
+            for i, old_file in enumerate(split_files):
+                new_name = dst_dir / f"{new_filename_format.format(i)}{suffix}"
+                os.rename(old_file, new_name)
+                split_files[i] = new_name
+
+        # 返回拆分的文件路径列表
+        return split_files
+
     def __1_read_write(self):
         """ 参考标准库的
         read_bytes、read_text

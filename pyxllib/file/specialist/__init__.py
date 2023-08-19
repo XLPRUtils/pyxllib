@@ -193,68 +193,6 @@ class JsonlDataFile:
         src_files = [str(file_path) for file_path in src_dir.glob('*.jsonl')]
         return cls.read_from_files(src_files)
 
-    def split_to_dir(self, split_files_num, dst_dir=None):
-        """ 将数据拆分到多个文件中，如果提供了目标目录，则将拆分的文件保存到目标目录，否则保存到当前工作目录 """
-        if dst_dir is None:
-            # 如果未提供目标目录，则拆分的文件保存到当前工作目录
-            dst_dir = self.infile.parent / f"{self.infile.stem}_split"
-        else:
-            # 如果提供了目标目录，将拆分的文件保存到目标目录
-            dst_dir = XlPath(dst_dir)
-
-        dst_dir.mkdir(parents=True, exist_ok=True)
-        chunk_size = len(self.records) // split_files_num
-        # 格式化字符串，使得编号部分的长度和总文件数量的位数相同
-        filename_format = "{:0" + str(len(str(split_files_num))) + "d}"
-        split_files = []  # 用于保存拆分的文件路径
-        for i in range(split_files_num):
-            chunk_records = self.records[i * chunk_size:(i + 1) * chunk_size]
-            outfile = dst_dir / f"{self.infile.stem}_{filename_format.format(i)}.jsonl"
-            XlPath(outfile).write_jsonl(chunk_records, ensure_ascii=False)
-            split_files.append(str(outfile))
-        # 返回拆分的文件路径列表
-        return split_files
-
-    @classmethod
-    def split_file_to_dir(cls, infile, lines_per_file, dst_dir=None):
-        """ 将数据拆分到多个文件中，如果提供了目标目录，则将拆分的文件保存到目标目录，否则保存到当前工作目录
-
-        :param str infile: 输入文件名
-        :param int lines_per_file: 打算拆分的每个新文件的行数
-        :param str dst_dir: 目标目录
-        :return list: 拆分的文件路径列表
-        """
-        if dst_dir is None:
-            # 如果未提供目标目录，则拆分的文件保存到当前工作目录
-            dst_dir = XlPath(infile).parent / f"{XlPath(infile).stem}_split"
-        else:
-            # 如果提供了目标目录，将拆分的文件保存到目标目录
-            dst_dir = XlPath(dst_dir)
-
-        dst_dir.mkdir(parents=True, exist_ok=True)
-        split_files = []  # 用于保存拆分的文件路径
-        outfile = None
-        filename_format = "{:03d}"
-        outfile_index = 0
-        line_counter = 0
-
-        with open(infile, 'r', encoding='utf-8') as f:
-            for line in f:
-                if line_counter % lines_per_file == 0:
-                    if outfile is not None:
-                        outfile.close()
-                    outfile_path = dst_dir / f"{XlPath(infile).stem}_{filename_format.format(outfile_index)}.jsonl"
-                    outfile = open(outfile_path, 'w', encoding='utf-8')
-                    split_files.append(str(outfile_path))
-                    outfile_index += 1
-                outfile.write(line)
-                line_counter += 1
-
-        if outfile is not None:
-            outfile.close()
-        # 返回拆分的文件路径列表
-        return split_files
-
     def __add__(self, other):
         """ 实现类加法操作，合并两个JsonlDataFile的records """
         if not isinstance(other, JsonlDataFile):
@@ -308,11 +246,34 @@ class JsonlDataFile:
 class JsonlDataDir:
     def __init__(self, dir_path):
         """ 一般用来处理较大的jsonl文件，将其该放到一个目录里，拆分成多个jsonl文件
+
+        注意待处理的文件名是依照 01.jsonl, 02.jsonl,... 的格式识别的，不要改动这个规则
         """
         self.dir_path = XlPath(dir_path)
+        self.files = []
+        for f in self.dir_path.glob_files('*.jsonl'):
+            if re.match(r'\d+$', f.stem):
+                self.files.append(f)
+
+    def check(self):
+        print('文件数：', len(self.files))
 
     @classmethod
     def init_from_file(cls, file, lines_per_file=1000):
         """ 从一个jsonl文件初始化一个JsonlDataDir对象 """
         file = XlPath(file)
-        JsonlDataFile.split_file_to_dir(file, lines_per_file=lines_per_file)
+        dst_dir = file.parent / file.stem
+        if not dst_dir.is_dir():
+            file.split_to_dir(lines_per_file, dst_dir)
+        c = cls(dst_dir)
+        return c
+
+    def apply_function_to_records(self, func):
+        """ 对records中的每个record应用函数func，先写出最简单的串行版本，后续可以考虑更复杂的并行版本
+        """
+        n = len(self.files)
+        for i, file in enumerate(self.files):
+            print(f'处理文件 {i + 1}/{n}: {file}')
+            data_file = JsonlDataFile(file)
+            data_file.apply_function_to_records(func, inplace=True, print_mode=1)
+            data_file.save(file)
