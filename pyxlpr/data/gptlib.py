@@ -6,6 +6,7 @@
 import copy
 
 from pyxllib.prog.pupil import check_install_package
+from joblib import Parallel, delayed
 
 check_install_package('transformers', 'transformers')
 
@@ -18,8 +19,10 @@ from urllib.parse import unquote
 
 import pandas as pd
 from transformers import GPT2TokenizerFast
+from tqdm import tqdm
+from openpyxl import Workbook
 
-from pyxllib.prog.specialist import browser
+from pyxllib.prog.specialist import browser, TicToc
 from pyxllib.algo.pupil import ValuesStat
 from pyxllib.file.specialist import XlPath, JsonlDataFile, TwinDirs
 
@@ -76,7 +79,7 @@ class Tokenizer:
         return len(cls.tokenize(paragraph, max_length))
 
 
-def print_statistics(data, indent_level=1, price_base=0.0015):
+def print_statistics(data, indent_level=1, price_base=0.0015, max_samples=500):
     """
     :param price_base: 每1K token对应的美元单价
     """
@@ -90,7 +93,7 @@ def print_statistics(data, indent_level=1, price_base=0.0015):
     # stat_len = ValuesStat([len(x) for x in data])
     # stat_strwith = ValuesStat([strwidth(x) for x in data])
     # 算token的机制很慢，只能抽查一部分估算
-    samples = random.sample(data, min(len(data), 500))
+    samples = random.sample(data, min(len(data), max_samples))
     stat_tokens = ValuesStat([Tokenizer.count_tokens(x) for x in samples])
 
     fmts = ['g', '.0f', '.0f', 'd', 'd']
@@ -304,6 +307,8 @@ class GptChatJsonl(JsonlDataFile):
     def get_all_answers_texts(self, all_answers):
         ls = []
         for t in all_answers:
+            if isinstance(t, dict):
+                t = json.dumps(t, ensure_ascii=False, indent=2)
             ls.append(str(t))
         return ls
 
@@ -574,6 +579,13 @@ class GptTrainJsonl(JsonlDataFile):
         # 或者返回HTML字符串
         return html_content
 
+    def add_record(self, texts):
+        messages = []
+        for i, text in enumerate(texts):
+            role = 'assistant' if i % 2 else 'user'
+            messages.append({'role': role, 'content': text})
+        self.records.append({'messages': messages})
+
 
 def __4_综合集成类():
     pass
@@ -588,6 +600,7 @@ class GptChatDir:
         self.chat_file = root / 'in.jsonl'
         self.chatted_file = root / 'out.jsonl'
         self.post_file = root / 'post.jsonl'
+        self.train_file = root / 'train.jsonl'
 
         self.upload_files_dir = root / 'upload_files'
         self.download_files_dir = root / 'download_files'
@@ -596,8 +609,8 @@ class GptChatDir:
             if not dir_path.is_dir():
                 dir_path.mkdir(parents=True, exist_ok=True)
 
-    def init(self):
-        """ 一些基础处理 """
+    def summary(self):
+        """ 一些统计信息 """
         # 1 chat信息
         if self.chatted_file.is_file():
             gcj1 = GptChatJsonl(self.chatted_file)
@@ -636,38 +649,147 @@ class GptChatDir:
 
         print(f'3、post：{len(gcj2.records)}条会话')
 
-    def merge_rechatted(self, check_func, rechat_dir):
-        """ 从另一份重跑的数据，更新数据回来
+        # 4 verify（这一步有时候会集成到post中）
 
-        :param check_func: 原chatted没过，但是rechatted通过的，需要把数据更新过来
-        :param rechat_dir: 注意是传另一份数据所在的目录
+        # 5 train 生成的训练数据
+        print('5、train：')
+        gtj = GptTrainJsonl(self.train_file)
+        gtj.analyze_text_length()
 
-        TODO 这个函数还没写完
+    def create_chat(self):
+        """ 生成chat数据，具体内容方式跟业务有关 """
+        raise NotImplementedError
+
+    def browse_chatted_record(self, index=None, paths=None, **kwargs):
+        """ 显示第i次会话的内容 """
+        f = self.chatted_file if self.chatted_file.is_file() else self.chat_file
+        return GptChatJsonl(f, 100).browse_record(index, paths, **kwargs)
+
+    def chatted2post_record(self, chatted_record):
+        """ 后处理，解析
+
+        一般会保留基本的all_answers结果，供检查上游一些基本情况
+        然后把一些结构化结果存储到extra字段
+
+        :return: 会返回新的dict结构的一个post_record，如果解析失败，会返回None
         """
-        rechat_dir = XlPath(rechat_dir)
-        td = TwinDirs(rechat_dir, self.root)
+        # 0 基本情况判断
+        if 'all_answers' not in chatted_record:
+            return
 
-        gcj1 = GptChatJsonl(self.chatted_file)
-        gcj2 = type(self)(rechat_dir / 'out.jsonl')
+        post_record = copy.deepcopy(chatted_record)
 
-        id2index = {x['id']: i for i, x in enumerate(gcj1.records)}
+        # 1 删掉一些没卵用的字段
+        for name in ['all_questions', 'first_text_length', 'second_text_length']:
+            if name in post_record:
+                del post_record[name]
 
-        # 需要处理下下载链接名称
-        gcj2.parse_answer_downloads()
+        # 2 解析all_answers：这个结构太复杂，进行内容整理精简
+        # 2.1 contents：这个结构太复杂，搁这俄罗斯套娃呢~ 稍微精简下更方便后处理
+        for answer in post_record['all_answers']:
+            if isinstance(answer, dict) and 'contents' in answer:
+                new_contents = []
+                for i, x in enumerate(answer['contents']):
+                    if not x['message']:
+                        continue
+                    content = x['message']['content']
+                    new_content = {'type': content['content_type']}
+                    if content['content_type'] == 'text':
+                        new_content['text'] = '\n'.join(content['parts'])
+                    elif content['content_type'] == 'code':
+                        new_content['text'] = content['text']
+                    elif content['content_type'] == 'execution_output':
+                        new_content['text'] = content['text']
+                    else:
+                        raise ValueError('未见类型')
 
-        for y in gcj2.records:
-            index = id2index[y['id']]
-            x = gcj1.records[index]
-            x2 = copy.deepcopy(x)
-            gcj1.parse_single_record_answer(x2)
-            if not check_func(x2) and check_func(y):
-                # 先把x相关的数据删掉
-                if 'all_answers' in x2:
-                    for answer in x2['all_answers']:
-                        for fname in answer.get('downloads', []):
-                            (self.root / (str(x['id']) + '-' + fname)).delete()
-                # 再把y拷贝过来
-                for answer in y['all_answers']:
-                    for fname in answer.get('downloads', []):
-                        td.copy_file(td.src_dir / fname)
-                gcj1.records[index] = y
+                    new_contents.append(new_content)
+                answer['contents'] = new_contents
+
+        # 2.2 downloads：下载链接精简下，并把关联的文件也顺带整理一下
+        for answer in post_record['all_answers']:
+            if 'downloads' not in answer:
+                continue
+            for i, link in enumerate(answer['downloads']):
+                m = re.search(r'filename%3D(.+?)&sig=', link)
+                if m:
+                    answer['downloads'][i] = str(post_record['id']) + '-' + unquote(unquote(m.group(1)))
+
+        # 2.3 删掉answer里其他没用的字段
+        for answer in post_record['all_answers']:
+            for name in ['created', 'message_id', 'conversation_id', 'end_turn']:
+                if name in answer:
+                    del answer[name]
+
+        # 返回处理结果
+        return post_record
+
+    def create_post(self, n_jobs=1):
+        """ 建议初步跑的时候，先串行debug，等比较稳定后，再开并发跑 """
+        # 1 把下载的文件整理的更清晰些
+        with TicToc('整理下载的文件'):
+            for f in self.root.glob_files('OpenAI-download-*'):
+                new_name = re.sub(r'OpenAI-download-\d+-', '', f.name)
+                # gpt同一次会话是有重名文件的，如果使用replace请慎重
+                f.rename2(self.download_files_dir / new_name, if_exists='replace')
+
+        # 2 把chatted数据解析为post格式
+        with TicToc('读取chatted数据'):
+            gcj1 = GptChatJsonl(self.chatted_file)
+            gcj2 = GptChatJsonl()
+
+        for x in tqdm(gcj1.records):
+            y = self.chatted2post_record(x)
+
+            if y:
+                gcj2.records.append(y)
+
+        # def func(x):
+        #     y = self.chatted2post_record(x)
+        #     if y:
+        #         gcj2.records.append(y)
+        #
+        # pl = Parallel(n_jobs=n_jobs, backend='threading', timeout=5)
+        # pl(delayed(func)(x) for x in tqdm(gcj1.records))
+
+        # 3 保存后处理文件
+        gcj2.save(self.post_file)
+
+    # def merge_rechatted(self, check_func, rechat_dir):
+    #     """ 从另一份重跑的数据，更新数据回来
+    #
+    #     :param check_func: 原chatted没过，但是rechatted通过的，需要把数据更新过来
+    #     :param rechat_dir: 注意是传另一份数据所在的目录
+    #
+    #     TODO 这个函数还没写完
+    #     """
+    #     rechat_dir = XlPath(rechat_dir)
+    #     td = TwinDirs(rechat_dir, self.root)
+    #
+    #     gcj1 = GptChatJsonl(self.chatted_file)
+    #     gcj2 = type(self)(rechat_dir / 'out.jsonl')
+    #
+    #     id2index = {x['id']: i for i, x in enumerate(gcj1.records)}
+    #
+    #     # 需要处理下下载链接名称
+    #     gcj2.parse_answer_downloads()
+    #
+    #     for y in gcj2.records:
+    #         index = id2index[y['id']]
+    #         x = gcj1.records[index]
+    #         x2 = copy.deepcopy(x)
+    #         gcj1.parse_single_record_answer(x2)
+    #         if not check_func(x2) and check_func(y):
+    #             # 先把x相关的数据删掉
+    #             if 'all_answers' in x2:
+    #                 for answer in x2['all_answers']:
+    #                     for fname in answer.get('downloads', []):
+    #                         (self.root / (str(x['id']) + '-' + fname)).delete()
+    #             # 再把y拷贝过来
+    #             for answer in y['all_answers']:
+    #                 for fname in answer.get('downloads', []):
+    #                     td.copy_file(td.src_dir / fname)
+    #             gcj1.records[index] = y
+
+    def create_train(self):
+        raise NotImplementedError
