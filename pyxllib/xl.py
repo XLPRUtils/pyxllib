@@ -6,6 +6,7 @@
 
 """ pyxllib常用功能
 """
+import fire
 
 from pyxllib.file.packlib import shutil
 
@@ -25,3 +26,7 @@ from pyxllib.text.specialist import *
 from pyxllib.file.newbie import *
 from pyxllib.file.pupil import *
 from pyxllib.file.specialist import *
+
+if __name__ == '__main__':
+    # 直接运行的话，支持开放出所有函数类接口
+    fire.Fire()

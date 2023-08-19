@@ -303,3 +303,16 @@ class JsonlDataFile:
             new_data_file = JsonlDataFile()
             new_data_file.records = new_records
             return new_data_file
+
+
+class JsonlDataDir:
+    def __init__(self, dir_path):
+        """ 一般用来处理较大的jsonl文件，将其该放到一个目录里，拆分成多个jsonl文件
+        """
+        self.dir_path = XlPath(dir_path)
+
+    @classmethod
+    def init_from_file(cls, file, lines_per_file=1000):
+        """ 从一个jsonl文件初始化一个JsonlDataDir对象 """
+        file = XlPath(file)
+        JsonlDataFile.split_file_to_dir(file, lines_per_file=lines_per_file)
