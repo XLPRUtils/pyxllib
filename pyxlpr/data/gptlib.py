@@ -16,6 +16,7 @@ import re
 import html
 import random
 from urllib.parse import unquote
+from collections import OrderedDict
 
 import pandas as pd
 from transformers import GPT2TokenizerFast
@@ -600,10 +601,15 @@ class GptChatDir:
         self.chat_file = root / 'in.jsonl'
         self.chatted_file = root / 'out.jsonl'
         self.post_file = root / 'post.jsonl'
+        self.verify_file = root / 'verify.jsonl'
         self.train_file = root / 'train.jsonl'
 
         self.upload_files_dir = root / 'upload_files'
         self.download_files_dir = root / 'download_files'
+
+        # 把 1chat 改名 in，2chatted 改名 out
+        # for f in self.root.glob_files('*1chat*.jsonl'):
+        #     f.rename2(f.parent / 'in.jsonl')
 
         for dir_path in [self.root, self.upload_files_dir, self.download_files_dir]:
             if not dir_path.is_dir():
@@ -714,6 +720,8 @@ class GptChatDir:
                 m = re.search(r'filename%3D(.+?)&sig=', link)
                 if m:
                     answer['downloads'][i] = str(post_record['id']) + '-' + unquote(unquote(m.group(1)))
+            # 理论上下载的文件不应该有重复，虽然不知道为什么会拿到重复，但去掉重复比较好
+            answer['downloads'] = list(OrderedDict.fromkeys(answer['downloads']))
 
         # 2.3 删掉answer里其他没用的字段
         for answer in post_record['all_answers']:
@@ -754,42 +762,6 @@ class GptChatDir:
 
         # 3 保存后处理文件
         gcj2.save(self.post_file)
-
-    # def merge_rechatted(self, check_func, rechat_dir):
-    #     """ 从另一份重跑的数据，更新数据回来
-    #
-    #     :param check_func: 原chatted没过，但是rechatted通过的，需要把数据更新过来
-    #     :param rechat_dir: 注意是传另一份数据所在的目录
-    #
-    #     TODO 这个函数还没写完
-    #     """
-    #     rechat_dir = XlPath(rechat_dir)
-    #     td = TwinDirs(rechat_dir, self.root)
-    #
-    #     gcj1 = GptChatJsonl(self.chatted_file)
-    #     gcj2 = type(self)(rechat_dir / 'out.jsonl')
-    #
-    #     id2index = {x['id']: i for i, x in enumerate(gcj1.records)}
-    #
-    #     # 需要处理下下载链接名称
-    #     gcj2.parse_answer_downloads()
-    #
-    #     for y in gcj2.records:
-    #         index = id2index[y['id']]
-    #         x = gcj1.records[index]
-    #         x2 = copy.deepcopy(x)
-    #         gcj1.parse_single_record_answer(x2)
-    #         if not check_func(x2) and check_func(y):
-    #             # 先把x相关的数据删掉
-    #             if 'all_answers' in x2:
-    #                 for answer in x2['all_answers']:
-    #                     for fname in answer.get('downloads', []):
-    #                         (self.root / (str(x['id']) + '-' + fname)).delete()
-    #             # 再把y拷贝过来
-    #             for answer in y['all_answers']:
-    #                 for fname in answer.get('downloads', []):
-    #                     td.copy_file(td.src_dir / fname)
-    #             gcj1.records[index] = y
 
     def create_train(self):
         raise NotImplementedError

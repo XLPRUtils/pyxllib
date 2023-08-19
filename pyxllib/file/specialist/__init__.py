@@ -244,14 +244,14 @@ class JsonlDataFile:
 
 
 class JsonlDataDir:
-    def __init__(self, dir_path):
+    def __init__(self, root):
         """ 一般用来处理较大的jsonl文件，将其该放到一个目录里，拆分成多个jsonl文件
 
         注意待处理的文件名是依照 01.jsonl, 02.jsonl,... 的格式识别的，不要改动这个规则
         """
-        self.dir_path = XlPath(dir_path)
+        self.root = XlPath(root)
         self.files = []
-        for f in self.dir_path.glob_files('*.jsonl'):
+        for f in self.root.glob_files('*.jsonl'):
             if re.match(r'\d+$', f.stem):
                 self.files.append(f)
 

@@ -205,10 +205,7 @@ def write_dataframes_to_excel(outfile, dataframes, order_mode='序号'):
                 if start == 1:
                     start = 0
                 for col_num, value in enumerate(df.columns, start=start):
-                    try:
-                        writer.sheets[sheet_name].write(0, col_num, value, head_format)
-                    except IndexError:  # 有bug，先跳过
-                        pass
+                    writer.sheets[sheet_name].write(0, col_num, value, head_format)
 
 
 def read_dataframes_from_excel(infile):
