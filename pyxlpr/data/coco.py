@@ -41,7 +41,7 @@ from pyxllib.prog.pupil import DictTool
 from pyxllib.prog.specialist import mtqdm
 from pyxllib.algo.pupil import Groups, make_index_function, matchpairs
 from pyxllib.algo.geo import rect_bounds, rect2polygon, reshape_coords, ltrb2xywh, xywh2ltrb, ComputeIou
-from pyxllib.algo.stat import dataframes_to_excel
+from pyxllib.algo.stat import write_dataframes_to_excel
 from pyxllib.file.specialist import PathGroups, XlPath
 from pyxllib.prog.specialist import get_xllog
 from pyxlpr.data.icdar import IcdarEval
@@ -1272,7 +1272,7 @@ class CocoMatch(CocoParser, CocoMatchBase):
             print(self.parse_dt_score())
 
     def to_excel(self, savepath, *, segmentation=False):
-        dataframes_to_excel(savepath,
+        write_dataframes_to_excel(savepath,
                             {'images': self.images,
                              'categories': self.categories,
                              'match_anns': self.match_anns})
