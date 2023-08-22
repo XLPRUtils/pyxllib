@@ -4,6 +4,9 @@
 # @Email  : 877362867@qq.com
 # @Date   : 2021/06/06 17:46
 
+from itertools import islice
+import multiprocessing
+import multiprocessing.dummy
 
 from pyxllib.file.specialist.filelib import *
 from pyxllib.file.specialist.dirlib import *
@@ -50,15 +53,42 @@ class JsonlDataFile:
                 # 只读取部分数据
                 self.read_partial_records(num_records)
 
+    def __len__(self):
+        return len(self.records)
+
+    def yield_record(self, start=0, end=None, step=1, batch_size=None):
+        """ 返回指定区间的记录
+
+        :param int start: 起始记录索引，默认为0
+        :param int end: 结束记录索引，默认为None（读取到记录末尾）
+        :param int step: 步长，默认为1
+        :param int batch_size: 每批返回的记录数，如果为None，则逐记录返回
+        """
+        total_records = len(self.records)  # 获取总记录数
+
+        # 处理负索引
+        if start < 0 or (end is not None and end < 0):
+            if start < 0:
+                start = total_records + start
+            if end is not None and end < 0:
+                end = total_records + end
+
+        iterator = islice(self.records, start, end, step)
+        while True:
+            batch = list(islice(iterator, batch_size))
+            if not batch:
+                break
+            if batch_size is None:
+                yield from batch
+            else:
+                yield batch
+
     def read_partial_records(self, num_records):
         """ 从jsonl文件中只读取指定数量的记录 """
         if self.infile and self.infile.is_file():
-            with open(self.infile, 'r', encoding='utf-8') as file:
-                for _ in range(num_records):
-                    line = file.readline().strip()
-                    if not line:
-                        break  # 如果已经读完文件，跳出循环
-                    self.records.append(json.loads(line))
+            lines = next(self.infile.yield_line(batch_size=num_records))
+            for line in lines:
+                self.records.append(json.loads(line))
 
     def save(self, outfile=None, ensure_ascii=False):
         """ 将当前数据保存到指定的jsonl文件中 """
@@ -208,31 +238,24 @@ class JsonlDataFile:
         self.records += other.records
         return self
 
-    def apply_function_to_records(self, func, inplace=False, print_mode=0):
+    def process_each_record(self, func, *, inplace=False, print_mode=0, threads_num=1):
         """ 对records中的每个record应用函数func，可以选择是否在原地修改，以及是否显示进度条
 
         :param function func: 对record进行处理的函数，应接受一个record作为参数并返回处理后的record，如果返回None则删除该record
         :param bool inplace: 是否在原地修改records，如果为False（默认），则创建新的JsonlDataFile并返回
         :param int print_mode: 是否显示处理过程的进度条，0表示不显示（默认），1表示显示
         :return JsonlDataFile or None: 如果inplace为False，则返回新的JsonlDataFile，否则返回None
+        :param int threads_num: 线程数，默认为1，即单线程
 
         遍历self.records，对每个record执行func函数，如果func返回None，则不包含该record到新的records中。
-
-        >>> data_file = JsonlDataFile()
-        >>> data_file.records = [{'a': 1}, {'b': 2}, {'c': 3}]
-        >>> func = lambda x: {k: v * 2 for k, v in x.items()} if 'a' in x else None  # 定义一个只处理含有'a'的record并将其值翻倍的函数
-        >>> new_data_file = data_file.apply_function_to_records(func, print_mode=1)
-        >>> new_data_file.records
-        [{'a': 2}]
-        >>> data_file.records  # 原始的data_file并没有被修改
-        [{'a': 1}, {'b': 2}, {'c': 3}]
         """
-        records = self.records
-        if print_mode == 1:
-            records = tqdm(records)
+        with multiprocessing.dummy.Pool(threads_num) as executor:
+            if print_mode == 1:
+                results = tqdm(executor.imap(func, self.records), total=len(self.records))
+            else:
+                results = executor.imap(func, self.records)
 
-        # new_records = [func(record) for record in records if func(record) is not None]
-        new_records = [func(record) for record in records]
+            new_records = list(results)
 
         if inplace:
             self.records = new_records
@@ -242,8 +265,14 @@ class JsonlDataFile:
             new_data_file.records = new_records
             return new_data_file
 
+    def update_each_record(self, func, print_mode=0):
+        """ 遍历并对原始数据进行更改 """
+        self.process_each_record(func, inplace=True, print_mode=print_mode)
+
 
 class JsonlDataDir:
+    """ 注意这个类开发目标，应该是尽量去模拟JsonDataFile，让下游工作更好衔接统一 """
+
     def __init__(self, root):
         """ 一般用来处理较大的jsonl文件，将其该放到一个目录里，拆分成多个jsonl文件
 
@@ -252,28 +281,140 @@ class JsonlDataDir:
         self.root = XlPath(root)
         self.files = []
         for f in self.root.glob_files('*.jsonl'):
-            if re.match(r'\d+$', f.stem):
+            if re.match(r'_?\d+$', f.stem):  # 目前先用'_?'兼容旧版，但以后应该固定只匹配_\d+
                 self.files.append(f)
 
+    def __bool__(self):
+        if self.root.is_dir() and self.files:
+            return True
+        else:
+            return False
+
+    def count_records(self):
+        total = 0
+        for f in self.files:
+            total += len(JsonlDataFile(f).records)
+        return total
+
     def check(self):
+        """ 检查一些数据状态 """
         print('文件数：', len(self.files))
 
     @classmethod
-    def init_from_file(cls, file, lines_per_file=1000):
+    def init_from_file(cls, file, lines_per_file=10000):
         """ 从一个jsonl文件初始化一个JsonlDataDir对象 """
         file = XlPath(file)
         dst_dir = file.parent / file.stem
-        if not dst_dir.is_dir():
+        if not dst_dir.is_dir() and file.is_file():
             file.split_to_dir(lines_per_file, dst_dir)
         c = cls(dst_dir)
         return c
 
-    def apply_function_to_records(self, func):
-        """ 对records中的每个record应用函数func，先写出最简单的串行版本，后续可以考虑更复杂的并行版本
+    def rearrange(self, lines_per_file=10000):
+        """ 重新整理划分文件
+
+        :param int lines_per_file: 每个文件的行数
         """
-        n = len(self.files)
+        output_dir = self.root
+
+        # 使用临时文件名前缀，以便在处理完成后更改为最终的文件名
+        temp_prefix = 'temp_'
+
+        new_file_count = 1
+        new_file = None
+        line_count = 0
+
+        # 计算总行数以确定文件名的前导零数量
+        total_lines = sum(1 for file in self.files for _ in file.open('r', encoding='utf-8'))
+        num_digits = len(str((total_lines + lines_per_file - 1) // lines_per_file))
+
+        for file in self.files:
+            with file.open('r', encoding='utf-8') as f:
+                for line in f:
+                    if line_count == 0:
+                        if new_file is not None:
+                            new_file.close()
+                        new_file_name = f'{temp_prefix}{new_file_count:0{num_digits}d}.jsonl'
+                        new_file_path = output_dir / new_file_name
+                        new_file = new_file_path.open('w', encoding='utf-8')
+                        new_file_count += 1
+
+                    new_file.write(line)
+                    line_count += 1
+
+                    if line_count == lines_per_file:
+                        line_count = 0
+
+        if new_file is not None:
+            new_file.close()
+
+        # 删除旧文件
+        for file in self.files:
+            os.remove(file)
+
+        # 将临时文件名更改为最终的文件名
+        for temp_file in output_dir.glob(f'{temp_prefix}*.jsonl'):
+            final_name = temp_file.name[len(temp_prefix):]
+            temp_file.rename(output_dir / final_name)
+
+    def yield_record(self, batch_size=None):
+        """ 返回数据记录
+
+        :param int batch_size: 每批返回的记录数，如果为None，则逐条返回
+        """
         for i, file in enumerate(self.files):
-            print(f'处理文件 {i + 1}/{n}: {file}')
+            data = file.read_jsonl()
+            iterator = iter(data)
+            while True:
+                batch = list(islice(iterator, batch_size))
+                if not batch:
+                    break
+                if batch_size is None:
+                    yield from batch
+                else:
+                    yield batch
+
+    def process_each_record(self, func, *, inplace=False,
+                            print_mode=1, desc=None,
+                            processes_num=1, threads_num=1):
+        """ 封装的对每个record进行操作的函数
+
+        :param int processes_num: 进程数，每个文件为单独一个进程
+        :param int threads_num: 线程数，每个文件处理的时候使用几个线程
+        """
+        for i, file in tqdm(enumerate(self.files), desc=desc, disable=not print_mode):
             data_file = JsonlDataFile(file)
-            data_file.apply_function_to_records(func, inplace=True, print_mode=1)
-            data_file.save(file)
+            data_file.process_each_record(func, inplace=inplace,
+                                          threads_num=threads_num,
+                                          print_mode=print_mode > 1)
+            if inplace:
+                data_file.save(file)
+
+    def update_each_record(self, func, desc=None):
+        """ 封装的对每个record进行操作的函数
+        """
+        self.process_each_record(func, inplace=True, desc=desc)
+
+    def process_each_file(self, func, *, desc=None):
+        for i, file in tqdm(enumerate(self.files), desc=desc):
+            func(file)
+
+    def process_each_records(self, func, *, inplace=False, desc=None):
+        for i, file in tqdm(enumerate(self.files), desc=desc):
+            records = XlPath(file).read_jsonl()
+            new_records = func(records)  # 如果使用inplace，那么需要函数配套返回新的records
+            if inplace:
+                XlPath(file).write_jsonl(new_records)
+
+    def save(self, dst_path=None):
+        """ 将数据合并到一个jsonl文件中 """
+        if not dst_path:
+            dst_path = self.root.parent / f'{self.root.name}.jsonl'
+        dst_path = XlPath(dst_path)
+        dst_path.parent.mkdir(parents=True, exist_ok=True)
+        with dst_path.open('w', encoding='utf8') as f:
+            for file in tqdm(self.files, desc=f'合并文件并保存 {dst_path.name}'):
+                with file.open('r', encoding='utf8') as f2:
+                    for line in f2:
+                        if line.strip():  # 不存储空行
+                            f.write(line)

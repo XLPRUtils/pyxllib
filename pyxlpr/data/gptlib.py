@@ -25,7 +25,7 @@ from openpyxl import Workbook
 
 from pyxllib.prog.specialist import browser, TicToc
 from pyxllib.algo.pupil import ValuesStat
-from pyxllib.file.specialist import XlPath, JsonlDataFile, TwinDirs
+from pyxllib.file.specialist import XlPath, JsonlDataFile, JsonlDataDir, TwinDirs
 
 
 def __1_生成提问数据():
@@ -111,12 +111,13 @@ class GptChatJsonl(JsonlDataFile):
     """ GPT问答批量执行脚本的jsonl生成、读取器 """
 
     def __init__(self, file=None, num_records=None, *, start_id=None):
-        from datetime import date
+        from datetime import datetime
 
         super().__init__(file, num_records)
         if start_id is None:
-            today = date.today().strftime("%Y%m%d")
-            self.start_id = int(today + "00000000")
+            # 230821周一02:02，原本只有日期标记，后面发现这样id很容易出现重复，还是加上小时分钟更不容易引起一些没必要的麻烦
+            today = datetime.now().strftime("%Y%m%d%H%M")
+            self.start_id = int(today + "000000")
         else:
             self.start_id = start_id
 
@@ -595,7 +596,7 @@ def __4_综合集成类():
 class GptChatDir:
     """ 一个目录，包含了一个任务的所有数据，包括in、out、post等文件 """
 
-    def __init__(self, root):
+    def __init__(self, root, lines_per_file=10000):
         self.root = root = XlPath(root)
 
         self.chat_file = root / 'in.jsonl'
@@ -604,10 +605,17 @@ class GptChatDir:
         self.verify_file = root / 'verify.jsonl'
         self.train_file = root / 'train.jsonl'
 
+        # 如果有目录文件，会优先以目录为准。如果没有，则会从单文件拆分创建。
+        self.chat_dir = JsonlDataDir.init_from_file(self.chat_file, lines_per_file)
+        self.chatted_dir = JsonlDataDir.init_from_file(self.chatted_file, lines_per_file)
+        self.post_dir = JsonlDataDir.init_from_file(self.post_file, lines_per_file)
+        self.verify_dir = JsonlDataDir.init_from_file(self.verify_file, lines_per_file)
+        self.train_dir = JsonlDataDir.init_from_file(self.train_file, lines_per_file)
+
         self.upload_files_dir = root / 'upload_files'
         self.download_files_dir = root / 'download_files'
 
-        # 把 1chat 改名 in，2chatted 改名 out
+        # todo 把 1chat 改名 in，2chatted 改名 out
         # for f in self.root.glob_files('*1chat*.jsonl'):
         #     f.rename2(f.parent / 'in.jsonl')
 
@@ -618,49 +626,36 @@ class GptChatDir:
     def summary(self):
         """ 一些统计信息 """
         # 1 chat信息
-        if self.chatted_file.is_file():
-            gcj1 = GptChatJsonl(self.chatted_file)
-        elif self.chat_file.is_file():
-            gcj1 = GptChatJsonl(self.chat_file)
-        else:
+        gcd1 = self.chatted_dir or self.chat_dir
+        if not gcd1:
             print('请确认是否有生成初始的chat数据')
             return
 
         print(f'【{self.root.name}】')
-        n = len(gcj1.records)
-        m = sum([len(x['text']) for x in gcj1.records])
+        texts = [len(x['text']) for x in gcd1.yield_record()]
+        n, m = len(texts), sum(texts)
         print(f'1、chat：{n}条会话*{m / n:.2g}条消息')
+        gcj1 = GptChatJsonl(gcd1.files[0])  # 统计一个文件就够了，不然太多了
         gcj1.check_records()
         print()
 
         # 2 chatted信息
-        filter_records = [x for x in gcj1.records if 'all_answers' in x]
+        filter_records = [x for x in gcd1.yield_record() if 'all_answers' in x]
         if filter_records:
             print(f'2、chatted：已获得{len(filter_records)}条会话')
         else:
             print('2、chatted：暂未获得生成数据')
 
         # 3 post信息
-        if filter_records and not self.post_file.is_file():  # 待生成后处理文件
-            gcj2 = GptChatJsonl()
-            gcj2.infile = self.post_file
-            gcj2.records = filter_records
-            gcj2.parse_answer_contents()
-            gcj2.parse_answer_downloads()
-            gcj2.save()
-        elif self.post_file.is_file():  # 已经有后处理文件
-            gcj2 = GptChatJsonl(self.post_file)
-        else:
-            return
-
-        print(f'3、post：{len(gcj2.records)}条会话')
+        if self.post_dir:
+            print(f'3、post：{self.post_dir.count_records()}条会话')
 
         # 4 verify（这一步有时候会集成到post中）
 
         # 5 train 生成的训练数据
-        print('5、train：')
-        gtj = GptTrainJsonl(self.train_file)
-        gtj.analyze_text_length()
+        # print('5、train：')
+        # gtj = GptTrainJsonl(self.train_file)
+        # gtj.analyze_text_length()
 
     def create_chat(self):
         """ 生成chat数据，具体内容方式跟业务有关 """
@@ -719,7 +714,12 @@ class GptChatDir:
             for i, link in enumerate(answer['downloads']):
                 m = re.search(r'filename%3D(.+?)&sig=', link)
                 if m:
-                    answer['downloads'][i] = str(post_record['id']) + '-' + unquote(unquote(m.group(1)))
+                    answer['downloads'][i] = str(post_record['id']) + '/' + unquote(unquote(m.group(1)))
+                # 对应的文件不存在的不要，有数据超过50M的也不要
+                file = self.download_files_dir / link
+                if not file.exists() and file.size() > 50 * 1024 * 1024:
+                    return
+
             # 理论上下载的文件不应该有重复，虽然不知道为什么会拿到重复，但去掉重复比较好
             answer['downloads'] = list(OrderedDict.fromkeys(answer['downloads']))
 
@@ -732,26 +732,45 @@ class GptChatDir:
         # 返回处理结果
         return post_record
 
-    def create_post(self, n_jobs=1):
-        """ 建议初步跑的时候，先串行debug，等比较稳定后，再开并发跑 """
-        # 1 把下载的文件整理的更清晰些
+    def post2verify_record(self, post_record):
+        """ 这个一般是要具体任务定制的，没有通用操作方式 """
+        raise NotImplementedError
+
+    def verify2train_record(self, verify_record):
+        """ 这个一般是要具体任务定制的，没有通用操作方式 """
+        raise NotImplementedError
+
+    def organize_downloaded_files(self):
+        # 把下载的文件整理的更清晰些
         with TicToc('整理下载的文件'):
             for f in self.root.glob_files('OpenAI-download-*'):
                 new_name = re.sub(r'OpenAI-download-\d+-', '', f.name)
-                # gpt同一次会话是有重名文件的，如果使用replace请慎重
-                f.rename2(self.download_files_dir / new_name, if_exists='replace')
+                new_name = new_name.replace('-', '/', 1)
+                try:
+                    (self.download_files_dir / new_name).parent.mkdir(exist_ok=True)
+                    f.rename2(self.download_files_dir / new_name, if_exists='replace')
+                except FileExistsError as e:
+                    # 有的文件会移动不了
+                    print(e)
 
-        # 2 把chatted数据解析为post格式
-        with TicToc('读取chatted数据'):
-            gcj1 = GptChatJsonl(self.chatted_file)
+        # 会剩一些特殊的处理不了的文件，可以看一眼后手动删掉
+        # 这些相关的records，默认的chatted2post_record会把这些记录过滤掉
+
+    def create_post(self, n_jobs=1):
+        """ 建议初步跑的时候，先串行debug，等比较稳定后，再开并发跑 """
+        # 1 把chatted数据解析为post格式
+        print('【create_post】后处理')
+        n = len(self.chatted_dir.files)
+        for i, chatted_file in enumerate(self.chatted_dir.files):
+            gcj = GptChatJsonl(chatted_file)
             gcj2 = GptChatJsonl()
+            for x in tqdm(gcj.records, desc=f'第{i + 1}/{n}个文件'):
+                y = self.chatted2post_record(x)
+                if y:
+                    gcj2.records.append(y)
+            gcj2.save(self.post_dir.root / chatted_file.name)
 
-        for x in tqdm(gcj1.records):
-            y = self.chatted2post_record(x)
-
-            if y:
-                gcj2.records.append(y)
-
+        # 2 尝试并发？
         # def func(x):
         #     y = self.chatted2post_record(x)
         #     if y:
@@ -760,8 +779,26 @@ class GptChatDir:
         # pl = Parallel(n_jobs=n_jobs, backend='threading', timeout=5)
         # pl(delayed(func)(x) for x in tqdm(gcj1.records))
 
-        # 3 保存后处理文件
-        gcj2.save(self.post_file)
+    def create_verify(self, n_jobs=1):
+        print('【create_verify】得到更准确或精确后处理的验证集')
+        n = len(self.post_dir.files)
+        for i, post_file in enumerate(self.post_dir.files):
+            gcj = GptChatJsonl(post_file)
+            gcj2 = GptChatJsonl()
+            for x in tqdm(gcj.records, desc=f'第{i + 1}/{n}个文件'):
+                y = self.post2verify_record(x)
+                if y:
+                    gcj2.records.append(y)
+            gcj2.save(self.post_dir.root / post_file.name)
 
     def create_train(self):
-        raise NotImplementedError
+        print('【create_train】生成训练集数据')
+        n = len(self.verify_dir.files)
+        for i, verify_file in enumerate(self.verify_dir.files):
+            gcj = GptChatJsonl(verify_file)
+            gcj2 = GptChatJsonl()
+            for x in tqdm(gcj.records, desc=f'第{i + 1}/{n}个文件'):
+                y = self.verify2train_record(x)
+                if y:
+                    gcj2.records.append(y)
+            gcj2.save(self.train_dir.root / verify_file.name)

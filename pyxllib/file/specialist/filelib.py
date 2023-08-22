@@ -21,6 +21,8 @@ import tempfile
 import ujson
 from collections import defaultdict, Counter
 import math
+from itertools import islice
+import datetime
 
 # import chardet
 import charset_normalizer
@@ -916,22 +918,57 @@ class XlPath(type(pathlib.Path())):
             # 判断路径字符串是否包含相对路径字符串
             return item_str.startswith(abs_path_str) or abs_path_str == item_str
 
-    def get_line_count(self):
-        """ 统计文件的行数 """
-        with open(self, 'rb') as file:
-            line_count = 0
-            while True:
-                chunk = file.read(10 * 1024 * 1024)  # 读取 10MB 的数据块
-                if not chunk:
-                    break
-                line_count += chunk.count(b'\n')  # 计算换行符数量
-        return line_count + 1  # 添加最后一行
+    def get_total_lines(self, encoding='utf-8', skip_blank=False):
+        """ 统计文件的行数（注意会统计空行，所以在某些场合可能与预期理解的条目数不太一致）
 
-    def split_to_dir(self, lines_per_file, dst_dir=None, encoding='utf-8'):
+        :param str encoding: 文件编码，默认为'utf-8'
+        :param bool skip_blank: 是否跳过空白行，默认为True
+        :return: 文件的行数
+        """
+        line_count = 0
+        with open(self, 'r', encoding=encoding) as file:
+            for line in file:
+                if skip_blank and not line.strip():  # 跳过空白行
+                    continue
+                line_count += 1
+        return line_count
+
+    def yield_line(self, start=0, end=None, step=1, batch_size=None, encoding='utf-8'):
+        """ 返回指定区间的文件行
+
+        :param int start: 起始行，默认为0
+        :param int end: 结束行，默认为None（读取到文件末尾）
+        :param int step: 步长，默认为1
+        :param int batch_size: 每批返回的行数，如果为None，则逐行返回
+        """
+        total_lines = None  # 使用局部变量缓存总行数
+        # 处理负索引
+        if start < 0 or (end is not None and end < 0):
+            total_lines = total_lines or self.get_total_lines()
+            if start < 0:
+                start = total_lines + start
+            if end is not None and end < 0:
+                end = total_lines + end
+
+        with open(self, 'r', encoding=encoding) as file:
+            iterator = islice(file, start, end, step)
+            while True:
+                batch = list(islice(iterator, batch_size))
+                if not batch:
+                    break
+                batch = [line.rstrip('\n') for line in batch]  # 删除每行末尾的换行符
+                if batch_size is None:
+                    yield from batch
+                else:
+                    yield batch
+
+    def split_to_dir(self, lines_per_file, dst_dir=None, encoding='utf-8',
+                     filename_template="_{index}{suffix}"):
         """ 将文件按行拆分到多个子文件中
 
         :param int lines_per_file: 打算拆分的每个新文件的行数
-        :param str dst_dir: 目标目录，未输入的时候，输出到同stem明的目录下
+        :param str dst_dir: 目标目录，未输入的时候，输出到同stem名的目录下
+        :param str filename_template: 文件名模板，可以包含 {stem}, {index} 和 {suffix} 占位符
         :return list: 拆分的文件路径列表
             拆分后文件名类似如下： 01.jsonl, 02.jsonl, ...
         """
@@ -950,7 +987,6 @@ class XlPath(type(pathlib.Path())):
 
         # 2 拆分文件
         split_files = []  # 用于保存拆分的文件路径
-        tmp_files = []  # 用于保存临时文件路径
         outfile = None
         filename_format = "{:04d}"
         outfile_index = 0
@@ -964,7 +1000,6 @@ class XlPath(type(pathlib.Path())):
                         outfile.close()
                     outfile_path = dst_dir / f"{self.stem}_{filename_format.format(outfile_index)}{suffix}"
                     outfile = open(outfile_path, 'w', encoding='utf-8')
-                    tmp_files.append(str(outfile_path))
                     split_files.append(outfile_path)  # 先占位，后面再填充
                     outfile_index += 1
                 outfile.write(line)
@@ -976,12 +1011,53 @@ class XlPath(type(pathlib.Path())):
         # 3 重新设置文件名的对齐宽度
         new_filename_format = "{:0" + str(len(str(len(split_files)))) + "d}"
         for i, old_file in enumerate(split_files):
-            new_name = dst_dir / f"{new_filename_format.format(i)}{suffix}"
+            new_name = dst_dir / filename_template.format(stem=self.stem,
+                                                          index=new_filename_format.format(i),
+                                                          suffix=suffix)
             os.rename(old_file, new_name)
             split_files[i] = new_name
 
         # 返回拆分的文件路径列表
         return split_files
+
+    def merge_from_files(self, files,
+                         ignore_empty_lines_between_files=False,
+                         encoding='utf-8'):
+        """ 将多个文件合并到一个文件中
+
+        :param list files: 要合并的文件列表
+        :param bool ignore_empty_lines_between_files: 是否忽略文件间的空行
+        :param str encoding: 文件编码，默认为'utf-8'
+        :return XlPath: 合并后的文件路径
+        """
+        # 合并文件
+        prev_line_end_with_newline = True  # 记录上一次text的最后一个字符是否为'\n'
+        with open(self, 'w', encoding=encoding) as outfile:
+            for i, file in enumerate(files):
+                file = XlPath(file)
+                text = file.read_text(encoding=encoding)
+                if ignore_empty_lines_between_files:
+                    text = text.rstrip('\n')
+                if i > 0 and not prev_line_end_with_newline and text != '':
+                    outfile.write('\n')
+                outfile.write(text)
+                prev_line_end_with_newline = text.endswith('\n')
+
+    def merge_from_dir(self, src_dir, filename_template="_{index}{suffix}", encoding='utf-8'):
+        """ 将目录中的多个文件合并到一个文件中
+
+        :param str src_dir: 要合并的文件所在的目录
+        :param str filename_template: 文件名模板，可以包含 {stem}, {index} 和 {suffix} 占位符
+        :param str encoding: 文件编码，默认为'utf-8'
+        :return XlPath: 合并后的文件路径
+        """
+        src_dir = XlPath(src_dir)
+        stem = src_dir.name
+
+        pattern = filename_template.format(stem=stem, index="(\d+)", suffix=".*")
+        files = [file for file in src_dir.iterdir() if re.match(pattern, file.name)]  # 获取目录中符合模式的文件
+
+        self.merge_from_files(files, ignore_empty_lines_between_files=True, encoding=encoding)
 
     def __1_read_write(self):
         """ 参考标准库的
@@ -1089,7 +1165,7 @@ class XlPath(type(pathlib.Path())):
     def write_jsonl(self, list_data, ensure_ascii=False):
         """ 由于这种格式主要是跟商汤这边对接，就尽量跟它们的格式进行兼容 """
         content = '\n'.join([json.dumps(x, ensure_ascii=ensure_ascii) for x in list_data])
-        self.write_text_unix(content + '\n')
+        self.write_text_unix(content)
 
     def read_csv(self, encoding='utf8', *, errors='strict', return_mode: bool = False,
                  delimiter=',', quotechar='"', **kwargs):
@@ -1551,11 +1627,49 @@ class XlPath(type(pathlib.Path())):
         else:
             return msg
 
-    def check_summary(self, print_mode=False, hash_func=None):
+    def check_summary(self, print_mode=True, return_mode=False, **kwargs):
+        if self.is_dir():
+            res = self._check_dir_summary(print_mode, **kwargs)
+        elif self.is_file():
+            res = self._check_file_summary(print_mode, **kwargs)
+        else:
+            res = '文件不存在'
+            print(res)
+
+        if return_mode:
+            return res
+
+    def _check_file_summary(self, print_mode=True, **kwargs):
+        """ 对文件进行通用的状态检查
+
+        :param bool print_mode: 是否将统计信息打印到控制台
+        :return dict: 文件的统计信息
+        """
+        file_summary = {}
+
+        # 文件大小
+        file_summary['文件大小'] = self.size(human_readable=True)
+
+        # 文件行数
+        file_summary['文件行数'] = self.get_total_lines()
+
+        # 文件修改时间
+        mod_time_str = datetime.datetime.fromtimestamp(self.mtime()).strftime('%Y-%m-%d %H:%M:%S')
+        file_summary['修改时间'] = mod_time_str
+
+        # 如果print_mode为True，则将统计信息打印到控制台
+        if print_mode:
+            for key, value in file_summary.items():
+                print(f"{key}: {value}")
+
+        return file_summary
+
+    def _check_dir_summary(self, print_mode=True, hash_func=None, run_mode=99):
         """ 对文件夹情况进行通用的状态检查
 
         :param hash_func: 可以传入自定义的hash函数，用于第四块的重复文件运算
             其实默认的get_etag就没啥问题，只是有时候为了性能考虑，可能会传入一个支持，提前有缓存知道etag的函数
+        :param int run_mode: 只运行编号内的功能
         """
         if not self.is_dir():
             return ''
@@ -1567,43 +1681,48 @@ class XlPath(type(pathlib.Path())):
 
         # 一 目录大小，二 各后缀文件大小
         msg = []
-        printf('【' + self.as_posix() + '】目录检查')
-        printf('\n'.join(self.check_size('list')))
+        if run_mode >= 1:  # 1和2目前是绑定一起运行的
+            printf('【' + self.as_posix() + '】目录检查')
+            printf('\n'.join(self.check_size('list')))
 
         # 三 重名文件
-        printf('\n三、重名文件（忽略大小写，跨目录检查name重复情况）')
-        printf('\n'.join(self.check_repeat_name_files(print_mode=False)))
+        if run_mode >= 3:
+            printf('\n三、重名文件（忽略大小写，跨目录检查name重复情况）')
+            printf('\n'.join(self.check_repeat_name_files(print_mode=False)))
 
         # 四 重复文件
-        printf('\n四、重复文件（etag相同）')
-        printf('\n'.join(self.check_repeat_files(print_mode=False, hash_func=hash_func)))
+        if run_mode >= 4:
+            printf('\n四、重复文件（etag相同）')
+            printf('\n'.join(self.check_repeat_files(print_mode=False, hash_func=hash_func)))
 
         # 五 错误扩展名
-        printf('\n五、错误扩展名')
-        for i, (f1, suffix2) in enumerate(self.xglob_faker_suffix_files('**/*'), start=1):
-            printf(f'{i}、{f1.relpath(self)} -> {suffix2}')
+        if run_mode >= 5:
+            printf('\n五、错误扩展名')
+            for i, (f1, suffix2) in enumerate(self.xglob_faker_suffix_files('**/*'), start=1):
+                printf(f'{i}、{f1.relpath(self)} -> {suffix2}')
 
         # 六 文件配对
-        printf('\n六、文件配对（检查每个目录里stem名称是否配对，列出文件组成不单一的目录结构，请重点检查落单未配对的情况）')
-        prompt = False
-        for root, dirs, files in os.walk(self):
-            suffix_counts = defaultdict(list)
-            for file in files:
-                stem, suffix = os.path.splitext(file)
-                suffix_counts[stem].append(suffix)
-            suffix_counts = {k: tuple(sorted(v)) for k, v in suffix_counts.items()}
-            suffix_counts2 = {v: k for k, v in suffix_counts.items()}  # 反向存储，如果有重复v会进行覆盖
-            ct = Counter(suffix_counts.values())
-            if len(ct.keys()) > 1:
-                printf(root)
-                for k, v in ct.most_common():
-                    tag = f'\t{k}: {v}'
-                    if v == 1:
-                        tag += f'，{suffix_counts2[k]}'
-                    if len(k) > 1 and not prompt:
-                        tag += f'\t标记注解：有{v}组stem相同文件，配套有{k}这些后缀。其他标记同理。'
-                        prompt = True
-                    printf(tag)
+        if run_mode >= 6:
+            printf('\n六、文件配对（检查每个目录里stem名称是否配对，列出文件组成不单一的目录结构，请重点检查落单未配对的情况）')
+            prompt = False
+            for root, dirs, files in os.walk(self):
+                suffix_counts = defaultdict(list)
+                for file in files:
+                    stem, suffix = os.path.splitext(file)
+                    suffix_counts[stem].append(suffix)
+                suffix_counts = {k: tuple(sorted(v)) for k, v in suffix_counts.items()}
+                suffix_counts2 = {v: k for k, v in suffix_counts.items()}  # 反向存储，如果有重复v会进行覆盖
+                ct = Counter(suffix_counts.values())
+                if len(ct.keys()) > 1:
+                    printf(root)
+                    for k, v in ct.most_common():
+                        tag = f'\t{k}: {v}'
+                        if v == 1:
+                            tag += f'，{suffix_counts2[k]}'
+                        if len(k) > 1 and not prompt:
+                            tag += f'\t标记注解：有{v}组stem相同文件，配套有{k}这些后缀。其他标记同理。'
+                            prompt = True
+                        printf(tag)
 
         return '\n'.join(msg)
 
