@@ -16,9 +16,11 @@ check_install_package('xlrd2')
 check_install_package('yattag')
 check_install_package('jsonpickle')
 
+import random
 import datetime
 import json
 import re
+from pathlib import Path
 
 import openpyxl
 from openpyxl.cell.cell import MergedCell
@@ -26,6 +28,7 @@ from openpyxl.styles import Font
 from openpyxl.utils.cell import get_column_letter, column_index_from_string
 import pandas as pd
 import jsonpickle
+from collections import Counter, OrderedDict
 
 from pyxllib.prog.pupil import inject_members, dprint, xlmd5
 from pyxllib.prog.specialist import browser
@@ -1135,6 +1138,60 @@ class XlWorkbook(openpyxl.Workbook):
         """ 基于to_json计算的md5，一般用来判断不同workbook间是否相同 """
         return xlmd5(json.dumps(self.to_json(reduction_degree)))
 
+    def extract_summary(self):
+        """ 更新后的函数：提取整个Excel工作簿的摘要信息 """
+        wb = self
+
+        all_sheets_summary = []
+
+        for ws in wb._sheets:  # 非数据表，也要遍历出来，所以使用了_sheets
+            # 如果是标准工作表（Worksheet），使用现有的摘要提取机制
+            if isinstance(ws, openpyxl.worksheet.worksheet.Worksheet):
+                # 找到使用范围和表头范围
+                used_range = find_used_range_optimized(ws)
+                if used_range:
+                    header_range, data_range = split_header_and_data(ws, used_range)
+
+                    # 提取表头结构
+                    header_structure = extract_header_structure(ws, header_range)
+
+                    summary = ({
+                        "sheetName": ws.title,
+                        "sheetType": "Worksheet",
+                        "usedRange": used_range,
+                        "headerRange": header_range,
+                        "header": header_structure,
+                        'dataRange': data_range,
+                        'data': extract_field_summaries(ws, header_range, data_range)
+                    })
+
+                    if not summary['data']:  # 如果没有数据，则大概率是数据透视表，是计算出来的，读取不到~
+                        summary['sheetType'] = 'PivotTable'
+                        del summary['data']
+                else:
+                    summary = ({
+                        "sheetName": ws.title,
+                        "sheetType": "DialogOrMacroSheet",
+                        "usedRange": None,
+                    })
+
+            # 如果是其他类型的工作表，提供基础摘要
+            else:
+                summary = ({
+                    "sheetName": ws.title,
+                    "sheetType": ws.__class__.__name__  # 使用工作表的类名作为类型
+                })
+
+            all_sheets_summary.append(summary)
+
+        workbook_summary = {
+            "fileName": Path(self.path).name if self.path else None,
+            "sheetNames": wb.sheetnames,
+            "sheets": all_sheets_summary
+        }
+
+        return workbook_summary
+
 
 inject_members(XlWorkbook, openpyxl.Workbook)
 
@@ -1142,3 +1199,314 @@ inject_members(XlWorkbook, openpyxl.Workbook)
 def excel2md5(file, reduction_degree=1):
     wb = openpyxl.load_workbook(file)
     return wb.to_md5(reduction_degree)
+
+
+def __提取表格摘要信息():
+    """ """
+
+
+def parse_range_address(address):
+    """ 解析单元格范围地址。
+
+    :param str address: 单元格范围地址，例如 'A1', 'A1:B3', '1:3', 'A:B' 等。
+    :return dict: 一个包含 'left', 'top', 'right', 'bottom' 的字典。
+    """
+    # 初始化默认值
+    left, right, top, bottom = None, None, None, None
+
+    # 分割地址以获取开始和结束
+    parts = address.split(":")
+    start_cell = parts[0]
+    end_cell = parts[1] if len(parts) > 1 else start_cell
+
+    # 如果 start_cell 是行号
+    if start_cell.isdigit():
+        top = int(start_cell)
+    else:
+        # 尝试从 start_cell 提取列
+        try:
+            left = column_index_from_string(start_cell.rstrip('1234567890'))
+            top = int(''.join(filter(str.isdigit, start_cell))) if any(
+                char.isdigit() for char in start_cell) else None
+        except ValueError:
+            left = None
+
+    # 如果 end_cell 是行号
+    if end_cell.isdigit():
+        bottom = int(end_cell)
+    else:
+        # 尝试从 end_cell 提取列
+        try:
+            right = column_index_from_string(end_cell.rstrip('1234567890'))
+            bottom = int(''.join(filter(str.isdigit, end_cell))) if any(char.isdigit() for char in end_cell) else None
+        except ValueError:
+            right = None
+
+    # 如果只提供了一个部分 (例如 '1', 'A')，将最大值设置为最小值
+    if len(parts) == 1:
+        right = left if left is not None else right
+        bottom = top if top is not None else bottom
+
+    return {"left": left, "top": top, "right": right, "bottom": bottom}
+
+
+def build_range_address(left=None, top=None, right=None, bottom=None):
+    """ 构建单元格范围地址。
+
+    :return str: 单元格范围地址，例如 'A1', 'A1:B3', '1:3', 'A:B' 等。
+    """
+    start_cell = f"{get_column_letter(left) if left else ''}{top if top else ''}"
+    end_cell = f"{get_column_letter(right) if right else ''}{bottom if bottom else ''}"
+
+    # 当开始和结束单元格相同时，只返回一个单元格地址
+    if start_cell == end_cell:
+        return start_cell
+    # 当其中一个单元格是空字符串时，只返回另一个单元格地址
+    elif not start_cell or not end_cell:
+        return start_cell or end_cell
+    else:
+        return f"{start_cell}:{end_cell}"
+
+
+def find_used_range_optimized(ws):
+    """ 定位有效数据区间
+    目前假设每个ws只有一个数据表，但以后可以考虑找多个used_range，多个数据表
+    """
+    # 初始化边界值
+    left, right, top, bottom = None, None, None, None
+
+    # 找到最上方的行
+    for row in ws.iter_rows():
+        if any(cell.value is not None for cell in row):
+            top = row[0].row
+            break
+
+    # 找到最左边的列
+    for col in ws.iter_cols():
+        if any(cell.value is not None for cell in col):
+            left = col[0].column
+            break
+
+    # 找到最下方的行
+    rows = list(ws.iter_rows(min_row=top, max_row=ws.max_row))
+    for row in reversed(rows):
+        if any(cell.value is not None for cell in row):
+            bottom = row[0].row
+            break
+
+    # 找到最右边的列
+    cols = list(ws.iter_cols(min_col=left, max_col=ws.max_column))
+    for col in reversed(cols):
+        if any(cell.value is not None for cell in col):
+            right = col[0].column
+            break
+
+    # 使用 build_range_address 获取 used_range
+    used_range = build_range_address(left=left, top=top, right=right, bottom=bottom)
+
+    return used_range
+
+
+def is_string_type(value):
+    """检查值是否为字符串类型，不是数值或日期类型"""
+    # 首先检查日期类型
+    try:
+        pd.to_datetime(value, errors='raise')
+        return False
+    except (ValueError, TypeError, OverflowError):
+        pass
+
+    # 检查是否为浮点数类型
+    try:
+        float(value)
+        return False
+    except (ValueError, TypeError):
+        return True
+
+
+def score_row(row):
+    score = 0
+    for cell in row:
+        if cell.value is not None:
+            if is_string_type(cell.value):
+                score += 1  # Add positive score for string type
+            else:
+                score -= 1  # Subtract score for non-string type
+
+            # 检查填充颜色和边框，为得分增加0.5分
+            if cell.fill.start_color.index != 'FFFFFFFF' or \
+                    (cell.border.left.style or cell.border.right.style or
+                     cell.border.top.style or cell.border.bottom.style):
+                score += 0.5
+    return score
+
+
+def find_header_row(ws, used_range, max_rows_to_check=10):
+    """找到工作表中的表头行"""
+    range_details = parse_range_address(used_range)
+
+    # 初始化得分列表
+    row_scores = []
+
+    # 只检查指定的最大行数
+    rows_to_check = min(range_details['bottom'] - range_details['top'] + 1, max_rows_to_check)
+
+    # 为每行评分
+    for row in ws.iter_rows(min_row=range_details['top'], max_row=range_details['top'] + rows_to_check - 1,
+                            min_col=range_details['left'], max_col=range_details['right']):
+        row_scores.append(score_row(row))
+
+    # 计算行与行之间分数变化的加权
+    weighted_scores = []
+    for i, score in enumerate(row_scores):
+        b = score - row_scores[i + 1] if i < len(row_scores) - 1 else 0
+        y = score + b
+        weighted_scores.append(y)
+
+    # 确定表头行的位置
+    header_row = weighted_scores.index(max(weighted_scores)) + range_details['top']
+
+    # 从used_range的起始行到找到的表头行都视为表头
+    header_range = build_range_address(left=range_details['left'], top=range_details['top'],
+                                       right=range_details['right'], bottom=header_row)
+    return header_range
+
+
+def split_header_and_data(ws, used_range, max_rows_to_check=10):
+    """ 将工作表的used_range拆分为表头范围和数据范围 """
+    header_range = find_header_row(ws, used_range, max_rows_to_check)
+    header_details = parse_range_address(header_range)
+    used_range_details = parse_range_address(used_range)
+
+    # 数据范围是紧接着表头下面的部分，直到used_range的结束
+    data_range = build_range_address(left=used_range_details['left'], top=header_details['bottom'] + 1,
+                                     right=used_range_details['right'], bottom=used_range_details['bottom'])
+    return header_range, data_range
+
+
+def extract_header_structure(ws, header_range):
+    """ 根据合并的单元格提取表头结构 """
+    header_range_details = parse_range_address(header_range)
+
+    header_structure = {}
+    merged_addresses = set()
+
+    # 处理合并的单元格
+    for merged_range in ws.merged_cells.ranges:
+        # 如果合并的单元格在提供的表头范围内
+        if merged_range.bounds[1] <= header_range_details['bottom'] \
+                and merged_range.bounds[3] >= header_range_details['top']:
+            top_left_cell = ws.cell(row=merged_range.bounds[1], column=merged_range.bounds[0])
+            address = build_range_address(left=merged_range.bounds[0], top=merged_range.bounds[1],
+                                          right=merged_range.bounds[2], bottom=merged_range.bounds[3])
+            header_structure[address] = top_left_cell.value
+            for row in range(merged_range.bounds[1], merged_range.bounds[3] + 1):
+                for col in range(merged_range.bounds[0], merged_range.bounds[2] + 1):
+                    merged_addresses.add((row, col))
+
+    # 处理未合并的单元格
+    for row in ws.iter_rows(min_row=header_range_details['top'], max_row=header_range_details['bottom'],
+                            min_col=header_range_details['left'], max_col=header_range_details['right']):
+        for cell in row:
+            # 如果这个单元格的地址还没有被添加到结构中，并且它有一个值
+            if (cell.row, cell.column) not in merged_addresses and cell.value:
+                header_structure[cell.coordinate] = cell.value
+
+    return header_structure
+
+
+def determine_field_type_and_summary(ws, col, start_row, end_row):
+    """ 根据指定的列范围确定字段的摘要信息 """
+
+    # 初始化存储
+    number_formats = []
+    sample_values = []
+    numeric_values = []
+    date_values = []
+    time_values = []
+
+    # 从指定范围中抽取10个值
+    rows = list(ws.iter_rows(min_col=col, max_col=col, min_row=start_row, max_row=end_row))
+    sample_indices = random.sample(range(len(rows)), min(10, len(rows)))
+    sample_indices.sort()
+    sample_rows = [rows[i] for i in sample_indices]
+
+    for row in sample_rows:
+        cell = row[0]
+        number_formats.append(cell.number_format)
+
+        # If cell value is a date or time, format it using its number_format
+        if isinstance(cell.value, (datetime.datetime, datetime.date)):
+            formatted_value = cell.value.strftime('%Y-%m-%d')
+            sample_values.append(formatted_value)
+        elif isinstance(cell.value, datetime.time):
+            formatted_value = cell.value.strftime('%H:%M:%S')
+            sample_values.append(formatted_value)
+        else:
+            sample_values.append(cell.value)
+
+    # 对于整列，收集所有数值value
+    for row in rows:
+        cell = row[0]
+        if isinstance(cell.value, (int, float)):
+            numeric_values.append(cell.value)
+        elif isinstance(cell.value, (datetime.datetime, datetime.date)):
+            date_values.append(cell.value)
+        elif isinstance(cell.value, datetime.time):
+            time_values.append(cell.value)
+
+    # 从抽样值中提取最多5个出现最多的值，每个值最多显示20个字符
+    value_counts = Counter(sample_values).most_common(5)
+    truncated_values = []
+    for value, _ in value_counts:
+        if isinstance(value, str) and len(value) > 20:
+            truncated_values.append(value[:17] + '...')
+        else:
+            truncated_values.append(value)
+
+    # 计算数值范围
+    if numeric_values:
+        value_range = (min(numeric_values), max(numeric_values))
+    elif date_values:
+        date_range = (min(date_values), max(date_values))
+        value_range = (date_range[0].strftime('%Y-%m-%d'),
+                       date_range[1].strftime('%Y-%m-%d'))
+    elif time_values:
+        time_range = (min(time_values), max(time_values))
+        value_range = (time_range[0].strftime('%H:%M:%S'),
+                       time_range[1].strftime('%H:%M:%S'))
+    else:
+        value_range = None
+
+    summary = {
+        "number_formats": sorted(Counter(number_formats).keys(), key=number_formats.count, reverse=True),
+        "sample_values": truncated_values,
+        "numeric_range": value_range
+    }
+
+    return summary
+
+
+def extract_field_summaries(ws, header_range, data_range):
+    """ 再次优化为每个字段生成摘要信息的函数 """
+    header_details = parse_range_address(header_range)
+    data_details = parse_range_address(data_range)
+
+    field_summaries = {}
+    for col in ws.iter_cols(min_col=header_details['left'], max_col=header_details['right']):
+        header_cell = col[header_details['bottom'] - header_details['top']]
+        if header_cell.value:
+            field_summaries[header_cell.value] = determine_field_type_and_summary(
+                ws, header_cell.column, header_details['bottom'] + 1, data_details['bottom']
+            )
+
+    return field_summaries
+
+
+def extract_workbook_summary(file_path):
+    """ 更新后的函数：提取整个Excel工作簿的摘要信息 """
+
+    wb = openpyxl.load_workbook(file_path)
+    res = wb.extract_summary()
+    res['fileName'] = Path(file_path).name
+    return res

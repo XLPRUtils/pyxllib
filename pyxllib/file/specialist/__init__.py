@@ -86,9 +86,12 @@ class JsonlDataFile:
     def read_partial_records(self, num_records):
         """ 从jsonl文件中只读取指定数量的记录 """
         if self.infile and self.infile.is_file():
-            lines = next(self.infile.yield_line(batch_size=num_records))
-            for line in lines:
-                self.records.append(json.loads(line))
+            try:
+                lines = next(self.infile.yield_line(batch_size=num_records))
+                for line in lines:
+                    self.records.append(json.loads(line))
+            except StopIteration:
+                self.records = []
 
     def save(self, outfile=None, ensure_ascii=False):
         """ 将当前数据保存到指定的jsonl文件中 """
