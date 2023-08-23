@@ -812,14 +812,23 @@ class GptChatDir:
                     gcj2.records.append(y)
             gcj2.save(self.verify_dir.root / post_file.name)
 
+    @classmethod
+    def texts2train_record(cls, texts):
+        """ user和assistant的轮询对话，转为训练集格式 """
+        messages = []
+        for i, text in enumerate(texts):
+            role = 'assistant' if i % 2 else 'user'
+            messages.append({'role': role, 'content': text})
+        return {'messages': messages}
+
     def create_train(self):
         print('【create_train】生成训练集数据')
         n = len(self.verify_dir.files)
         for i, verify_file in enumerate(self.verify_dir.files):
             gcj = GptChatJsonl(verify_file)
-            gcj2 = GptChatJsonl()
+            gtj = GptTrainJsonl()
             for x in tqdm(gcj.records, desc=f'第{i + 1}/{n}个文件'):
                 y = self.verify2train_record(x)
                 if y:
-                    gcj2.records.append(y)
-            gcj2.save(self.train_dir.root / verify_file.name)
+                    gtj.records.append(y)
+            gtj.save(self.train_dir.root / verify_file.name)
