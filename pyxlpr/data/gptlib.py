@@ -3,7 +3,7 @@
 # @Author : 陈坤泽
 # @Email  : 877362867@qq.com
 # @Date   : 2023/07/13 14:26
-import copy
+
 
 from pyxllib.prog.pupil import check_install_package
 from joblib import Parallel, delayed
@@ -15,8 +15,10 @@ import json
 import re
 import html
 import random
+import copy
 from urllib.parse import unquote
 from collections import OrderedDict
+from collections import Counter
 
 import pandas as pd
 from transformers import GPT2TokenizerFast
@@ -232,7 +234,7 @@ class GptChatJsonl(JsonlDataFile):
             texts[i]['content'] = text['content'].strip()
 
         # 3 添加会话conversation
-        item = {'id': record_id or self.start_id,
+        item = {'id': str(record_id or self.start_id),  # 要转成字符串类型，不然容易出问题
                 'text': texts,
                 'first_text_length': len(texts[0]['content'])}
         if extra:
@@ -623,7 +625,7 @@ class GptChatDir:
             if not dir_path.is_dir():
                 dir_path.mkdir(parents=True, exist_ok=True)
 
-    def summary(self):
+    def summary_records(self):
         """ 一些统计信息 """
         # 1 chat信息
         gcd1 = self.chatted_dir or self.chat_dir
@@ -656,6 +658,22 @@ class GptChatDir:
         # print('5、train：')
         # gtj = GptTrainJsonl(self.train_file)
         # gtj.analyze_text_length()
+
+    def summary_downloads(self):
+        """ 统计下载的文件情况 """
+        print('【每个目录文件数量】')
+        files_each_dir = []
+        for d in self.download_files_dir.glob_dirs():
+            files_each_dir.append(len(list(d.rglob_files())))
+        print(ValuesStat(files_each_dir).summary())
+        print(Counter(files_each_dir))
+
+        print('【每个文件大小】')
+        filesizes_each_dir = []
+        for d in self.download_files_dir.glob_dirs():
+            for f in d.rglob_files():
+                filesizes_each_dir.append(f.size())
+        print(ValuesStat(filesizes_each_dir).summary())
 
     def create_chat(self):
         """ 生成chat数据，具体内容方式跟业务有关 """
@@ -779,11 +797,14 @@ class GptChatDir:
         # pl = Parallel(n_jobs=n_jobs, backend='threading', timeout=5)
         # pl(delayed(func)(x) for x in tqdm(gcj1.records))
 
-    def create_verify(self, n_jobs=1):
+    def create_verify(self, n_jobs=1, num_records=None):
+        """
+        :param num_records: 每个文件最多提取多少条目，用于小批量运行调试
+        """
         print('【create_verify】得到更准确或精确后处理的验证集')
         n = len(self.post_dir.files)
         for i, post_file in enumerate(self.post_dir.files):
-            gcj = GptChatJsonl(post_file)
+            gcj = GptChatJsonl(post_file, num_records=num_records)
             gcj2 = GptChatJsonl()
             for x in tqdm(gcj.records, desc=f'第{i + 1}/{n}个文件'):
                 y = self.post2verify_record(x)
