@@ -810,7 +810,7 @@ class GptChatDir:
                 y = self.post2verify_record(x)
                 if y:
                     gcj2.records.append(y)
-            gcj2.save(self.post_dir.root / post_file.name)
+            gcj2.save(self.verify_dir.root / post_file.name)
 
     def create_train(self):
         print('【create_train】生成训练集数据')
