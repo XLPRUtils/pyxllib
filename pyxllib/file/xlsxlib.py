@@ -1465,6 +1465,7 @@ def determine_field_type_and_summary(ws, col, start_row, end_row):
     numeric_values = []
     date_values = []
     time_values = []
+    time_delta_values = []
 
     # 从指定范围中抽取10个值
     rows = list(ws.iter_rows(min_col=col, max_col=col, min_row=start_row, max_row=end_row))
@@ -1483,6 +1484,9 @@ def determine_field_type_and_summary(ws, col, start_row, end_row):
         elif isinstance(cell.value, datetime.time):
             formatted_value = cell.value.strftime('%H:%M:%S')
             sample_values.append(formatted_value)
+        elif isinstance(cell.value, datetime.timedelta):
+            formatted_value = str(cell.value)
+            sample_values.append(formatted_value)
         else:
             sample_values.append(cell.value)
 
@@ -1495,6 +1499,8 @@ def determine_field_type_and_summary(ws, col, start_row, end_row):
             date_values.append(cell.value)
         elif isinstance(cell.value, datetime.time):
             time_values.append(cell.value)
+        elif isinstance(cell.value, datetime.timedelta):
+            time_delta_values.append(cell.value)
 
     # 从抽样值中提取最多5个出现最多的值，每个值最多显示20个字符
     value_counts = Counter(sample_values).most_common(5)
@@ -1516,6 +1522,9 @@ def determine_field_type_and_summary(ws, col, start_row, end_row):
         time_range = (min(time_values), max(time_values))
         value_range = (time_range[0].strftime('%H:%M:%S'),
                        time_range[1].strftime('%H:%M:%S'))
+    elif time_delta_values:
+        time_delta_range = (min(time_delta_values), max(time_delta_values))
+        value_range = (str(time_delta_range[0]), str(time_delta_range[1]))
     else:
         value_range = None
 

@@ -26,7 +26,9 @@ import pandas as pd
 from transformers import GPT2TokenizerFast
 from tqdm import tqdm
 from openpyxl import Workbook
+from jinja2 import Template
 
+from pyxllib.prog.pupil import OutputLogger
 from pyxllib.prog.specialist import browser, TicToc
 from pyxllib.algo.pupil import ValuesStat
 from pyxllib.file.specialist import XlPath, JsonlDataFile, JsonlDataDir, TwinDirs
@@ -109,6 +111,17 @@ def print_statistics(data, indent_level=1, price_base=0.0015, max_samples=500):
     # 官方gpt3.5价格，/1000是除1K token，*7.1388是美元兑换人民币基本价格（浮动，不定期更新）
     price = stat_tokens.mean * len(data) / 1000 * price_base * 7.1388
     print(f"{indent}  tokens {stat_tokens.summary(fmts)} gpt3_price=￥{price:.0f}")
+
+
+def set_template(s, *args, **kwargs):
+    return Template(s.strip(), *args, **kwargs)
+
+
+def set_meta_template(s, meta_start='[[', meta_end=']]', **kwargs):
+    """ 支持预先用某些格式渲染后，再返回标准渲染模板 """
+    t = Template(s.strip(), variable_start_string=meta_start,
+                 variable_end_string=meta_end).render(**kwargs)
+    return Template(t)
 
 
 class GptChatJsonl(JsonlDataFile):
@@ -608,6 +621,11 @@ def process_file(input_file, num_records, output_dir, processing_func,
     :param thread_num: 使用的线程数
     :param mininterval: tqdm的更新间隔
     """
+    # 当目标文件已存在时，视为已经处理过，不再重复处理。如果想重跑，可以删掉目标文件即可
+    dst_file = output_dir / input_file.name
+    if dst_file.is_file():
+        return
+
     data_input = JsonlDataFile(input_file, num_records=num_records)
     data_output = JsonlDataFile()
 
@@ -627,7 +645,7 @@ def process_file(input_file, num_records, output_dir, processing_func,
                 if y:
                     data_output.records.append(y)
 
-    data_output.save(output_dir / input_file.name)
+    data_output.save(dst_file)
 
 
 class GptChatDir:
@@ -656,6 +674,8 @@ class GptChatDir:
         for dir_path in [self.root, self.upload_files_dir, self.download_files_dir]:
             if not dir_path.is_dir():
                 dir_path.mkdir(parents=True, exist_ok=True)
+
+        self.logger = OutputLogger(log_file=self.root / 'log.txt')
 
     def update_dir(self):
         """ 目录结构有些更新后，一些成员变量要跟着改变 """
