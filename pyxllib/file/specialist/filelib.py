@@ -1155,7 +1155,10 @@ class XlPath(type(pathlib.Path())):
         # todo 这一步可能不够严谨，不同的操作系统文件格式不同。但使用splitlines也不太好，在数据含有NEL等特殊字符时会多换行。
         for line in s.split('\n'):
             if line:
-                data.append(json.loads(line))
+                try:  # 注意，这里可能会有数据读取失败
+                    data.append(json.loads(line))
+                except json.decoder.JSONDecodeError:
+                    pass
 
         if return_mode:
             return data, encoding

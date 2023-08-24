@@ -334,6 +334,8 @@ class JsonlDataDir:
         for file in self.files:
             with file.open('r', encoding='utf-8') as f:
                 for line in f:
+                    if not line.strip():
+                        continue
                     if line_count == 0:
                         if new_file is not None:
                             new_file.close()
