@@ -323,7 +323,7 @@ class JsonlDataDir:
         # 使用临时文件名前缀，以便在处理完成后更改为最终的文件名
         temp_prefix = 'temp_'
 
-        new_file_count = 1
+        new_file_count = 0
         new_file = None
         line_count = 0
 
@@ -357,7 +357,7 @@ class JsonlDataDir:
 
         # 将临时文件名更改为最终的文件名
         for temp_file in output_dir.glob(f'{temp_prefix}*.jsonl'):
-            final_name = temp_file.name[len(temp_prefix):]
+            final_name = temp_file.name[len(temp_prefix) - 1:]
             temp_file.rename(output_dir / final_name)
 
     def yield_record(self, batch_size=None):

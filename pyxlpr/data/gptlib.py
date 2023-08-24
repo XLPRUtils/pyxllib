@@ -19,6 +19,8 @@ import copy
 from urllib.parse import unquote
 from collections import OrderedDict
 from collections import Counter
+import multiprocessing
+from multiprocessing.dummy import Pool as ThreadPool
 
 import pandas as pd
 from transformers import GPT2TokenizerFast
@@ -595,11 +597,45 @@ def __4_综合集成类():
     pass
 
 
+def process_file(input_file, num_records, output_dir, processing_func,
+                 thread_num=1, mininterval=None):
+    """ 处理指定的文件
+
+    :param input_file: 待处理的输入文件
+    :param num_records: 每个文件最多提取多少条目，用于小批量运行调试
+    :param output_dir: 输出文件的目录
+    :param processing_func: 用于处理记录的函数
+    :param thread_num: 使用的线程数
+    :param mininterval: tqdm的更新间隔
+    """
+    data_input = JsonlDataFile(input_file, num_records=num_records)
+    data_output = JsonlDataFile()
+
+    if thread_num == 1:
+        for record in tqdm(data_input.records, total=len(data_input.records),
+                           desc=f'Processing {input_file.name}',
+                           mininterval=mininterval):
+            result = processing_func(record)
+            if result:
+                data_output.records.append(result)
+    else:
+        with ThreadPool(thread_num) as pool:
+            for y in tqdm(pool.imap(processing_func, data_input.records),
+                          total=len(data_input.records),
+                          desc=f'Processing {input_file.name}',
+                          mininterval=mininterval):
+                if y:
+                    data_output.records.append(y)
+
+    data_output.save(output_dir / input_file.name)
+
+
 class GptChatDir:
     """ 一个目录，包含了一个任务的所有数据，包括in、out、post等文件 """
 
     def __init__(self, root, lines_per_file=10000):
         self.root = root = XlPath(root)
+        self.lines_per_file = lines_per_file
 
         self.chat_file = root / 'in.jsonl'
         self.chatted_file = root / 'out.jsonl'
@@ -608,11 +644,7 @@ class GptChatDir:
         self.train_file = root / 'train.jsonl'
 
         # 如果有目录文件，会优先以目录为准。如果没有，则会从单文件拆分创建。
-        self.chat_dir = JsonlDataDir.init_from_file(self.chat_file, lines_per_file)
-        self.chatted_dir = JsonlDataDir.init_from_file(self.chatted_file, lines_per_file)
-        self.post_dir = JsonlDataDir.init_from_file(self.post_file, lines_per_file)
-        self.verify_dir = JsonlDataDir.init_from_file(self.verify_file, lines_per_file)
-        self.train_dir = JsonlDataDir.init_from_file(self.train_file, lines_per_file)
+        self.update_dir()
 
         self.upload_files_dir = root / 'upload_files'
         self.download_files_dir = root / 'download_files'
@@ -624,6 +656,15 @@ class GptChatDir:
         for dir_path in [self.root, self.upload_files_dir, self.download_files_dir]:
             if not dir_path.is_dir():
                 dir_path.mkdir(parents=True, exist_ok=True)
+
+    def update_dir(self):
+        """ 目录结构有些更新后，一些成员变量要跟着改变 """
+        # 如果有目录文件，会优先以目录为准。如果没有，则会从单文件拆分创建。
+        self.chat_dir = JsonlDataDir.init_from_file(self.chat_file, self.lines_per_file)
+        self.chatted_dir = JsonlDataDir.init_from_file(self.chatted_file, self.lines_per_file)
+        self.post_dir = JsonlDataDir.init_from_file(self.post_file, self.lines_per_file)
+        self.verify_dir = JsonlDataDir.init_from_file(self.verify_file, self.lines_per_file)
+        self.train_dir = JsonlDataDir.init_from_file(self.train_file, self.lines_per_file)
 
     def summary_records(self):
         """ 一些统计信息 """
@@ -760,57 +801,76 @@ class GptChatDir:
 
     def organize_downloaded_files(self):
         # 把下载的文件整理的更清晰些
-        with TicToc('整理下载的文件'):
-            for f in self.root.glob_files('OpenAI-download-*'):
-                new_name = re.sub(r'OpenAI-download-\d+-', '', f.name)
-                new_name = new_name.replace('-', '/', 1)
-                try:
-                    (self.download_files_dir / new_name).parent.mkdir(exist_ok=True)
-                    f.rename2(self.download_files_dir / new_name, if_exists='replace')
-                except FileExistsError as e:
-                    # 有的文件会移动不了
-                    print(e)
+        for f in tqdm(list(self.root.glob_files('OpenAI-download-*')),
+                      desc='整理下载的文件'):
+            new_name = re.sub(r'OpenAI-download-\d+-', '', f.name)
+            new_name = new_name.replace('-', '/', 1)
+            try:
+                (self.download_files_dir / new_name).parent.mkdir(exist_ok=True)
+                f.rename2(self.download_files_dir / new_name, if_exists='replace')
+            except FileExistsError as e:
+                # 有的文件会移动不了
+                print(e)
 
         # 会剩一些特殊的处理不了的文件，可以看一眼后手动删掉
         # 这些相关的records，默认的chatted2post_record会把这些记录过滤掉
 
-    def create_post(self, n_jobs=1):
-        """ 建议初步跑的时候，先串行debug，等比较稳定后，再开并发跑 """
-        # 1 把chatted数据解析为post格式
-        print('【create_post】后处理')
-        n = len(self.chatted_dir.files)
-        for i, chatted_file in enumerate(self.chatted_dir.files):
-            gcj = GptChatJsonl(chatted_file)
-            gcj2 = GptChatJsonl()
-            for x in tqdm(gcj.records, desc=f'第{i + 1}/{n}个文件'):
-                y = self.chatted2post_record(x)
-                if y:
-                    gcj2.records.append(y)
-            gcj2.save(self.post_dir.root / chatted_file.name)
+    @classmethod
+    def process_files(cls, input_files, num_records, output_dir,
+                      processing_func, thread_num, process_num):
+        if process_num == 1:  # 单进程
+            for file in input_files:
+                process_file(file, num_records, output_dir, processing_func, thread_num)
+        elif isinstance(process_num, int):  # 多进程
+            with multiprocessing.Pool(process_num) as pool:
+                pool.starmap(process_file,
+                             [(file, num_records, output_dir,
+                               processing_func, thread_num, process_num * 3)
+                              for file in input_files])
+        elif isinstance(process_num, (list, tuple)):  # 多进程，但是不同进程"不同构"
+            # 这个功能还不是很完善，设计的不太好，暂不推荐使用。但基本原理差不多是这样的，放在这里做个参考。
+            process_functions = process_num
+            with multiprocessing.Pool(len(process_functions)) as pool:
+                pool.starmap(lambda process_func, file:
+                             process_func(file, num_records, output_dir,
+                                          processing_func, thread_num),
+                             zip(process_functions, input_files))
+        else:
+            raise TypeError
 
-        # 2 尝试并发？
-        # def func(x):
-        #     y = self.chatted2post_record(x)
-        #     if y:
-        #         gcj2.records.append(y)
-        #
-        # pl = Parallel(n_jobs=n_jobs, backend='threading', timeout=5)
-        # pl(delayed(func)(x) for x in tqdm(gcj1.records))
+    def create_post(self, *, num_records=None, process_num=1, thread_num=1):
+        """ 建议初步跑的时候，先串行debug，等比较稳定后，再开并发跑
 
-    def create_verify(self, n_jobs=1, num_records=None):
-        """
         :param num_records: 每个文件最多提取多少条目，用于小批量运行调试
+        :param int process_num: 分文件多进程执行
+        :param int thread_num: 每个文件里的多线程执行数
         """
-        print('【create_verify】得到更准确或精确后处理的验证集')
-        n = len(self.post_dir.files)
-        for i, post_file in enumerate(self.post_dir.files):
-            gcj = GptChatJsonl(post_file, num_records=num_records)
-            gcj2 = GptChatJsonl()
-            for x in tqdm(gcj.records, desc=f'第{i + 1}/{n}个文件'):
-                y = self.post2verify_record(x)
-                if y:
-                    gcj2.records.append(y)
-            gcj2.save(self.verify_dir.root / post_file.name)
+        input_files = self.chatted_dir.files
+        output_dir = self.post_dir.root
+        processing_func = self.chatted2post_record
+
+        input_num = len(input_files)
+        print(f'【create_post】后处理 {input_num}个文件待处理')
+
+        self.process_files(input_files, num_records, output_dir,
+                           processing_func, thread_num, process_num)
+
+        self.update_dir()
+
+    def create_verify(self, *, num_records=None, process_num=1, thread_num=1):
+        """ 有时候create_verify是有cpu密集运算场景的，可以开多进程
+        """
+        input_files = self.post_dir.files
+        output_dir = self.verify_dir.root
+        processing_func = self.post2verify_record
+
+        input_num = len(input_files)
+        print(f'【create_verify】得到更准确或精确后处理的验证集 {input_num}个文件待处理')
+
+        self.process_files(input_files, num_records, output_dir,
+                           processing_func, thread_num, process_num)
+
+        self.update_dir()
 
     @classmethod
     def texts2train_record(cls, texts):
@@ -821,14 +881,15 @@ class GptChatDir:
             messages.append({'role': role, 'content': text})
         return {'messages': messages}
 
-    def create_train(self):
-        print('【create_train】生成训练集数据')
-        n = len(self.verify_dir.files)
-        for i, verify_file in enumerate(self.verify_dir.files):
-            gcj = GptChatJsonl(verify_file)
-            gtj = GptTrainJsonl()
-            for x in tqdm(gcj.records, desc=f'第{i + 1}/{n}个文件'):
-                y = self.verify2train_record(x)
-                if y:
-                    gtj.records.append(y)
-            gtj.save(self.train_dir.root / verify_file.name)
+    def create_train(self, *, num_records=None, process_num=1, thread_num=1):
+        input_files = self.verify_dir.files
+        output_dir = self.train_dir.root
+        processing_func = self.verify2train_record
+
+        input_num = len(input_files)
+        print(f'【create_train】生成训练集数据 {input_num}个文件待处理')
+
+        self.process_files(input_files, num_records, output_dir,
+                           processing_func, thread_num, process_num)
+
+        self.update_dir()

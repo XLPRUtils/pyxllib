@@ -24,7 +24,7 @@ from pathlib import Path
 
 import openpyxl
 from openpyxl.cell.cell import MergedCell
-from openpyxl.styles import Font
+from openpyxl.styles import Font, Alignment
 from openpyxl.utils.cell import get_column_letter, column_index_from_string
 import pandas as pd
 import jsonpickle
@@ -919,6 +919,43 @@ class XlWorksheet(openpyxl.worksheet.worksheet.Worksheet):
             'data_bottom': self.max_row,
         }
 
+    def autofit(self):
+        """ 自动调整工作表中所有列的宽度
+        这里并不是excel自带标准的autofit，而是一种近似算法
+        """
+
+        def adjusted_column_width(cell_value):
+            """
+            根据单元格的内容调整列宽。
+            假设中文字符的宽度是拉丁字符的两倍。
+            """
+            width_constant = 1.2  # 根据所需宽度调整此常数
+            try:
+                chinese_characters = sum(1 for char in cell_value if '\u4e00' <= char <= '\u9fff')
+                latin_characters = len(cell_value) - chinese_characters
+                return (chinese_characters * 2 + latin_characters) * width_constant
+            except TypeError:
+                return 10 * width_constant  # 如果单元格没有值或非字符串值则返回默认宽度
+
+        for col in self.columns:
+            max_width = 0
+            column = [cell for cell in col]
+            for cell in column:
+                adjusted_width = adjusted_column_width(cell.value)
+                if adjusted_width > max_width:
+                    max_width = adjusted_width
+            # 找到列中的第一个非合并单元格
+            first_non_merged_cell = next((cell for cell in column if not isinstance(cell, MergedCell)), None)
+            if first_non_merged_cell:
+                self.column_dimensions[first_non_merged_cell.column_letter].width = min(max_width, 100)
+            # 列宽最多设置到100，再大就增设自动换行来实现排版
+            if max_width > 100:
+                for cell in column:
+                    current_alignment_dict = getattr(cell, 'alignment', Alignment()).__dict__
+                    # 从字典中删除 wrapText，以避免重复赋值
+                    current_alignment_dict.pop('wrapText', None)
+                    cell.alignment = Alignment(wrapText=True, **current_alignment_dict)
+
 
 inject_members(XlWorksheet, openpyxl.worksheet.worksheet.Worksheet, white_list=['_cells_by_row'])
 
@@ -1191,6 +1228,10 @@ class XlWorkbook(openpyxl.Workbook):
         }
 
         return workbook_summary
+
+    def autofit(self):
+        for ws in self.worksheets:
+            ws.autofit()
 
 
 inject_members(XlWorkbook, openpyxl.Workbook)
