@@ -610,21 +610,22 @@ def __4_综合集成类():
     pass
 
 
-def process_file(input_file, num_records, output_dir, processing_func,
-                 thread_num=1, mininterval=None):
+def process_file(processing_func, input_file, output_dir=None,
+                 thread_num=1, mininterval=None, num_records=None):
     """ 处理指定的文件
 
-    :param input_file: 待处理的输入文件
-    :param num_records: 每个文件最多提取多少条目，用于小批量运行调试
-    :param output_dir: 输出文件的目录
     :param processing_func: 用于处理记录的函数
+    :param input_file: 待处理的输入文件
+    :param output_dir: 输出文件的目录
     :param thread_num: 使用的线程数
     :param mininterval: tqdm的更新间隔
+    :param num_records: 每个文件最多提取多少条目，用于小批量运行调试
     """
     # 当目标文件已存在时，视为已经处理过，不再重复处理。如果想重跑，可以删掉目标文件即可
-    dst_file = output_dir / input_file.name
-    if dst_file.is_file():
-        return
+    if output_dir is not None:
+        dst_file = output_dir / input_file.name
+        if dst_file.is_file():
+            return
 
     data_input = JsonlDataFile(input_file, num_records=num_records)
     data_output = JsonlDataFile()
@@ -645,7 +646,8 @@ def process_file(input_file, num_records, output_dir, processing_func,
                 if y:
                     data_output.records.append(y)
 
-    data_output.save(dst_file)
+    if output_dir is not None:
+        data_output.save(dst_file)
 
 
 class GptChatDir:
@@ -714,6 +716,8 @@ class GptChatDir:
             print(f'3、post：{self.post_dir.count_records()}条会话')
 
         # 4 verify（这一步有时候会集成到post中）
+        if self.verify_dir:
+            print(f'4、verify：{self.verify_dir.count_records()}条会话')
 
         # 5 train 生成的训练数据
         # print('5、train：')
@@ -766,25 +770,35 @@ class GptChatDir:
 
         # 2 解析all_answers：这个结构太复杂，进行内容整理精简
         # 2.1 contents：这个结构太复杂，搁这俄罗斯套娃呢~ 稍微精简下更方便后处理
-        for answer in post_record['all_answers']:
+        for k, answer in enumerate(post_record['all_answers']):
             if isinstance(answer, dict) and 'contents' in answer:
                 new_contents = []
                 for i, x in enumerate(answer['contents']):
                     if not x['message']:
+                        # Error in message stream
+                        # self.logger.print(f'{post_record["id"]} answer[{k}] contents[{i}] message为空')
                         continue
+
                     content = x['message']['content']
+                    tp = content['content_type']
                     new_content = {'type': content['content_type']}
-                    if content['content_type'] == 'text':
+                    if tp == 'text':
                         new_content['text'] = '\n'.join(content['parts'])
-                    elif content['content_type'] == 'code':
+                    elif tp == 'code':
                         new_content['text'] = content['text']
-                    elif content['content_type'] == 'execution_output':
+                    elif tp == 'execution_output':
                         new_content['text'] = content['text']
+                    elif tp == 'system_error':
+                        continue
                     else:
-                        raise ValueError('未见类型')
+                        self.logger.print(f'{post_record["id"]} answer[{k}] contents[{i}] content_type={tp} 未见类型')
+                        continue
 
                     new_contents.append(new_content)
                 answer['contents'] = new_contents
+            elif isinstance(answer, str):  # 普通模式也转成解释器风格，方便统一处理
+                post_record['all_answers'][k] = {'contents': [{'type': 'text',
+                                                               'text': answer}]}
 
         # 2.2 downloads：下载链接精简下，并把关联的文件也顺带整理一下
         for answer in post_record['all_answers']:
@@ -812,7 +826,11 @@ class GptChatDir:
         return post_record
 
     def post2verify_record(self, post_record):
-        """ 这个一般是要具体任务定制的，没有通用操作方式 """
+        """ 这个一般是要具体任务定制的，没有通用操作方式
+
+        注意，如果有些record不想重复verify，可以在类里其他地方预设存储一些已经处理过的结果
+            然后在这个函数中引用
+        """
         raise NotImplementedError
 
     def verify2train_record(self, verify_record):
@@ -836,24 +854,25 @@ class GptChatDir:
         # 这些相关的records，默认的chatted2post_record会把这些记录过滤掉
 
     @classmethod
-    def process_files(cls, input_files, num_records, output_dir,
-                      processing_func, thread_num, process_num):
+    def process_files(cls, processing_func, input_files, output_dir,
+                      *, process_num=1, thread_num=1, num_records=None):
         if process_num == 1:  # 单进程
             for file in input_files:
-                process_file(file, num_records, output_dir, processing_func, thread_num)
+                process_file(processing_func, file, output_dir,
+                             thread_num=thread_num, num_records=num_records)
         elif isinstance(process_num, int):  # 多进程
             with multiprocessing.Pool(process_num) as pool:
                 pool.starmap(process_file,
-                             [(file, num_records, output_dir,
-                               processing_func, thread_num, process_num * 3)
+                             [(processing_func, file, output_dir,
+                               thread_num, process_num * 3, num_records)
                               for file in input_files])
         elif isinstance(process_num, (list, tuple)):  # 多进程，但是不同进程"不同构"
             # 这个功能还不是很完善，设计的不太好，暂不推荐使用。但基本原理差不多是这样的，放在这里做个参考。
             process_functions = process_num
             with multiprocessing.Pool(len(process_functions)) as pool:
                 pool.starmap(lambda process_func, file:
-                             process_func(file, num_records, output_dir,
-                                          processing_func, thread_num),
+                             process_func(processing_func, file, output_dir,
+                                          thread_num, process_num * 3, num_records),
                              zip(process_functions, input_files))
         else:
             raise TypeError
@@ -872,8 +891,9 @@ class GptChatDir:
         input_num = len(input_files)
         print(f'【create_post】后处理 {input_num}个文件待处理')
 
-        self.process_files(input_files, num_records, output_dir,
-                           processing_func, thread_num, process_num)
+        self.process_files(processing_func, input_files, output_dir,
+                           process_num=process_num, thread_num=thread_num,
+                           num_records=num_records)
 
         self.update_dir()
 
@@ -887,8 +907,9 @@ class GptChatDir:
         input_num = len(input_files)
         print(f'【create_verify】得到更准确或精确后处理的验证集 {input_num}个文件待处理')
 
-        self.process_files(input_files, num_records, output_dir,
-                           processing_func, thread_num, process_num)
+        self.process_files(processing_func, input_files, output_dir,
+                           process_num=process_num, thread_num=thread_num,
+                           num_records=num_records)
 
         self.update_dir()
 
@@ -909,7 +930,75 @@ class GptChatDir:
         input_num = len(input_files)
         print(f'【create_train】生成训练集数据 {input_num}个文件待处理')
 
-        self.process_files(input_files, num_records, output_dir,
-                           processing_func, thread_num, process_num)
+        self.process_files(processing_func, input_files, output_dir,
+                           process_num=process_num, thread_num=thread_num,
+                           num_records=num_records)
 
         self.update_dir()
+
+    def check_chatted_record(self, chatted_record):
+        """ 检查chatted数据的有效性 """
+        x = chatted_record
+        x = self.chatted2post_record(x)
+        # x = self.post2verify_record(x)
+        # 针对verify可以再进一步定制规则
+        return bool(x)
+
+    def create_rechat(self, rechat_path):
+        """ 筛选失败的数据到一个新的目录，常用于对chatted数据筛选出未成功的样例，上池子重跑
+
+        :param rechat_path: 把挑选出来的数据放到新路径
+        """
+        gcd = GptChatDir(rechat_path)
+        f = open(gcd.chat_file, 'w', encoding='utf-8')
+
+        for record in tqdm(self.chatted_dir.yield_record(), '检查待重新生成的问题'):
+            if not self.check_chatted_record(record):
+                continue
+            # 否则把这个条目放到rechat，准备拿去重新提问
+            if 'error' in record:
+                del record['error']
+            f.write(json.dumps(record, ensure_ascii=False) + '\n')
+            # 如果有文件，也要对应移动
+            src_dir = self.upload_files_dir / str(record['id'])
+            if src_dir.is_dir():
+                src_dir.copy(gcd.upload_files_dir / src_dir.name, if_exists='skip')
+
+        f.close()
+        return gcd
+
+    def update_chatted(self, rechat_path):
+        """ 从另一个rechat数据，更新数据条目过来
+
+        self依然叫src，rechat叫dst，虽然其实数据是从rechat更新流向self
+
+        注意：这个函数还没有比较严格地进行调试~
+        """
+        # 1 读取有效记录
+        gcd = GptChatDir(rechat_path)
+        gcd.organize_downloaded_files()
+        # 请确保内存充足哦，这个函数会从rechat的chatted读取所有通过的记录保存起来
+        dst_records = {}
+        for record in gcd.chatted_dir.yield_record():
+            # 找到有all_answers的挑出来
+            post_record = self.chatted2post_record(record)
+            if post_record:
+                dst_records[record['id']] = record
+
+        # 2 更新记录
+        def update_each_record(x):
+            if x['id'] in dst_records:
+                # 除了返回record，还得拷贝目录数据呢
+                # 上传的目录一般没变，但最好重置下
+                src_dir = self.upload_files_dir / x['id']
+                dst_dir = gcd.upload_files_dir / x['id']
+                dst_dir.copy(src_dir, if_exists='replace')
+                # 下载的目录
+                src_dir = self.download_files_dir / x['id']
+                dst_dir = gcd.download_files_dir / x['id']
+                dst_dir.copy(src_dir, if_exists='replace')
+                return dst_records[x['id']]
+            else:
+                return x
+
+        self.chatted_dir.update_each_record(update_each_record)
