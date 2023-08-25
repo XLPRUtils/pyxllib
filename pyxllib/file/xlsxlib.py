@@ -1546,7 +1546,8 @@ def extract_field_summaries(ws, header_range, data_range):
     for col in ws.iter_cols(min_col=header_details['left'], max_col=header_details['right']):
         header_cell = col[header_details['bottom'] - header_details['top']]
         if header_cell.value:
-            field_summaries[header_cell.value] = determine_field_type_and_summary(
+            # 注意，原本摘要这里用的是.value，后面改成了.coordinate。原本的遇到重名就会出一些问题了~
+            field_summaries[header_cell.coordinate] = determine_field_type_and_summary(
                 ws, header_cell.column, header_details['bottom'] + 1, data_details['bottom']
             )
 

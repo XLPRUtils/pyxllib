@@ -395,16 +395,16 @@ class JsonlDataDir:
             if inplace:
                 data_file.save(file)
 
-    def update_each_record(self, func, desc=None):
+    def update_each_record(self, func, desc='update_each_record'):
         """ 封装的对每个record进行操作的函数
         """
         self.process_each_record(func, inplace=True, desc=desc)
 
-    def process_each_file(self, func, *, desc=None):
+    def process_each_file(self, func, *, desc='process_each_file'):
         for i, file in tqdm(enumerate(self.files), desc=desc):
             func(file)
 
-    def process_each_records(self, func, *, inplace=False, desc=None):
+    def process_each_records(self, func, *, inplace=False, desc='process_each_records'):
         for i, file in tqdm(enumerate(self.files), desc=desc):
             records = XlPath(file).read_jsonl()
             new_records = func(records)  # 如果使用inplace，那么需要函数配套返回新的records
