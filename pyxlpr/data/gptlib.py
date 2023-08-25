@@ -222,8 +222,10 @@ class GptChatJsonl(JsonlDataFile):
                    record_id=0, max_word_length=None, prompt=None):
         """
         :param texts:
-            可以输入list，原本配置的多轮对话
-            也可以只输入一个str，默认一轮对话
+            str -> list[str]，可以只输入一个str，默认一轮对话
+            list[str] -> list[{'content': ..., 'file_paths': [...]}]
+                content: 文本内容
+                file_paths: 注意可以设置本地电脑其他来源，会自动移到该任务的upload_files里
         :param record_id: 可以自定义这个session的id
         :param max_word_length: 是否设置一个约束长度，自动切分会话
         :param prompt: 自动分段后
@@ -256,6 +258,40 @@ class GptChatJsonl(JsonlDataFile):
             item['extra'] = extra
         self.records.append(item)
         return item
+
+    def fix_file_paths(self, save_dir):
+        """ 修正records中设置的file_paths
+
+        这些路径可能在设置的时候图方便，设置的是非项目目录下的路径
+        这个函数会对这些路径进行修正，为了修正，需要输入一个该jsonl所保存的目录位置
+        """
+        save_dir = XlPath(save_dir)
+        for i, record in enumerate(self.records):
+            dst_dir = save_dir / 'upload_files' / str(record['id'])
+            for j, text in enumerate(record['text']):
+                for k, fn in enumerate(text.get('file_paths', [])):
+                    src_file = XlPath(fn)
+                    src_file2 = src_file.as_posix()
+                    if src_file2.startswith(f'upload_files/{record["id"]}/'):
+                        continue
+                    dst_file = dst_dir / src_file.name
+                    dst_file2 = dst_file.relpath(save_dir).as_posix()
+                    if src_file.is_file():
+                        if src_file2 != dst_file2:
+                            dst_dir.mkdir(parents=True, exist_ok=True)
+                            src_file.copy(dst_file, if_exists='replace')
+                    else:  # 既然设置了，原文件目录应该在
+                        raise FileNotFoundError
+                    text['file_paths'][k] = dst_file2
+
+    def clean_file_paths(self):
+        """ 清除records中的file_paths
+        一般用于把一些相关文件移到对应会话后，实际提问gpt的时候并不上传文件
+        """
+        for x in self.records:
+            for t in x['text']:
+                if 'file_paths' in t:
+                    del t['file_paths']
 
     def find_indices_by_qlength(self):
         """ 返回提问(q,question)内容从短到长的数据下标 """
@@ -522,8 +558,13 @@ def try_parse_json(resp_json):
     return resp_json
 
 
-def extract_code_blocks_from_md(markdown_text):
-    """ 可以输入str，也可以输入list[str] """
+def extract_code_blocks_from_md(markdown_text, *, sort_by_length=False):
+    """ 可以输入str，也可以输入list[str]
+
+    :param sort_by_length: 按代码长度从短到长排序
+        常用在比较确信有效代码段应该只有一段，但是有些短小的片段有干扰
+        此时可以排序后，选取最长的一个代码片段作为正确代码
+    """
     if isinstance(markdown_text, str):
         markdown_text = [markdown_text]
 
@@ -531,6 +572,10 @@ def extract_code_blocks_from_md(markdown_text):
     pattern = re.compile(r'^```[^\n]*\n(.+?)^```', re.MULTILINE | re.DOTALL)
     for text in markdown_text:
         matches += pattern.findall(text)
+
+    if sort_by_length:
+        matches = sorted(matches, key=len)
+
     return matches
 
 
@@ -673,7 +718,8 @@ class GptChatDir:
         # for f in self.root.glob_files('*1chat*.jsonl'):
         #     f.rename2(f.parent / 'in.jsonl')
 
-        for dir_path in [self.root, self.upload_files_dir, self.download_files_dir]:
+        # for dir_path in [self.root, self.upload_files_dir, self.download_files_dir]:
+        for dir_path in [self.root]:
             if not dir_path.is_dir():
                 dir_path.mkdir(parents=True, exist_ok=True)
 
@@ -877,7 +923,7 @@ class GptChatDir:
         else:
             raise TypeError
 
-    def create_post(self, *, num_records=None, process_num=1, thread_num=1):
+    def create_post(self, *, reset=False, num_records=None, process_num=1, thread_num=1):
         """ 建议初步跑的时候，先串行debug，等比较稳定后，再开并发跑
 
         :param num_records: 每个文件最多提取多少条目，用于小批量运行调试
@@ -887,6 +933,8 @@ class GptChatDir:
         input_files = self.chatted_dir.files
         output_dir = self.post_dir.root
         processing_func = self.chatted2post_record
+        if reset:
+            output_dir.delete()
 
         input_num = len(input_files)
         print(f'【create_post】后处理 {input_num}个文件待处理')
@@ -897,12 +945,14 @@ class GptChatDir:
 
         self.update_dir()
 
-    def create_verify(self, *, num_records=None, process_num=1, thread_num=1):
+    def create_verify(self, *, reset=False, num_records=None, process_num=1, thread_num=1):
         """ 有时候create_verify是有cpu密集运算场景的，可以开多进程
         """
         input_files = self.post_dir.files
         output_dir = self.verify_dir.root
         processing_func = self.post2verify_record
+        if reset:
+            output_dir.delete()
 
         input_num = len(input_files)
         print(f'【create_verify】得到更准确或精确后处理的验证集 {input_num}个文件待处理')
@@ -922,10 +972,12 @@ class GptChatDir:
             messages.append({'role': role, 'content': text})
         return {'messages': messages}
 
-    def create_train(self, *, num_records=None, process_num=1, thread_num=1):
+    def create_train(self, *, reset=False, num_records=None, process_num=1, thread_num=1):
         input_files = self.verify_dir.files
         output_dir = self.train_dir.root
         processing_func = self.verify2train_record
+        if reset:
+            output_dir.delete()
 
         input_num = len(input_files)
         print(f'【create_train】生成训练集数据 {input_num}个文件待处理')
