@@ -44,7 +44,7 @@ class JsonlDataFile:
             else:
                 self.infile = filepath
 
-        if self.infile is not None:
+        if self.infile and self.infile.is_file():  # 机制上文件也可能不存在的，有可能只是一个预设目录~
             if num_records is None:
                 # 读取全部数据
                 if self.infile.is_file():
