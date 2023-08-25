@@ -8,7 +8,7 @@
 """
 import fire
 
-from pyxllib.file.packlib import shutil
+from pyxllib.file.packlib import *
 
 from pyxllib.prog.newbie import *
 from pyxllib.prog.pupil import *
