@@ -104,7 +104,7 @@ class XlSSHClient(paramiko.SSHClient):
         """
         :param str|list server:
         :param map_path: 主要在上传、下载文件的时候，可以用来自动定位路径
-            参考写法：{'C:/': '/'}  # 将D盘映射到服务器位置
+            参考写法：{'C:/': '/'}  # 将C盘映射到服务器位置
         :param int relogin: 当连接失败的时候，可能只是某种特殊原因，可以尝试重新连接
             该参数设置重连的次数
         :param int|float relogin_interval: 每次重连的间隔秒数

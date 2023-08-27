@@ -805,7 +805,7 @@ class DPrint:
 
 
 def format_exception(e):
-    return ''.join(traceback.format_exception(etype=type(e), value=e, tb=e.__traceback__))
+    return ''.join(traceback.format_exception(type(e), e, e.__traceback__))
 
 
 def prettifystr(s):
@@ -875,7 +875,7 @@ class OutputLogger(logging.Logger):
     也能在需要的时候指定文件路径，会自动将结果存储到文件中。
     """
 
-    def __init__(self, name='OutputLogger', log_file=None, output_to_console=True):
+    def __init__(self, name='OutputLogger', *, log_file=None, log_mode='w', output_to_console=True):
         """
         :param str name: 记录器的名称。默认为 'OutputLogger'。
         :param log_file: 日志文件的路径。默认为 None，表示不输出到文件。
@@ -892,7 +892,7 @@ class OutputLogger(logging.Logger):
                                       '%Y-%m-%d %H:%M:%S')
 
         # 提前重置为空文件
-        with open(log_file, 'w') as f:
+        with open(log_file, log_mode) as f:
             f.write('')
 
         # 创建文件日志处理器

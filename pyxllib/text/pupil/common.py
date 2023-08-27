@@ -260,7 +260,7 @@ class Stdout:
         self.strout.close()
 
     def __str__(self):
-        """在这个期间获得的文本内容"""
+        """ 在这个期间获得的文本内容 """
         if self.result:
             return self.result
         else:

@@ -27,6 +27,8 @@ from transformers import GPT2TokenizerFast
 from tqdm import tqdm
 from openpyxl import Workbook
 from jinja2 import Template
+# import pathos
+# import pathos.multiprocessing as multiprocessing
 
 from pyxllib.prog.pupil import OutputLogger
 from pyxllib.prog.specialist import browser, TicToc
@@ -656,7 +658,8 @@ def __4_综合集成类():
 
 
 def process_file(processing_func, input_file, output_dir=None,
-                 thread_num=1, mininterval=None, num_records=None):
+                 thread_num=1, mininterval=None, num_records=None,
+                 json_encoder=None):
     """ 处理指定的文件
 
     :param processing_func: 用于处理记录的函数
@@ -692,7 +695,7 @@ def process_file(processing_func, input_file, output_dir=None,
                     data_output.records.append(y)
 
     if output_dir is not None:
-        data_output.save(dst_file)
+        data_output.save(dst_file, json_encoder=json_encoder)
 
 
 class GptChatDir:
@@ -723,7 +726,8 @@ class GptChatDir:
             if not dir_path.is_dir():
                 dir_path.mkdir(parents=True, exist_ok=True)
 
-        self.logger = OutputLogger(log_file=self.root / 'log.txt')
+        # 这个类经常要并发处理，不能把一个不能序列化的类放到这里~
+        # self.logger = OutputLogger(log_file=self.root / 'log.txt')
 
     def update_dir(self):
         """ 目录结构有些更新后，一些成员变量要跟着改变 """
@@ -901,25 +905,28 @@ class GptChatDir:
 
     @classmethod
     def process_files(cls, processing_func, input_files, output_dir,
-                      *, process_num=1, thread_num=1, num_records=None):
+                      *, process_num=1, thread_num=1, num_records=None,
+                      json_encoder=None):
         if process_num == 1:  # 单进程
             for file in input_files:
                 process_file(processing_func, file, output_dir,
-                             thread_num=thread_num, num_records=num_records)
+                             thread_num=thread_num, num_records=num_records,
+                             json_encoder=json_encoder)
         elif isinstance(process_num, int):  # 多进程
             with multiprocessing.Pool(process_num) as pool:
                 pool.starmap(process_file,
-                             [(processing_func, file, output_dir,
-                               thread_num, process_num * 3, num_records)
-                              for file in input_files])
+                         [(processing_func, file, output_dir,
+                           thread_num, process_num * 3, num_records, json_encoder)
+                          for file in input_files])
         elif isinstance(process_num, (list, tuple)):  # 多进程，但是不同进程"不同构"
             # 这个功能还不是很完善，设计的不太好，暂不推荐使用。但基本原理差不多是这样的，放在这里做个参考。
             process_functions = process_num
             with multiprocessing.Pool(len(process_functions)) as pool:
                 pool.starmap(lambda process_func, file:
-                             process_func(processing_func, file, output_dir,
-                                          thread_num, process_num * 3, num_records),
-                             zip(process_functions, input_files))
+                         process_func(processing_func, file, output_dir,
+                                      thread_num, process_num * 3, num_records,
+                                      json_encoder),
+                         zip(process_functions, input_files))
         else:
             raise TypeError
 
@@ -931,6 +938,8 @@ class GptChatDir:
         :param int thread_num: 每个文件里的多线程执行数
         """
         input_files = self.chatted_dir.files
+        if num_records:
+            input_files = input_files[:1]  # 使用num_records的时候，会只跑一个文件
         output_dir = self.post_dir.root
         processing_func = self.chatted2post_record
         if reset:
@@ -945,10 +954,13 @@ class GptChatDir:
 
         self.update_dir()
 
-    def create_verify(self, *, reset=False, num_records=None, process_num=1, thread_num=1):
+    def create_verify(self, *, reset=False, num_records=None, process_num=1, thread_num=1,
+                      json_encoder=None):
         """ 有时候create_verify是有cpu密集运算场景的，可以开多进程
         """
         input_files = self.post_dir.files
+        if num_records:
+            input_files = input_files[:1]  # 使用num_records的时候，会只跑一个文件
         output_dir = self.verify_dir.root
         processing_func = self.post2verify_record
         if reset:
@@ -959,7 +971,7 @@ class GptChatDir:
 
         self.process_files(processing_func, input_files, output_dir,
                            process_num=process_num, thread_num=thread_num,
-                           num_records=num_records)
+                           num_records=num_records, json_encoder=json_encoder)
 
         self.update_dir()
 
@@ -974,6 +986,8 @@ class GptChatDir:
 
     def create_train(self, *, reset=False, num_records=None, process_num=1, thread_num=1):
         input_files = self.verify_dir.files
+        if num_records:
+            input_files = input_files[:1]  # 使用num_records的时候，会只跑一个文件
         output_dir = self.train_dir.root
         processing_func = self.verify2train_record
         if reset:
