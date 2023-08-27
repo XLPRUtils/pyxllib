@@ -1561,3 +1561,30 @@ def extract_workbook_summary(file_path):
     res = wb.extract_summary()
     res['fileName'] = Path(file_path).name
     return res
+
+
+def sort_excel_files(file_paths):
+    """ 在文件清单中，把excel类型的文件优先排到前面 """
+
+    def sort_key(filename: str) -> int:
+        """ 根据文件后缀给出权重排序值
+
+        :param str filename: 文件名
+        :return int: 权重值（小的在前）
+
+        >>> sort_key('test.xlsx')
+        1
+        >>> sort_key('demo.xls')
+        2
+        >>> sort_key('other.txt')
+        3
+        """
+        if re.search(r'\.xlsx$', filename):
+            return 1
+        elif re.search(r'\.xl[^.]*$', filename):
+            return 2
+        else:
+            return 3
+
+    file_paths2 = sorted(file_paths, key=sort_key)
+    return file_paths2

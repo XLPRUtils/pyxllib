@@ -1165,9 +1165,9 @@ class XlPath(type(pathlib.Path())):
         else:
             return data
 
-    def write_jsonl(self, list_data, ensure_ascii=False):
+    def write_jsonl(self, list_data, ensure_ascii=False, default=None):
         """ 由于这种格式主要是跟商汤这边对接，就尽量跟它们的格式进行兼容 """
-        content = '\n'.join([json.dumps(x, ensure_ascii=ensure_ascii) for x in list_data])
+        content = '\n'.join([json.dumps(x, ensure_ascii=ensure_ascii, default=default) for x in list_data])
         self.write_text_unix(content)
 
     def read_csv(self, encoding='utf8', *, errors='strict', return_mode: bool = False,

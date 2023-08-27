@@ -93,7 +93,7 @@ class JsonlDataFile:
             except StopIteration:
                 self.records = []
 
-    def save(self, outfile=None, ensure_ascii=False):
+    def save(self, outfile=None, ensure_ascii=False, json_encoder=None):
         """ 将当前数据保存到指定的jsonl文件中 """
         if outfile is None:  # 默认保存回原文件
             outfile = self.infile
@@ -112,7 +112,7 @@ class JsonlDataFile:
             p = p.with_name(new_name)  # 更改文件名
 
         p.parent.mkdir(parents=True, exist_ok=True)
-        p.write_jsonl(self.records, ensure_ascii=ensure_ascii)
+        p.write_jsonl(self.records, ensure_ascii=ensure_ascii, default=json_encoder)
 
     def browse_record(self, index=None, paths=None, **kwargs):
         """ 在浏览器中显示指定记录的内容 """

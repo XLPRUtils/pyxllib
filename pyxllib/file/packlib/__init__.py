@@ -177,8 +177,7 @@ def unpack_archive(filename, extract_dir=None, format=None, *, wrap=0):
 
 
 def compress_to_zip(source_path, target_zip_path=None):
-    """
-    压缩指定的文件或文件夹为ZIP格式。
+    """ 压缩指定的文件或文件夹为ZIP格式。
 
     :param str source_path: 要压缩的文件或文件夹路径
     :param str target_zip_path: 目标ZIP文件路径（可选）
