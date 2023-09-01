@@ -268,7 +268,7 @@ class GptChatJsonl(JsonlDataFile):
         这个函数会对这些路径进行修正，为了修正，需要输入一个该jsonl所保存的目录位置
         """
         save_dir = XlPath(save_dir)
-        for i, record in enumerate(self.records):
+        for i, record in tqdm(enumerate(self.records), desc='修复文件路径'):
             dst_dir = save_dir / 'upload_files' / str(record['id'])
             for j, text in enumerate(record['text']):
                 for k, fn in enumerate(text.get('file_paths', [])):
@@ -283,7 +283,7 @@ class GptChatJsonl(JsonlDataFile):
                             dst_dir.mkdir(parents=True, exist_ok=True)
                             src_file.copy(dst_file, if_exists='replace')
                     else:  # 既然设置了，原文件目录应该在
-                        raise FileNotFoundError
+                        raise FileNotFoundError(f'{src_file}')
                     text['file_paths'][k] = dst_file2
 
     def clean_file_paths(self):
@@ -585,6 +585,15 @@ def __3_生成最后训练用的数据():
     pass
 
 
+def texts2train_record(texts):
+    """ user和assistant的轮询对话，转为训练集格式 """
+    messages = []
+    for i, text in enumerate(texts):
+        role = 'assistant' if i % 2 else 'user'
+        messages.append({'role': role, 'content': text})
+    return {'messages': messages}
+
+
 class GptTrainJsonl(JsonlDataFile):
     """
     record: dict
@@ -651,6 +660,10 @@ class GptTrainJsonl(JsonlDataFile):
             role = 'assistant' if i % 2 else 'user'
             messages.append({'role': role, 'content': text})
         self.records.append({'messages': messages})
+
+    def add_from_texts(self, texts):
+        record = texts2train_record(texts)
+        self.records.append(record)
 
 
 def __4_综合集成类():
@@ -826,7 +839,7 @@ class GptChatDir:
                 for i, x in enumerate(answer['contents']):
                     if not x['message']:
                         # Error in message stream
-                        # self.logger.print(f'{post_record["id"]} answer[{k}] contents[{i}] message为空')
+                        # print(f'{post_record["id"]} answer[{k}] contents[{i}] message为空')
                         continue
 
                     content = x['message']['content']
@@ -841,7 +854,7 @@ class GptChatDir:
                     elif tp == 'system_error':
                         continue
                     else:
-                        self.logger.print(f'{post_record["id"]} answer[{k}] contents[{i}] content_type={tp} 未见类型')
+                        print(f'{post_record["id"]} answer[{k}] contents[{i}] content_type={tp} 未见类型')
                         continue
 
                     new_contents.append(new_content)
@@ -915,18 +928,18 @@ class GptChatDir:
         elif isinstance(process_num, int):  # 多进程
             with multiprocessing.Pool(process_num) as pool:
                 pool.starmap(process_file,
-                         [(processing_func, file, output_dir,
-                           thread_num, process_num * 3, num_records, json_encoder)
-                          for file in input_files])
+                             [(processing_func, file, output_dir,
+                               thread_num, process_num * 3, num_records, json_encoder)
+                              for file in input_files])
         elif isinstance(process_num, (list, tuple)):  # 多进程，但是不同进程"不同构"
             # 这个功能还不是很完善，设计的不太好，暂不推荐使用。但基本原理差不多是这样的，放在这里做个参考。
             process_functions = process_num
             with multiprocessing.Pool(len(process_functions)) as pool:
                 pool.starmap(lambda process_func, file:
-                         process_func(processing_func, file, output_dir,
-                                      thread_num, process_num * 3, num_records,
-                                      json_encoder),
-                         zip(process_functions, input_files))
+                             process_func(processing_func, file, output_dir,
+                                          thread_num, process_num * 3, num_records,
+                                          json_encoder),
+                             zip(process_functions, input_files))
         else:
             raise TypeError
 

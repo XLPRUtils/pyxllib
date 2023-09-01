@@ -12,11 +12,44 @@ import os
 import sys
 from multiprocessing import Process, Pipe
 from io import StringIO
+import threading
 
 # from IPython.core.interactiveshell import InteractiveShell
 
+from timeout_decorator import timeout
+
 from pyxllib.prog.pupil import format_exception
 from pyxllib.file.specialist import XlPath
+
+if sys.platform == 'win32':
+    def timeout(seconds):
+        def decorator(func):
+            def wrapper(*args, **kwargs):
+                result = None
+                exception = None
+
+                # 定义一个内部函数来运行目标函数
+                def worker():
+                    nonlocal result, exception
+                    try:
+                        result = func(*args, **kwargs)
+                    except Exception as e:
+                        exception = e
+
+                thread = threading.Thread(target=worker)
+                thread.start()
+                thread.join(timeout=seconds)
+
+                if thread.is_alive():
+                    thread.join()  # 确保线程结束
+                    raise TimeoutError(f"Function '{func.__name__}' exceeded {seconds} seconds of execution time.")
+                if exception:
+                    raise exception
+                return result
+
+            return wrapper
+
+        return decorator
 
 
 class InProcessExecutor:
@@ -31,6 +64,7 @@ class InProcessExecutor:
         self._original_stderr = sys.stderr
 
         if self.base_dir:
+            self.base_dir.mkdir(parents=True, exist_ok=True)
             os.chdir(self.base_dir)
 
     def _execute_code(self, code):
@@ -54,6 +88,7 @@ class InProcessExecutor:
 
         return response
 
+    # @timeout(10)  # 先把超时写死了，以后有空再研究怎么加到函数的timeout参数里
     def execute(self, code: str, silent=False):
         """ 在主进程中执行代码 """
         response = self._execute_code(code)
@@ -136,6 +171,7 @@ class SubprocessExecutor:
 
         return response
 
+    # @timeout(10)
     def execute(self, code: str, silent=False):
         """ 在子进程中执行代码 """
         self.parent_conn.send({'action': 'execute', 'code': code})
@@ -164,6 +200,12 @@ class SubprocessExecutor:
         """ 关闭子进程 """
         self.parent_conn.send({'action': 'exit'})
         self.process.join()
+
+
+if os.getppid() == os.getpid():  # 主进程的时候，另外建立子进程运行更好，也便于调试
+    AutoProcessExecutor = SubprocessExecutor
+else:  # 并发跑的时候，只能在每个进程里，不能另外再套进程
+    AutoProcessExecutor = InProcessExecutor
 
 
 class InteractiveExecutor(SubprocessExecutor):

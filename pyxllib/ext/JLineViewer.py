@@ -75,6 +75,7 @@ class TextEditDelegate(QItemDelegate):
 
     def sizeHint(self, option, index):
         size = super().sizeHint(option, index)
+        # todo 但是比如一个4k的屏幕使用2k的时候，这个缩放比例不会自动兼容，会导致太挤了
         size.setHeight(20)  # 限制最大高度为20像素，限定每个条目只展示一行
         return size
 

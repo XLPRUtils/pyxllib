@@ -1475,11 +1475,15 @@ def determine_field_type_and_summary(ws, col, start_row, end_row):
 
     for row in sample_rows:
         cell = row[0]
-        number_formats.append(cell.number_format)
+        number_format = cell.number_format
+        # 日期现在不可能用国际化的mm-dd-yy格式，先简单暴力替换的机制
+        #   todo 之后要鲁棒性更好的话，可能要有其他更合理的机制处理方法
+        number_format = number_format.replace('mm-dd-yy', 'yy/mm/dd')
+        number_formats.append(number_format)
 
         # If cell value is a date or time, format it using its number_format
         if isinstance(cell.value, (datetime.datetime, datetime.date)):
-            formatted_value = cell.value.strftime('%Y-%m-%d')
+            formatted_value = cell.value.strftime('%Y/%m/%d')
             sample_values.append(formatted_value)
         elif isinstance(cell.value, datetime.time):
             formatted_value = cell.value.strftime('%H:%M:%S')
@@ -1516,8 +1520,8 @@ def determine_field_type_and_summary(ws, col, start_row, end_row):
         value_range = (min(numeric_values), max(numeric_values))
     elif date_values:
         date_range = (min(date_values), max(date_values))
-        value_range = (date_range[0].strftime('%Y-%m-%d'),
-                       date_range[1].strftime('%Y-%m-%d'))
+        value_range = (date_range[0].strftime('%Y/%m/%d'),
+                       date_range[1].strftime('%Y/%m/%d'))
     elif time_values:
         time_range = (min(time_values), max(time_values))
         value_range = (time_range[0].strftime('%H:%M:%S'),

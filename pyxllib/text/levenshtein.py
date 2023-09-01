@@ -71,7 +71,7 @@ class MatchSimString:
         self.ext_value.append(v)
 
     def match(self, s):
-        """跟候选字符串进行匹配，返回最佳匹配结果
+        """ 跟候选字符串进行匹配，返回最佳匹配结果
         """
         idx, sim = -1, 0
         for i in range(len(self)):
