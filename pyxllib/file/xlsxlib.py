@@ -1426,7 +1426,7 @@ def split_header_and_data(ws, used_range, max_rows_to_check=10):
 
 
 def extract_header_structure(ws, header_range):
-    """ 根据合并的单元格提取表头结构 """
+    """ 对输入的表头位置单元格，提取表头结构 """
     header_range_details = parse_range_address(header_range)
 
     header_structure = {}
@@ -1548,8 +1548,9 @@ def extract_field_summaries(ws, header_range, data_range):
 
     field_summaries = {}
     for col in ws.iter_cols(min_col=header_details['left'], max_col=header_details['right']):
-        header_cell = col[header_details['bottom'] - header_details['top']]
-        if header_cell.value:
+        # header_cell = col[header_details['bottom'] - header_details['top']]  # 找到对应的表头单元格
+        header_cell = ws.cell(header_details['bottom'], col[0].column)
+        if header_cell.celltype() != 1:  # todo 这里要改成不使用衍生单元格的场景
             # 注意，原本摘要这里用的是.value，后面改成了.coordinate。原本的遇到重名就会出一些问题了~
             field_summaries[header_cell.coordinate] = determine_field_type_and_summary(
                 ws, header_cell.column, header_details['bottom'] + 1, data_details['bottom']

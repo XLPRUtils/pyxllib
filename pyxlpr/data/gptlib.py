@@ -34,6 +34,7 @@ from pyxllib.prog.pupil import OutputLogger
 from pyxllib.prog.specialist import browser, TicToc
 from pyxllib.algo.pupil import ValuesStat
 from pyxllib.file.specialist import XlPath, JsonlDataFile, JsonlDataDir, TwinDirs
+from pyxllib.file.xlsxlib import extract_workbook_summary
 
 
 def __1_生成提问数据():
