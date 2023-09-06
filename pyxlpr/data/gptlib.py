@@ -102,8 +102,14 @@ def print_statistics(data, indent_level=1, price_base=0.0015, max_samples=500):
     # 使用 ValuesStat 类统计数据并输出摘要
     # stat_len = ValuesStat([len(x) for x in data])
     # stat_strwith = ValuesStat([strwidth(x) for x in data])
-    # 算token的机制很慢，只能抽查一部分估算
-    samples = random.sample(data, min(len(data), max_samples))
+
+    # 算token的机制很慢，只能抽查一部分估算（抽len最短的一半，最长的一半）
+    if max_samples < len(data):
+        data = sorted(data, key=lambda x: len(x))
+        samples = data[:max_samples // 2] + data[-max_samples // 2:]
+    else:
+        samples = data
+
     stat_tokens = ValuesStat([Tokenizer.count_tokens(x) for x in samples])
 
     fmts = ['g', '.0f', '.0f', 'd', 'd']

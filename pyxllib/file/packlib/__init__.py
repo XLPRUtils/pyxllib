@@ -176,11 +176,12 @@ def unpack_archive(filename, extract_dir=None, format=None, *, wrap=0):
         shutil.unpack_archive(filename, extract_dir, format)
 
 
-def compress_to_zip(source_path, target_zip_path=None):
+def compress_to_zip(source_path, target_zip_path=None, wrap=None):
     """ 压缩指定的文件或文件夹为ZIP格式。
 
     :param str source_path: 要压缩的文件或文件夹路径
     :param str target_zip_path: 目标ZIP文件路径（可选）
+    :param str wrap: 在ZIP文件内部创建的目录名，所有内容将被放在这个目录下
     """
     # 根据输入路径生成默认的目标ZIP文件路径
     if target_zip_path is None:
@@ -198,10 +199,14 @@ def compress_to_zip(source_path, target_zip_path=None):
                     file_path = os.path.join(root, file)
                     # 计算文件在ZIP中的相对路径
                     arcname = os.path.relpath(file_path, source_path)
+                    if wrap:
+                        arcname = os.path.join(wrap, arcname)
                     zipf.write(file_path, arcname)
         # 如果是文件，则直接将文件添加到ZIP中
         elif os.path.isfile(source_path):
             arcname = os.path.basename(source_path)
+            if wrap:
+                arcname = os.path.join(wrap, arcname)
             zipf.write(source_path, arcname)
 
     return target_zip_path
