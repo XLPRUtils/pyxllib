@@ -244,8 +244,10 @@ class JsonlDataFile:
         return self
 
     def process_each_record(self, func, *,
+                            inplace=False,
                             timeout=None,
-                            inplace=False, print_mode=0, threads_num=1,
+                            print_mode=0,
+                            threads_num=1,
                             **kwargs):
         """ 对records中的每个record应用函数func，可以选择是否在原地修改，以及是否显示进度条
 
@@ -272,9 +274,13 @@ class JsonlDataFile:
 
         return new_records
 
-    def update_each_record(self, func, print_mode=0, threads_num=1, timeout=None):
+    def update_each_record(self, func,
+                           timeout=None,
+                           print_mode=0,
+                           threads_num=1):
         """ 遍历并对原始数据进行更改 """
-        return self.process_each_record(func, inplace=True,
+        return self.process_each_record(func,
+                                        inplace=True,
                                         timeout=timeout,
                                         print_mode=print_mode,
                                         threads_num=threads_num)
@@ -390,9 +396,9 @@ class JsonlDataDir:
                 else:
                     yield batch
 
-    def process_each_file(self, func, *, print_mode=0,
+    def process_each_file(self, func, *,
+                          print_mode=0, desc='process_each_file',
                           processes_num=1,
-                          desc='process_each_file',
                           **kwargs):
         backend = 'loky' if processes_num != 1 else 'sequential'
         parallel = Parallel(n_jobs=processes_num, backend=backend, return_as='generator')
@@ -400,15 +406,28 @@ class JsonlDataDir:
         list(tqdm(parallel(tasks), disable=not print_mode,
                   total=len(self.files), desc=desc, **kwargs))
 
-    def process_each_record(self, func, *, inplace=False,
-                            print_mode=2, desc=None, timeout=None,
+    def process_each_record(self, func, *,
+                            inplace=False, reset=False,
+                            print_mode=2, desc=None,
+                            timeout=None,
                             processes_num=1, threads_num=1,
-                            dst_dir=None, reset=False, json_encoder=None):
+                            dst_dir=None, json_encoder=None):
         """ 封装的对每个record进行操作的函数
 
-        :param int processes_num: 进程数，每个文件为单独一个进程
-        :param int threads_num: 线程数，每个文件处理的时候使用几个线程
-        :param print_mode: 0 不显示，1 只显示文件数进度，2 显示文件内处理进度
+        :param func: 外部传入的处理函数
+        :param inplace: 是否修改原始数据
+        :param reset: 是否重新处理已经处理过的文件
+        :param print_mode:
+            0 不显示
+            1 只显示文件数进度
+            2（默认） 显示更详细的文件内处理进度
+        :param desc: print_mode=1的进度条标题
+        :param timeout: 超时时间，但有些场合会使用不了（比如linux的子进程里不能使用singal）
+            在用不了的场合，可以使用requests自带的timeout等各种机制来限时
+        :param processes_num: 进程数，每个文件为单独一个进程
+        :param threads_num: 线程数，每个文件处理的时候使用几个线程
+        :param dst_dir: 要保存到的目标目录，未设置的时候不保存
+        :param json_encoder: 有些不是标准的json数据结构，如何进行处理，有需要的时候一般会设置成str
         """
 
         def func2(srcfile):
@@ -423,12 +442,14 @@ class JsonlDataDir:
 
             # 2 跑特定文件里的条目
             jdf = JsonlDataFile(srcfile)
-            jdf.process_each_record(func, inplace=inplace,
-                                    timeout=timeout,
+            jdf.process_each_record(func,
+                                    inplace=inplace,
                                     print_mode=print_mode == 2,
+                                    desc=f'{jdf.infile.name}/{files_num}',
+                                    timeout=timeout,
                                     threads_num=threads_num,
                                     mininterval=processes_num * 3,
-                                    desc=f'{jdf.infile.name}/{files_num}')
+                                    )
 
             # 3 是否修改原文件，是否保存到dst_dir
             if inplace:
