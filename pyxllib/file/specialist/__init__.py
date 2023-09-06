@@ -8,6 +8,8 @@ from itertools import islice
 import multiprocessing
 import multiprocessing.dummy
 
+from joblib import Parallel, delayed
+
 from pyxllib.file.specialist.filelib import *
 from pyxllib.file.specialist.dirlib import *
 from pyxllib.file.specialist.download import *
@@ -241,7 +243,10 @@ class JsonlDataFile:
         self.records += other.records
         return self
 
-    def process_each_record(self, func, *, inplace=False, print_mode=0, threads_num=1):
+    def process_each_record(self, func, *,
+                            timeout=None,
+                            inplace=False, print_mode=0, threads_num=1,
+                            **kwargs):
         """ 对records中的每个record应用函数func，可以选择是否在原地修改，以及是否显示进度条
 
         :param function func: 对record进行处理的函数，应接受一个record作为参数并返回处理后的record，如果返回None则删除该record
@@ -252,25 +257,27 @@ class JsonlDataFile:
 
         遍历self.records，对每个record执行func函数，如果func返回None，则不包含该record到新的records中。
         """
-        with multiprocessing.dummy.Pool(threads_num) as executor:
-            if print_mode == 1:
-                results = tqdm(executor.imap(func, self.records), total=len(self.records))
-            else:
-                results = executor.imap(func, self.records)
-
-            new_records = list(results)
+        backend = 'threading' if threads_num != 1 else 'sequential'
+        parallel = Parallel(n_jobs=threads_num, backend=backend,
+                            timeout=timeout, return_as='generator')
+        tasks = [delayed(func)(record) for record in self.records]
+        new_records = []
+        for y in tqdm(parallel(tasks), disable=not print_mode,
+                      total=len(self.records), **kwargs):
+            if y:
+                new_records.append(y)
 
         if inplace:
             self.records = new_records
-            return self.records
-        else:
-            new_data_file = JsonlDataFile()
-            new_data_file.records = new_records
-            return new_data_file
 
-    def update_each_record(self, func, print_mode=0):
+        return new_records
+
+    def update_each_record(self, func, print_mode=0, threads_num=1, timeout=None):
         """ 遍历并对原始数据进行更改 """
-        self.process_each_record(func, inplace=True, print_mode=print_mode)
+        return self.process_each_record(func, inplace=True,
+                                        timeout=timeout,
+                                        print_mode=print_mode,
+                                        threads_num=threads_num)
 
 
 class JsonlDataDir:
@@ -299,9 +306,9 @@ class JsonlDataDir:
             total += len(JsonlDataFile(f).records)
         return total
 
-    def check(self):
+    def check(self, title=''):
         """ 检查一些数据状态 """
-        print('文件数：', len(self.files))
+        print(title, '文件数:', len(self.files), '条目数:', self.count_records())
 
     @classmethod
     def init_from_file(cls, file, lines_per_file=10000):
@@ -379,37 +386,46 @@ class JsonlDataDir:
                 else:
                     yield batch
 
+    def process_each_file(self, func, *, print_mode=0,
+                          processes_num=1,
+                          desc='process_each_file',
+                          **kwargs):
+        backend = 'loky' if processes_num != 1 else 'sequential'
+        parallel = Parallel(n_jobs=processes_num, backend=backend, return_as='generator')
+        tasks = [delayed(func)(file) for file in self.files]
+        list(tqdm(parallel(tasks), disable=not print_mode,
+                  total=len(self.files), desc=desc, **kwargs))
+
     def process_each_record(self, func, *, inplace=False,
-                            print_mode=1, desc=None,
-                            processes_num=1, threads_num=1):
+                            print_mode=2, desc=None, timeout=None,
+                            processes_num=1, threads_num=1,
+                            dst_dir=None):
         """ 封装的对每个record进行操作的函数
 
         :param int processes_num: 进程数，每个文件为单独一个进程
         :param int threads_num: 线程数，每个文件处理的时候使用几个线程
+        :param print_mode: 0 不显示，1 只显示文件数进度，2 显示文件内处理进度
         """
-        for i, file in tqdm(enumerate(self.files), desc=desc, disable=not print_mode):
-            data_file = JsonlDataFile(file)
-            data_file.process_each_record(func, inplace=inplace,
-                                          threads_num=threads_num,
-                                          print_mode=print_mode > 1)
+
+        def func2(file):
+            # print(file)
+            jdf = JsonlDataFile(file)
+            stem = jdf.infile.stem
+            jdf.process_each_record(func, inplace=inplace,
+                                    timeout=timeout,
+                                    print_mode=print_mode == 2,
+                                    threads_num=threads_num,
+                                    mininterval=processes_num * 3,
+                                    desc=stem)
+
             if inplace:
-                data_file.save(file)
+                jdf.save()
 
-    def update_each_record(self, func, desc='update_each_record'):
-        """ 封装的对每个record进行操作的函数
-        """
-        self.process_each_record(func, inplace=True, desc=desc)
+            if dst_dir:
+                jdf.save(XlPath(dst_dir) / jdf.infile.name)
 
-    def process_each_file(self, func, *, desc='process_each_file'):
-        for i, file in tqdm(enumerate(self.files), desc=desc):
-            func(file)
-
-    def process_each_records(self, func, *, inplace=False, desc='process_each_records'):
-        for i, file in tqdm(enumerate(self.files), desc=desc):
-            records = XlPath(file).read_jsonl()
-            new_records = func(records)  # 如果使用inplace，那么需要函数配套返回新的records
-            if inplace:
-                XlPath(file).write_jsonl(new_records)
+        self.process_each_file(func2, processes_num=processes_num,
+                               print_mode=print_mode == 1, desc=desc)
 
     def save(self, dst_path=None):
         """ 将数据合并到一个jsonl文件中 """

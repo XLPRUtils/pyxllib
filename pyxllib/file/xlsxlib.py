@@ -1533,7 +1533,8 @@ def determine_field_type_and_summary(ws, col, start_row, end_row):
         value_range = None
 
     summary = {
-        "number_formats": sorted(Counter(number_formats).keys(), key=number_formats.count, reverse=True),
+        "number_formats": sorted(Counter(number_formats).keys(),
+                                 key=number_formats.count, reverse=True),
         "sample_values": truncated_values,
         "numeric_range": value_range
     }

@@ -31,6 +31,7 @@ import threading
 import time
 import traceback
 from urllib.parse import urlparse
+from concurrent.futures import ThreadPoolExecutor
 
 from pyxllib.prog.newbie import classproperty, typename
 
@@ -983,3 +984,18 @@ def get_hostname():
 @run_once()
 def get_username():
     return os.path.split(os.path.expanduser('~'))[-1]
+
+
+class XlThreadPoolExecutor(ThreadPoolExecutor):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.futures = []
+
+    def submit(self, *args, **kwargs):
+        future = super().submit(*args, **kwargs)
+        self.futures.append(future)
+        return future
+
+    def yield_result(self, timeout=None):
+        for future in self.futures:
+            yield future.result(timeout=timeout)

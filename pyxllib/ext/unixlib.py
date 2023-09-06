@@ -201,7 +201,7 @@ class XlSSHClient(paramiko.SSHClient):
                 try:
                     res = self.client.exec(f'du "{self}" -s -b')
                 except SshCommandError:
-                    res = 0
+                    res = '0'
 
                 sz = int(re.match(r'\d+', res).group())
                 if human_readable:
