@@ -677,47 +677,6 @@ def __4_综合集成类():
     pass
 
 
-def process_file(processing_func, input_file, output_dir=None,
-                 thread_num=1, mininterval=None, num_records=None,
-                 json_encoder=None):
-    """ 处理指定的文件
-
-    :param processing_func: 用于处理记录的函数
-    :param input_file: 待处理的输入文件
-    :param output_dir: 输出文件的目录
-    :param thread_num: 使用的线程数
-    :param mininterval: tqdm的更新间隔
-    :param num_records: 每个文件最多提取多少条目，用于小批量运行调试
-    """
-    # 当目标文件已存在时，视为已经处理过，不再重复处理。如果想重跑，可以删掉目标文件即可
-    if output_dir is not None:
-        dst_file = output_dir / input_file.name
-        if dst_file.is_file():
-            return
-
-    data_input = JsonlDataFile(input_file, num_records=num_records)
-    data_output = JsonlDataFile()
-
-    if thread_num == 1:
-        for record in tqdm(data_input.records, total=len(data_input.records),
-                           desc=f'Processing {input_file.name}',
-                           mininterval=mininterval):
-            result = processing_func(record)
-            if result:
-                data_output.records.append(result)
-    else:
-        with ThreadPool(thread_num) as pool:
-            for y in tqdm(pool.imap(processing_func, data_input.records),
-                          total=len(data_input.records),
-                          desc=f'Processing {input_file.name}',
-                          mininterval=mininterval):
-                if y:
-                    data_output.records.append(y)
-
-    if output_dir is not None:
-        data_output.save(dst_file, json_encoder=json_encoder)
-
-
 class GptChatDir:
     """ 一个目录，包含了一个任务的所有数据，包括in、out、post等文件 """
 
@@ -923,77 +882,21 @@ class GptChatDir:
         # 会剩一些特殊的处理不了的文件，可以看一眼后手动删掉
         # 这些相关的records，默认的chatted2post_record会把这些记录过滤掉
 
-    @classmethod
-    def process_files(cls, processing_func, input_files, output_dir,
-                      *, process_num=1, thread_num=1, num_records=None,
-                      json_encoder=None):
-        if process_num == 1:  # 单进程
-            for file in input_files:
-                process_file(processing_func, file, output_dir,
-                             thread_num=thread_num, num_records=num_records,
-                             json_encoder=json_encoder)
-        elif isinstance(process_num, int):  # 多进程
-            with multiprocessing.Pool(process_num) as pool:
-                pool.starmap(process_file,
-                             [(processing_func, file, output_dir,
-                               thread_num, process_num * 3, num_records, json_encoder)
-                              for file in input_files])
-        elif isinstance(process_num, (list, tuple)):  # 多进程，但是不同进程"不同构"
-            # 这个功能还不是很完善，设计的不太好，暂不推荐使用。但基本原理差不多是这样的，放在这里做个参考。
-            process_functions = process_num
-            with multiprocessing.Pool(len(process_functions)) as pool:
-                pool.starmap(lambda process_func, file:
-                             process_func(processing_func, file, output_dir,
-                                          thread_num, process_num * 3, num_records,
-                                          json_encoder),
-                             zip(process_functions, input_files))
-        else:
-            raise TypeError
-
-    def create_post(self, *, reset=False, num_records=None, process_num=1, thread_num=1):
+    def create_post(self, **kwargs):
         """ 建议初步跑的时候，先串行debug，等比较稳定后，再开并发跑
-
-        :param num_records: 每个文件最多提取多少条目，用于小批量运行调试
-        :param int process_num: 分文件多进程执行
-        :param int thread_num: 每个文件里的多线程执行数
         """
-        input_files = self.chatted_dir.files
-        if num_records:
-            input_files = input_files[:1]  # 使用num_records的时候，会只跑一个文件
-        output_dir = self.post_dir.root
-        processing_func = self.chatted2post_record
-        if reset:
-            output_dir.delete()
+        if 'dst_dir' not in kwargs:
+            kwargs['dst_dir'] = self.post_dir.root
+        self.chatted_dir.process_each_record(self.chatted2post_record, **kwargs)
+        self.post_dir.update_subfiles()
 
-        input_num = len(input_files)
-        print(f'【create_post】后处理 {input_num}个文件待处理')
-
-        self.process_files(processing_func, input_files, output_dir,
-                           process_num=process_num, thread_num=thread_num,
-                           num_records=num_records)
-
-        self.update_dir()
-
-    def create_verify(self, *, reset=False, num_records=None, process_num=1, thread_num=1,
-                      json_encoder=None):
+    def create_verify(self, **kwargs):
         """ 有时候create_verify是有cpu密集运算场景的，可以开多进程
         """
-        input_files = self.post_dir.files
-        if num_records:
-            input_files = input_files[:1]  # 使用num_records的时候，会只跑一个文件
-        output_dir = self.verify_dir.root
-        processing_func = self.post2verify_record
-        if reset:
-            output_dir.delete()
-
-        input_num = len(input_files)
-        print(f'【create_verify】得到更准确或精确后处理的验证集 {input_num}个文件待处理')
-
-        self.process_files(processing_func, input_files, output_dir,
-                           process_num=process_num, thread_num=thread_num,
-                           num_records=num_records, json_encoder=json_encoder)
-
-        self.update_dir()
+        if 'dst_dir' not in kwargs:
+            kwargs['dst_dir'] = self.verify_dir.root
+        self.post_dir.process_each_record(self.post2verify_record, **kwargs)
+        self.verify_dir.update_subfiles()
 
     @classmethod
     def texts2train_record(cls, texts):
@@ -1004,23 +907,11 @@ class GptChatDir:
             messages.append({'role': role, 'content': text})
         return {'messages': messages}
 
-    def create_train(self, *, reset=False, num_records=None, process_num=1, thread_num=1):
-        input_files = self.verify_dir.files
-        if num_records:
-            input_files = input_files[:1]  # 使用num_records的时候，会只跑一个文件
-        output_dir = self.train_dir.root
-        processing_func = self.verify2train_record
-        if reset:
-            output_dir.delete()
-
-        input_num = len(input_files)
-        print(f'【create_train】生成训练集数据 {input_num}个文件待处理')
-
-        self.process_files(processing_func, input_files, output_dir,
-                           process_num=process_num, thread_num=thread_num,
-                           num_records=num_records)
-
-        self.update_dir()
+    def create_train(self, **kwargs):
+        if 'dst_dir' not in kwargs:
+            kwargs['dst_dir'] = self.train_dir.root
+        self.post_dir.process_each_record(self.verify2train_record, **kwargs)
+        self.train_dir.update_subfiles()
 
     def check_chatted_record(self, chatted_record):
         """ 检查chatted数据的有效性 """

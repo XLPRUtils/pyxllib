@@ -290,6 +290,10 @@ class JsonlDataDir:
         """
         self.root = XlPath(root)
         self.files = []
+        self.update_subfiles()
+
+    def update_subfiles(self):
+        self.files = []
         for f in self.root.glob_files('*.jsonl'):
             if re.match(r'_?\d+$', f.stem):  # 目前先用'_?'兼容旧版，但以后应该固定只匹配_\d+
                 self.files.append(f)
@@ -399,7 +403,7 @@ class JsonlDataDir:
     def process_each_record(self, func, *, inplace=False,
                             print_mode=2, desc=None, timeout=None,
                             processes_num=1, threads_num=1,
-                            dst_dir=None):
+                            dst_dir=None, reset=False, json_encoder=None):
         """ 封装的对每个record进行操作的函数
 
         :param int processes_num: 进程数，每个文件为单独一个进程
@@ -407,23 +411,33 @@ class JsonlDataDir:
         :param print_mode: 0 不显示，1 只显示文件数进度，2 显示文件内处理进度
         """
 
-        def func2(file):
-            # print(file)
-            jdf = JsonlDataFile(file)
-            stem = jdf.infile.stem
+        def func2(srcfile):
+            # 1 如果没有reset，且dstfile存在，则不处理
+            srcfile = XlPath(srcfile)
+            if dst_dir:
+                dstfile = XlPath(dst_dir) / srcfile.name
+            else:
+                dstfile = None
+            if not reset and dstfile and dstfile.is_file():
+                return
+
+            # 2 跑特定文件里的条目
+            jdf = JsonlDataFile(srcfile)
             jdf.process_each_record(func, inplace=inplace,
                                     timeout=timeout,
                                     print_mode=print_mode == 2,
                                     threads_num=threads_num,
                                     mininterval=processes_num * 3,
-                                    desc=stem)
+                                    desc=f'{jdf.infile.name}/{files_num}')
 
+            # 3 是否修改原文件，是否保存到dst_dir
             if inplace:
                 jdf.save()
 
-            if dst_dir:
-                jdf.save(XlPath(dst_dir) / jdf.infile.name)
+            if dstfile:
+                jdf.save(dstfile, json_encoder=json_encoder)
 
+        files_num = len(self.files)
         self.process_each_file(func2, processes_num=processes_num,
                                print_mode=print_mode == 1, desc=desc)
 
