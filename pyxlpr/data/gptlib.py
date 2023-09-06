@@ -6,7 +6,6 @@
 
 
 from pyxllib.prog.pupil import check_install_package
-from joblib import Parallel, delayed
 
 check_install_package('transformers', 'transformers')
 
@@ -19,16 +18,12 @@ import copy
 from urllib.parse import unquote
 from collections import OrderedDict
 from collections import Counter
-import multiprocessing
-from multiprocessing.dummy import Pool as ThreadPool
 
 import pandas as pd
 from transformers import GPT2TokenizerFast
 from tqdm import tqdm
 from openpyxl import Workbook
 from jinja2 import Template
-# import pathos
-# import pathos.multiprocessing as multiprocessing
 
 from pyxllib.prog.pupil import OutputLogger
 from pyxllib.prog.specialist import browser, TicToc

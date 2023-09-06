@@ -4,9 +4,9 @@
 # @Email  : 877362867@qq.com
 # @Date   : 2021/06/06 17:46
 
-from itertools import islice
-import multiprocessing
-import multiprocessing.dummy
+from pyxllib.prog.pupil import check_install_package
+
+check_install_package('joblib', 'joblib>=1.3.2')
 
 from joblib import Parallel, delayed
 
