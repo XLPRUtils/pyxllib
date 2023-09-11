@@ -57,7 +57,7 @@ class BCompare(Explorer):
             #     raise FileNotFoundError(f'{f}')
             else:  # 不是文件对象，要转存到文件
                 if not files[i]:  # 没有设置文件名则生成一个
-                    files[i] = XlPath.init(ref_names[i], Dir.TEMP, suffix=default_suffix)
+                    files[i] = XlPath.init(ref_names[i], XlPath.tempdir(), suffix=default_suffix)
                 else:
                     files[i] = XlPath(files[i])
                 files[i].write_text(arg)

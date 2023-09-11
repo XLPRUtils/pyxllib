@@ -74,7 +74,7 @@ class 网课考勤:
         self.当天课次2 = min(self.当天课次, self.课次数)
         self.结束课次 = self.当天课次 - len(self.视频返款) + 1  # 这是用于逻辑运算的，可能有负值
         self.结束课次2 = max(0, self.结束课次)
-        self.用户列表 = pd.read_csv(self.get_file('数据表/用户列表导出*.csv'))
+        self.用户列表 = pd.read_csv(self.get_file('数据表/用户列表导出*.csv'), dtype={16: str})
         # 用户列表 = 用户列表[用户列表['账号状态'] == '正常']
 
         self.考勤表出现次数 = Counter()
@@ -207,7 +207,7 @@ class 网课考勤:
             if m := re.match(r'(\d{4}\-\d{2}\-\d{2}).+?课.*?(\d+).+?直播观看详情', f.stem):
                 stat_day, 课次 = date.fromisoformat(m.group(1)), int(m.group(2))
                 skiprows = 1
-            elif m := re.search(r'\d+届.+?(\d+).+?直播用户列表.+?(\d{4}\-\d{2}\-\d{2})', f.stem):  # 新版格式
+            elif m := re.search(r'(?:[\d一-十四]+)届.+?(\d+).+?直播用户列表.+?(\d{4}\-\d{2}\-\d{2})', f.stem):  # 新版格式
                 stat_day, 课次 = date.fromisoformat(m.group(2)), int(m.group(1))
                 skiprows = 0
             else:

@@ -899,18 +899,23 @@ class OutputLogger(logging.Logger):
         # 创建文件日志处理器
         if log_file:
             file_handler = logging.FileHandler(log_file, encoding='utf-8')
-            file_handler.setLevel(logging.INFO)
+            file_handler.setLevel(logging.DEBUG)  # 日志文件是最详细级别都记录
             file_handler.setFormatter(formatter)
             self.addHandler(file_handler)
 
         # 创建命令行日志处理器
         if output_to_console:
             console_handler = logging.StreamHandler()
-            console_handler.setLevel(logging.INFO)
+            console_handler.setLevel(logging.WARNING)  # 有些太详细的问题，不想写在控制台，而是写到文件
             console_handler.setFormatter(formatter)
             self.addHandler(console_handler)
 
+        # 只输出到控制台：标准库的print
+        # 只输出到文件：debug, info
+        # 同时输出到控制台和文件：warning, error, critical, print
+
     def print(self, *args, **kwargs):
+        """ 使用print机制，会同时输出到控制台和日志文件 """
         msg = print2string(*args, **kwargs)
 
         if self.output_to_console:

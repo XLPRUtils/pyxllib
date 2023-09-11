@@ -118,6 +118,7 @@ def print_statistics(data, indent_level=1, price_base=0.0015, max_samples=500):
 
 
 def set_template(s, *args, **kwargs):
+    """ todo 这个名字会不会太容易冲突了？ """
     return Template(s.strip(), *args, **kwargs)
 
 
@@ -573,7 +574,7 @@ def extract_code_blocks_from_md(markdown_text, *, sort_by_length=False):
         markdown_text = [markdown_text]
 
     matches = []
-    pattern = re.compile(r'^```[^\n]*\n(.+?)^```', re.MULTILINE | re.DOTALL)
+    pattern = re.compile(r'^```[^\n]*\n(.+?)\n^```', re.MULTILINE | re.DOTALL)
     for text in markdown_text:
         matches += pattern.findall(text)
 
@@ -581,6 +582,18 @@ def extract_code_blocks_from_md(markdown_text, *, sort_by_length=False):
         matches = sorted(matches, key=len)
 
     return matches
+
+
+def extract_airscript_code_from_answers(all_answers):
+    """ 从多轮回答的最后一次回答中提取求解代码 """
+    contents = all_answers[-1]['contents']
+    text = contents[-1]['text']
+    code_blocks = extract_code_blocks_from_md(text, sort_by_length=True)
+
+    if code_blocks:
+        return code_blocks[-1]
+    else:
+        return ''
 
 
 def __3_生成最后训练用的数据():
@@ -849,11 +862,11 @@ class GptChatDir:
         # 返回处理结果
         return post_record
 
-    def post2verify_record(self, post_record):
+    @staticmethod
+    def post2verify_record(post_record):
         """ 这个一般是要具体任务定制的，没有通用操作方式
 
-        注意，如果有些record不想重复verify，可以在类里其他地方预设存储一些已经处理过的结果
-            然后在这个函数中引用
+        注意，如果要使用create_verify的多进程功能，这个函数必须是静态的，否则写成类方法或对象方法都可以
         """
         raise NotImplementedError
 
@@ -884,6 +897,8 @@ class GptChatDir:
             kwargs['dst_dir'] = self.post_dir.root
         self.chatted_dir.process_each_record(self.chatted2post_record, **kwargs)
         self.post_dir.update_subfiles()
+        num1, num2 = self.chatted_dir.count_records(), self.post_dir.count_records()
+        print(f'chatted有{num1}条，转换post有{num2}条，转换率{num1 / num2:.2%}')
 
     def create_verify(self, **kwargs):
         """ 有时候create_verify是有cpu密集运算场景的，可以开多进程
@@ -892,6 +907,8 @@ class GptChatDir:
             kwargs['dst_dir'] = self.verify_dir.root
         self.post_dir.process_each_record(self.post2verify_record, **kwargs)
         self.verify_dir.update_subfiles()
+        num1, num2 = self.post_dir.count_records(), self.verify_dir.count_records()
+        print(f'post有{num1}条，转换verify有{num2}条，转换率{num1 / num2:.2%}')
 
     @classmethod
     def texts2train_record(cls, texts):

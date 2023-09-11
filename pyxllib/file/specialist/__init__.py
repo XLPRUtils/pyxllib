@@ -3,10 +3,14 @@
 # @Author : 陈坤泽
 # @Email  : 877362867@qq.com
 # @Date   : 2021/06/06 17:46
+import re
 
 from pyxllib.prog.pupil import check_install_package
 
 check_install_package('joblib', 'joblib>=1.3.2')
+
+from collections import OrderedDict
+import sqlite3
 
 from joblib import Parallel, delayed
 
@@ -84,6 +88,38 @@ class JsonlDataFile:
                 yield from batch
             else:
                 yield batch
+
+    def yield_group(self, key, sort_mode='keep'):
+        """ 分组提取数据
+
+        :param key: 一个函数，对record的映射，通过这个映射规则来分组
+        :param sort_mode:
+            keep: 保留原本的相对顺序
+            id: 按照id的值进行排序
+            sort: 按照key的值进行排序
+        """
+        # 1 创建一个默认字典来保存分组
+        grouped_data = OrderedDict()
+
+        records = self.records
+        if sort_mode == 'id':
+            records = sorted(records, key=lambda x: x['id'])
+
+        # 2 对数据进行分组
+        for record in records:
+            k = key(record)
+            if k not in grouped_data:
+                grouped_data[k] = [record]
+            else:
+                grouped_data[k].append(record)
+
+        # 3 将分组的数据重新排序并合并为一个新列表
+        # 并且在这里可以进行一些分组信息的计算
+        if sort_mode == 'sort':
+            grouped_data = {k: grouped_data[k] for k in sorted(grouped_data.keys())}
+
+        # 4 返回分组后的数据
+        yield from grouped_data.values()
 
     def read_partial_records(self, num_records):
         """ 从jsonl文件中只读取指定数量的记录 """
@@ -313,7 +349,7 @@ class JsonlDataDir:
     def count_records(self):
         total = 0
         for f in self.files:
-            total += len(JsonlDataFile(f).records)
+            total += len(f.get_total_lines())
         return total
 
     def check(self, title=''):
@@ -330,14 +366,101 @@ class JsonlDataDir:
         c = cls(dst_dir)
         return c
 
-    def rearrange(self, lines_per_file=10000):
+    def _rearrange_group(self, lines_per_file=10000,
+                         group_key=None, sort_mode='keep',
+                         print_mode=1):
+        # 1 使用sqlite3存储数据和分组信息
+        # 创建一个临时文件来作为SQLite数据库
+        temp_db_file = self.root / 'data.sqlite3'
+        temp_db_file.delete()
+
+        # 使用临时文件创建SQLite数据库连接
+        conn = sqlite3.connect(temp_db_file)
+        cursor = conn.cursor()
+
+        # 创建一个临时表来存储jsonl数据
+        cursor.execute('CREATE TABLE records (id INTEGER PRIMARY KEY AUTOINCREMENT,'
+                       'data TEXT, group_key TEXT)')
+        # 给group_key添加索引
+        cursor.execute('CREATE INDEX idx_group_key ON records(group_key)')
+
+        # 从jsonl文件加载数据到SQLite数据库
+        commit_interval = 2000  # 多少记录执行一次commit
+        count = 0
+        for record in tqdm(self.yield_record(), desc='计算每个record分组', disable=not print_mode):
+            count += 1
+            group = group_key(record) if group_key else count
+            group = str(group)
+            cursor.execute('INSERT INTO records (data, group_key) VALUES (?, ?)',
+                           (json.dumps(record, ensure_ascii=False), group))
+            if count % commit_interval == 0:
+                conn.commit()
+        conn.commit()
+
+        # 2 查询数据库以进行排序和分组，并将结果写入新的jsonl文件
+        new_file_count = 0
+        lines_written = 0
+        current_file = None
+        sort_sql = ''
+        if sort_mode == 'id':
+            sort_sql = 'ORDER BY id'
+        elif sort_mode == 'sort':
+            sort_sql = f'ORDER BY {group_key}'
+
+        for group, in tqdm(cursor.execute('SELECT DISTINCT group_key FROM records').fetchall(),
+                           desc='提取每一组数据',
+                           disable=not print_mode):
+            query = f'SELECT data FROM records WHERE group_key = ? {sort_sql}'
+            cursor.execute(query, (group,))
+
+            if current_file is None or lines_written >= lines_per_file:
+                if current_file:
+                    current_file.close()
+                new_file_name = f'temp_{new_file_count}.jsonl'
+                new_file_path = self.root / new_file_name
+                current_file = new_file_path.open('w', encoding='utf-8')
+                new_file_count += 1
+                lines_written = 0
+
+            while True:
+                row = cursor.fetchone()
+                if row is None:
+                    break
+
+                current_file.write(row[0] + '\n')
+                lines_written += 1
+
+        if current_file:
+            current_file.close()
+
+        # 3 关闭数据库连接并删除临时文件
+        conn.close()
+        temp_db_file.delete()
+
+        # 4 删除旧文件，重命名新文件
+        for f in self.files:
+            f.delete()
+
+        widths = len(str(new_file_count))
+        for temp_file in self.root.glob('temp_*.jsonl'):
+            n = int(re.search(r'\d+', temp_file.name).group())
+            temp_file.rename(self.root / f'_{n:0{widths}}.jsonl')
+
+    def rearrange(self, lines_per_file=10000, group_key=None,
+                  sort_mode='keep', print_mode=1):
         """ 重新整理划分文件
 
         :param int lines_per_file: 每个文件的行数
+        :param func group_key: 用来分组的函数，确保相同key的数据会被分到同一个文件里
+        :param str sort_mode:
+            keep: 保留原本的相对顺序
+            id: 按照id的值进行排序
+            sort: 按照key的值进行排序
         """
-        output_dir = self.root
+        if group_key is not None or sort_mode != 'keep':
+            return self._rearrange_group(lines_per_file, group_key, sort_mode, print_mode)
 
-        # 使用临时文件名前缀，以便在处理完成后更改为最终的文件名
+        output_dir = self.root
         temp_prefix = 'temp_'
 
         new_file_count = 0
@@ -396,12 +519,25 @@ class JsonlDataDir:
                 else:
                     yield batch
 
-    def process_each_file(self, func, *,
+    def yield_group(self, key, sort_mode='keep'):
+        """ 分组提取数据
+
+        :param key: 一个函数，对record的映射，通过这个映射规则来分组
+
+        注意：这个分组只会对每个分文件单独执行，不会全局性质检索
+            一般要用self.rearrange对全局的文件进行检索重排后再使用这个函数
+        """
+        for filepath in self.files:
+            jdf = JsonlDataFile(filepath)
+            yield from jdf.yield_group(key, sort_mode)
+
+    def process_each_file(self, func=None, *,
                           print_mode=0, desc='process_each_file',
                           processes_num=1,
                           **kwargs):
         backend = 'loky' if processes_num != 1 else 'sequential'
         parallel = Parallel(n_jobs=processes_num, backend=backend, return_as='generator')
+
         tasks = [delayed(func)(file) for file in self.files]
         list(tqdm(parallel(tasks), disable=not print_mode,
                   total=len(self.files), desc=desc, **kwargs))
@@ -429,8 +565,9 @@ class JsonlDataDir:
         :param dst_dir: 要保存到的目标目录，未设置的时候不保存
         :param json_encoder: 有些不是标准的json数据结构，如何进行处理，有需要的时候一般会设置成str
         """
+        files_num = len(self.files)
 
-        def func2(srcfile):
+        def process_jsonl_file(srcfile):
             # 1 如果没有reset，且dstfile存在，则不处理
             srcfile = XlPath(srcfile)
             if dst_dir:
@@ -442,24 +579,69 @@ class JsonlDataDir:
 
             # 2 跑特定文件里的条目
             jdf = JsonlDataFile(srcfile)
-            jdf.process_each_record(func,
-                                    inplace=inplace,
-                                    print_mode=print_mode == 2,
-                                    desc=f'{jdf.infile.name}/{files_num}',
-                                    timeout=timeout,
-                                    threads_num=threads_num,
-                                    mininterval=processes_num * 3,
-                                    )
+            new_records = jdf.process_each_record(func,
+                                                  inplace=inplace,
+                                                  print_mode=print_mode == 2,
+                                                  desc=f'{jdf.infile.name}/{files_num}',
+                                                  timeout=timeout,
+                                                  threads_num=threads_num,
+                                                  mininterval=processes_num * 3,
+                                                  )
 
             # 3 是否修改原文件，是否保存到dst_dir
             if inplace:
                 jdf.save()
 
             if dstfile:
+                jdf = JsonlDataFile()
+                jdf.records = new_records
                 jdf.save(dstfile, json_encoder=json_encoder)
 
-        files_num = len(self.files)
-        self.process_each_file(func2, processes_num=processes_num,
+        self.process_each_file(process_jsonl_file,
+                               processes_num=processes_num,
+                               print_mode=print_mode == 1, desc=desc)
+
+    def process_each_group(self, func, group_key, sort_mode='keep', *,
+                           inplace=False, reset=False,
+                           print_mode=1, desc=None,
+                           processes_num=1,
+                           dst_dir=None,
+                           json_encoder=None):
+        """ 封装的对每组records的处理
+
+        todo 230909周六14:00，还有些细节功能可能不完善，比如内部的进度条，多线程等，等后续使用的时候慢慢优化
+        """
+
+        def process_jsonl_file(srcfile):
+            # 1 如果没有reset，且dstfile存在，则不处理
+            srcfile = XlPath(srcfile)
+            if dst_dir:
+                dstfile = XlPath(dst_dir) / srcfile.name
+            else:
+                dstfile = None
+            if not reset and dstfile and dstfile.is_file():
+                return
+
+            # 2 跑特定文件里的条目
+            jdf = JsonlDataFile(srcfile)
+            new_records = []
+            for records in jdf.yield_group(group_key, sort_mode):
+                records2 = func(records)
+                if records2:
+                    new_records.extend(records2)
+
+            # 3 是否修改原文件，是否保存到dst_dir
+            if inplace:
+                jdf.records = new_records
+                jdf.save()
+
+            if dstfile:
+                jdf = JsonlDataFile()
+                jdf.records = new_records
+                jdf.save(dstfile, json_encoder=json_encoder)
+
+        self.process_each_file(process_jsonl_file,
+                               processes_num=processes_num,
                                print_mode=print_mode == 1, desc=desc)
 
     def save(self, dst_path=None):
@@ -474,3 +656,7 @@ class JsonlDataDir:
                     for line in f2:
                         if line.strip():  # 不存储空行
                             f.write(line)
+
+    def clear(self):
+        for f in self.files:
+            f.delete()
