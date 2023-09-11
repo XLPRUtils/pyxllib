@@ -17,7 +17,7 @@ check_install_package('pyecharts')
 import pyecharts
 from pyecharts import options as opts
 from pyecharts.commons.utils import JsCode
-from pyecharts.charts import Bar
+from pyecharts.charts import Bar, Line
 from pyecharts.charts.chart import Chart
 
 from pyxllib.prog.pupil import inject_members

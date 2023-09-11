@@ -1113,6 +1113,35 @@ class XlWorkbook(openpyxl.Workbook):
             li.append(ws.to_latex())
         return '\n'.join(li)
 
+    def _to_json_readonly(self, data, reduction_degree):
+        if reduction_degree == 0:
+            return data
+
+        def traverse_json(obj, path=""):
+            """ 递归遍历JSON对象，模拟Python字典和列表的索引机制来显示路径。
+            """
+            if isinstance(obj, dict):
+                for name in ['filename', 'start_dir', 'header_offset', 'modified',
+                             'CRC', 'compress_size', 'file_size',
+                             # 230908周五16:40，后面是详细查看各种案例后，添加的处理
+                             '__reduce__', '_dict', '_fonts', '_fills', '_borders',
+                             '_style', '_named_styles']:
+                    if name in obj:
+                        del obj[name]
+                for k, v in obj.items():
+                    new_path = f"{path}['{k}']" if path else k
+                    traverse_json(v, new_path)
+            elif isinstance(obj, list):
+                for i, v in enumerate(obj):
+                    new_path = f"{path}[{i}]"
+                    traverse_json(v, new_path)
+            else:
+                pass  # 对于基本数据类型，不需要进一步处理
+
+        traverse_json(data)
+
+        return data
+
     def to_json(self, reduction_degree=0):
         """
         :param reduction_degree: 对json进行处理的程度级别
@@ -1124,9 +1153,11 @@ class XlWorkbook(openpyxl.Workbook):
         # 1 将对象先序列化
         s = jsonpickle.encode(self)
         data = json.loads(s)
-
         if reduction_degree == 0:
             return data
+
+        if self.read_only:
+            return self._to_json_readonly(data, reduction_degree)
 
         # 2 将复合结构hash化
         for name in ['font', 'border', 'fill']:
@@ -1238,7 +1269,15 @@ inject_members(XlWorkbook, openpyxl.Workbook)
 
 
 def excel2md5(file, reduction_degree=1):
-    wb = openpyxl.load_workbook(file)
+    try:
+        wb = openpyxl.load_workbook(file)
+    except (ValueError, TypeError) as e:
+        # 有些表格直接读取会失败，但使用read_only就能读了
+        wb = openpyxl.load_workbook(file, read_only=True)
+    except Exception as e:  # 还有其他zipfile.BadZipFile等错误
+        print(file, str(e))
+        return ''
+
     return wb.to_md5(reduction_degree)
 
 

@@ -338,7 +338,8 @@ def pareto_accumulate(weights, accuracy=0.01, *, print_mode=False):
 
     :param weights: 一组权重数据
     :param accuracy: 累计精度，当统计到末尾时，可能有大量权重过小的数值
-        此时不频繁进行累计权重计算，而是但更新权重累计达到accuracy，才会更新一个记录点
+        此时不频繁进行累计权重计算，而是当更新权重累计达到accuracy，才会更新一个记录点
+        注意这是全量数据综合的百分比，所以最小更新量就是1%
     :param print_mode: 是否直接展示可视化结果
     :return: [(累计数值数量, ≥当前阈值, 累计权重), ...]
 
