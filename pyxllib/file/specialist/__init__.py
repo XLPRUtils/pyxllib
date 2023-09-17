@@ -349,7 +349,7 @@ class JsonlDataDir:
     def count_records(self):
         total = 0
         for f in self.files:
-            total += len(f.get_total_lines())
+            total += f.get_total_lines()
         return total
 
     def check(self, title=''):

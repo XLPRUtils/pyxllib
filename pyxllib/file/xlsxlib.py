@@ -21,6 +21,7 @@ import datetime
 import json
 import re
 from pathlib import Path
+from collections import Counter, OrderedDict, defaultdict
 
 import openpyxl
 from openpyxl.cell.cell import MergedCell
@@ -28,7 +29,6 @@ from openpyxl.styles import Font, Alignment
 from openpyxl.utils.cell import get_column_letter, column_index_from_string
 import pandas as pd
 import jsonpickle
-from collections import Counter, OrderedDict
 
 from pyxllib.prog.pupil import inject_members, dprint, xlmd5
 from pyxllib.prog.specialist import browser
@@ -95,6 +95,136 @@ def is_valid_excel_address(address):
         return is_valid_excel_range(address)
     else:
         return is_valid_excel_cell(address)
+
+
+@run_once('str')
+def xlfmt2pyfmt_date(xl_fmt):
+    """ 日期的渲染操作
+
+    >>> xlfmt2pyfmt_date('yyyy/m/d')
+    '%Y/{month}/{day}'
+    >>> xlfmt2pyfmt_date('yyyy年mm月dd日')
+    '%Y年%m月%d日'
+    >>> xlfmt2pyfmt_date('yyyy年m月d日')
+    '%Y年{month}月{day}日'
+
+    # 注意以下是并未支持的功能...会默认返回 '%Y/%-m/%-d'
+    >>> xlfmt2pyfmt_date('yy-m-d')
+    '%y-{month}-{day}'
+    >>> xlfmt2pyfmt_date('m/d/yy')
+    '{month}/{day}/%y'
+    >>> xlfmt2pyfmt_date('dddd, mmmm dd, yyyy')
+    '%A, %B {day}, %Y'
+    >>> xlfmt2pyfmt_date('yy/mm/dd')
+    '%y/%m/%d'
+    >>> xlfmt2pyfmt_date('m-d-yy')
+    '{month}-{day}-%y'
+    """
+    mappings = {
+        'y': {2: '%y', 4: '%Y'},
+        'm': {1: '%-m', 2: '%m', 3: '%b', 4: '%B'},
+        'd': {1: '%-d', 2: '%d', 3: '%a', 4: '%A'}
+    }
+
+    m = re.search(r'(y+)(.+)(m+)(.)(d+)(日?)', xl_fmt.replace('"', ''))
+    if m:
+        y, sep1, m, sep2, d, sep3 = m.groups()
+        year_pattern = mappings['y'].get(len(y), '%Y')
+        month_pattern = mappings['m'].get(len(m), '%m')
+        day_pattern = mappings['d'].get(len(d), '%d')
+        fmt = f'{year_pattern}{sep1}{month_pattern}{sep2}{day_pattern}{sep3}'
+    else:
+        fmt = '%Y/%-m/%-d'
+
+    # 在windows下，%-m和%-d会报错，所以需要替换成{month}和{day}
+    fmt = fmt.replace('%-m', '{month}')
+    fmt = fmt.replace('%-d', '{day}')
+    return fmt
+
+
+@run_once('str')
+def xlfmt2pyfmt_time(xl_fmt):
+    """ 时间的渲染操作
+
+    >>> xlfmt2pyfmt_time('h:mm:ss')
+    '%I:%M:%S'
+    >>> xlfmt2pyfmt_time('hh:mm:ss')
+    '%H:%M:%S'
+    >>> xlfmt2pyfmt_time('mm:ss')
+    '%M:%S'
+    >>> xlfmt2pyfmt_time('h:mm')
+    '%I:%M'
+    >>> xlfmt2pyfmt_time('hh:mm')
+    '%H:%M'
+    >>> xlfmt2pyfmt_time('m:ss')
+    '%M:%S'
+    >>> xlfmt2pyfmt_time('h:mm:ss AM/PM')
+    '%I:%M:%S %p'
+    >>> xlfmt2pyfmt_time('hh:mm:ss AM/PM')
+    '%H:%M:%S %p'
+    """
+    xl_fmt = re.sub(r'(y+)(.)(m+)(.)(d+)(日?)', '', xl_fmt.replace('"', ''))
+
+    components = []
+
+    # 判断是12小时制还是24小时制
+    if 'hh' in xl_fmt:
+        components.append('%H')
+    elif 'h' in xl_fmt:
+        components.append('%I')
+
+    # 判断是否显示分钟
+    if 'mm' in xl_fmt or 'm' in xl_fmt:
+        components.append('%M')
+
+    # 判断是否显示秒钟
+    if 'ss' in xl_fmt or 's' in xl_fmt:
+        components.append('%S')
+
+    # 判断是否显示AM/PM
+    if 'AM/PM' in xl_fmt:
+        if components:
+            components[-1] += ' %p'
+        else:
+            components.append('%p')
+
+    return ':'.join(components)
+
+
+@run_once('str')
+def xlfmt2pyfmt_datetime(xl_fmt):
+    """ 主要是针对日期、时间的渲染操作 """
+    py_fmt = xlfmt2pyfmt_date(xl_fmt)
+    if ':' in xl_fmt:
+        py_fmt += ' ' + xlfmt2pyfmt_time(xl_fmt)
+    return py_fmt
+
+
+@run_once('str')
+def xlfmt2pyfmt(xl_fmt):
+    """ 主要是针对日期、时间的渲染操作 """
+    return xl_fmt
+
+
+def xl_render_value(x, xl_fmt):
+    """ 得到单元格简单渲染后的效果
+    py里不可能对excel的所有格式进行全覆盖，只是对场景格式进行处理
+
+    注意，遇到公式是很难计算处理的，大概率只能保持原公式显示
+    因为日期用的比较多，需要时常获得真实的渲染效果，所以这里封装一个接口
+    """
+
+    if isinstance(x, datetime.datetime):
+        y = x.strftime(xlfmt2pyfmt_datetime(xl_fmt)).format(month=x.month, day=x.day)
+    elif isinstance(x, datetime.date):
+        y = x.strftime(xlfmt2pyfmt_date(xl_fmt)).format(month=x.month, day=x.day)
+    elif isinstance(x, datetime.time):
+        y = x.strftime(xlfmt2pyfmt_time(xl_fmt))
+    elif isinstance(x, datetime.timedelta):
+        y = str(x)
+    else:
+        y = x
+    return y
 
 
 class XlCell(openpyxl.cell.cell.Cell):  # 适用于 openpyxl.cell.cell.MergedCell，但这里不能多重继承
@@ -307,6 +437,25 @@ class XlCell(openpyxl.cell.cell.Cell):  # 适用于 openpyxl.cell.cell.MergedCel
         if color:
             self.fill_color(color)
         # todo 可以考虑扩展更多富文本样式，在这里统一设置
+
+    def get_number_format(self):
+        """ 相比源生的接口，有做了一些细节优化 """
+        fmt = self.number_format
+        # openpyxl的机制，如果没有配置日期格式，读取到的是默认的'mm-dd-yy'，其实在中文场景，默认格式应该是后者
+        if fmt == 'mm-dd-yy':
+            return 'yyyy/m/d'  # 中文的默认日期格式
+        return fmt
+
+    def get_render_value(self):
+        """ 得到单元格简单渲染后的效果
+        py里不可能对excel的所有格式进行全覆盖，只是对场景格式进行处理
+
+        注意，遇到公式是很难计算处理的，大概率只能保持原公式显示
+        因为日期用的比较多，需要时常获得真实的渲染效果，所以这里封装一个接口
+        """
+        x = self.value
+        xl_fmt = self.get_number_format()
+        return xl_render_value(x, xl_fmt)
 
 
 # 只有cell和mergecell都共同没有的成员方法，才添加进去
@@ -1495,105 +1644,77 @@ def extract_header_structure(ws, header_range):
     return header_structure
 
 
-def determine_field_type_and_summary(ws, col, start_row, end_row):
-    """ 根据指定的列范围确定字段的摘要信息 """
+def determine_field_type_and_summary(ws, col, start_row, end_row, rows):
+    """ 根据指定的列范围确定字段的摘要信息
 
-    # 初始化存储
-    number_formats = []
+    :param rows: 由外部传入要抽样的数据编号
+    """
+    # 1 需要全量读取数据，获知主要格式，和数值范围
+    data = defaultdict(list)
+    for i in range(start_row, end_row + 1):
+        cell = ws.cell(i, col)
+        k, v = cell.get_number_format(), cell.value
+        data[k].append(v)
+
+    data2 = sorted(data.items(), key=lambda item: len(item[1]), reverse=True)
+    number_formats = [x[0] for x in data2]
+
+    # 2 获得要展示的样本值
     sample_values = []
-    numeric_values = []
-    date_values = []
-    time_values = []
-    time_delta_values = []
-
-    # 从指定范围中抽取10个值
-    rows = list(ws.iter_rows(min_col=col, max_col=col, min_row=start_row, max_row=end_row))
-    sample_indices = random.sample(range(len(rows)), min(10, len(rows)))
-    sample_indices.sort()
-    sample_rows = [rows[i] for i in sample_indices]
-
-    for row in sample_rows:
-        cell = row[0]
-        number_format = cell.number_format
-        # 日期现在不可能用国际化的mm-dd-yy格式，先简单暴力替换的机制
-        #   todo 之后要鲁棒性更好的话，可能要有其他更合理的机制处理方法
-        number_format = number_format.replace('mm-dd-yy', 'yy/mm/dd')
-        number_formats.append(number_format)
-
-        # If cell value is a date or time, format it using its number_format
-        if isinstance(cell.value, (datetime.datetime, datetime.date)):
-            formatted_value = cell.value.strftime('%Y/%m/%d')
-            sample_values.append(formatted_value)
-        elif isinstance(cell.value, datetime.time):
-            formatted_value = cell.value.strftime('%H:%M:%S')
-            sample_values.append(formatted_value)
-        elif isinstance(cell.value, datetime.timedelta):
-            formatted_value = str(cell.value)
-            sample_values.append(formatted_value)
-        else:
-            sample_values.append(cell.value)
-
-    # 对于整列，收集所有数值value
-    for row in rows:
-        cell = row[0]
-        if isinstance(cell.value, (int, float)):
-            numeric_values.append(cell.value)
-        elif isinstance(cell.value, (datetime.datetime, datetime.date)):
-            date_values.append(cell.value)
-        elif isinstance(cell.value, datetime.time):
-            time_values.append(cell.value)
-        elif isinstance(cell.value, datetime.timedelta):
-            time_delta_values.append(cell.value)
-
-    # 从抽样值中提取最多5个出现最多的值，每个值最多显示20个字符
-    value_counts = Counter(sample_values).most_common(5)
-    truncated_values = []
-    for value, _ in value_counts:
+    for i in rows:
+        cell = ws.cell(i, col)
+        value = cell.get_render_value()
         if isinstance(value, str) and len(value) > 20:
-            truncated_values.append(value[:17] + '...')
-        else:
-            truncated_values.append(value)
+            value = value[:17] + '...'
+        sample_values.append(value)
 
-    # 计算数值范围
-    if numeric_values:
-        value_range = (min(numeric_values), max(numeric_values))
-    elif date_values:
-        date_range = (min(date_values), max(date_values))
-        value_range = (date_range[0].strftime('%Y/%m/%d'),
-                       date_range[1].strftime('%Y/%m/%d'))
-    elif time_values:
-        time_range = (min(time_values), max(time_values))
-        value_range = (time_range[0].strftime('%H:%M:%S'),
-                       time_range[1].strftime('%H:%M:%S'))
-    elif time_delta_values:
-        time_delta_range = (min(time_delta_values), max(time_delta_values))
-        value_range = (str(time_delta_range[0]), str(time_delta_range[1]))
-    else:
-        value_range = None
+    # 3 数值范围（只要判断主类型的数值范围就行了）
+    numeric_range = None
+    for x in data2:
+        try:
+            fmt, values = x
+            values = [v for v in values if (v is not None and not isinstance(v, str))]
+            numeric_range = [min(values), max(values)]
+            numeric_range[0] = xl_render_value(numeric_range[0], fmt)
+            numeric_range[1] = xl_render_value(numeric_range[1], fmt)
+            break
+        except (TypeError, ValueError) as e:
+            pass
 
     summary = {
-        "number_formats": sorted(Counter(number_formats).keys(),
-                                 key=number_formats.count, reverse=True),
-        "sample_values": truncated_values,
-        "numeric_range": value_range
+        "number_formats": number_formats,
+        "numeric_range": numeric_range,
+        "sample_values": sample_values,
     }
 
     return summary
 
 
-def extract_field_summaries(ws, header_range, data_range):
-    """ 再次优化为每个字段生成摘要信息的函数 """
+def extract_field_summaries(ws, header_range, data_range, samples_num=10):
+    """ 提取所有字段的摘要信息
+
+    :param samples_num: 要抽样的数据行数
+    """
+    # 1 数据范围信息
     header_details = parse_range_address(header_range)
     data_details = parse_range_address(data_range)
+    start_row = header_details['bottom'] + 1
+    end_row = data_details['bottom']
 
+    # 2 提前决定好所有字段统一抽样的数据行号
+    rows = list(range(header_details['bottom'] + 1, data_details['bottom']))
+    if len(rows) > samples_num:
+        rows = random.sample(rows, samples_num)
+        rows.sort()
+
+    # 3 提取所有字段的摘要信息
     field_summaries = {}
     for col in ws.iter_cols(min_col=header_details['left'], max_col=header_details['right']):
-        # header_cell = col[header_details['bottom'] - header_details['top']]  # 找到对应的表头单元格
         header_cell = ws.cell(header_details['bottom'], col[0].column)
         if header_cell.celltype() != 1:  # todo 这里要改成不使用衍生单元格的场景
             # 注意，原本摘要这里用的是.value，后面改成了.coordinate。原本的遇到重名就会出一些问题了~
             field_summaries[header_cell.coordinate] = determine_field_type_and_summary(
-                ws, header_cell.column, header_details['bottom'] + 1, data_details['bottom']
+                ws, header_cell.column, start_row, end_row, rows
             )
 
     return field_summaries
