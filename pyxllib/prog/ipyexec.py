@@ -16,8 +16,6 @@ import threading
 
 # from IPython.core.interactiveshell import InteractiveShell
 
-# from timeout_decorator import timeout
-
 from pyxllib.prog.pupil import format_exception
 from pyxllib.file.specialist import XlPath
 

@@ -898,7 +898,7 @@ class GptChatDir:
         self.chatted_dir.process_each_record(self.chatted2post_record, **kwargs)
         self.post_dir.update_subfiles()
         num1, num2 = self.chatted_dir.count_records(), self.post_dir.count_records()
-        print(f'chatted有{num1}条，转换post有{num2}条，转换率{num1 / num2:.2%}')
+        print(f'chatted有{num1}条，转换post有{num2}条，转换率{num2 / num1:.2%}')
 
     def create_verify(self, **kwargs):
         """ 有时候create_verify是有cpu密集运算场景的，可以开多进程
@@ -908,7 +908,7 @@ class GptChatDir:
         self.post_dir.process_each_record(self.post2verify_record, **kwargs)
         self.verify_dir.update_subfiles()
         num1, num2 = self.post_dir.count_records(), self.verify_dir.count_records()
-        print(f'post有{num1}条，转换verify有{num2}条，转换率{num1 / num2:.2%}')
+        print(f'post有{num1}条，转换verify有{num2}条，转换率{num2 / num1:.2%}')
 
     @classmethod
     def texts2train_record(cls, texts):
