@@ -419,4 +419,8 @@ def start_jlineviewer(fname=None):
 if __name__ == '__main__':
     app = QApplication(sys.argv)
     ex = JLineViewer()
+
+    if len(sys.argv) > 1:
+        ex.showDialog(fname=sys.argv[1])
+
     sys.exit(app.exec_())

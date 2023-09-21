@@ -218,3 +218,72 @@ def compress_to_zip(source_path, target_zip_path=None, wrap=None,
             zipf.write(source_path, arcname)
 
     return target_zip_path
+
+
+def smart_compress_zip(root, paths, check_func=None):
+    """ 智能压缩，比compress_to_zip功能会更强些
+
+    :param root: 要有个根目录，才知道paths里添加到压缩包的时候存储到怎样的相对目录下
+    :param paths: 所有待添加到压缩包的文件或目录
+    :param check_func: 规则判断函数，输入文件或目录的路径
+        return
+            0，明确不要
+            1，要使用，但要递归内部文件精细检查
+            2，全部都要
+    """
+
+    if check_func is None:
+        def check_func(path):
+            p = XlPath(path)
+
+            if set(p.parts) & {'__pycache__', '.git', '.idea', 'dist', 'build', '.pytest_cache'}:
+                return 0
+
+            if p.parts[-1].endswith('.egg-info'):
+                return 0
+
+            return 1
+
+    def add_dir(dir):
+        for subroot, _, names in os.walk(dir):
+            for name in names:
+                file = XlPath(subroot) / name
+                zipf.write(file, file.relpath(root))
+
+    def add_path(path):
+        tag = check_func(path)
+
+        if path.is_file():
+            if tag:
+                zipf.write(path, path.relpath(root))
+        elif path.is_dir():
+            if tag == 2:
+                add_dir(path)
+            elif tag == 1:
+                for subroot, _, names in os.walk(path):
+                    tag2 = check_func(subroot)
+                    if tag2 == 2:
+                        add_dir(subroot)
+                    elif tag2 == 1:
+                        for name in names:
+                            file = XlPath(subroot) / name
+                            if check_func(file):
+                                zipf.write(file, file.relpath(root))
+
+    # 工作目录会自动切换的，这里取工作目录名即可
+    if not isinstance(paths, list):
+        paths = [paths]
+
+    root = XlPath(root)
+    num = len(paths)
+    if num > 1:
+        zipf = XlZipFile(root.name + '.zip', 'w', zipfile.ZIP_DEFLATED)
+    elif num == 1:
+        zipf = XlZipFile(XlPath(paths[0]).name + '.zip', 'w', zipfile.ZIP_DEFLATED)
+    else:
+        return
+
+    for subroot in paths:
+        add_path(XlPath(subroot))
+
+    zipf.close()

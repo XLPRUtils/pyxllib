@@ -908,7 +908,16 @@ class GptChatDir:
         self.post_dir.process_each_record(self.post2verify_record, **kwargs)
         self.verify_dir.update_subfiles()
         num1, num2 = self.post_dir.count_records(), self.verify_dir.count_records()
+        num1 = num1 or -1
         print(f'post有{num1}条，转换verify有{num2}条，转换率{num2 / num1:.2%}')
+
+    def refine_verify(self, print_mode=1, **kwargs):
+        """ 重复检查verify数据
+
+        这个函数可以重复执行，但前提是self.post2verify_record里的设计有增量规则部分
+        """
+        self.verify_dir.process_each_record(self.post2verify_record, print_mode=print_mode,
+                                            inplace=True, desc='refine_verify', **kwargs)
 
     @classmethod
     def texts2train_record(cls, texts):

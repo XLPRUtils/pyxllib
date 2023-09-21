@@ -1148,7 +1148,18 @@ class XlPath(type(pathlib.Path())):
             DictTool.ior(kwargs, {'ensure_ascii': False})
             json.dump(data, f, **kwargs)
 
-    def read_jsonl(self, encoding='utf8', *, errors='strict', return_mode: bool = False):
+    def read_jsonl(self, encoding='utf8', max_items=None, *,
+                   errors='strict', return_mode: bool = False):
+        """ 从文件中读取JSONL格式的数据
+
+        :param str encoding: 文件编码格式，默认为utf8
+        :param str errors: 读取文件时的错误处理方式，默认为strict
+        :param bool return_mode: 是否返回文件编码格式，默认为False
+        :param int max_items: 限制读取的条目数，默认为None，表示读取所有条目
+        :return: 返回读取到的数据列表，如果return_mode为True，则同时返回文件编码格式
+
+        >> read_jsonl('data.jsonl', max_items=10)  # 读取前10条数据
+        """
         s, encoding = self.read_text(encoding=encoding, errors=errors, return_mode=True)
 
         data = []
@@ -1159,6 +1170,9 @@ class XlPath(type(pathlib.Path())):
                     data.append(json.loads(line))
                 except json.decoder.JSONDecodeError:
                     pass
+            # 如果达到了限制的条目数，就停止读取
+            if max_items is not None and len(data) >= max_items:
+                break
 
         if return_mode:
             return data, encoding
