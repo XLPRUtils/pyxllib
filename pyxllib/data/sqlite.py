@@ -78,7 +78,7 @@ class SqlBase:
     def create_index(self, index_name, table_name, cols):
         if not isinstance(cols, str):
             cols = ','.join(map(str, cols))
-        self.execute(f'CREATE INDEX {index_name} ON {table_name}(cols)')
+        self.execute(f'CREATE INDEX {index_name} ON {table_name}({cols})')
 
     def keep_top_n_rows(self, table_name, num, col_name='id'):
         """ 只保留一小部分数据，常用来做lite、demo数据示例文件

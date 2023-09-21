@@ -13,12 +13,13 @@ check_install_package('humanfriendly')
 check_install_package('pandas')
 check_install_package('pyautogui', 'PyAutoGui')  # 其实pip install不区分大小写，不过官方这里安装是驼峰名
 
-import pathlib
-import pyperclip
-import re
 import datetime
 import json
 import os
+import pathlib
+import pyperclip
+import re
+
 
 import fire
 from humanfriendly import format_timespan
@@ -217,6 +218,11 @@ class UtoolsFile(UtoolsBase):
         # 4 运行结束标志
         print(f'finished in {format_timespan(tt.tocvalue())}.')
 
+    def open_jsonl(self):
+        """ 打开jsonl文件 """
+        from pyxllib.ext.JLineViewer import start_jlineviewer
+        start_jlineviewer(self.paths[0].as_posix())
+
 
 class UtoolsText(UtoolsBase):
 
@@ -322,3 +328,4 @@ class UtoolsRegex(UtoolsBase):
 if __name__ == '__main__':
     with TicToc('utools'):
         pass
+

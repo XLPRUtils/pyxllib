@@ -3,10 +3,13 @@
 # @Author : 陈坤泽
 # @Email  : 877362867@qq.com
 # @Date   : 2020/06/06
+import sys
 
 from pyxllib.prog.pupil import check_install_package
 
-check_install_package('pyautogui')
+if sys.platform == 'win32':
+    check_install_package('pyautogui')
+
 check_install_package('keyboard')
 check_install_package('klembord')
 check_install_package('mss')  # 多屏幕截图
@@ -20,7 +23,10 @@ import random
 import mss
 import numpy as np
 from pandas.api.types import is_list_like
-import pyautogui
+
+if sys.platform == 'win32':
+    import pyautogui
+
 import pyscreeze  # NOQA pyautogui安装的时候会自动安装依赖的pyscreeze
 
 from pyxllib.prog.newbie import first_nonnone, round_int

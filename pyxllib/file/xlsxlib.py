@@ -103,6 +103,8 @@ def xlfmt2pyfmt_date(xl_fmt):
 
     >>> xlfmt2pyfmt_date('yyyy/m/d')
     '%Y/{month}/{day}'
+    >>> xlfmt2pyfmt_date('yyyy-mm-dd')
+    '%Y-%m-%d'
     >>> xlfmt2pyfmt_date('yyyy年mm月dd日')
     '%Y年%m月%d日'
     >>> xlfmt2pyfmt_date('yyyy年m月d日')
@@ -126,7 +128,7 @@ def xlfmt2pyfmt_date(xl_fmt):
         'd': {1: '%-d', 2: '%d', 3: '%a', 4: '%A'}
     }
 
-    m = re.search(r'(y+)(.+)(m+)(.)(d+)(日?)', xl_fmt.replace('"', ''))
+    m = re.search(r'(y+)(.+?)(m+)(.+?)(d+)(日?)', xl_fmt.replace('"', ''))
     if m:
         y, sep1, m, sep2, d, sep3 = m.groups()
         year_pattern = mappings['y'].get(len(y), '%Y')
@@ -163,7 +165,7 @@ def xlfmt2pyfmt_time(xl_fmt):
     >>> xlfmt2pyfmt_time('hh:mm:ss AM/PM')
     '%H:%M:%S %p'
     """
-    xl_fmt = re.sub(r'(y+)(.)(m+)(.)(d+)(日?)', '', xl_fmt.replace('"', ''))
+    xl_fmt = re.sub(r'(y+)(.+?)(m+)(.+?)(d+)(日?)', '', xl_fmt.replace('"', ''))
 
     components = []
 
@@ -193,7 +195,11 @@ def xlfmt2pyfmt_time(xl_fmt):
 
 @run_once('str')
 def xlfmt2pyfmt_datetime(xl_fmt):
-    """ 主要是针对日期、时间的渲染操作 """
+    """ 主要是针对日期、时间的渲染操作
+
+    >>> xlfmt2pyfmt_datetime('yyyy-mm-dd h:mm:ss')
+    '%Y-%m-%d %I:%M:%S'
+    """
     py_fmt = xlfmt2pyfmt_date(xl_fmt)
     if ':' in xl_fmt:
         py_fmt += ' ' + xlfmt2pyfmt_time(xl_fmt)
@@ -212,6 +218,9 @@ def xl_render_value(x, xl_fmt):
 
     注意，遇到公式是很难计算处理的，大概率只能保持原公式显示
     因为日期用的比较多，需要时常获得真实的渲染效果，所以这里封装一个接口
+
+    >>> xl_render_value(datetime.datetime(2020, 1, 1), 'yyyy-mm-dd')
+    '2020-01-01'
     """
 
     if isinstance(x, datetime.datetime):
@@ -444,6 +453,8 @@ class XlCell(openpyxl.cell.cell.Cell):  # 适用于 openpyxl.cell.cell.MergedCel
         # openpyxl的机制，如果没有配置日期格式，读取到的是默认的'mm-dd-yy'，其实在中文场景，默认格式应该是后者
         if fmt == 'mm-dd-yy':
             return 'yyyy/m/d'  # 中文的默认日期格式
+        elif fmt == 'yyyy\-mm\-dd':  # 不知道为什么会有提取到这种\的情况，先暴力替换了
+            fmt = 'yyyy-mm-dd'
         return fmt
 
     def get_render_value(self):

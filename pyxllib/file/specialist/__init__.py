@@ -296,14 +296,20 @@ class JsonlDataFile:
         遍历self.records，对每个record执行func函数，如果func返回None，则不包含该record到新的records中。
         """
         backend = 'threading' if threads_num != 1 else 'sequential'
-        parallel = Parallel(n_jobs=threads_num, backend=backend,
-                            timeout=timeout, return_as='generator')
-        tasks = [delayed(func)(record) for record in self.records]
-        new_records = []
-        for y in tqdm(parallel(tasks), disable=not print_mode,
-                      total=len(self.records), **kwargs):
-            if y:
-                new_records.append(y)
+
+        if print_mode:
+            parallel = Parallel(n_jobs=threads_num, backend=backend,
+                                timeout=timeout, return_as='generator')
+            tasks = [delayed(func)(record) for record in self.records]
+            new_records = []
+            for y in tqdm(parallel(tasks), total=len(self.records), **kwargs):
+                if y:
+                    new_records.append(y)
+        else:
+            parallel = Parallel(n_jobs=threads_num, backend=backend, timeout=timeout)
+            tasks = [delayed(func)(record) for record in self.records]
+            new_records = parallel(tasks)
+            new_records = [y for y in new_records if y]
 
         if inplace:
             self.records = new_records
@@ -349,7 +355,7 @@ class JsonlDataDir:
     def count_records(self):
         total = 0
         for f in self.files:
-            total += f.get_total_lines()
+            total += f.get_total_lines(skip_blank=True)
         return total
 
     def check(self, title=''):
@@ -536,11 +542,14 @@ class JsonlDataDir:
                           processes_num=1,
                           **kwargs):
         backend = 'loky' if processes_num != 1 else 'sequential'
-        parallel = Parallel(n_jobs=processes_num, backend=backend, return_as='generator')
-
-        tasks = [delayed(func)(file) for file in self.files]
-        list(tqdm(parallel(tasks), disable=not print_mode,
-                  total=len(self.files), desc=desc, **kwargs))
+        if print_mode:
+            parallel = Parallel(n_jobs=processes_num, backend=backend, return_as='generator')
+            tasks = [delayed(func)(file) for file in self.files]
+            list(tqdm(parallel(tasks), total=len(self.files), desc=desc, **kwargs))
+        else:
+            parallel = Parallel(n_jobs=processes_num, backend=backend)
+            tasks = [delayed(func)(file) for file in self.files]
+            parallel(tasks)
 
     def process_each_record(self, func, *,
                             inplace=False, reset=False,

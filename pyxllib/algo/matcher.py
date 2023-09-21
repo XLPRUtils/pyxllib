@@ -22,6 +22,8 @@ warnings.filterwarnings("ignore", category=FutureWarning,
 
 from more_itertools import chunked
 
+from tqdm import tqdm
+
 try:
     import numpy as np
 except ModuleNotFoundError:
@@ -41,7 +43,11 @@ except ModuleNotFoundError:
 class DataMatcher:
     """ 泛化的匹配类，对任何类型的数据进行匹配 """
 
-    def __init__(self):
+    def __init__(self, *, cmp_key=None):
+        """
+        :param cmp_key: 当设置该值时，表示data中不是整个用于比较，而是有个索引列
+        """
+        self.cmp_key = cmp_key
         self.data = []  # 用于匹配的数据
 
     def __getitem__(self, i):
@@ -55,6 +61,8 @@ class DataMatcher:
 
     def compute_similarity(self, x, y):
         """ 计算两个数据之间的相似度，这里默认对字符串使用编辑距离 """
+        if self.cmp_key:
+            x = x[self.cmp_key]
         ratio = Levenshtein.ratio(x, y)
         return ratio
 
@@ -62,7 +70,7 @@ class DataMatcher:
         """添加候选数据"""
         self.data.append(data)
 
-    def find_best_matches(self, item, top_n=1):
+    def find_best_matches(self, item, top_n=1, print_mode=0):
         """ 找到与给定数据项最匹配的候选项。
 
         :param item: 需要匹配的数据项。
@@ -71,17 +79,27 @@ class DataMatcher:
         """
         # 计算所有候选数据的相似度
         similarities = [(i, self.compute_similarity(candidate, item))
-                        for i, candidate in enumerate(self.data)]
+                        for i, candidate in tqdm(enumerate(self.data), disable=not print_mode)]
 
         # 按相似度降序排序
         sorted_matches = sorted(similarities, key=lambda x: x[1], reverse=True)
 
         return sorted_matches[:top_n]
 
+    def find_best_match_items(self, item, top_n=1):
+        """ 直接返回匹配的数据内容，而不是下标和相似度 """
+        matches = self.find_best_matches(item, top_n=top_n)
+        return [self.data[m[0]] for m in matches]
+
     def find_best_match(self, item):
         """ 返回最佳匹配 """
         matches = self.find_best_matches(item, top_n=1)
         return matches[0]
+
+    def find_best_match_item(self, item):
+        """ 直接返回匹配的数据内容，而不是下标和相似度 """
+        items = self.find_best_match_items(item)
+        return items[0]
 
     def agglomerative_clustering(self, threshold=0.5):
         """ 对内部字符串进行层次聚类
@@ -205,7 +223,7 @@ class GroupedDataMatcher(DataMatcher):
 
         return result
 
-    def init_groups(self, threshold=0.5, batch_size=1000):
+    def init_groups(self, threshold=0.5, batch_size=1000, print_mode=0):
         """ 初始化数据的分组
 
         :param threshold: 两个数据项的距离小于此阈值时，它们被认为是相似的。
@@ -231,6 +249,9 @@ class GroupedDataMatcher(DataMatcher):
             # 如果分组没有发生变化，退出循环
             if len(new_groups) == len(groups):
                 break
+
+            if print_mode:
+                print(f'Groups number: {len(new_groups)}')
 
             groups = new_groups
             new_groups = {}
