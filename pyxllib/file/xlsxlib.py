@@ -1701,7 +1701,7 @@ def determine_field_type_and_summary(ws, col, start_row, end_row, rows):
     return summary
 
 
-def extract_field_summaries(ws, header_range, data_range, samples_num=10):
+def extract_field_summaries(ws, header_range, data_range, samples_num=5):
     """ 提取所有字段的摘要信息
 
     :param samples_num: 要抽样的数据行数
