@@ -1612,7 +1612,7 @@ def find_header_row(ws, used_range, max_rows_to_check=10):
     return header_range
 
 
-def split_header_and_data(ws, used_range, max_rows_to_check=10):
+def split_header_and_data(ws, used_range, max_rows_to_check=50):
     """ 将工作表的used_range拆分为表头范围和数据范围 """
     header_range = find_header_row(ws, used_range, max_rows_to_check)
     header_details = parse_range_address(header_range)
