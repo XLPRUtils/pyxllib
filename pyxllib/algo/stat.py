@@ -181,7 +181,7 @@ def write_dataframes_to_excel(outfile, dataframes, order_mode='序号'):
 
     实现上，尽可能在一些常见结构上，进行一些格式美化。但对费常规结构，就保留df默认排版效果，不做特殊处理。
     """
-    with pd.ExcelWriter(str(outfile)) as writer:
+    with pd.ExcelWriter(str(outfile), engine='xlsxwriter') as writer:
         head_format = writer.book.add_format({'font_size': 12, 'font_color': 'blue',
                                               'align': 'left', 'valign': 'vcenter'})
         for sheet_name, df in dataframes.items():
