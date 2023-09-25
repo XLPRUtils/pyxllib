@@ -5,6 +5,7 @@
 # @Date   : 2023/08/02 14:05
 
 import os
+import random
 import re
 import sys
 import json
@@ -55,6 +56,9 @@ class MyTreeView(QTreeView):
     def edit(self, index, trigger, event):
         if trigger == QAbstractItemView.DoubleClicked:
             return False
+            # 如果是第 0 列 (keys)，则禁止编辑
+        if index.column() == 0:
+            return False
         return super().edit(index, trigger, event)
 
 
@@ -65,19 +69,17 @@ class KeyStandardItem(QStandardItem):
         return super().data(role)
 
 
-class TextEditDelegate(QItemDelegate):
+class ExpandedTextEditDelegate(QItemDelegate):
     def createEditor(self, parent, option, index):
         return QTextEdit(parent)
+
+    def sizeHint(self, option, index):
+        size = super().sizeHint(option, index)
+        return size
 
     def setEditorData(self, editor, index):
         value = index.model().data(index, Qt.EditRole)
         editor.setPlainText(value)
-
-    def sizeHint(self, option, index):
-        size = super().sizeHint(option, index)
-        # todo 但是比如一个4k的屏幕使用2k的时候，这个缩放比例不会自动兼容，会导致太挤了
-        size.setHeight(20)  # 限制最大高度为20像素，限定每个条目只展示一行
-        return size
 
     def setModelData(self, editor, model, index):
         value = editor.toPlainText()
@@ -86,13 +88,21 @@ class TextEditDelegate(QItemDelegate):
     def updateEditorGeometry(self, editor, option, index):
         editor.setGeometry(option.rect)
 
+
+class CompactTextEditDelegate(ExpandedTextEditDelegate):
+    def sizeHint(self, option, index):
+        size = super().sizeHint(option, index)
+        # todo 如果一个4k的屏幕使用2k的时候，这个缩放比例不会自动兼容，阁下又当如何应对
+        size.setHeight(20)  # 限制最大高度为20像素，限定每个条目只展示一行
+        return size
+
     def paint(self, painter, option, index):
         text = index.model().data(index)
 
         # 只显示前100个字符
-        elided_text = text[:100] + '...' if len(text) > 100 else text
+        text = text[:100] + '...' if len(text) > 100 else text
 
-        painter.drawText(option.rect, Qt.AlignLeft, elided_text)
+        painter.drawText(option.rect, Qt.AlignLeft, text)
 
 
 class JLineViewer(QMainWindow):
@@ -175,14 +185,29 @@ class JLineViewer(QMainWindow):
         self.treeView.setAlternatingRowColors(True)
         self.treeView.setIndentation(20)
         # self.treeView.setSortingEnabled(True)
-        # self.treeView.setStyleSheet(LargeStrings.treeViewStyles)
-        self.plainTextEdit.setWordWrapMode(QTextOption.WordWrap)
+        self.treeView.setStyleSheet(LargeStrings.treeViewStyles)
+        # self.plainTextEdit.setWordWrapMode(QTextOption.WordWrap)
         self.plainTextEdit.setReadOnly(True)
         self.showMaximized()
 
         self.treeView.setSortingEnabled(False)  # 禁止排序
         self.treeView.setAnimated(False)
-        self.plainTextEdit.textChanged.connect(self.updateJson)  # 连接 textChanged 信号到新的槽函数
+        # self.plainTextEdit.textChanged.connect(self.updateJson)  # 连接 textChanged 信号到新的槽函数
+
+        self.delegate_mode = 'compact'
+        self.toggleDelegateButton = QAction('切换显示模式', self)
+        self.toggleDelegateButton.triggered.connect(self.toggleDelegate)
+        toolbar.addAction(self.toggleDelegateButton)
+
+    def toggleDelegate(self):
+        if self.delegate_mode == 'compact':
+            self.treeView.setItemDelegate(ExpandedTextEditDelegate(self.treeView))
+            self.toggleDelegateButton.setText('切换为紧凑模式')
+            self.delegate_mode = 'expanded'
+        else:
+            self.treeView.setItemDelegate(CompactTextEditDelegate(self.treeView))
+            self.toggleDelegateButton.setText('切换为扩展模式')
+            self.delegate_mode = 'compact'
 
     def addPane(self, widget, title):
         layout = QVBoxLayout()
@@ -261,11 +286,22 @@ class JLineViewer(QMainWindow):
         self.treeView.expandAll()
 
         # 使用自定义的delegate
-        delegate = TextEditDelegate(self.treeView)
-        self.treeView.setItemDelegate(delegate)
+        if self.delegate_mode == 'compact':
+            self.treeView.setItemDelegate(CompactTextEditDelegate(self.treeView))
+        else:
+            self.treeView.setItemDelegate(ExpandedTextEditDelegate(self.treeView))
 
         self.treeView.header().setSectionResizeMode(0, QHeaderView.ResizeToContents)
         self.treeView.header().setSectionResizeMode(1, QHeaderView.Stretch)
+
+        if hasattr(self, 'lastClickedPath'):
+            path = self.lastClickedPath
+            index = self.model.index(path[0][0], path[0][1])  # 从根开始
+            for row, col in path[1:]:
+                index = self.model.index(row, col, index)
+            if index.isValid():
+                self.treeView.setCurrentIndex(index)
+                self.editItem(index)
 
     def loadAllItems(self):
         if not self.allItemsLoaded:
@@ -311,14 +347,21 @@ class JLineViewer(QMainWindow):
             self.statusBar.showMessage(
                 f"总条目数: {len(self.lines)}, 找到: {foundCount}, 搜索耗时: {time.time() - start_time:.2f} 秒")
 
-    def editItem(self, index):
+    def itemToData(self, key_item):
+        value_item = key_item.model().item(key_item.row(), 1)
+        return value_item.text()
+
+    def editItem(self, index=None):
         self.currentlyEditingItem = self.model.itemFromIndex(index)  # 保存当前正在编辑的项
-        target_data = self.currentlyEditingItem.data(Qt.UserRole + 1)  # 获取存储的 JSON 数据
-        if target_data is not None:
-            target_text = json.dumps(target_data, indent=2)  # 把 JSON 对象格式化为字符串
-        else:
-            target_text = self.currentlyEditingItem.text()
+        target_text = self.currentlyEditingItem.text()
         self.plainTextEdit.setPlainText(target_text)
+
+        # 保存路径
+        self.lastClickedPath = []
+        while index.isValid():
+            self.lastClickedPath.append((index.row(), index.column()))
+            index = index.parent()
+        self.lastClickedPath.reverse()
 
     def dictToModel(self, data, parent=None):
         if parent is None:

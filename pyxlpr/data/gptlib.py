@@ -10,20 +10,26 @@ from pyxllib.prog.pupil import check_install_package
 check_install_package('transformers', 'transformers')
 
 import ast
-import json
-import re
-import html
-import random
-import copy
-from urllib.parse import unquote
 from collections import OrderedDict
 from collections import Counter
+import copy
+import datetime
+import html
+import json
+import random
+import re
+from urllib.parse import unquote
 
-import pandas as pd
-from transformers import GPT2TokenizerFast
-from tqdm import tqdm
-from openpyxl import Workbook
 from jinja2 import Template
+from openpyxl import Workbook
+import pandas as pd
+import requests
+from tqdm import tqdm
+
+try:
+    from transformers import GPT2TokenizerFast
+except ModuleNotFoundError:
+    pass
 
 from pyxllib.prog.pupil import OutputLogger
 from pyxllib.prog.specialist import browser, TicToc
@@ -1000,3 +1006,53 @@ class GptChatDir:
                 return x
 
         self.chatted_dir.update_each_record(update_each_record)
+
+
+def __5_bdchat():
+    """ 百度相关api """
+
+
+class BaiduChatbot:
+    def __init__(self, api_key, secret_key, file_path=None):
+        self.API_KEY = api_key
+        self.SECRET_KEY = secret_key
+        self.ACCESS_TOKEN = self._get_access_token()
+        self.base_url = "https://aip.baidubce.com/rpc/2.0/ai_custom/v1/wenxinworkshop/chat/completions?access_token="
+        self.file_path = file_path  # 文件路径为可选参数
+
+    def _get_access_token(self):
+        """
+        使用 AK，SK 生成鉴权签名（Access Token）
+        :return: access_token，或是None(如果错误)
+        """
+        url = "https://aip.baidubce.com/oauth/2.0/token"
+        params = {
+            "grant_type": "client_credentials",
+            "client_id": self.API_KEY,
+            "client_secret": self.SECRET_KEY
+        }
+        return str(requests.post(url, params=params).json().get("access_token"))
+
+    def chat(self, user_message):
+        """ 向Baidu API发送用户消息并返回API的回复
+        注意user_message的token不要超过3k
+        """
+        url = self.base_url + self.ACCESS_TOKEN
+        payload = json.dumps({
+            "messages": [{"role": "user", "content": user_message}]
+        })
+        headers = {'Content-Type': 'application/json'}
+        response = requests.post(url, headers=headers, data=payload)
+        response_json = response.json()
+        response_json['user_message'] = user_message
+        response_json['timestamp'] = datetime.datetime.now().isoformat()
+
+        # 如果指定了文件路径，自动保存记录
+        if self.file_path:
+            self._save_to_file(response_json)
+
+        return response_json.get('result', '')
+
+    def _save_to_file(self, response):
+        with open(self.file_path, 'a', encoding='utf-8') as file:
+            file.write(json.dumps(response, ensure_ascii=False) + '\n')
