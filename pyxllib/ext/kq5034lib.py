@@ -275,7 +275,10 @@ class 网课考勤:
             elif '回放' in value:
                 color = RgbFormatter.from_name('黄色')
                 v1 = self.视频返款[0]
-                v2 = self.视频返款[int(re.search(r'第(\d+)天', value).group(1))]
+                idx = min(int(re.search(r'第(\d+)天', value).group(1)),
+                          len(self.视频返款) - 1)
+                v2 = self.视频返款[idx]
+
                 if v2:
                     color = color.light((v1 - v2) / v2)  # 根据返款额度自动变浅
                 else:  # 如果无返款额度

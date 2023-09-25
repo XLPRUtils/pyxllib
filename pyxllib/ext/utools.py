@@ -20,7 +20,6 @@ import pathlib
 import pyperclip
 import re
 
-
 import fire
 from humanfriendly import format_timespan
 import pandas as pd
@@ -324,8 +323,16 @@ class UtoolsRegex(UtoolsBase):
 
         return _refine()
 
+    def bc_text(self, func):
+        """ 用bc软件打开，对比前后文本变化，有用户自己决定如何处理保留 """
+        from functools import partial
+        from pyxllib.prog.specialist import bcompare
+
+        text1 = self.cmds['ClipText']
+        text2 = fire.Fire(partial(func, text1), self.cmds['subinput'], func.__name__)
+        bcompare(text1, text2)
+
 
 if __name__ == '__main__':
     with TicToc('utools'):
         pass
-
