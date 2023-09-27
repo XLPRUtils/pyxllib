@@ -135,7 +135,7 @@ def ensure_localfile(localfile, from_url, *, if_exists=None, progress=True):
 
 
 def ensure_localdir(localdir, from_url, *, if_exists=None, progress=True, wrap=0):
-    """
+    """ 判断本地目录 localdir 是否存在，如果不存在，自动从指定的 from_url 下载下来
 
     :param from_url: 相比 ensure_localfile，这个链接一般是一个压缩包，下载到本地后要解压到目标目录
     :param wrap:

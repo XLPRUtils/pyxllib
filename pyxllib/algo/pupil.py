@@ -103,17 +103,32 @@ class ValuesStat:
         :param valfmt: 数值显示的格式
             g是比较智能的一种模式
             也可以用 '.3f'表示保留3位小数
+            注意可以写None表示删除特定位的显示
 
             也可以传入长度5的格式清单，表示 [和、均值、标准差、最小值、最大值] 一次展示的格式
+        :param total: 是否显示总和，注意就算不显示综合，valfmt也是要占位配置的
         """
         if isinstance(valfmt, str):
             valfmt = [valfmt] * 5
 
-        if self.n > 1:  # 有多轮，则应该输出些参考统计指标
-            ls = [f'总和: {self.sum:{valfmt[0]}}', f'均值标准差: {self.mean:{valfmt[1]}}±{self.std:{valfmt[2]}}',
-                  f'总数: {self.n}', f'最小值: {self.min:{valfmt[3]}}', f'最大值: {self.max:{valfmt[4]}}']
+        ls = []
+
+        if self.n > 1:
+            ls.append(f'总数: {self.n}')  # 注意输出其实完整是6个值，还有个总数不用控制格式
+            if valfmt[0]:
+                ls.append(f'总和: {self.sum:{valfmt[0]}}')
+            if valfmt[1] and valfmt[2]:
+                ls.append(f'均值标准差: {self.mean:{valfmt[1]}}±{self.std:{valfmt[2]}}')
+            elif valfmt[1]:
+                ls.append(f'均值: {self.mean:{valfmt[1]}}')
+            elif valfmt[2]:
+                ls.append(f'标准差: {self.std:{valfmt[2]}}')
+            if valfmt[3]:
+                ls.append(f'最小值: {self.min:{valfmt[3]}}')
+            if valfmt[4]:
+                ls.append(f'最大值: {self.max:{valfmt[4]}}')
             return '\t'.join(ls)
-        elif self.n == 1:  # 只有一轮，则简单地输出即可
+        elif self.n == 1:
             return f'{self.sum:{valfmt[0]}}'
         else:
             raise ValueError

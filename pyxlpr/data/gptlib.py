@@ -4,7 +4,6 @@
 # @Email  : 877362867@qq.com
 # @Date   : 2023/07/13 14:26
 
-
 from pyxllib.prog.pupil import check_install_package
 
 check_install_package('transformers', 'transformers')
@@ -12,13 +11,19 @@ check_install_package('transformers', 'transformers')
 import ast
 from collections import OrderedDict
 from collections import Counter
+import contextlib
 import copy
 import datetime
+import heapq
 import html
 import json
+import math
 import random
 import re
 from urllib.parse import unquote
+import io
+import logging
+import warnings
 
 from jinja2 import Template
 from openpyxl import Workbook
@@ -34,7 +39,7 @@ except ModuleNotFoundError:
 from pyxllib.prog.pupil import OutputLogger
 from pyxllib.prog.specialist import browser, TicToc
 from pyxllib.algo.pupil import ValuesStat
-from pyxllib.file.specialist import XlPath, JsonlDataFile, JsonlDataDir, TwinDirs
+from pyxllib.file.specialist import XlPath, JsonlDataFile, JsonlDataDir, TwinDirs, ensure_localdir
 from pyxllib.file.xlsxlib import extract_workbook_summary
 
 
@@ -50,7 +55,11 @@ class Tokenizer:
         """ 获取tokenizer，第一次调用时进行初始化 """
 
         if Tokenizer._tokenizer is None:
-            Tokenizer._tokenizer = GPT2TokenizerFast.from_pretrained("gpt2")
+            # 根本没必要每次都尝试连接官网，本地有就不要老是sb的尝试连接huggingface
+            # 而且官网连接也不稳，这里换成我自己的服务器中转
+            gpt2_dir = XlPath.tempdir() / 'huggingface_gpt2'
+            ensure_localdir(gpt2_dir, 'https://xmutpriu.com/download/huggingface_gpt2.zip')
+            Tokenizer._tokenizer = GPT2TokenizerFast.from_pretrained(gpt2_dir)
         return Tokenizer._tokenizer
 
     @classmethod
@@ -90,37 +99,89 @@ class Tokenizer:
         return len(cls.tokenize(paragraph, max_length))
 
 
-def print_statistics(data, indent_level=1, price_base=0.0015, max_samples=500):
+def print_statistics(data, indent_level=1):
+    """ 计算字符串长度，并且计算关键的一些token数
+
+    :param data: data应该是一个嵌套结构，表示会话与消息
     """
-    :param price_base: 每1K token对应的美元单价
-    """
-    data = list(data)
-    for i, x in enumerate(data):
-        if isinstance(x, dict):
-            x = x.get('content', str(x))
-        data[i] = html.unescape(x)
-
-    # 使用 ValuesStat 类统计数据并输出摘要
-    # stat_len = ValuesStat([len(x) for x in data])
-    # stat_strwith = ValuesStat([strwidth(x) for x in data])
-
-    # 算token的机制很慢，只能抽查一部分估算（抽len最短的一半，最长的一半）
-    if max_samples < len(data):
-        data = sorted(data, key=lambda x: len(x))
-        samples = data[:max_samples // 2] + data[-max_samples // 2:]
-    else:
-        samples = data
-
-    stat_tokens = ValuesStat([Tokenizer.count_tokens(x) for x in samples])
-
     fmts = ['g', '.0f', '.0f', 'd', 'd']
+    stat_len = ValuesStat([len(str(x)) for x in data])
 
-    indent = "\t" * indent_level
-    # print(f"{indent}     len {stat_len.summary(fmts)}")
-    # print(f"{indent}strwidth {stat_strwith.summary(fmts)}")
-    # 官方gpt3.5价格，/1000是除1K token，*7.1388是美元兑换人民币基本价格（浮动，不定期更新）
-    price = stat_tokens.mean * len(data) / 1000 * price_base * 7.1388
-    print(f"{indent}  tokens {stat_tokens.summary(fmts)} gpt3_price=￥{price:.0f}")
+    indent = '\t' * indent_level
+    print(f'{indent} {stat_len.summary(fmts)}')
+
+
+def check_conversation_lengths(all_texts, n_values=(4, 4),
+                               compute_tokens=False, ids=None):
+    """ 分析会话长度 """
+
+    # 0 预处理
+    for i, texts in enumerate(all_texts):
+        if isinstance(texts, str):
+            all_texts[i] = [texts]
+
+    # 如果没有提供ID，则使用默认的range(n)
+    if ids is None:
+        ids = list(range(len(all_texts)))
+
+    # 处理n_values的重叠
+    if sum(n_values) >= len(all_texts):
+        n_values = [len(all_texts), 0]  # 将所有数据视为最短数据，不再考虑最长数据
+
+    # 1 消息长度统计
+    fmts = [None, '.0f', '.0f', 'd', 'd']
+    lengths = [len(t) for texts in all_texts for t in texts]
+    print(f'1、消息长度统计 {ValuesStat(lengths).summary(fmts)}')
+
+    # 2 每组会话消息数目
+    ct = Counter(len(texts) for texts in all_texts)
+    sorted_ct = {k: v for k, v in sorted(ct.items(), key=lambda x: x[0])}
+    print(f'2、每组消息数目: {sorted_ct}')
+
+    # 3 找出消息总长度最短和最长的会话
+    total_lengths = [(i, sum(len(t) for t in texts)) for i, texts in enumerate(all_texts)]
+    shortest_indices = [item[0] for item in heapq.nsmallest(n_values[0], total_lengths, key=lambda x: x[1])]
+    longest_indices = [item[0] for item in heapq.nlargest(n_values[1], total_lengths, key=lambda x: x[1])]
+    longest_indices = longest_indices[::-1]  # 从小到大排序
+
+    parts = []
+    if shortest_indices:
+        parts.append(', '.join(map(str, [ids[i] for i in shortest_indices])))
+    if longest_indices:
+        parts.append(', '.join(map(str, [ids[i] for i in longest_indices])))
+    print(f'3、最短最长会话的id:', ', ..., '.join(parts))
+
+    # 4 计算token
+    if compute_tokens:
+        # 4.1 代表性样本的tokens数
+        s_texts = [' '.join([x for x in all_texts[i]]) for i in shortest_indices]
+        l_texts = [' '.join([x for x in all_texts[i]]) for i in longest_indices]
+
+        s_lens = [[len(x), Tokenizer.count_tokens(x)] for x in s_texts]
+        l_lens = [[len(x), Tokenizer.count_tokens(x)] for x in l_texts]
+
+        # try:
+        #     s_lens = [[len(x), Tokenizer.count_tokens(x)] for x in s_texts]
+        #     l_lens = [[len(x), Tokenizer.count_tokens(x)] for x in l_texts]
+        # except Exception as e:
+        #     # 如果token相关功能用不了，则不用继续处理，结束该函数即可
+        #     return
+
+        parts = []
+        if s_lens:
+            parts.append(', '.join(map(str, [x[1] for x in s_lens])))
+        if l_lens:
+            parts.append(', '.join(map(str, [x[1] for x in l_lens])))
+        # 仅计算3中代表性样本
+        print(f'4、tokens数量:', ', ..., '.join(parts))
+
+        # 4.2 token的比率规律
+        ratios = []
+        for x in s_lens + l_lens:
+            ratios.append(x[1] / x[0])
+        fmts = [None, '.0%', '.0%', '.0%', '.0%']
+        print(f'token/len比率统计 {ValuesStat(ratios).summary(fmts)}')
+        # 比率越大，代表越接近中文场景，汉字越多，要注意len的控制不要让token某些场合超出长度
 
 
 def set_template(s, *args, **kwargs):
@@ -168,20 +229,22 @@ class GptChatJsonl(JsonlDataFile):
             也可以参考gen_prompt2,一些生成函数写法进行自定义
         :return:
         """
+        # 0 如果没有输入max_word_length，就不用特地处理了
         if max_word_length is None:
             return [text]
 
+        # 1 工具函数
         def gen_prompt1(n, i, text):
             """ 一共n条，当前第i条的，当前内容是text """
             if n == 1:
                 return text
             if n > 1:
                 if i == 0:
-                    return f'【注意，由于本次提问过长，这里拆分成{n}个片段分开输入，目前是第{1}个片段，你只需暂时回复"收到"即可】' + text
+                    return f'【注意，由于本次提问过长，这里拆分成{n}个片段分开输入，目前是第{1}个片段，你只需暂时回复"收到"即可】\n' + text
                 elif i < n - 1:
-                    return f'【这是{n}个片段中的第{i + 1}个片段，先回复"收到"即可】' + text
+                    return f'【这是{n}个片段中的第{i + 1}个片段，先回复"收到"即可】\n' + text
                 else:
-                    return f'【这是{n}个片段的最后一个片段，请开始回复内容】' + text
+                    return f'【这是{n}个片段的最后一个片段，请开始回复内容】\n' + text
 
         def gen_prompt2(n, i, text):
             return prompt + text
@@ -193,30 +256,37 @@ class GptChatJsonl(JsonlDataFile):
         else:  # callable
             gen_prompt = prompt
 
-        fragments = []
-        current_fragment = ''
+        # 2 拆分重拼接
+        # 首先要重新调整max_word_length，在确定要拆分为几个片段的情况下，尽量保证这些片段之间的均匀性
+        num = len(text) // max_word_length + 1
+        max_word_length = math.ceil(len(text) / num)
 
+        # 2.1 检查是否有超长单行文本，要提前切分成多行
         lines = text.rstrip().split('\n')
         new_lines = []
         for line in lines:
             if len(line) < max_word_length:
                 new_lines.append(line)
-            else:
-                n = max_word_length - 10
+            else:  # 单行就已经爆限制长度的比较特别
+                n = max_word_length - 10  # 将这个长文本按照n的长度再拆分成多个片段加入new_lines
                 parts = [line[i:i + n] for i in range(0, len(line), n)]
                 new_lines += parts
 
+        # 2.2 拼接new_lines
+        fragments = []
+        current_fragment = []
+
         for line in new_lines:
             if len(current_fragment) + len(line) <= max_word_length:
-                current_fragment += line + '\n'
+                current_fragment.append(line)
             else:
-                fragments.append(current_fragment)
-                current_fragment = line
+                fragments.append('\n'.join(current_fragment))
+                current_fragment = [line]
         if current_fragment:
-            fragments.append(current_fragment)
+            fragments.append('\n'.join(current_fragment))
 
         n = len(fragments)
-        fragments = [gen_prompt(n, i, x).rstrip() for i, x in enumerate(fragments)]
+        fragments = [gen_prompt(n, i, x).strip() for i, x in enumerate(fragments)]
         return fragments
 
     def split_texts(self, texts, max_word_length=None, prompt=None):
@@ -225,8 +295,8 @@ class GptChatJsonl(JsonlDataFile):
         for text in texts:
             pure_text = text['content']
             new_texts += self.split_and_add_prompt(pure_text, max_word_length=max_word_length, prompt=prompt)
-            if 'file_path' in text:  # 如果有文件，自动放在最后一轮插入
-                new_texts[-1]['file_path'] = XlPath(text['file_path']).name
+            if 'file_paths' in text:  # 如果有文件，自动放在最后一轮插入
+                new_texts[-1]['file_paths'] = text['file_paths']
         return new_texts
 
     def add_record(self, texts, *, extra=None,
@@ -238,14 +308,15 @@ class GptChatJsonl(JsonlDataFile):
                 content: 文本内容
                 file_paths: 注意可以设置本地电脑其他来源，会自动移到该任务的upload_files里
         :param record_id: 可以自定义这个session的id
-        :param max_word_length: 是否设置一个约束长度，自动切分会话
+        :param max_word_length: 是否设置一个约束长度，自动切分会话中太长的消息
+            gpt4是8192个token，大概len就是8192/0.6=13653，一般建议如果要设就设10000左右
         :param prompt: 自动分段后
             None，自动配置的一套提示
             '', 不用提示
         :return:
         """
         # 1 变成标准的list + 字典结构，方便后面统一处理
-        if isinstance(texts, str):
+        if not isinstance(texts, list):
             texts = [texts]
 
         for i, text in enumerate(texts):
@@ -256,12 +327,11 @@ class GptChatJsonl(JsonlDataFile):
         if max_word_length:
             texts = self.split_texts(texts, max_word_length=max_word_length, prompt=prompt)
 
-        self.start_id += 1
-
         for i, text in enumerate(texts):
             texts[i]['content'] = text['content'].strip()
 
         # 3 添加会话conversation
+        self.start_id += 1
         item = {'id': str(record_id or self.start_id),  # 要转成字符串类型，不然容易出问题
                 'text': texts,
                 'first_text_length': len(texts[0]['content'])}
@@ -378,22 +448,27 @@ class GptChatJsonl(JsonlDataFile):
             ls.append(str(t))
         return ls
 
-    def check_records(self):
-        # 单次 QA 的长度信息
-        qa_texts = []
-        qa_answers = []
-        for session in self.records:
-            texts = self.get_text_texts(session.get("text", []))
-            all_answers = self.get_all_answers_texts(session.get("all_answers", []))
-            qa_texts.extend(texts)
-            qa_answers.extend(all_answers)
+    def check(self):
+        """ 检查会话、消息长度等信息 """
+        # 1 提问的内容
+        all_texts = [self.get_text_texts(session.get('text', []))
+                     for session in self.records]
+        print('【提问的内容】')
+        check_conversation_lengths(all_texts,
+                                   compute_tokens=True,
+                                   ids=[x['id'] for x in self.records])
 
-        print("消息messages长度统计信息:")
-        print('\t提问', end='\t')
-        print_statistics(qa_texts)
-        if qa_answers:
-            print('\t回答', end='\t')
-            print_statistics(qa_answers, price_base=0.002)
+        # 2 回复的内容
+        all_texts = [self.get_all_answers_texts(session.get('all_answers', []))
+                     for session in self.records]
+        # 过滤空值，并相应地更新ids
+        filtered_texts = [(text, session['id']) for text, session in zip(all_texts, self.records) if text]
+        all_texts, ids = zip(*filtered_texts) if filtered_texts else ([], [])
+        if all_texts:
+            print('【回复的内容】')
+            check_conversation_lengths(all_texts,
+                                       compute_tokens=True,
+                                       ids=ids)
 
     def filter_records_without_answers(self):
         """ 过滤掉没有 'all_answers' 字段的sessions """
@@ -624,6 +699,7 @@ class GptTrainJsonl(JsonlDataFile):
     """
 
     def analyze_text_length(self):
+        # 1 先将数据统计到df
         ls = []
         columns = ['role', 'content']
         for x in self.records:
@@ -631,12 +707,40 @@ class GptTrainJsonl(JsonlDataFile):
                 ls.append([t['role'], t['content']])
         df = pd.DataFrame.from_records(ls, columns=columns)
 
+        # 2 再从df筛选出不同的统计数据
         print('【user和assistant】')
         print_statistics(df['content'])
         print('【user】')
         print_statistics(df[df['role'] == 'user']['content'])
         print('【assistant】')
         print_statistics(df[df['role'] == 'assistant']['content'])
+
+    def check(self):
+        """ 检查会话、消息长度等信息 """
+        # 1. 提取'user'角色的content
+        user_texts = [[message['content']
+                       for message in record['messages']
+                       if message['role'] == 'user']
+                      for record in self.records]
+        print('【User的内容】')
+        check_conversation_lengths(user_texts, compute_tokens=True,
+                                   ids=list(range(len(user_texts))))
+
+        # 2. 提取'assistant'角色的content
+        assistant_texts = [[message['content']
+                            for message in record['messages']
+                            if message['role'] == 'assistant']
+                           for record in self.records]
+        print('【Assistant的内容】')
+        check_conversation_lengths(assistant_texts, compute_tokens=True,
+                                   ids=list(range(len(assistant_texts))))
+
+        # 3. 将整个record视为一个完整的会话
+        full_conversations = [' '.join([message['content'] for message in record['messages']])
+                              for record in self.records]
+        print('【完整的会话】')
+        check_conversation_lengths(full_conversations, compute_tokens=True,
+                                   ids=list(range(len(full_conversations))))
 
     def browse_record(self, index=None, paths=None, **kwargs):
         """ 显示第i次会话的内容 """
@@ -694,7 +798,10 @@ def __4_综合集成类():
 class GptChatDir:
     """ 一个目录，包含了一个任务的所有数据，包括in、out、post等文件 """
 
-    def __init__(self, root, lines_per_file=10000):
+    def __init__(self, root=None, lines_per_file=10000):
+        if root is None:
+            root = self.__class__.__name__.lower()
+
         self.root = root = XlPath(root)
         self.lines_per_file = lines_per_file
 

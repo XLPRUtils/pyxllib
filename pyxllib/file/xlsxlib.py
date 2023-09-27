@@ -16,12 +16,13 @@ check_install_package('xlrd2')
 check_install_package('yattag')
 check_install_package('jsonpickle')
 
-import random
+from collections import Counter, OrderedDict, defaultdict
 import datetime
 import json
-import re
+import math
 from pathlib import Path
-from collections import Counter, OrderedDict, defaultdict
+import random
+import re
 
 import openpyxl
 from openpyxl.cell.cell import MergedCell
@@ -1370,6 +1371,57 @@ class XlWorkbook(openpyxl.Workbook):
         """ 更新后的函数：提取整个Excel工作簿的摘要信息 """
         wb = self
 
+        def reduce_summarys(sheets, limit_length=2500):
+            """
+            :param sheets: 若干表格的摘要信息
+            :param limit_length: 参考限定的长度，折算后大概是限定1500token
+            """
+            # 1 不用改变
+            text1 = json.dumps(sheets, ensure_ascii=False)
+            length1 = len(text1)
+            if length1 < limit_length:
+                return sheets
+
+            # 2 每个字段都去掉一个样本
+            for sheet in sheets:
+                if 'data' in sheet:
+                    st_data = sheet['data']
+                    for col_header, col in st_data.items():
+                        st_data[col_header]['sample_values'] = col['sample_values'][:-1]
+
+            text2 = json.dumps(sheets, ensure_ascii=False)
+            length2 = len(text2)
+            bias = length1 - length2
+            # dprint(length1, length2, bias)  # 调试用
+            if length2 <= limit_length:
+                return sheets
+
+            # 3 算出理论上要去掉几个样本，才能控制到理想长度
+            n = math.ceil((length1 - limit_length) / bias)
+            m = 5 - n
+            if m >= 0:
+                for sheet in sheets:
+                    if 'data' in sheet:
+                        st_data = sheet['data']
+                        for col_header, col in st_data.items():
+                            if m > 0:
+                                st_data[col_header]['sample_values'] = col['sample_values'][:m]
+                            elif m == 0:
+                                del st_data[col_header]['sample_values']
+                return sheets
+
+            # 4 如果m<0，可能靠上述删除还不够。这应该是不可能发生的事情，但还是处理下。
+            for sheet in sheets:
+                if 'data' in sheet:
+                    del sheet['data']
+                # 这个删除后可能还是太长的话，表示sheet太多了，需要删掉一些sheet
+
+            # 如果删除所有的数据后仍然超过限制，那么删除一些表格
+            while len(json.dumps(sheets, ensure_ascii=False)) > limit_length:
+                sheets.pop()
+
+            return sheets
+
         all_sheets_summary = []
 
         for ws in wb._sheets:  # 非数据表，也要遍历出来，所以使用了_sheets
@@ -1415,7 +1467,7 @@ class XlWorkbook(openpyxl.Workbook):
         workbook_summary = {
             "fileName": Path(self.path).name if self.path else None,
             "sheetNames": wb.sheetnames,
-            "sheets": all_sheets_summary
+            "sheets": reduce_summarys(all_sheets_summary),
         }
 
         return workbook_summary
@@ -1574,15 +1626,15 @@ def score_row(row):
                 score -= 1  # Subtract score for non-string type
 
             # 检查填充颜色和边框，为得分增加0.5分
-            if cell.fill.start_color.index != 'FFFFFFFF' or \
-                    (cell.border.left.style or cell.border.right.style or
-                     cell.border.top.style or cell.border.bottom.style):
-                score += 0.5
+            # if cell.fill.bgColor.rgb != '00000000' or \
+            #         (cell.border.left.style or cell.border.right.style or
+            #          cell.border.top.style or cell.border.bottom.style):
+            #     score += 0.5
     return score
 
 
 def find_header_row(ws, used_range, max_rows_to_check=10):
-    """找到工作表中的表头行"""
+    """ 找到工作表中的表头行 """
     range_details = parse_range_address(used_range)
 
     # 初始化得分列表
@@ -1639,7 +1691,7 @@ def extract_header_structure(ws, header_range):
             top_left_cell = ws.cell(row=merged_range.bounds[1], column=merged_range.bounds[0])
             address = build_range_address(left=merged_range.bounds[0], top=merged_range.bounds[1],
                                           right=merged_range.bounds[2], bottom=merged_range.bounds[3])
-            header_structure[address] = top_left_cell.value
+            header_structure[address] = top_left_cell.get_render_value()
             for row in range(merged_range.bounds[1], merged_range.bounds[3] + 1):
                 for col in range(merged_range.bounds[0], merged_range.bounds[2] + 1):
                     merged_addresses.add((row, col))
@@ -1650,7 +1702,7 @@ def extract_header_structure(ws, header_range):
         for cell in row:
             # 如果这个单元格的地址还没有被添加到结构中，并且它有一个值
             if (cell.row, cell.column) not in merged_addresses and cell.value:
-                header_structure[cell.coordinate] = cell.value
+                header_structure[cell.coordinate] = cell.get_render_value()
 
     return header_structure
 
