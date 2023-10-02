@@ -1700,8 +1700,8 @@ def extract_header_structure(ws, header_range):
     for row in ws.iter_rows(min_row=header_range_details['top'], max_row=header_range_details['bottom'],
                             min_col=header_range_details['left'], max_col=header_range_details['right']):
         for cell in row:
-            # 如果这个单元格的地址还没有被添加到结构中，并且它有一个值
-            if (cell.row, cell.column) not in merged_addresses and cell.value:
+            # 如果这个单元格的地址还没有被添加到结构中，并且它有一个值 （后记，没有值也添加下比较好）
+            if (cell.row, cell.column) not in merged_addresses:
                 header_structure[cell.coordinate] = cell.get_render_value()
 
     return header_structure

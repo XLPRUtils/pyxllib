@@ -6,7 +6,7 @@
 
 from pyxllib.prog.pupil import check_install_package
 
-check_install_package('transformers', 'transformers')
+# check_install_package('transformers', 'transformers')
 
 import ast
 from collections import OrderedDict
@@ -160,13 +160,6 @@ def check_conversation_lengths(all_texts, n_values=(4, 4),
         s_lens = [[len(x), Tokenizer.count_tokens(x)] for x in s_texts]
         l_lens = [[len(x), Tokenizer.count_tokens(x)] for x in l_texts]
 
-        # try:
-        #     s_lens = [[len(x), Tokenizer.count_tokens(x)] for x in s_texts]
-        #     l_lens = [[len(x), Tokenizer.count_tokens(x)] for x in l_texts]
-        # except Exception as e:
-        #     # 如果token相关功能用不了，则不用继续处理，结束该函数即可
-        #     return
-
         parts = []
         if s_lens:
             parts.append(', '.join(map(str, [x[1] for x in s_lens])))
@@ -194,6 +187,33 @@ def set_meta_template(s, meta_start='[[', meta_end=']]', **kwargs):
     t = Template(s.strip(), variable_start_string=meta_start,
                  variable_end_string=meta_end).render(**kwargs)
     return Template(t)
+
+
+class StyleParser:
+    def __init__(self, text):
+        # 使用正则表达式拆分文本，并获取权重和风格
+        self.styles = []
+        self.weights = []
+        matches = re.findall(r'<风格变换\d+(\s+(\d+))?[^>]*>\s*(.*?)\s*(?=<风格变换|$)', text, re.DOTALL)
+        for match in matches:
+            self.styles.append(match[2])
+            # 提取权重
+            weight = match[1]
+            if weight:
+                self.weights.append(int(weight))
+            else:
+                self.weights.append(100)  # 默认权重
+
+    def random_pick(self):
+        """ 随机选择一个风格，并返回其下标和内容
+
+        :return tuple: (下标, 风格内容)
+
+        >>> sp = StyleParser("...")  # 按照之前的格式传入一个字符串
+        >>> index, style = sp.random_pick()  # 随机选择一个风格
+        """
+        index = random.choices(range(len(self.styles)), weights=self.weights, k=1)[0]
+        return index, self.styles[index]
 
 
 class GptChatJsonl(JsonlDataFile):
@@ -275,18 +295,24 @@ class GptChatJsonl(JsonlDataFile):
         # 2.2 拼接new_lines
         fragments = []
         current_fragment = []
-
+        current_fragment_total_length = 0
         for line in new_lines:
-            if len(current_fragment) + len(line) <= max_word_length:
+            if current_fragment_total_length + len(line) <= max_word_length:
                 current_fragment.append(line)
+                current_fragment_total_length += len(line)
             else:
                 fragments.append('\n'.join(current_fragment))
                 current_fragment = [line]
+                current_fragment_total_length = len(line)
         if current_fragment:
             fragments.append('\n'.join(current_fragment))
 
         n = len(fragments)
         fragments = [gen_prompt(n, i, x).strip() for i, x in enumerate(fragments)]
+
+        for i, fragment in enumerate(fragments):
+            fragment = {"content": fragment}
+            fragments[i] = fragment
         return fragments
 
     def split_texts(self, texts, max_word_length=None, prompt=None):

@@ -348,7 +348,7 @@ class LabelmeDict:
             name, height, width = '', 0, 0
 
         # 2 字段值
-        data = {'version': '5.0.1',
+        data = {'version': '5.1.7',
                 'flags': {},
                 'shapes': [],
                 'imagePath': name,

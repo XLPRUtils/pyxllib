@@ -163,9 +163,16 @@ class JLineViewer(QMainWindow):
         openFile.setStatusTip('打开新文件，可以打开jsonl或json格式的文件')
         openFile.triggered.connect(self.showDialog)
 
-        self.loadAllButton = QPushButton("加载全部")
+        self.reloadButton = QAction('重新加载', self)
+        self.reloadButton.triggered.connect(self.reload)
+
+        self.loadAllButton = QAction("加载全部", self)
         self.loadAllButton.setStatusTip('对jsonl最多只会预加载1000行，点击该按钮可以加载剩余全部条目')
-        self.loadAllButton.clicked.connect(self.loadAllItems)
+        self.loadAllButton.triggered.connect(self.loadAllItems)
+
+        self.delegate_mode = 'compact'
+        self.toggleDelegateButton = QAction('单行模式', self)
+        self.toggleDelegateButton.triggered.connect(self.toggleDelegate)
 
         saveFile = QAction('保存文件', self)
         saveFile.setShortcut('Ctrl+S')
@@ -174,7 +181,9 @@ class JLineViewer(QMainWindow):
 
         toolbar = self.addToolBar('文件')
         toolbar.addAction(openFile)
-        toolbar.addWidget(self.loadAllButton)  # 将按钮添加到布局中
+        toolbar.addAction(self.reloadButton)
+        toolbar.addAction(self.loadAllButton)  # 将按钮添加到布局中
+        toolbar.addAction(self.toggleDelegateButton)
         # toolbar.addAction(saveFile)
 
         self.statusBar = QStatusBar()
@@ -194,19 +203,14 @@ class JLineViewer(QMainWindow):
         self.treeView.setAnimated(False)
         # self.plainTextEdit.textChanged.connect(self.updateJson)  # 连接 textChanged 信号到新的槽函数
 
-        self.delegate_mode = 'compact'
-        self.toggleDelegateButton = QAction('切换显示模式', self)
-        self.toggleDelegateButton.triggered.connect(self.toggleDelegate)
-        toolbar.addAction(self.toggleDelegateButton)
-
     def toggleDelegate(self):
         if self.delegate_mode == 'compact':
             self.treeView.setItemDelegate(ExpandedTextEditDelegate(self.treeView))
-            self.toggleDelegateButton.setText('切换为紧凑模式')
+            self.toggleDelegateButton.setText('单行模式')
             self.delegate_mode = 'expanded'
         else:
             self.treeView.setItemDelegate(CompactTextEditDelegate(self.treeView))
-            self.toggleDelegateButton.setText('切换为扩展模式')
+            self.toggleDelegateButton.setText('多行模式')
             self.delegate_mode = 'compact'
 
     def addPane(self, widget, title):
@@ -277,6 +281,9 @@ class JLineViewer(QMainWindow):
                                            f"加载条目耗时: {time.time() - start_time:.2f} 秒")
             else:
                 self.statusBar.showMessage(f"总条目数: {len(self.lines)}, 加载条目耗时: {time.time() - start_time:.2f} 秒")
+
+    def reload(self):
+        self.showDialog(fname=self.lastOpenDir or None)
 
     def loadJson(self, item):
         index = self.listWidget.row(item)

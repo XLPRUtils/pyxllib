@@ -60,7 +60,7 @@ class BCompare(Explorer):
                     files[i] = XlPath.init(ref_names[i], XlPath.tempdir(), suffix=default_suffix)
                 else:
                     files[i] = XlPath(files[i])
-                files[i].write_text(arg)
+                files[i].write_text(str(arg))
                 new_args.append(files[i])
 
         return new_args
