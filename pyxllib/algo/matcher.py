@@ -168,6 +168,7 @@ class GroupedDataMatcher(DataMatcher):
     def __init__(self):
         """ 初始化一个分组数据匹配器 """
         super().__init__()
+        # 父类有个data(list)存储了所有数据，这里self.groups只存储数据的下标
         self.groups = dict()
 
     def _sort_groups(self):

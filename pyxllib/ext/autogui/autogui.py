@@ -400,7 +400,6 @@ class NamedLocate(AutoGuiLabelData):
             True，一直拖拽到末尾，即内容不再变化为止
         """
 
-
         def core():
             x = self[loclabel]
             l, t, r, b = x['ltrb']
@@ -432,7 +431,6 @@ class NamedLocate(AutoGuiLabelData):
                 last_im = new_im
         else:
             core()
-
 
     def wait(self, loclabel, *, fixpos=False, limit=None, interval=1):
         """ 封装的比较高层的功能 """
@@ -764,7 +762,7 @@ def grab_pixel_color(radius=0):
         time.sleep(0.1)
 
 
-def grab_monitor(order=0):
+def grab_monitor(order=0, to_cv2=True):
     """ 截屏
 
     :param int order:
@@ -781,7 +779,9 @@ def grab_monitor(order=0):
         monitor = sct.monitors[order]
         sct_img = sct.grab(monitor)
         img = Image.frombytes("RGB", sct_img.size, sct_img.bgra, "raw", "BGRX")
-        return PilImg.read(img).to_cv2_image()  # 返回是np矩阵
+        if to_cv2:
+            img = PilImg.read(img).to_cv2_image()  # 返回是np矩阵
+        return img
 
 
 def list_windows(mode=1):
@@ -798,6 +798,7 @@ def list_windows(mode=1):
     import win32gui
 
     ls = []
+
     def callback(hwnd, extra):
         l, t, r, b = win32gui.GetWindowRect(hwnd)
         w, h = r - l, b - t

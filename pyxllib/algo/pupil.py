@@ -129,7 +129,7 @@ class ValuesStat:
                 ls.append(f'最大值: {self.max:{valfmt[4]}}')
             return '\t'.join(ls)
         elif self.n == 1:
-            return f'{self.sum:{valfmt[0]}}'
+            return f'{self.sum:{valfmt[0] or "g"}}'
         else:
             raise ValueError
 
