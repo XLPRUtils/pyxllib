@@ -12,6 +12,14 @@ import json
 import time
 from types import SimpleNamespace
 
+import warnings
+
+warnings.filterwarnings('ignore')
+
+import logging
+
+logging.disable(logging.CRITICAL)
+
 from PyQt5.QtWidgets import QApplication, QMainWindow, QAction, QFileDialog, QListWidget, QLineEdit, QVBoxLayout, \
     QSplitter, QTreeView, QPlainTextEdit, QPushButton, QLabel, QHBoxLayout, QSizePolicy, QWidget, QStatusBar, \
     QAbstractItemView, QHeaderView, QMessageBox

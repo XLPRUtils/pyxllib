@@ -29,7 +29,11 @@ from openpyxl.cell.cell import MergedCell
 from openpyxl.styles import Font, Alignment
 from openpyxl.utils.cell import get_column_letter, column_index_from_string
 import pandas as pd
-import jsonpickle
+
+try:
+    import jsonpickle
+except ModuleNotFoundError:
+    pass
 
 from pyxllib.prog.pupil import inject_members, dprint, xlmd5
 from pyxllib.prog.specialist import browser
@@ -1367,60 +1371,9 @@ class XlWorkbook(openpyxl.Workbook):
         """ 基于to_json计算的md5，一般用来判断不同workbook间是否相同 """
         return xlmd5(json.dumps(self.to_json(reduction_degree)))
 
-    def extract_summary(self):
+    def extract_summary(self, *, samples_num=5, limit_length=2500):
         """ 更新后的函数：提取整个Excel工作簿的摘要信息 """
         wb = self
-
-        def reduce_summarys(sheets, limit_length=2500):
-            """
-            :param sheets: 若干表格的摘要信息
-            :param limit_length: 参考限定的长度，折算后大概是限定1500token
-            """
-            # 1 不用改变
-            text1 = json.dumps(sheets, ensure_ascii=False)
-            length1 = len(text1)
-            if length1 < limit_length:
-                return sheets
-
-            # 2 每个字段都去掉一个样本
-            for sheet in sheets:
-                if 'data' in sheet:
-                    st_data = sheet['data']
-                    for col_header, col in st_data.items():
-                        st_data[col_header]['sample_values'] = col['sample_values'][:-1]
-
-            text2 = json.dumps(sheets, ensure_ascii=False)
-            length2 = len(text2)
-            bias = length1 - length2
-            # dprint(length1, length2, bias)  # 调试用
-            if length2 <= limit_length:
-                return sheets
-
-            # 3 算出理论上要去掉几个样本，才能控制到理想长度
-            n = math.ceil((length1 - limit_length) / bias)
-            m = 5 - n
-            if m >= 0:
-                for sheet in sheets:
-                    if 'data' in sheet:
-                        st_data = sheet['data']
-                        for col_header, col in st_data.items():
-                            if m > 0:
-                                st_data[col_header]['sample_values'] = col['sample_values'][:m]
-                            elif m == 0:
-                                del st_data[col_header]['sample_values']
-                return sheets
-
-            # 4 如果m<0，可能靠上述删除还不够。这应该是不可能发生的事情，但还是处理下。
-            for sheet in sheets:
-                if 'data' in sheet:
-                    del sheet['data']
-                # 这个删除后可能还是太长的话，表示sheet太多了，需要删掉一些sheet
-
-            # 如果删除所有的数据后仍然超过限制，那么删除一些表格
-            while len(json.dumps(sheets, ensure_ascii=False)) > limit_length:
-                sheets.pop()
-
-            return sheets
 
         all_sheets_summary = []
 
@@ -1435,6 +1388,10 @@ class XlWorkbook(openpyxl.Workbook):
                     # 提取表头结构
                     header_structure = extract_header_structure(ws, header_range)
 
+                    filterRange = re.sub(r'\d+',
+                                         lambda m: str(max(int(m.group()) - 1, 1)),
+                                         data_range, count=1)
+
                     summary = ({
                         "sheetName": ws.title,
                         "sheetType": "Worksheet",
@@ -1442,7 +1399,9 @@ class XlWorkbook(openpyxl.Workbook):
                         "headerRange": header_range,
                         "header": header_structure,
                         'dataRange': data_range,
-                        'data': extract_field_summaries(ws, header_range, data_range)
+                        'filterRange': filterRange,
+                        'sortRange': filterRange,
+                        'data': extract_field_summaries(ws, header_range, data_range, samples_num)
                     })
 
                     if not summary['data']:  # 如果没有数据，则大概率是数据透视表，是计算出来的，读取不到~
@@ -1467,8 +1426,10 @@ class XlWorkbook(openpyxl.Workbook):
         workbook_summary = {
             "fileName": Path(self.path).name if self.path else None,
             "sheetNames": wb.sheetnames,
-            "sheets": reduce_summarys(all_sheets_summary),
+            "sheets": all_sheets_summary,
         }
+
+        WorkbookSummary(workbook_summary).reduce_summarys(limit_length=limit_length)
 
         return workbook_summary
 
@@ -1765,7 +1726,7 @@ def extract_field_summaries(ws, header_range, data_range, samples_num=5):
     end_row = data_details['bottom']
 
     # 2 提前决定好所有字段统一抽样的数据行号
-    rows = list(range(header_details['bottom'] + 1, data_details['bottom']))
+    rows = list(range(header_details['bottom'] + 1, data_details['bottom'] + 1))
     if len(rows) > samples_num:
         rows = random.sample(rows, samples_num)
         rows.sort()
@@ -1783,12 +1744,172 @@ def extract_field_summaries(ws, header_range, data_range, samples_num=5):
     return field_summaries
 
 
-def extract_workbook_summary(file_path):
-    """ 更新后的函数：提取整个Excel工作簿的摘要信息 """
+class WorkbookSummary:
+    """ 工作薄摘要相关处理功能 """
 
+    def __init__(self, data):
+        self.data = data
+
+    def reduce_summarys(self, limit_length=2500):
+        """ 精简摘要
+
+        :param limit_length: 参考限定的长度，折算后大概是限定1500token
+        """
+        sheets = self.data['sheets']
+
+        if limit_length == -1:  # -1表示不限制长度
+            return sheets
+
+        # 1 不用改变
+        text1 = json.dumps(sheets, ensure_ascii=False)
+        length1 = len(text1)
+        if length1 < limit_length:
+            return sheets
+
+        # 2 每个字段都去掉一个样本
+        for sheet in sheets:
+            if 'data' in sheet:
+                st_data = sheet['data']
+                for col_header, col in st_data.items():
+                    st_data[col_header]['sample_values'] = col['sample_values'][:-1]
+
+        text2 = json.dumps(sheets, ensure_ascii=False)
+        length2 = len(text2)
+        bias = length1 - length2
+        # dprint(length1, length2, bias)  # 调试用
+        if length2 <= limit_length:
+            return sheets
+
+        # 3 算出理论上要去掉几个样本，才能控制到理想长度
+        n = math.ceil((length1 - limit_length) / bias)
+        m = 5 - n
+        if m >= 0:
+            for sheet in sheets:
+                if 'data' in sheet:
+                    st_data = sheet['data']
+                    for col_header, col in st_data.items():
+                        if m > 0:
+                            st_data[col_header]['sample_values'] = col['sample_values'][:m]
+                        elif m == 0:
+                            del st_data[col_header]['sample_values']
+            return sheets
+
+        # 4 如果m<0，可能靠上述删除还不够。这应该是不可能发生的事情，但还是处理下。
+        for sheet in sheets:
+            if 'data' in sheet:
+                del sheet['data']
+            # 这个删除后可能还是太长的话，表示sheet太多了，需要删掉一些sheet
+
+        # 如果删除所有的数据后仍然超过限制，那么删除一些表格
+        while len(json.dumps(sheets, ensure_ascii=False)) > limit_length:
+            sheets.pop()
+
+        self.data['sheets'] = sheets
+        return sheets
+
+    def random_filename(self):
+        self.data['fileName'] = str(random.randint(0, 2000)) + '.xlsx'
+
+    def choice_samples(self, samples_num=5):
+        """ 限定最多抽取几个样本
+        """
+        data = self.data
+        for sheet in data['sheets']:
+            if 'data' in sheet:
+                # 预设好要抽哪些行
+                n = min([len(v['sample_values']) for k, v in sheet['data'].items()])
+                rows = list(range(n))
+                if len(rows) > samples_num:
+                    rows = random.sample(rows, samples_num)
+                    rows.sort()
+                # 抽取样本
+                for col_name, col_data in sheet['data'].items():
+                    col_data['sample_values'] = [col_data['sample_values'][i] for i in rows]
+
+    def random_delete(self):
+        """ 随机删除一些字段 """
+        data = self.data
+        for sheet in data['sheets']:
+            # 80%概率删除data
+            if 'data' in sheet and random.random() < 0.8:
+                del sheet['data']
+
+            # filterRange和sortRange有80%概率随机删除一个
+            if 'filterRange' in sheet and 'sortRange' in sheet:
+                if random.random() < 0.5:
+                    del sheet['filterRange']
+                else:
+                    del sheet['sortRange']
+
+            # usedRange、headRange、dataRange，有20%概率随机删掉一个
+            if 'usedRange' in sheet and 'headRange' in sheet and 'dataRange' in sheet:
+                r = random.random()
+                if r < 1 / 3:
+                    del sheet['usedRange']
+                elif r < 2 / 3:
+                    del sheet['headRange']
+                else:
+                    del sheet['dataRange']
+
+            # hearder有50%概率随机打乱
+            if random.random() < 0.5:
+                random.shuffle(sheet['header'])
+
+    def to_str(self):
+        return json.dumps(self.data, ensure_ascii=False)
+
+
+def get_random_workbook_summary(data, samples_num=5, limit_length=2500):
+    """ 输入摘要字典，进行随机简化配置 """
+    # 1 文件名随机变换
+    data['fileName'] = str(random.randint(0, 2000)) + '.xlsx'
+
+    # 2 sheets
+    for sheet in data['sheets']:
+        # 80%概率删除data
+        # filterRange和sortRange有80%概率随机删除一个
+        # usedRange、headRange、dataRange，有20%概率随机删掉一个
+        # hearder有50%概率随机打乱
+        pass
+
+        # 3 samples_num
+        if samples_num:
+            pass
+
+    WorkbookSummary(data).reduce_summarys(limit_length=limit_length)
+    return data
+
+
+def extract_workbook_summary(file_path, mode=0,
+                             samples_num=5, limit_length=2500):
+    """ 更新后的函数：提取整个Excel工作簿的摘要信息
+
+    :param mode:
+        -1，提取全量摘要（详细信息，全部样本）
+        0, 标准的提取摘要（详细信息，随机抽5个样本）
+        1，精简摘要，在保留逻辑完整性的前提下，随机的修改一些摘要的结构内容
+    """
     wb = openpyxl.load_workbook(file_path)
-    res = wb.extract_summary()
-    res['fileName'] = Path(file_path).name
+
+    if mode == -1:
+        res = wb.extract_summary(samples_num=1000, limit_length=-1)
+        res['fileName'] = Path(file_path).name
+    elif mode == 0:
+        res = wb.extract_summary(samples_num=samples_num, limit_length=limit_length)
+        res['fileName'] = Path(file_path).name
+
+    elif mode == 1:
+        res = wb.extract_summary(samples_num=samples_num)
+
+        wb_summary = WorkbookSummary(res)
+        wb_summary.random_filename()
+        wb_summary.random_delete()
+        wb_summary.reduce_summarys(limit_length=limit_length)
+
+        res = wb_summary.data
+    else:
+        raise ValueError('mode参数值不正确')
+
     return res
 
 

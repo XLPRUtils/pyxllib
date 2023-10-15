@@ -26,15 +26,16 @@ def 删注释周围留空(c, arr):  # 应急
         # c = c[:i].rstrip() + '%' + c[i:].lstrip()  # debug，定位
         有回车 = False
         l = r = 上一回车处 = i
-        r = i + 1
-        while l > 0:
+        r=i+1
+        len_c = len(c)
+        while len_c > l >0:
             l -= 1
             ci = c[l]
             if ci == '\n':  # \r已统一为\n
                 有回车 = True
             elif ci not in '\t \v':  # TODO 中文空格行不行
                 break
-        while r < len(c):
+        while r < len_c:
             ci = c[r]
             if ci in '\n\r':  # \r已统一为\n
                 有回车 = True
@@ -43,7 +44,7 @@ def 删注释周围留空(c, arr):  # 应急
                 break
             r += 1
             # print(r)
-        c = c[:l + 1] + ('\n' if 有回车 else '') + c[上一回车处:]  # 有必要多留个空格吗
+        c = c[:l+1] + ('\n' if 有回车 else '') + c[上一回车处:]  # 有必要多留个空格吗
         # 已知 BUG：连续注释后的缩进无法保持，但不影响 JS 代码逻辑就是了
     return c
 
@@ -63,7 +64,7 @@ def 回溯区分正则除号(c):
         elif ci in '\n\r':  # 折行，暂时无法给出结论，其实可以与如上合并，区别可能是回车前可能是已省略的分号
             # return 回溯区分正则除号(c, i=i)  # 经验证，js 中 转义回车仅限于字符串内，运算符后是可折行的， \ 反而语法错误
             continue  # 经考虑，还是不必递归了
-        elif ci in '{[(=,;?&|?*~':  # todo ++ --  ，注：~ 为非预期操作，但因类型转换语法允许
+        elif ci in '{[(=,;?:&|!*~%^':  # todo ++ --  ，注：~ 为非预期操作，但因类型转换语法允许 https://developer.mozilla.org/zh-CN/docs/Web/JavaScript/Guide/Expressions_and_operators
             return True  # 正则
         elif ci == '+':  # todo ++ --
             i -= 1
@@ -110,8 +111,7 @@ class JSParser():
                     self.indexPointer + 1] == 号:  # 超标报错正好，对应其语法错误，TODO 以后完善，实测 JS，  如果在引号中回车前没\反是其语法错误；就当源文件语法吧
                     pass
                 self.jsWithoutComment += self.jsSourceCode[self.indexPointer]  # 转义后的字符好像都是要吃掉的，不用 if，待深入思考
-            elif si == '$' and self.jsSourceCode[
-                self.indexPointer + 1] == '{':  # 重要区别 。经实验 ${  后必有 } 否则报错：g = `2${2+3 7`
+            elif si == '$' and self.jsSourceCode[self.indexPointer + 1] == '{':  # 重要区别 。经实验 ${  后必有 } 否则报错：g = `2${2+3 7`
                 self.indexPointer += 1
                 self.jsWithoutComment += '{'
                 self.反引号嵌套表达式允许多行注释()
@@ -152,8 +152,7 @@ class JSParser():
             self.jsWithoutComment += self.注释占位
             self.indexPointer += 1
             self.多行注释()
-        elif 回溯区分正则除号(
-                self.jsWithoutComment):  # bool(re.search('[\n\r(\[\{=+,;&?|]([ \t]*|\\[\n\r])*[ \t]*$', self.jsWithoutComment)):  # def 区分正则或除号(): ←
+        elif 回溯区分正则除号(self.jsWithoutComment): #bool(re.search('[\n\r(\[\{=+,;&?|]([ \t]*|\\[\n\r])*[ \t]*$', self.jsWithoutComment)):  # def 区分正则或除号(): ←
             self.jsWithoutComment += '/'
             self.正则()
         else:
@@ -171,8 +170,8 @@ class JSParser():
         # while (s[idx] != '\n' or s[idx] != '\r') and idx < 长 :
         while (self.jsSourceCode[self.indexPointer] not in '\n\r') and self.indexPointer < self.jsCodeLength:
             self.indexPointer += 1
-        self.jsWithoutComment += '\n'
         self.注释location.append(len(self.jsWithoutComment))
+        self.jsWithoutComment += '\n'  # 补回车于删注释点后，不能反了
 
     def 多行注释(self):
         self.indexPointer += 1  # 要吗？加过没
@@ -220,8 +219,7 @@ class JSParser():
             elif si == "`":  # `
                 self.jsWithoutComment += si
                 self.反引号()
-            elif si == "S" and self.jsCodeLength - self.indexPointer > 11 and self.jsSourceCode[
-                                                                              self.indexPointer:self.indexPointer + 11] == 'String.raw`':  # String.raw` 元字符串
+            elif si == "S" and self.jsCodeLength - self.indexPointer > 11 and self.jsSourceCode[ self.indexPointer:self.indexPointer + 11] == 'String.raw`':  # String.raw` 元字符串
                 self.jsWithoutComment += si
                 self.indexPointer += 10;
                 self.jsWithoutComment += 'tring.raw`'  # 分两步，以便上面那个能和其它情景合并
@@ -249,3 +247,7 @@ class JSParser():
 def remove_js_comments(jsSourceCode):  # 对外接口，将本来用得两行代码封装为一行
     js = JSParser(jsSourceCode)
     return js.clearComment()
+
+
+if __name__ == '__main__':
+    pass

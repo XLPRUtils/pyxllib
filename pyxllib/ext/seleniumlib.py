@@ -37,11 +37,14 @@ class XlChrome(webdriver.Chrome):
             locator = (By.XPATH, locator)
         return WebDriverWait(self, seconds).until(EC.presence_of_element_located(locator))
 
-    def click(self, locator, seconds=10):
+    def click(self, locator, seconds=10, check=True):
         """ 点击一个元素 """
         if isinstance(locator, str):
             locator = (By.XPATH, locator)
-        element = WebDriverWait(self, seconds).until(EC.element_to_be_clickable(locator))
+        if check:
+            element = WebDriverWait(self, seconds).until(EC.element_to_be_clickable(locator))
+        else:
+            element = self.locate(locator, seconds)
         time.sleep(0.5)  # 最好稍微等一下再点击
         try:
             element.click()
