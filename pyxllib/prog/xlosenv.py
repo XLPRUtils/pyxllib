@@ -40,7 +40,10 @@ class XlOsEnv:
         try:
             return json.loads(value)
         except json.decoder.JSONDecodeError:
-            return value.decode()
+            if isinstance(value, bytes):
+                return value.decode()
+            else:
+                return value
 
     @classmethod
     def set(cls, name, value, encoding=False):

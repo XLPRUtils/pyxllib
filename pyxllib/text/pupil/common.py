@@ -761,6 +761,16 @@ class ListingFormat:
     def next(self):
         self.value += 1
 
+    @classmethod
+    def join(cls, start_idx, ls: list):
+        """ 给ls清单的元素，按照start_idx的格式，添加编号 """
+        lf = cls(start_idx)
+        ls2 = []
+        for x in ls:
+            ls2.append(str(lf) + x)
+            lf.next()
+        return '\n'.join(ls2)
+
     def __repr__(self):
         if self.func:
             return self.form.format(self.func(self.value))
