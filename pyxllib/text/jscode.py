@@ -26,9 +26,9 @@ def 删注释周围留空(c, arr):  # 应急
         # c = c[:i].rstrip() + '%' + c[i:].lstrip()  # debug，定位
         有回车 = False
         l = r = 上一回车处 = i
-        r=i+1
+        r = i + 1
         len_c = len(c)
-        while len_c > l >0:
+        while len_c > l > 0:
             l -= 1
             ci = c[l]
             if ci == '\n':  # \r已统一为\n
@@ -44,7 +44,7 @@ def 删注释周围留空(c, arr):  # 应急
                 break
             r += 1
             # print(r)
-        c = c[:l+1] + ('\n' if 有回车 else '') + c[上一回车处:]  # 有必要多留个空格吗
+        c = c[:l + 1] + ('\n' if 有回车 else '') + c[上一回车处:]  # 有必要多留个空格吗
         # 已知 BUG：连续注释后的缩进无法保持，但不影响 JS 代码逻辑就是了
     return c
 
@@ -111,7 +111,8 @@ class JSParser():
                     self.indexPointer + 1] == 号:  # 超标报错正好，对应其语法错误，TODO 以后完善，实测 JS，  如果在引号中回车前没\反是其语法错误；就当源文件语法吧
                     pass
                 self.jsWithoutComment += self.jsSourceCode[self.indexPointer]  # 转义后的字符好像都是要吃掉的，不用 if，待深入思考
-            elif si == '$' and self.jsSourceCode[self.indexPointer + 1] == '{':  # 重要区别 。经实验 ${  后必有 } 否则报错：g = `2${2+3 7`
+            elif si == '$' and self.jsSourceCode[
+                self.indexPointer + 1] == '{':  # 重要区别 。经实验 ${  后必有 } 否则报错：g = `2${2+3 7`
                 self.indexPointer += 1
                 self.jsWithoutComment += '{'
                 self.反引号嵌套表达式允许多行注释()
@@ -152,7 +153,8 @@ class JSParser():
             self.jsWithoutComment += self.注释占位
             self.indexPointer += 1
             self.多行注释()
-        elif 回溯区分正则除号(self.jsWithoutComment): #bool(re.search('[\n\r(\[\{=+,;&?|]([ \t]*|\\[\n\r])*[ \t]*$', self.jsWithoutComment)):  # def 区分正则或除号(): ←
+        elif 回溯区分正则除号(
+                self.jsWithoutComment):  # bool(re.search('[\n\r(\[\{=+,;&?|]([ \t]*|\\[\n\r])*[ \t]*$', self.jsWithoutComment)):  # def 区分正则或除号(): ←
             self.jsWithoutComment += '/'
             self.正则()
         else:
@@ -219,7 +221,8 @@ class JSParser():
             elif si == "`":  # `
                 self.jsWithoutComment += si
                 self.反引号()
-            elif si == "S" and self.jsCodeLength - self.indexPointer > 11 and self.jsSourceCode[ self.indexPointer:self.indexPointer + 11] == 'String.raw`':  # String.raw` 元字符串
+            elif si == "S" and self.jsCodeLength - self.indexPointer > 11 and self.jsSourceCode[
+                                                                              self.indexPointer:self.indexPointer + 11] == 'String.raw`':  # String.raw` 元字符串
                 self.jsWithoutComment += si
                 self.indexPointer += 10;
                 self.jsWithoutComment += 'tring.raw`'  # 分两步，以便上面那个能和其它情景合并

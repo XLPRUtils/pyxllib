@@ -8,6 +8,7 @@
 """ 封装一些代码开发中常用的功能，工程组件 """
 import builtins
 from collections import Counter
+from concurrent.futures import ThreadPoolExecutor
 import ctypes
 import datetime
 import functools
@@ -21,6 +22,7 @@ import math
 import os
 import pprint
 import queue
+import random
 import signal
 import socket
 import socketserver
@@ -31,7 +33,6 @@ import threading
 import time
 import traceback
 from urllib.parse import urlparse
-from concurrent.futures import ThreadPoolExecutor
 
 from pyxllib.prog.newbie import classproperty, typename
 
@@ -503,6 +504,8 @@ class Timeout:
         是用一个Timer计时器子线程计时，当timeout超时，使用信号机制给主线程抛出一个异常
             ① 注意，不能子线程直接抛出异常，这样影响不了主线程
             ② 也不能直接抛出错误signal，这样会强制直接中断程序。应该抛出TimeoutError，让后续程序进行超时逻辑的处理
+
+    注意：这个函数似乎不支持多线程
     """
 
     def __init__(self, seconds):
@@ -1004,3 +1007,10 @@ class XlThreadPoolExecutor(ThreadPoolExecutor):
     def yield_result(self, timeout=None):
         for future in self.futures:
             yield future.result(timeout=timeout)
+
+
+def shuffle_dict_keys(d):
+    keys = list(d.keys())
+    random.shuffle(keys)
+    d = {k: d[k] for k in keys}
+    return d

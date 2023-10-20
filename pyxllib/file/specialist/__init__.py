@@ -540,15 +540,25 @@ class JsonlDataDir:
     def process_each_file(self, func=None, *,
                           print_mode=0, desc='process_each_file',
                           processes_num=1,
+                          subfiles=None,
                           **kwargs):
+        # 1 backend
         backend = 'loky' if processes_num != 1 else 'sequential'
+
+        # 2 tasks
+        if subfiles is None:
+            subfiles = [0, len(self.files)]
+        elif not isinstance(subfiles, (list, tuple)):
+            subfiles = [subfiles, subfiles + 1]
+        a, b = subfiles
+        tasks = [delayed(func)(file) for file in self.files[a:b]]
+
+        # 3 run
         if print_mode:
             parallel = Parallel(n_jobs=processes_num, backend=backend, return_as='generator')
-            tasks = [delayed(func)(file) for file in self.files]
             list(tqdm(parallel(tasks), total=len(self.files), desc=desc, **kwargs))
         else:
             parallel = Parallel(n_jobs=processes_num, backend=backend)
-            tasks = [delayed(func)(file) for file in self.files]
             parallel(tasks)
 
     def process_each_record(self, func, *,
@@ -556,7 +566,8 @@ class JsonlDataDir:
                             print_mode=2, desc=None,
                             timeout=None,
                             processes_num=1, threads_num=1,
-                            dst_dir=None, json_encoder=None):
+                            dst_dir=None, json_encoder=None,
+                            subfiles=None):
         """ 封装的对每个record进行操作的函数
 
         :param func: 外部传入的处理函数
@@ -573,6 +584,9 @@ class JsonlDataDir:
         :param threads_num: 线程数，每个文件处理的时候使用几个线程
         :param dst_dir: 要保存到的目标目录，未设置的时候不保存
         :param json_encoder: 有些不是标准的json数据结构，如何进行处理，有需要的时候一般会设置成str
+        :param subfiles: 只跑部分子文件
+            a，只有文件编号为a的才运行
+            [a, b]，跑左闭右开的区间内的文件
         """
         files_num = len(self.files)
 
@@ -606,7 +620,7 @@ class JsonlDataDir:
                 jdf.records = new_records
                 jdf.save(dstfile, json_encoder=json_encoder)
 
-        self.process_each_file(process_jsonl_file,
+        self.process_each_file(process_jsonl_file, subfiles=subfiles,
                                processes_num=processes_num,
                                print_mode=print_mode == 1, desc=desc)
 

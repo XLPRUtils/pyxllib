@@ -703,6 +703,95 @@ def extract_airscript_code_from_answers(all_answers):
         return ''
 
 
+def merge_answers_contents(answers):
+    """ 对一组answers结果中，相同type的contents进行合并 """
+    for answer in answers:
+        contents = []
+        for content in answer['contents']:
+            if len(contents) == 0:
+                contents.append(content)
+            else:
+                if contents[-1]['type'] == content['type']:
+                    contents[-1]['text'] += '\n' + content['text']
+                else:
+                    contents.append(content)
+        answer['contents'] = contents
+
+
+def refine_content_title(content, tag, dst_title=None):
+    """ 将内容中的标题描述形式标准化
+
+    :param tag: 原标题相关字符
+    :param content: 文本内容
+    :param dst_title: 目标标题格式
+    :return: 处理后的字符串
+    """
+    if dst_title is None:
+        dst_title = f'<{tag}>'
+    content_lines = content.splitlines()
+    chars_str = re.compile(tag.replace(':', '[:的]?'))
+    chinese_chars = re.compile(r'[\u4e00-\u9fa5]')
+
+    res = []
+    for line in content_lines:
+        # 使用正则表达式查找匹配的部分
+        new_line = chars_str.sub('', line)
+        if new_line != line and not chinese_chars.search(new_line):
+            res.append(dst_title)
+        else:
+            # 如果不满足条件，不进行替换
+            res.append(line)
+    return '\n'.join(res)
+
+
+def refine_block_name(record, block_names, preproc=None):
+    """ 优化模块的标题名，方便后续结构化提取数据
+
+    感觉这个系列解析是比较通用的，就放在标准库中
+    """
+    # if preproc is None:
+    #     def preproc(x):
+    #         return x
+
+    for answer in record['all_answers']:
+        for content in answer['contents']:
+            if content['type'] == 'text':
+                text = old_text = content['text']
+                if preproc is not None:
+                    text = preproc(text)
+
+                for block_name in block_names:
+                    text = refine_content_title(text, block_name)
+                text = refine_content_title(text, '---', '')
+                # 一般不要直接修改原数据，但post里会有备份，所以这里verify可以直接修改了
+                # if 'answer' not in curr_record['extra']:
+                #     curr_record['extra']['answer'] = []
+                # curr_record['extra']['answer'].append(text)
+                content['text'] = text
+                # 可以借助bc调试
+                # bcompare(old_text, text)
+
+
+def extract_block_content(record, block_name):
+    """ 从record的all_answers中，从后往前检索 <block_name> 的内容，
+    返回第一个匹配结果，如果找不到则返回空字符串
+    """
+    for answer in record['all_answers'][::-1]:
+        for content in answer['contents'][::-1]:
+            if content['type'] == 'text':
+                matches = list(re.finditer(rf'^<{block_name}>\n((.|\n)+?)(?=^<.+?>\n)',
+                                           content['text'] + '\n<test>\n',  # 末尾补一个<test>，方便对齐
+                                           flags=re.MULTILINE))
+                if matches:
+                    s = matches[-1].group(1).strip()
+                    blocks = extract_code_blocks_from_md(s, sort_by_length=True)
+                    if blocks:
+                        return blocks[-1]
+                    if s:
+                        return s
+    return ''  # 提取不到
+
+
 def __3_生成最后训练用的数据():
     pass
 
@@ -748,9 +837,14 @@ class GptTrainJsonl(JsonlDataFile):
                        for message in record['messages']
                        if message['role'] == 'user']
                       for record in self.records]
+        if not user_texts:
+            print('空数据')
+            return
+
         print('【User的内容】')
         check_conversation_lengths(user_texts, compute_tokens=True,
-                                   ids=list(range(len(user_texts))))
+                                   # 因为一般是使用JLineViewer进行查看，跟那个软件对称使用1开始编号
+                                   ids=list(range(1, len(user_texts) + 1)))
 
         # 2. 提取'assistant'角色的content
         assistant_texts = [[message['content']
@@ -759,14 +853,14 @@ class GptTrainJsonl(JsonlDataFile):
                            for record in self.records]
         print('【Assistant的内容】')
         check_conversation_lengths(assistant_texts, compute_tokens=True,
-                                   ids=list(range(len(assistant_texts))))
+                                   ids=list(range(1, len(assistant_texts) + 1)))
 
         # 3. 将整个record视为一个完整的会话
         full_conversations = [' '.join([message['content'] for message in record['messages']])
                               for record in self.records]
         print('【完整的会话】')
         check_conversation_lengths(full_conversations, compute_tokens=True,
-                                   ids=list(range(len(full_conversations))))
+                                   ids=list(range(1, len(full_conversations) + 1)))
 
     def browse_record(self, index=None, paths=None, **kwargs):
         """ 显示第i次会话的内容 """
@@ -1005,7 +1099,9 @@ class GptChatDir:
     def post2verify_record(post_record):
         """ 这个一般是要具体任务定制的，没有通用操作方式
 
-        注意，如果要使用create_verify的多进程功能，这个函数必须是静态的，否则写成类方法或对象方法都可以
+        注意，如果要使用create_verify的多进程功能，这个函数必须是静态的，并且里面也不能使用其他"类静态方法"
+            否则写成类方法或对象方法都可以
+
         """
         raise NotImplementedError
 

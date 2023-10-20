@@ -35,7 +35,7 @@ try:
 except ModuleNotFoundError:
     pass
 
-from pyxllib.prog.pupil import inject_members, dprint, xlmd5
+from pyxllib.prog.pupil import inject_members, dprint, xlmd5, shuffle_dict_keys
 from pyxllib.prog.specialist import browser
 from pyxllib.algo.specialist import product
 
@@ -1853,31 +1853,23 @@ class WorkbookSummary:
 
             # hearder有50%概率随机打乱
             if random.random() < 0.5:
-                random.shuffle(sheet['header'])
+                sheet['header'] = shuffle_dict_keys(sheet['header'])
+
+        # 一半的概率删掉文件名
+        if random.random() < 0.5:
+            del data['fileName']
+
+        # 如果只有一个sheet，还会进一步精简
+        if len(data['sheets']) == 1:
+            if random.random() < 0.5:
+                data = data['sheets'][0]
+
+            for name in ['sheetName', 'sheetType']:
+                if random.random() < 0.5 and name in data:
+                    del data[name]
 
     def to_str(self):
         return json.dumps(self.data, ensure_ascii=False)
-
-
-def get_random_workbook_summary(data, samples_num=5, limit_length=2500):
-    """ 输入摘要字典，进行随机简化配置 """
-    # 1 文件名随机变换
-    data['fileName'] = str(random.randint(0, 2000)) + '.xlsx'
-
-    # 2 sheets
-    for sheet in data['sheets']:
-        # 80%概率删除data
-        # filterRange和sortRange有80%概率随机删除一个
-        # usedRange、headRange、dataRange，有20%概率随机删掉一个
-        # hearder有50%概率随机打乱
-        pass
-
-        # 3 samples_num
-        if samples_num:
-            pass
-
-    WorkbookSummary(data).reduce_summarys(limit_length=limit_length)
-    return data
 
 
 def extract_workbook_summary(file_path, mode=0,

@@ -280,7 +280,8 @@ class JLineViewer(QMainWindow):
             # 2 加载条目数据
             start_time = time.time()
             self.setWindowTitle(f'JLineViewer - {fname}')
-            self.listWidget.addItems([f'{i + 1}. {line.strip()}' for i, line in enumerate(self.lines[:1000])])
+            self.listWidget.addItems([f'{i + 1}. {line.strip()[:1000]}'  # 这里要限制长度，不然遇到长文本软件会巨卡
+                                      for i, line in enumerate(self.lines[:1000])])
             QApplication.processEvents()
 
             # TODO 只有总条目数大于1000时才显示"仅预加载1000条"
@@ -321,7 +322,9 @@ class JLineViewer(QMainWindow):
     def loadAllItems(self):
         if not self.allItemsLoaded:
             start_time = time.time()
-            self.listWidget.addItems([f'{i + 1}. {line.strip()}' for i, line in enumerate(self.lines[1000:])])
+            self.listWidget.clear()
+            self.listWidget.addItems([f'{i + 1}. {line.strip()[:1000]}'
+                                      for i, line in enumerate(self.lines)])
             QApplication.processEvents()
             self.statusBar.showMessage(f"全部加载完毕, 总条目数: {len(self.lines)}, 加载耗时: {time.time() - start_time:.2f} 秒")
 
@@ -330,6 +333,11 @@ class JLineViewer(QMainWindow):
         else:
             self.statusBar.showMessage(f"所有条目已经加载完毕。")
 
+    def get_item_full_text(self, item):
+        t = item.text()
+        idx = re.search(r'\d+', t).group()
+        return f'{idx}. {self.lines[int(idx) - 1]}'
+
     def searchItems(self):
         if hasattr(self, 'lines'):
             start_time = time.time()
@@ -337,7 +345,7 @@ class JLineViewer(QMainWindow):
             foundCount = 0
             for i in range(self.listWidget.count()):
                 item = self.listWidget.item(i)
-                if searchText in item.text():
+                if searchText in self.get_item_full_text(item):
                     item.setHidden(False)
                     foundCount += 1
                 else:
@@ -354,7 +362,7 @@ class JLineViewer(QMainWindow):
             foundCount = 0
             for i in range(self.listWidget.count()):
                 item = self.listWidget.item(i)
-                if regexPattern.search(item.text()):  # 使用正则表达式搜索
+                if regexPattern.search(self.get_item_full_text(item)):  # 使用正则表达式搜索
                     item.setHidden(False)
                     foundCount += 1
                 else:
