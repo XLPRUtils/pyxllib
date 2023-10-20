@@ -1,22 +1,28 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-# @Sponsor 甲方: 泽少
-# @Author : 本少：https://lyeebn.gitee.io/technology-shop/HeyBoss.html
-# @Date   : 2023/09/27
+# @Author : 陈坤泽，梁奕本（js去注释部分）
+# @Email  : 877362867@qq.com, https://lyeebn.gitee.io/technology-shop/HeyBoss.html
+# @Date   : 2023/10/20
 
-"""
-用编译语法解析方式分析，清理JS中的注释，支持嵌套
+from collections import Counter
+import re
+import textwrap
 
-Usage:
-1、A simple function
-from pyxllib.text.jscode import dropJScomment
-dropJScomment(jsSourceCodeAsString)
 
-2、Object
-from pyxllib.text.jscode import JSParser
-js = JSParser(jsSourceCode)
-jsc = js.clearComment()
-"""
+def __1_删注释功能():
+    """
+    用编译语法解析方式分析，清理JS中的注释，支持嵌套
+
+    Usage:
+    1、A simple function
+    from pyxllib.text.jscode import dropJScomment
+    dropJScomment(jsSourceCodeAsString)
+
+    2、Object
+    from pyxllib.text.jscode import JSParser
+    js = JSParser(jsSourceCode)
+    jsc = js.clearComment()
+    """
 
 
 def 删注释周围留空(c, arr):  # 应急
@@ -250,6 +256,485 @@ class JSParser():
 def remove_js_comments(jsSourceCode):  # 对外接口，将本来用得两行代码封装为一行
     js = JSParser(jsSourceCode)
     return js.clearComment()
+
+
+def __2_类js的as处理功能():
+    pass
+
+
+airscript_head = r"""
+// 0 基础组件代码（可以放在功能代码之前，也能放在最后面）
+
+// 根据提供的 pattern 在 range 中寻找 cell
+// 如果没有提供 range，默认在 ActiveSheet.UsedRange 中寻找
+function findCell(pattern, range = ActiveSheet.UsedRange) {
+    const cell = range.Find(pattern, range, xlValues, xlWhole)
+    return cell
+}
+
+function levenshteinDistance(a, b) {
+    const matrix = [];
+
+    let i;
+    for (i = 0; i <= b.length; i++) {
+        matrix[i] = [i];
+    }
+
+    let j;
+    for (j = 0; j <= a.length; j++) {
+        matrix[0][j] = j;
+    }
+
+    for (i = 1; i <= b.length; i++) {
+        for (j = 1; j <= a.length; j++) {
+            if (b.charAt(i - 1) === a.charAt(j - 1)) {
+                matrix[i][j] = matrix[i - 1][j - 1];
+            } else {
+                matrix[i][j] = Math.min(matrix[i - 1][j - 1] + 1, Math.min(matrix[i][j - 1] + 1, matrix[i - 1][j] + 1));
+            }
+        }
+    }
+
+    return matrix[b.length][a.length];
+}
+
+// 根据提供的 pattern 在 range 中寻找 column
+// 如果没有提供 range，默认在 ActiveSheet.UsedRange 中寻找
+function findColumn(pattern, range = ActiveSheet.UsedRange) {
+    let cell = findCell(pattern, range);  // 首先尝试精确匹配
+    if (!cell) {  // 如果精确匹配失败，尝试模糊匹配
+        let minDistance = Infinity;
+        let minDistanceColumn;
+        for (let i = 1; i <= range.Columns.Count; i++) {
+            let columnName = range.Cells(1, i).Value;
+            let distance = levenshteinDistance(pattern, columnName);
+            if (distance < minDistance) {
+                minDistance = distance;
+                minDistanceColumn = i;
+            }
+        }
+        return minDistanceColumn;
+    }
+    if (cell) { return cell.Column }
+}
+
+// 根据提供的 pattern 在 range 中寻找 row
+// 如果没有提供 range，默认在 ActiveSheet.UsedRange 中寻找
+function findRow(pattern, range = ActiveSheet.UsedRange) {
+    const cell = findCell(pattern, range)
+    if (cell) { return cell.Row }
+}
+
+// 判断一个 cells 集合是否为空
+function isEmpty(cells) {
+    for (let i = 1; i <= cells.Count; i++) {
+        if (cells.Item(i).Text) {
+            return false;
+        }
+    }
+    return true;
+}
+
+// 获取实际使用的区域
+function getUsedRange(maxRows = 500, maxColumns = 100, startFromA1 = true) {
+    /* 允许通过"表格上下文"信息，调整这里数据行的上限500行，或者列上限100列
+        注意，如果分析预设的表格数据在这个限定参数内可以不改
+        只有表格未知，或者明确数据量超过设置时，需要重新调整这里的参数
+        调整的时候千万不要故意凑的刚刚好，可以设置一定的冗余区间
+        比如数据说有4101条，那么这里阈值设置为5000也是可以的，比较保险。
+    */
+
+    // 默认获得的区间，有可能是有冗余的空行，所以还要进一步优化
+    let usedRange = ActiveSheet.UsedRange;
+
+    let lastRow = Math.min(usedRange.Rows.Count, maxRows);
+    let lastColumn = Math.min(usedRange.Columns.Count, maxColumns);
+
+    let firstRow = 1;
+    let firstColumn = 1;
+
+    // 找到最后一个非空行
+    for (; lastRow >= firstRow; lastRow--) {
+        if (!isEmpty(usedRange.Rows(lastRow).Cells)) {
+            break;
+        }
+    }
+
+    // 找到最后一个非空列
+    for (; lastColumn >= firstColumn; lastColumn--) {
+        if (!isEmpty(usedRange.Columns(lastColumn).Cells)) {
+            break;
+        }
+    }
+
+    // 如果表格不是从"A1"开始，找到第一个非空行和非空列
+    if (!startFromA1) {
+        for (; firstRow <= lastRow; firstRow++) {
+            if (!isEmpty(usedRange.Rows(firstRow).Cells)) {
+                break;
+            }
+        }
+
+        for (; firstColumn <= lastColumn; firstColumn++) {
+            if (!isEmpty(usedRange.Columns(firstColumn).Cells)) {
+                break;
+            }
+        }
+    }
+
+    // 创建一个新的 Range 对象，它只包含非空的行和列
+    let newUsedRange = ActiveSheet.Range(
+        usedRange.Cells(firstRow, firstColumn),
+        usedRange.Cells(lastRow, lastColumn)
+    );
+
+    return newUsedRange;  // 返回新的实际数据区域
+}
+
+// 将 Excel 日期转换为 JavaScript 日期
+function xlDateToJSDate(xlDate) {
+    return new Date((xlDate - 25569) * 24 * 3600 * 1000);
+}
+
+// 判断日期是否在本周
+function isCurrentWeek(date) {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);  // 把时间设为午夜以准确地比较日期
+    const firstDayOfWeek = new Date(today.setDate(today.getDate() - today.getDay()));
+    const lastDayOfWeek = new Date(today.setDate(today.getDate() - today.getDay() + 6));
+    return date >= firstDayOfWeek && date <= lastDayOfWeek;
+}
+
+// 判断日期是否在当前月份
+function isCurrentMonth(date) {
+    const currentDate = new Date();
+    currentDate.setHours(0, 0, 0, 0);  // 把时间设为午夜stdcode以准确地比较日期
+    return date.getMonth() === currentDate.getMonth() && date.getFullYear() === currentDate.getFullYear();
+}
+
+// 判断日期是否在下周
+function isNextWeek(date) {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);  // 把时间设为午夜以准确地比较日期
+  const nextWeek = new Date(today.getFullYear(), today.getMonth(), today.getDate() + 7);
+  return date > today && date <= nextWeek;
+}
+
+// 判断日期是否在下个月
+function isNextMonth(date) {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);  // 把时间设为午夜以准确地比较日期
+    const nextMonth = new Date(today.getFullYear(), today.getMonth() + 1, 1);
+    const endDateOfNextMonth = new Date(today.getFullYear(), today.getMonth() + 2, 0);
+    return date >= nextMonth && date <= endDateOfNextMonth;
+}
+""".strip()
+
+
+class AirScriptCodeFixer:
+    @classmethod
+    def fix_colors(cls, code_text):
+        # 1 一些错误的颜色设置方法
+        if re.search(r'(?<!\.)\b(Color.\w+)\b', code_text):
+            return 0, code_text
+
+        # 2 不能像vba那样，直接对颜色设置一个数值
+        match = re.search(r'\.Color\s*=\s*(\d+)', code_text)
+        if match:
+            color_number = int(match.group(1))
+            red = color_number % 256
+            green = (color_number // 256) % 256
+            blue = (color_number // 256 // 256) % 256
+            rgb_format = f'RGB({red}, {green}, {blue})'
+            code_text = code_text[:match.start(1)] + rgb_format + code_text[match.end(1):]
+
+        # 3 一些错误的颜色设置方法，进行修正
+        configs = {
+            '红色': 'RGB(255, 0, 0)',
+            '黄色': 'RGB(255, 255, 0)',
+            '绿色': 'RGB(0, 255, 0)',
+            '蓝色': 'RGB(0, 0, 255)',
+            '灰色': 'RGB(128, 128, 128)',
+            'red': 'RGB(255, 0, 0)',
+            'yellow': 'RGB(255, 255, 0)',
+            'green': 'RGB(0, 255, 0)',
+            'blue': 'RGB(0, 0, 255)',
+            'black': 'RGB(0, 0, 0)',
+            'gray': 'RGB(128, 128, 128)',
+            'grey': 'RGB(128, 128, 128)',
+            'purple': 'RGB(128, 0, 128)',
+            'pink': 'RGB(255, 192, 203)',
+            'orange': 'RGB(255, 128, 0)',
+        }
+
+        def replace_color_fmt(m):
+            t1, t2 = m.groups()
+            t2 = t2.strip('"\'').lower()
+            if t2 in configs:
+                return f'{t1}{configs[t2]}'
+            elif m2 := re.search(r'[a-fA-F0-9]{6}', t2):
+                res = f'{t1}RGB({int(m2.group(0)[:2], 16)}, ' \
+                      f'{int(m2.group(0)[2:4], 16)}, ' \
+                      f'{int(m2.group(0)[4:], 16)})'
+                return res
+            return t1 + m.group(2)
+
+        text = re.sub(r'''(\bColor\s*=\s*)(['"].+?['"])''', replace_color_fmt, code_text)
+
+        # 4 经过优化仍无法修正的颜色问题
+        if re.search(r'''\bColor\s*=\s*['"]''', text):
+            # global count_target
+            # ms = re.findall(r'''\bColor\s*=\s*(['"].+)''', text)
+            # for m in ms:
+            #     count_target[m] += 1
+            return 0, text
+
+        return 1, text
+
+    @classmethod
+    def fix_miscellaneous(cls, code_text):
+        """ 修复其他各种杂项问题 """
+        text = code_text
+
+        # Cannot convert a Symbol value to a string, 一般是对Excel对象使用'+='运算报错
+        text = re.sub(r'(\s+)((?:.+)Value2?)\s+(?:\+=)\s+(.+)', r'\1\2 = \2 + \3', text)  # 531条
+
+        # 各种错误的接口调用形式
+        text = text.replace('.Range.Find(', '.Find(')  # 8条
+
+        # sort接口问题
+        text = re.sub(r'(\.Sort\(.*?,\s+)(-1|0|false)\)', r'\g<1>2)', text)  # 328条
+
+        # 做数据有效性的时候，有时候会有重复的引号嵌套
+        text = re.sub(r'''(Formula\d:\s*')"(.+?)"''', r'\1\2', text)
+
+        # 230907周四19:56，枚举值不用放在字符串中
+        text = re.sub(r'''(['"`])(xlCellTypeVisible)\1''', r'\2', text)
+
+        return 1, text
+
+    @classmethod
+    def delete_error_record(cls, code_text):
+        return 1, code_text
+
+    @classmethod
+    def check_assistant_content(cls, code_text):
+        text = code_text
+
+        global count_target
+        pieces = re.findall(r'[a-zA-Z_\d\.]+\.Columns', text)
+        count_target += Counter([x.strip() for x in pieces])
+
+        # Columns前一般用ActiveSheet就行了
+
+        return 1, text
+
+    @classmethod
+    def simplify_advtools(cls, code_text):
+        """ 移除高级工具函数代码，用其他更简洁的方式取代 """
+        text = code_text
+        text = text.replace('getUsedRange()', 'ActiveSheet.UsedRange')
+        text = re.sub(r'''findCell\(((['"]).+?\2)(, [a-zA-Z]+)?\)''',
+                      r'ActiveSheet.UsedRange.Find(\1)', text)
+        text = re.sub(r'''findColumn\(((['"]).+?\2)(, [a-zA-Z]+)?\)''',
+                      r'ActiveSheet.UsedRange.Find(\1).Column', text)
+        text = re.sub(r'''findRow\(((['"]).+?\2(, [a-zA-Z]+)?)\)''',
+                      r'ActiveSheet.UsedRange.Find(\1).Row', text)
+
+        return 1, text
+
+    @classmethod
+    def simplify_code(cls, code_text):
+        """ 代码简化，去掉一些冗余写法 """
+        code_text = re.sub(r'ActiveSheet\.(Range|Rows|Columns|Cells)', r'\1', code_text)
+        code_text = re.sub(r'Application\.(WorksheetFunction)', r'\1', code_text)
+        code_text = re.sub(r'(\w+)\.(Row|Column)\s*\+\s*\1\.\2s\.Count\s*-\s*1', r'\1.\2End', code_text)
+        code_text = re.sub(r'\bvar\b', 'let', code_text)
+
+        return 1, code_text.strip()
+
+    @classmethod
+    def fix_stdcode(cls, code_text):
+        """ 更智能的，缺什么组件才补什么组件 """
+        # 1 检查依赖补充
+        text = code_text
+        _, text = cls.simplify_advtools(text)
+
+        defined_vars = set(re.findall(r'(?:<=^|\b)(?:var|let|const|function)\s+(\w+)(?:\s+|\()', text))
+        used_vars = set(re.findall(r'(?<!\.)\b(\w+)\b', text))
+
+        # 2 提取js中的函数
+        def extract_functions(code_string):
+            pattern = r"(function\s+(\w+).+?^\})"
+            matches = re.findall(pattern, code_string, re.MULTILINE | re.DOTALL)
+            return {name: func for func, name in matches}
+
+        js_funcs = extract_functions(airscript_head)
+
+        # 3 补充缺失的定义
+        pre_additional_code = []
+        for name, code in {'xlDateToJSDate': '',
+                           'isCurrentWeek': '',
+                           'isCurrentMonth': '',
+                           'isNextWeek': '',
+                           'isNextMonth': '',
+                           'usedRange': 'const usedRange = ActiveSheet.UsedRange;',
+                           'headerRows': 'const headerRows = usedRange.Rows("1:1");',
+                           'firstDataRow': 'const firstDataRow = headerRows.RowEnd + 1;',
+                           'lastDataRow': 'const lastRow = usedRange.RowEnd;',
+                           }.items():
+            if name in used_vars and name not in defined_vars:
+                if name in js_funcs:
+                    code = js_funcs[name]
+                if code:
+                    pre_additional_code.append(code)
+                    used_vars.remove(name)
+                else:  # 有未定义就使用的变量，这条数据不要了
+                    return 0, text
+        else:
+            # 还得再检查一波是不是有叫'xxxColumn'的变量未定义被使用
+            logo = True
+            for name in used_vars:
+                if name.endswith('Column') and name not in defined_vars:
+                    logo = False
+                    break
+            if logo and pre_additional_code:
+                text = '\n'.join(pre_additional_code) + '\n' + text
+            return 1, text
+
+    @classmethod
+    def pre_proc(cls, code_text):
+        code_text = re.sub(r'^\\n', '', code_text, flags=re.MULTILINE)
+        return 1, code_text
+
+    @classmethod
+    def fix_loc_head(cls, code_text):
+        """ 修复定位头 """
+        m1 = re.search(r'//\s*1([\.\s]+)定位', code_text)
+        m2 = re.search(r'//\s*2([\.\s]+)业务功能', code_text)
+        if not m1 and m2:
+            code_text = '// 1' + m2.group(1) + '定位\n' + code_text
+        return 1, code_text
+
+    @classmethod
+    def remove_stdcode(cls, code_text):
+        """ 删除开头固定的组件头代码 """
+        code_text = re.sub(r'(.*?)(//\s*1[\.\s]+定位)', r'\2', code_text, flags=re.DOTALL)
+        code_text = re.sub(r'// 0 基础组件代码（可以放在功能代码之前，也能放在最后面）.+?$', '', code_text, flags=re.DOTALL)
+        return 1, code_text
+
+    @classmethod
+    def fix_texts(cls, code_text):
+        """ 修复文本中出现的关键词，描述 """
+        s = code_text
+        s = s.replace('<表格结构信息描述>', '表格摘要')
+        s = s.replace('<孩子:表格摘要>', '表格摘要')
+        return 1, s
+
+    @classmethod
+    def fix_base(cls, code_text):
+        text = code_text
+        for func in [
+            cls.simplify_code,
+            cls.fix_colors,
+            cls.fix_miscellaneous,
+            cls.advanced_remove_comments_regex,
+        ]:
+            status, text = func(text)
+            if not status:
+                return status, text
+        return status, text
+
+    @classmethod
+    def fix_base2(cls, code_text):
+        text = code_text
+        for func in [
+            cls.simplify_code,
+            cls.fix_colors,
+            cls.fix_miscellaneous,
+        ]:
+            status, text = func(text)
+            if not status:
+                return status, text
+        return status, text
+
+    @classmethod
+    def fix_all(cls, code_text):
+        old_text = code_text
+        text = code_text
+        for func in [
+            cls.simplify_code,
+            cls.fix_colors,
+            cls.fix_miscellaneous,
+            cls.fix_stdcode,
+            cls.advanced_remove_comments_regex,
+        ]:
+            status, text = func(text)
+            if not status:
+                return status, text
+        # if text != old_text:
+        #     bcompare(old_text, text)
+        #     dprint()
+        return status, text
+
+    @classmethod
+    def format_hanging_indent(cls, text):
+        r""" 优化悬挂缩进的文本排版
+
+        :param str text: 输入文本
+        :return str: 优化后的文本
+
+        >>> AirScriptCodeFixer.format_hanging_indent('const usedRange = getUsedRange();\\n        const headerRows = usedRange.Rows(\'1:1\');')
+        'const usedRange = getUsedRange();\\nconst headerRows = usedRange.Rows(\'1:1\');'
+        """
+        lines = text.strip().split('\n')  # 去掉前后空行并分割成行
+        first_line = lines.pop(0)  # 取出第1行
+        remaining_text = '\n'.join(lines)  # 剩余行合并为一个字符串
+        dedented_text = textwrap.dedent(remaining_text)  # 对剩余行进行反缩进处理
+
+        return 1, first_line + '\n' + dedented_text  # 将处理后的剩余行和第1行拼接回去
+
+    @classmethod
+    def remove_comments_regex(cls, js_code):
+        """ 这个代码功能并不严谨，只是一个临时快速方案 """
+        js_code = re.sub(r'^\s*/\*.*?\*/\n?', '', js_code, flags=re.DOTALL | re.MULTILINE)
+        js_code = re.sub(r'^\s*//.*\n?', '', js_code, flags=re.MULTILINE)
+
+        # Removing multi-line comments
+        js_code = re.sub(r'\s*/\*.*?\*/', '', js_code, flags=re.DOTALL)
+        # Removing single-line comments
+        js_code = re.sub(r'\s*//.*', '', js_code)
+        return js_code
+
+    @classmethod
+    def advanced_remove_comments_regex(cls, js_code):
+        # Regex to match strings, either single or double quoted
+        string_pattern = r'(?:"[^"\\]*(?:\\.[^"\\]*)*"|\'[^\'\\]*(?:\\.[^\'\\]*)*\')'
+
+        # Combined regex pattern to match strings or single/multi-line comments
+        pattern = r'|'.join([
+            string_pattern,  # match strings first to avoid removing content inside them
+            r'\/\/[^\n]*',  # single line comments
+            r'\/\*.*?\*\/'  # multi-line comments
+        ])
+
+        def replacer(match):
+            # If the matched text is a string, return it unchanged
+            if match.group(0).startswith(('"', "'")):
+                return match.group(0)
+            # Otherwise, it's a comment, so return an empty string
+            return ''
+
+        # Use re.sub with the replacer function
+        return 1, re.sub(pattern, replacer, js_code, flags=re.DOTALL)
+
+    @classmethod
+    def remove_js_comment(cls, js_code):
+        try:
+            js_code2 = remove_js_comments(js_code)
+        except BaseException as e:
+            js_code2 = cls.remove_comments_regex(js_code)
+        return 1, js_code2
 
 
 if __name__ == '__main__':
