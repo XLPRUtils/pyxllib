@@ -27,7 +27,10 @@ from pandas.api.types import is_list_like
 if sys.platform == 'win32':
     import pyautogui
 
-import pyscreeze  # NOQA pyautogui安装的时候会自动安装依赖的pyscreeze
+try:
+    import pyscreeze  # NOQA pyautogui安装的时候会自动安装依赖的pyscreeze
+except ModuleNotFoundError:
+    pass
 
 from pyxllib.prog.newbie import first_nonnone, round_int
 from pyxllib.prog.pupil import xlwait, DictTool, check_install_package
