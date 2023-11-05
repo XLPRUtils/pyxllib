@@ -8,6 +8,11 @@ from collections import Counter
 import re
 import textwrap
 
+try:
+    import jsbeautifier
+except ModuleNotFoundError:
+    pass
+
 
 def __1_删注释功能():
     """
@@ -544,12 +549,23 @@ class AirScriptCodeFixer:
         return 1, text
 
     @classmethod
-    def simplify_code(cls, code_text):
-        """ 代码简化，去掉一些冗余写法 """
+    def simplify_code(cls, code_text, indent=4):
+        """ 代码简化，去掉一些冗余写法
+
+        包括代码美化，默认缩进是4，但在训练阶段，建议默认缩进是2，
+        """
+        # 1 代码精简
+        code_text = re.sub(r'Application\.(WorksheetFunction|ActiveSheet|Sheets|Range|Workbook)', r'\1', code_text)
+        code_text = re.sub(r'Workbook\.(Sheets)', r'\1', code_text)
         code_text = re.sub(r'ActiveSheet\.(Range|Rows|Columns|Cells)', r'\1', code_text)
-        code_text = re.sub(r'Application\.(WorksheetFunction)', r'\1', code_text)
         code_text = re.sub(r'(\w+)\.(Row|Column)\s*\+\s*\1\.\2s\.Count\s*-\s*1', r'\1.\2End', code_text)
         code_text = re.sub(r'\bvar\b', 'let', code_text)
+        code_text = code_text.replace('Sheets.Item(', 'Sheets(')
+
+        # 2 代码美化
+        opts = jsbeautifier.default_options()
+        opts.indent_size = indent
+        code_text = jsbeautifier.beautify(code_text, opts)
 
         return 1, code_text.strip()
 

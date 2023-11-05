@@ -173,6 +173,9 @@ class 网课考勤:
         ws = self.wb['报名表']
         for row in tqdm(list(ws.iterrows('真实姓名')), desc='匹配进度'):
             x = todict(row)
+            x['手机号'] = str(x['手机号']).lstrip('`')
+            x['错误手机号'] = str(x['错误手机号']).lstrip('`')
+
             待查手机号 = [x['手机号']]
             t = try2int(x['错误手机号'])
             if t:
@@ -195,6 +198,12 @@ class 网课考勤:
                 if sum(flags) == 1:
                     idx = flags.index(1)
                     用户ID = ls[idx]['用户ID']
+            # 如果用户ID还是空的，则用手机号能匹配上的那条
+            if 用户ID == '':
+                for i, text in enumerate(摘要ls):
+                    if str(x['手机号']) in text:
+                        用户ID = ls[i]['用户ID']
+                        break
             ws.cell2(row, '用户ID', 用户ID)
             ws.cell2(row, '参考信息', '\n'.join(摘要ls))
             row += 1
@@ -685,6 +694,54 @@ class 网课考勤:
 
         # 保存。一般不用重新再加载self.wb、self.ws，因为这里需求本来基本都是要分段重新执行程序的。
         wb.save(self.表格路径)
+
+    def 匹配交易单号(self, value):
+        """ 更加智能的一条龙匹配操作
+
+        :param value: 需要输入待检索的金额值
+        """
+        # 1 读取账单，账单文件可能不唯一，可能有重复可以自动去重
+        files = XlPath('数据表').rglob_files('*基本账户*.csv')
+        df_list = []
+        for f in files:
+            df = pd.read_csv(f)
+            df_list.append(df)
+        df = pd.concat(df_list, ignore_index=True)
+        # 按照"资金流水单号"去重
+        df = df.drop_duplicates(subset=['资金流水单号'], keep='first')
+        df = df[df['收支类型'] == '`收入']
+        df.reset_index(drop=True, inplace=True)
+
+        # 2 因为情况比较特殊，这里不调用通用的对齐功能，而是定制化写过
+        ws = self.wb['报名表']
+
+        data = ws.iterrows('真实姓名', to_dict=['交易单号'])
+        last_row = -1
+        for i, row in data:
+            last_row = i
+            # 在 df['微信支付业务单号'] 找是否有 row['交易单号']
+            items = df[df['微信支付业务单号'] == row['交易单号']]
+            if items.empty:
+                continue
+
+            # 如果匹配，理论上只有一条
+            item = items.iloc[0]
+            ws.cell2(i, '交易订单号').value = item['业务凭证号'][1:]
+            ws.cell2(i, '订单金额').value = item['收支金额(元)']
+
+            # 在df中去掉所有items
+            df = df.drop(items.index)
+
+        # 3 匹配完后，还有目标金额的数据要列出来
+        items = df[df['收支金额(元)'] == f'`{value:.2f}']
+        for idx, row in items.iterrows():
+            last_row += 1
+            ws.cell2(last_row, '交易单号').value = row['微信支付业务单号']
+            ws.cell2(last_row, '交易订单号').value = row['业务凭证号'][1:]
+            ws.cell2(last_row, '订单金额').value = row['收支金额(元)']
+
+        # 4 保存
+        self.wb.save(self.表格路径)
 
     def __2_自动浏览网页(self):
         pass

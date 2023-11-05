@@ -716,7 +716,7 @@ class XlSSHClient(paramiko.SSHClient):
             self.exec(f'chmod 777 /tmp/download/{package}')  # 下载的包，其他用户也可以读取、执行
         return p
 
-    def reinstall_conda(self, package='Anaconda3-2022.05-Linux-x86_64.sh'):
+    def reinstall_conda(self, package='Anaconda3-2023.03-Linux-x86_64.sh'):
         """ 给当前用户重装anaconda
 
         :param package: 要安装的目标版本，可以修改，以后有时间也可以考虑怎么做成自动找最新版
