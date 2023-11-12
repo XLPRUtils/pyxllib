@@ -516,6 +516,9 @@ class AirScriptCodeFixer:
         # 230907周四19:56，枚举值不用放在字符串中
         text = re.sub(r'''(['"`])(xlCellTypeVisible)\1''', r'\2', text)
 
+        # 231106周一18:42，range的使用规范性
+        text = re.sub(r'Range\(("|\')([A-Z]+|\d+)("|\')\)', r'Range(\1\2:\2\1)', text)
+
         return 1, text
 
     @classmethod
@@ -555,7 +558,7 @@ class AirScriptCodeFixer:
         包括代码美化，默认缩进是4，但在训练阶段，建议默认缩进是2，
         """
         # 1 代码精简
-        code_text = re.sub(r'Application\.(WorksheetFunction|ActiveSheet|Sheets|Range|Workbook)', r'\1', code_text)
+        code_text = re.sub(r'Application\.(WorksheetFunction|ActiveWorkbook|ActiveSheet|Sheets|Range|Workbook)', r'\1', code_text)
         code_text = re.sub(r'Workbook\.(Sheets)', r'\1', code_text)
         code_text = re.sub(r'ActiveSheet\.(Range|Rows|Columns|Cells)', r'\1', code_text)
         code_text = re.sub(r'(\w+)\.(Row|Column)\s*\+\s*\1\.\2s\.Count\s*-\s*1', r'\1.\2End', code_text)
@@ -683,7 +686,7 @@ class AirScriptCodeFixer:
             cls.fix_colors,
             cls.fix_miscellaneous,
             cls.fix_stdcode,
-            cls.advanced_remove_comments_regex,
+            # cls.advanced_remove_comments_regex,
         ]:
             status, text = func(text)
             if not status:

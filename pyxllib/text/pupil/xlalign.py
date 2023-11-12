@@ -14,6 +14,7 @@ import re
 import textwrap
 
 from pyxllib.prog.newbie import len_in_dim2, GrowingList
+from pyxllib.prog.pupil import run_once
 
 
 def strwidth(s):
@@ -36,6 +37,12 @@ def strwidth(s):
                 count += 1
         res = count
     return res
+
+
+@run_once('str')
+def get_strwidth(s):
+    """ 带缓存的版本 """
+    return strwidth(s)
 
 
 def strwidth_proc(s, fmt='r', chinese_char_width=1.8):

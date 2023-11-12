@@ -252,7 +252,7 @@ class XlprDb(Connection):
             ip_list = ['localhost', '172.16.170.136', 'xmutpriu.com']
         for ip in ip_list:
             try:
-                xldb = XlprDb.connect(f'postgresql://{name}:{passwd}@{ip}/{database}', **kwargs)
+                xldb = cls.connect(f'postgresql://{name}:{passwd}@{ip}/{database}', **kwargs)
                 break
             except psycopg.OperationalError:
                 pass
@@ -523,7 +523,7 @@ class XlprDb(Connection):
 
         args = ['CPU核心数（比如4核显示是400%）', date_trunc, recent, 'sum(hosts.cpu_number)*100']
 
-        htmltexts = []
+        htmltexts = ['<a target="_blank" href="https://www.yuque.com/xlpr/data/hnpb2g?singleDoc#"> 《服务器监控》工具使用文档 </a>']
         res = self._get_host_trace_total('cpu', 'XLPR服务器 CPU 使用近况', *args)
         htmltexts.append(res[0])
 
@@ -545,7 +545,7 @@ class XlprDb(Connection):
 
         args = ['内存（单位：GB）', date_trunc, recent, 'sum(hosts.cpu_gb)']
 
-        htmltexts = []
+        htmltexts = ['<a target="_blank" href="https://www.yuque.com/xlpr/data/hnpb2g?singleDoc#"> 《服务器监控》工具使用文档 </a>']
         res = self._get_host_trace_total('cpu_memory', 'XLPR服务器 内存 使用近况', *args)
         htmltexts.append(res[0])
 
@@ -569,7 +569,7 @@ class XlprDb(Connection):
 
         args = ['硬盘（单位：GB）', date_trunc, recent, 'sum(hosts.disk_gb)']
 
-        htmltexts = []
+        htmltexts = ['<a target="_blank" href="https://www.yuque.com/xlpr/data/hnpb2g?singleDoc#"> 《服务器监控》工具使用文档 </a>']
         res = self._get_host_trace_total('disk_memory', 'XLPR服务器 DISK硬盘 使用近况', *args)
         htmltexts.append(res[0])
         htmltexts.append('注：xlpr4（四卡）服务器使用du计算/home大小有问题，未统计在列<br/>')
@@ -596,7 +596,7 @@ class XlprDb(Connection):
 
         args = ['显存（单位：GB）', date_trunc, recent, 'sum(hosts.gpu_gb)']
 
-        htmltexts = []
+        htmltexts = ['<a target="_blank" href="https://www.yuque.com/xlpr/data/hnpb2g?singleDoc#"> 《服务器监控》工具使用文档 </a>']
         res = self._get_host_trace_total('gpu_memory', 'XLPR八台服务器 GPU显存 使用近况', *args)
         htmltexts.append(res[0])
 

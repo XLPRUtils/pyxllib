@@ -228,7 +228,7 @@ class DictTool:
 
         :param keys: 可以输入另一个字典，也可以输入一个列表表示要删除的键值清单
 
-        :return: dict_ -= keys
+        :return: dict2 = dict_ - keys
         """
         if isinstance(keys, dict):
             keys = keys.keys()
@@ -243,7 +243,7 @@ class DictTool:
 
         keys可以输入另一个字典，也可以输入一个列表表示要删除的键值清单
 
-        :return: dict_ -= keys
+        效果相当于 dict_ -= keys
         """
         if isinstance(keys, dict):
             keys = keys.keys()
@@ -481,6 +481,11 @@ def set_default_args(*d_args, **d_kwargs):
 def utc_now(offset_hours=8):
     """ 有的机器可能本地时间设成了utc0，可以用这个方式，获得准确的utc8时间 """
     return datetime.datetime.utcnow() + datetime.timedelta(hours=offset_hours)
+
+
+def utc_now2(offset_hours=8):
+    """ 转字符串格式 """
+    return utc_now().isoformat(' ', timespec='seconds')
 
 
 def utc_timestamp(offset_hours=8):

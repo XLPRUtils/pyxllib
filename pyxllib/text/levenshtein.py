@@ -19,6 +19,7 @@ import Levenshtein
 import numpy as np
 import pandas as pd
 
+from pyxllib.prog.pupil import run_once
 from pyxllib.prog.specialist import dataframe_str
 from pyxllib.text.pupil import briefstr
 
@@ -28,8 +29,14 @@ warnings.filterwarnings("ignore", category=FutureWarning,
                         lineno=1005)
 
 
+@run_once('str')
+def get_levenshtein_similar(x, y):
+    """ 缓存各字符串之间的编辑距离 """
+    return Levenshtein.ratio(x, y)
+
+
 class MatchSimString:
-    """匹配近似字符串
+    """ 匹配近似字符串
 
     mss = MatchSimString()
 
