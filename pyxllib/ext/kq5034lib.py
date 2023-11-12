@@ -121,23 +121,26 @@ class 网课考勤:
 
         昵称 = tolist(昵称)
         手机号 = tolist(手机号)
-        手机号 = [f'{x}' for x in 手机号]
+        手机号 = [f'{x}' for x in 手机号 if (x and x != 'None')]
 
         # 2 查找所有可能匹配的项目
         ls = []
         for idx, x in self.用户列表.iterrows():
-            logo = False
+            logo = 0
             if '真实姓名' in x:
                 x['姓名'] = x['真实姓名']
 
             if 昵称:
                 if x['昵称'] in 昵称 or x['姓名'] in 昵称:
-                    logo = True
+                    logo += 1
             if 手机号:
                 if check_telphone(x.get('账户绑定手机号'), 手机号) or check_telphone(x.get('最近采集的手机号'), 手机号):
-                    logo = True
+                    logo += 2
             if logo:
-                ls.append(x)
+                ls.append([x, logo])
+
+        ls.sort(key=lambda x: x[1], reverse=True)
+        ls = [x[0] for x in ls]
 
         if debug:
             print('\n'.join(map(self.用户信息摘要, ls)))
@@ -152,7 +155,7 @@ class 网课考勤:
             ls.append('考勤' + str(self.考勤表出现次数[x['用户ID']]) + '次')
         return ', '.join(ls)
 
-    def 匹配用户ID(self):
+    def 匹配用户ID(self, sheet_name='报名表'):
 
         def try2int(x):
             try:
@@ -170,8 +173,9 @@ class 网课考勤:
                 msg[x] = ws.cell2(row, x).value
             return msg
 
-        ws = self.wb['报名表']
+        ws = self.wb[sheet_name]
         for row in tqdm(list(ws.iterrows('真实姓名')), desc='匹配进度'):
+            # todo 这里要考虑相似度整体权重的，而不是几个属性的优先级
             x = todict(row)
             x['手机号'] = str(x['手机号']).lstrip('`')
             x['错误手机号'] = str(x['错误手机号']).lstrip('`')
