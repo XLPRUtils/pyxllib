@@ -220,7 +220,10 @@ class 网课考勤:
             if m := re.match(r'(\d{4}\-\d{2}\-\d{2}).+?课.*?(\d+).+?直播观看详情', f.stem):
                 stat_day, 课次 = date.fromisoformat(m.group(1)), int(m.group(2))
                 skiprows = 1
-            elif m := re.search(r'(?:[\d一-十四]+)届.+?(\d+).+?直播用户列表.+?(\d{4}\-\d{2}\-\d{2})', f.stem):  # 新版格式
+            elif m := re.search(r'届(?:念住|觉观).+?(\d+).+?直播用户列表.+?(\d{4}\-\d{2}\-\d{2})', f.stem):
+                stat_day, 课次 = date.fromisoformat(m.group(2)), int(m.group(1))
+                skiprows = 0
+            elif m := re.search(r'本体音艺网课-(\d+).+?直播用户列表.+?(\d{4}\-\d{2}\-\d{2})', f.stem):
                 stat_day, 课次 = date.fromisoformat(m.group(2)), int(m.group(1))
                 skiprows = 0
             else:
