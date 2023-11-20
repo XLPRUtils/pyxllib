@@ -573,6 +573,13 @@ class AirScriptCodeFixer:
         return 1, code_text.strip()
 
     @classmethod
+    def simplify_code2(cls, code_text, indent=4):
+        """ 有些规则可能在标注数据中想留着，但训练的时候想删除，则可以调用这个进一步级别的简化 """
+        _, code_text = cls.simplify_code(code_text, indent)
+        code_text = code_text.replace('Application.Enum.XlLineStyle.xlDouble', 'xlDouble')
+        return code_text
+
+    @classmethod
     def fix_stdcode(cls, code_text):
         """ 更智能的，缺什么组件才补什么组件 """
         # 1 检查依赖补充
