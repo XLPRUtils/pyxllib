@@ -104,7 +104,7 @@ class Connection(psycopg.Connection, SqlBase):
 
     @classmethod
     def cvt_type(cls, val):
-        if isinstance(val, dict):
+        if isinstance(val, (dict, list)):
             val = json.dumps(val, ensure_ascii=False)
         # 注意list数组类型读、写都会自动适配py
         return val

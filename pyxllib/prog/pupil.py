@@ -478,9 +478,18 @@ def set_default_args(*d_args, **d_kwargs):
     return decorator
 
 
-def utc_now(offset_hours=8):
-    """ 有的机器可能本地时间设成了utc0，可以用这个方式，获得准确的utc8时间 """
-    return datetime.datetime.utcnow() + datetime.timedelta(hours=offset_hours)
+def utc_now(offset_hours=8, microseconds=0):
+    """ 有的机器可能本地时间设成了utc0，可以用这个方式，获得准确的utc8时间
+
+    :param microseconds: 微秒，如果不指定（None），就是当前时间的微秒
+    """
+    dt = datetime.datetime.utcnow()
+    dt += datetime.timedelta(hours=offset_hours)
+
+    if microseconds is not None:
+        dt = dt.replace(microsecond=microseconds)
+
+    return dt
 
 
 def utc_now2(offset_hours=8):
