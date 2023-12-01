@@ -564,6 +564,7 @@ class AirScriptCodeFixer:
         code_text = re.sub(r'(\w+)\.(Row|Column)\s*\+\s*\1\.\2s\.Count\s*-\s*1', r'\1.\2End', code_text)
         code_text = re.sub(r'\bvar\b', 'let', code_text)
         code_text = code_text.replace('Sheets.Item(', 'Sheets(')
+        code_text = re.sub(r'Application.Enum.\w+.(\w+)', r'\1', code_text)
 
         # 2 代码美化
         opts = jsbeautifier.default_options()
@@ -576,7 +577,6 @@ class AirScriptCodeFixer:
     def simplify_code2(cls, code_text, indent=4):
         """ 有些规则可能在标注数据中想留着，但训练的时候想删除，则可以调用这个进一步级别的简化 """
         _, code_text = cls.simplify_code(code_text, indent)
-        code_text = code_text.replace('Application.Enum.XlLineStyle.xlDouble', 'xlDouble')
         return code_text
 
     @classmethod

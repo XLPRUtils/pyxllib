@@ -251,9 +251,9 @@ def xlpivot(df, index=None, columns=None, values=None):
     :return: 数据透视表的表格
 
     使用示例：
-    def func(items):
+    def func(items):  # 输入匹配的多行数据
         x = items.iloc[0]
-        return f'{x["precision"]:.0f}，{x["recall"]:.0f}，{x["hmean"]:.2f}，{x["fps"]}'
+        return f'{x["precision"]:.0f}，{x["recall"]:.0f}，{x["hmean"]:.2f}，{x["fps"]}'  # 返回显示的值
     >> df2 = xlpivot(df, ['model_type'], ['dataset', 'total_frame'], {'precision，recall，hmean，fps': func})
     """
 

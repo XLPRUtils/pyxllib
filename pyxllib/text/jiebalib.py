@@ -121,6 +121,7 @@ class TextClassifier:
 
     def get_text_tf(self, text, *,
                     function_word_weight=0.2,
+                    normalize=True,
                     ingore_words=(' ', '\t', '\n'),
                     add_flag=False):
         """ 这里可以定制提取text关键词的算法
@@ -146,12 +147,13 @@ class TextClassifier:
                     ct[word] += 1
 
         # 2 归一化一些词
-        ct2 = Counter()
-        for k, v in ct.items():
-            # 如果需要对一些词汇做归一化，也可以这里设置
-            k = re.sub(r'\d', '0', k)  # 把数字都换成0
-            ct2[k] += v
-        ct = ct2
+        if normalize:
+            ct2 = Counter()
+            for k, v in ct.items():
+                # 如果需要对一些词汇做归一化，也可以这里设置
+                k = re.sub(r'\d', '0', k)  # 把数字都换成0
+                ct2[k] += v
+            ct = ct2
 
         # 3 过滤掉一些词
         if ingore_words:
@@ -161,14 +163,14 @@ class TextClassifier:
 
         return ct
 
-    def compute_tfidf(self, outfile=None, sheet_name='tf-idf'):
+    def compute_tfidf(self, outfile=None, sheet_name='tf-idf', normalize=False, function_word_weight=0.2, add_flag=False):
         """ 重算tfidf表 """
         from math import log10
 
         # 1 统计频数和出现该词的文章数
         d = dict()
         for text in tqdm(self.texts, '词频统计'):
-            ct = self.get_text_tf(text)
+            ct = self.get_text_tf(text, normalize=normalize, function_word_weight=function_word_weight, add_flag=add_flag)
             for k, v in ct.items():
                 if k not in d:
                     d[k] = [0, 0]

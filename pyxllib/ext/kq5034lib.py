@@ -45,6 +45,7 @@ class 网课考勤:
         self.开课日期 = '2022-01-08'
         self.视频返款 = [20, 15, 10, 5, 0, 0]  # 直播(当堂)/第1天（当天）/第2天/第3天/第4天/第5天，完成观看的依次返款额。
         self.打卡返款 = {5: 100, 10: 150, 15: 200}  # 打卡满5/10/15次的返款额
+        self.课程链接 = []
         self._init(today)
 
         self.driver = None  # 浏览器脚本
@@ -221,6 +222,9 @@ class 网课考勤:
                 stat_day, 课次 = date.fromisoformat(m.group(1)), int(m.group(2))
                 skiprows = 1
             elif m := re.search(r'届(?:念住|觉观).+?(\d+).+?直播用户列表.+?(\d{4}\-\d{2}\-\d{2})', f.stem):
+                stat_day, 课次 = date.fromisoformat(m.group(2)), int(m.group(1))
+                skiprows = 0
+            elif m := re.search(r'第(\d+)堂.+?届(?:念住|觉观).+?直播用户列表.+?(\d{4}\-\d{2}\-\d{2})', f.stem):
                 stat_day, 课次 = date.fromisoformat(m.group(2)), int(m.group(1))
                 skiprows = 0
             elif m := re.search(r'本体音艺网课-(\d+).+?直播用户列表.+?(\d{4}\-\d{2}\-\d{2})', f.stem):
