@@ -371,3 +371,16 @@ def funcmsg(func):
         else:
             return f'装饰器：{type(func)}，无法定位'
     return f'函数名：{func.__name__}，来自文件：{func.__code__.co_filename}，所在行号={func.__code__.co_firstlineno}'
+
+
+def safe_div(a, b):
+    """ 安全除法，避免除数为0的情况
+
+    :param a: 被除数
+    :param b: 除数
+    :return: a/b，如果b为0，返回0
+    """
+    if b == 0:
+        return 0
+    else:
+        return a / b

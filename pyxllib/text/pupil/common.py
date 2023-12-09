@@ -21,7 +21,7 @@ import os
 import re
 import sys
 
-from pyxllib.prog.newbie import RunOnlyOnce
+from pyxllib.prog.newbie import RunOnlyOnce, safe_div
 from pyxllib.prog.pupil import dprint
 from pyxllib.text.newbie import circlednumber2digits, digits2circlednumber, roman2digits, digits2roman
 
@@ -590,6 +590,21 @@ def grp_bracket(depth=0, left='{', right=None, inner=False):
 
 def grp_chinese_char():
     return r'[\u4e00-\u9fa5，。；？（）【】、①-⑨]'
+
+
+def calc_chinese_ratio(s):
+    """ 计算中文字符比例
+
+    >>> calc_chinese_ratio('abc')
+    0.0
+    >>> calc_chinese_ratio('abc中文')
+    0.5714285714285714
+    """
+    s2 = re.sub(grp_chinese_char(), '', s)
+    b = len(s2)
+    a = 2 * (len(s) - b)
+    # 一个汉字占2个字符权重
+    return safe_div(a, a + b)
 
 
 def grr_check(m):

@@ -103,35 +103,45 @@ class ValuesStat:
         :param valfmt: 数值显示的格式
             g是比较智能的一种模式
             也可以用 '.3f'表示保留3位小数
+            可以是一个函数，该函数接收一个数值作为输入，返回格式化后的字符串
             注意可以写None表示删除特定位的显示
 
             也可以传入长度5的格式清单，表示 [和、均值、标准差、最小值、最大值] 一次展示的格式
-        :param total: 是否显示总和，注意就算不显示综合，valfmt也是要占位配置的
         """
-        if isinstance(valfmt, str):
+        if isinstance(valfmt, str) or callable(valfmt):
             valfmt = [valfmt] * 5
 
         ls = []
 
+        def format_value(value, format_spec):
+            """ 根据指定的格式来格式化值 """
+            if callable(format_spec):
+                return format_spec(value)
+            else:
+                return f"{value:{format_spec}}"
+
         if self.n > 1:
             ls.append(f'总数: {self.n}')  # 注意输出其实完整是6个值，还有个总数不用控制格式
             if valfmt[0]:
-                ls.append(f'总和: {self.sum:{valfmt[0]}}')
-            if valfmt[1] and valfmt[2]:
-                ls.append(f'均值标准差: {self.mean:{valfmt[1]}}±{self.std:{valfmt[2]}}')
-            elif valfmt[1]:
-                ls.append(f'均值: {self.mean:{valfmt[1]}}')
-            elif valfmt[2]:
-                ls.append(f'标准差: {self.std:{valfmt[2]}}')
+                ls.append(f'总和: {format_value(self.sum, valfmt[0])}')
+            if valfmt[1] or valfmt[2]:
+                mean_str = format_value(self.mean, valfmt[1]) if valfmt[1] else ''
+                std_str = format_value(self.std, valfmt[2]) if valfmt[2] else ''
+                if mean_str and std_str:
+                    ls.append(f'均值标准差: {mean_str}±{std_str}')
+                elif mean_str:
+                    ls.append(f'均值: {mean_str}')
+                elif std_str:
+                    ls.append(f'标准差: {std_str}')
             if valfmt[3]:
-                ls.append(f'最小值: {self.min:{valfmt[3]}}')
+                ls.append(f'最小值: {format_value(self.min, valfmt[3])}')
             if valfmt[4]:
-                ls.append(f'最大值: {self.max:{valfmt[4]}}')
+                ls.append(f'最大值: {format_value(self.max, valfmt[4])}')
             return '\t'.join(ls)
         elif self.n == 1:
-            return f'{self.sum:{valfmt[0] or "g"}}'
+            return format_value(self.sum, valfmt[0] or 'g')
         else:
-            raise ValueError
+            raise ValueError("无效的数据数量")
 
 
 class Groups:
