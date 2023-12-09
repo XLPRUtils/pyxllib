@@ -162,7 +162,7 @@ inject_members(XlZipFile, ZipFile)
 inject_members(XlTarFile, TarFile)
 
 
-def unpack_archive(filename, extract_dir=None, format=None, *, wrap=0):
+def unpack_archive(filename, extract_dir=None, format=None, *, wrap=1):
     """ 对shutil.unpack_archive的扩展，增加了一个wrap的接口功能 """
     if format is None:
         format = shutil._find_unpack_format(str(filename).lower())

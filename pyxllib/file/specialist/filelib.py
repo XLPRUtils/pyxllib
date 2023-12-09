@@ -800,10 +800,19 @@ class XlPath(type(pathlib.Path())):
         return cls(tempfile.gettempdir())
 
     @classmethod
-    def tempfile(cls, suffix="", dir=None):
+    def create_tempdir_path(cls, dir=None):
+        if dir is None:
+            dir = tempfile.gettempdir()
+        dst = cls(tempfile.mktemp(dir=dir))
+        return dst
+
+    @classmethod
+    def create_tempfile_path(cls, suffix="", dir=None):
         if dir is None:
             dir = tempfile.gettempdir()
         return cls(tempfile.mktemp(suffix=suffix, dir=dir))
+
+    tempfile = create_tempfile_path
 
     @classmethod
     def init(cls, path, root=None, *, suffix=None):
@@ -902,6 +911,10 @@ class XlPath(type(pathlib.Path())):
         >> File('C:/a/b/c.txt').relpath('D:/')  # ValueError
         """
         return XlPath(os.path.relpath(self, str(ref_dir)))
+
+    def as_windows_path(self):
+        """ 返回windows风格的路径，即使用\\分隔符 """
+        return self.as_posix().replace('/', '\\')
 
     def __contains__(self, item):
         """ 判断item的路径是否是在self里的，不考虑item是目录、文件，还是不存在文件的路径
@@ -1282,6 +1295,24 @@ class XlPath(type(pathlib.Path())):
         for f in self.rglob(pattern):
             if f.is_dir():
                 yield f
+
+    def glob_stems(self):
+        """ 按照文件的stem分组读取
+
+        :return: 返回格式类似 {'stem1': [suffix1, suffix2, ...], 'stem2': [suffix1, suffix2, ...], ...}
+        """
+        from collections import defaultdict
+        d = defaultdict(set)
+        for f in self.glob_files():
+            d[f.stem].add(f.suffix)
+        return d
+
+    def glob_suffixs(self):
+        """ 判断目录下有哪些扩展名的文件 """
+        suffixs = set()
+        for f in self.glob_files():
+            suffixs.add(f.suffix)
+        return suffixs
 
     def ____2_定制glob(self):
         pass
@@ -1941,6 +1972,29 @@ class XlPath(type(pathlib.Path())):
             dst_dir = dst / XlPath(root).relative_to(self)
             # 创建目录
             dst_dir.mkdir(parents=True, exist_ok=True)
+
+    # 无法选定文件
+    def _move_selectable(self, dst_dir):
+        """ 目录功能，将目录下可选中的文件移动到目标目录
+
+        1、要理解这个看似有点奇怪的功能，需要理解，在数据处理中，可能会拿到超长文件名的文件，
+            这种在windows平台虽然手动可以操作，但在代码中，会glob不到，强制指定也会说文件不存在
+        2、为了解决这类文件问题，一般需要对其进行某种规则的重命名。因为linux里似乎不会限制文件名长度，所以要把这些特殊文件打包到linux里处理。
+        3、因为这些文件本来就无法被选中，所以只能反向操作，将目录下的可选中文件移动到目标目录。
+        """
+        for p in self.glob('*'):
+            if p.exists():
+                p.move(dst_dir / p.name)
+
+    def move_unselectable(self, dst_dir):
+        """ 见_move_selectable，因为无法对这些特殊文件进行移动
+        所以这里只是对_move_selectable的封装，中间通过文件重命名，来伪造移动了无法选中文件的操作效果
+        """
+        tempdir = self.create_tempdir_path(dir=self.parent)
+        tempdir.mkdir(exist_ok=True)
+        self._move_selectable(tempdir)
+        self.rename2(dst_dir)
+        tempdir.move(self)
 
 
 def demo_file():

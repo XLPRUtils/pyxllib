@@ -259,6 +259,7 @@ class XlSSHClient(paramiko.SSHClient):
 
         # 虽然是基于本地的情况生成随机名称脚本，但一般在服务器也不会冲突，概率特别小
         local_file = XlPath.tempfile()
+        self.exec(f'mkdir -p /tmp/scripts')
         host_file = '/tmp/scripts/' + local_file.name
 
         if file is not None:

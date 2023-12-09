@@ -1433,6 +1433,55 @@ class XlWorkbook(openpyxl.Workbook):
 
         return workbook_summary
 
+    def extract_summary2(self):
+        """ 另一套按照单元格提取摘要的程序 """
+        wb = self
+
+        all_sheets_summary = []
+
+        for ws in wb._sheets:  # 非数据表，也要遍历出来，所以使用了_sheets
+            # 如果是标准工作表（Worksheet），使用现有的摘要提取机制
+            if isinstance(ws, openpyxl.worksheet.worksheet.Worksheet):
+                # 找到使用范围和表头范围
+                used_range = find_used_range_optimized(ws)
+                if used_range:
+                    raw_used_range = build_range_address(left=ws.min_column, top=ws.min_row,
+                                                         right=ws.max_column, bottom=ws.max_row)
+                    summary = ({
+                        "sheetName": ws.title,
+                        "sheetType": "Worksheet",
+                        "rawUsedRange": raw_used_range,
+                        "usedRange": used_range,
+                        'data': extract_cells_content(ws)
+                    })
+
+                    if not summary['data']:  # 如果没有数据，则大概率是数据透视表，是计算出来的，读取不到~
+                        summary['sheetType'] = 'PivotTable'
+                        del summary['data']
+                else:
+                    summary = ({
+                        "sheetName": ws.title,
+                        "sheetType": "DialogOrMacroSheet",
+                        "usedRange": None,
+                    })
+
+            # 如果是其他类型的工作表，提供基础摘要
+            else:
+                summary = ({
+                    "sheetName": ws.title,
+                    "sheetType": ws.__class__.__name__  # 使用工作表的类名作为类型
+                })
+
+            all_sheets_summary.append(summary)
+
+        workbook_summary = {
+            "fileName": Path(self.path).name if self.path else None,
+            "sheetNames": wb.sheetnames,
+            "sheets": all_sheets_summary,
+        }
+
+        return workbook_summary
+
     def autofit(self):
         for ws in self.worksheets:
             ws.autofit()
@@ -1503,22 +1552,39 @@ def parse_range_address(address):
     return {"left": left, "top": top, "right": right, "bottom": bottom}
 
 
-def build_range_address(left=None, top=None, right=None, bottom=None):
-    """ 构建单元格范围地址。
-
-    :return str: 单元格范围地址，例如 'A1', 'A1:B3', '1:3', 'A:B' 等。
-    """
-    start_cell = f"{get_column_letter(left) if left else ''}{top if top else ''}"
-    end_cell = f"{get_column_letter(right) if right else ''}{bottom if bottom else ''}"
-
-    # 当开始和结束单元格相同时，只返回一个单元格地址
-    if start_cell == end_cell:
-        return start_cell
-    # 当其中一个单元格是空字符串时，只返回另一个单元格地址
-    elif not start_cell or not end_cell:
-        return start_cell or end_cell
+def get_addr_area(addr):
+    """ 一个range描述的面积 """
+    if ':' in addr:
+        d = parse_range_address(addr)
+        return (d['right'] - d['left'] + 1) * (d['bottom'] - d['top'] + 1)
     else:
-        return f"{start_cell}:{end_cell}"
+        return 1
+
+
+class BuildRangeAddressProto:
+    def __call__(self, left=None, top=None, right=None, bottom=None):
+        """ 构建单元格范围地址。
+
+        :return str: 单元格范围地址，例如 'A1', 'A1:B3', '1:3', 'A:B' 等。
+        """
+        start_cell = f"{get_column_letter(left) if left else ''}{top if top else ''}"
+        end_cell = f"{get_column_letter(right) if right else ''}{bottom if bottom else ''}"
+
+        # 当开始和结束单元格相同时，只返回一个单元格地址
+        if start_cell == end_cell:
+            return start_cell
+        # 当其中一个单元格是空字符串时，只返回另一个单元格地址
+        elif not start_cell or not end_cell:
+            return start_cell or end_cell
+        else:
+            return f"{start_cell}:{end_cell}"
+
+    def from_merged_cells(self, mc):
+        return self.__call__(*mc.bounds)
+
+
+# 这是一个仿函数
+build_range_address = BuildRangeAddressProto()
 
 
 def find_used_range_optimized(ws):
@@ -1744,6 +1810,30 @@ def extract_field_summaries(ws, header_range, data_range, samples_num=5):
     return field_summaries
 
 
+def extract_cells_content(ws):
+    """ 提取一个工作表中的所有单元格内容 """
+    cells = {}
+    for row in ws.rows:
+        for cell in row:
+            cell_type = cell.celltype()
+            if cell_type == 0:
+                v = cell.value
+                if v is not None:
+                    # cells[cell.coordinate] = v
+                    cells[cell.coordinate] = cell.get_render_value()
+                else:
+                    cells[cell.coordinate] = ''
+            elif cell_type == 2:
+                v = cell.value
+                if v is not None:
+                    rng = cell.in_range()
+                    addr = build_range_address.from_merged_cells(rng)
+                    cells[addr] = cell.get_render_value()
+                else:
+                    cells[cell.coordinate] = ''
+    return cells
+
+
 class WorkbookSummary:
     """ 工作薄摘要相关处理功能 """
 
@@ -1873,7 +1963,7 @@ class WorkbookSummary:
 
 
 def extract_workbook_summary(file_path, mode=0,
-                             samples_num=5, limit_length=2500):
+                             samples_num=5, limit_length=2500, ignore_errors=False):
     """ 更新后的函数：提取整个Excel工作簿的摘要信息
 
     :param mode:
@@ -1881,7 +1971,13 @@ def extract_workbook_summary(file_path, mode=0,
         0, 标准的提取摘要（详细信息，随机抽5个样本）
         1，精简摘要，在保留逻辑完整性的前提下，随机的修改一些摘要的结构内容
     """
-    wb = openpyxl.load_workbook(file_path)
+    try:
+        wb: XlWorkbook = openpyxl.load_workbook(file_path)
+    except Exception as e:
+        if ignore_errors:
+            return {}
+        else:
+            raise e
 
     if mode == -1:
         res = wb.extract_summary(samples_num=1000, limit_length=-1)
@@ -1905,6 +2001,24 @@ def extract_workbook_summary(file_path, mode=0,
     return res
 
 
+def extract_workbook_summary2(file_path, *,
+                              ignore_errors=False, keep_links=False):
+    """
+    :param keep_links: 是否保留外部表格链接数据。如果保留，打开好像会有点问题。
+    """
+    try:
+        wb: XlWorkbook = openpyxl.load_workbook(file_path, keep_links=keep_links)
+    except Exception as e:
+        if ignore_errors:
+            return {}
+        else:
+            raise e
+
+    res = wb.extract_summary2()
+    res['fileName'] = Path(file_path).name
+    return res
+
+
 def sort_excel_files(file_paths):
     """ 在文件清单中，把excel类型的文件优先排到前面 """
 
@@ -1922,11 +2036,11 @@ def sort_excel_files(file_paths):
         3
         """
         if re.search(r'\.xlsx$', filename):
-            return 1
+            return 1, filename
         elif re.search(r'\.xl[^.]*$', filename):
-            return 2
+            return 2, filename
         else:
-            return 3
+            return 3, filename
 
     file_paths2 = sorted(file_paths, key=sort_key)
     return file_paths2
