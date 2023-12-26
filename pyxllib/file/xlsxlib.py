@@ -12,7 +12,7 @@ from pyxllib.prog.pupil import check_install_package, run_once
 
 check_install_package('openpyxl')
 check_install_package('premailer')
-check_install_package('xlrd2')
+# check_install_package('xlrd2')
 check_install_package('yattag')
 check_install_package('jsonpickle')
 
@@ -23,8 +23,12 @@ import math
 from pathlib import Path
 import random
 import re
+import csv
+
+import xlrd
 
 import openpyxl
+from openpyxl import Workbook
 from openpyxl.cell.cell import MergedCell
 from openpyxl.styles import Font, Alignment
 from openpyxl.utils.cell import get_column_letter, column_index_from_string
@@ -35,9 +39,16 @@ try:
 except ModuleNotFoundError:
     pass
 
-from pyxllib.prog.pupil import inject_members, dprint, xlmd5, shuffle_dict_keys
-from pyxllib.prog.specialist import browser
+from pyxllib.prog.newbie import safe_div
+from pyxllib.prog.pupil import inject_members, dprint, xlmd5, shuffle_dict_keys, Timeout
+from pyxllib.prog.specialist import browser, TicToc
 from pyxllib.algo.specialist import product
+from pyxllib.text.pupil import calc_chinese_ratio
+from pyxllib.file.specialist import XlPath
+
+
+def __1_basic():
+    """ 基础组件 """
 
 
 def excel_addr(n, m) -> str:
@@ -241,6 +252,75 @@ def xl_render_value(x, xl_fmt):
     return y
 
 
+def sort_excel_files(file_paths):
+    """ 在文件清单中，把excel类型的文件优先排到前面 """
+
+    def sort_key(filename: str) -> int:
+        """ 根据文件后缀给出权重排序值
+
+        :param str filename: 文件名
+        :return int: 权重值（小的在前）
+
+        >>> sort_key('test.xlsx')
+        1
+        >>> sort_key('demo.xls')
+        2
+        >>> sort_key('other.txt')
+        3
+        """
+        if re.search(r'\.xlsx$', filename):
+            return 1, filename
+        elif re.search(r'\.xl[^.]*$', filename):
+            return 2, filename
+        else:
+            return 3, filename
+
+    file_paths2 = sorted(file_paths, key=sort_key)
+    return file_paths2
+
+
+def convert_csv_to_xlsx(csv_file):
+    """ 将 csv 文件转换为 xlsx 文件 """
+    wb = Workbook()
+    sheet = wb.active
+
+    with open(csv_file, encoding='utf-8') as f:
+        reader = csv.reader(f)
+        for row_idx, row in enumerate(reader, start=1):
+            for col_idx, value in enumerate(row, start=1):
+                sheet.cell(row=row_idx, column=col_idx).value = value
+
+    return wb
+
+
+def convert_xls_to_xlsx(xls_file):
+    """ 将 xls 文件转换为 xlsx 文件
+
+    注意，这只是一个简化版的转换，要尽量完整的话，还是要用microsoft 365来升级xls的
+    """
+    # 使用 xlrd 打开 xls 文件
+    xls_workbook = xlrd.open_workbook(xls_file)
+
+    # 创建一个新的 openpyxl 工作簿
+    wb = Workbook()
+    sheet = wb.active
+
+    for i in range(xls_workbook.nsheets):
+        xls_sheet = xls_workbook.sheet_by_index(i)
+        if i > 0:
+            sheet = wb.create_sheet(xls_sheet.name)
+        for row in range(xls_sheet.nrows):
+            for col in range(xls_sheet.ncols):
+                # 将 xlrd 单元格的数据写入 openpyxl 单元格
+                sheet.cell(row=row + 1, column=col + 1).value = xls_sheet.cell_value(row, col)
+
+    return wb
+
+
+def __2_extend_methods():
+    """ 给各种类扩展的成员方法 """
+
+
 class XlCell(openpyxl.cell.cell.Cell):  # 适用于 openpyxl.cell.cell.MergedCell，但这里不能多重继承
 
     def in_range(self):
@@ -265,14 +345,14 @@ class XlCell(openpyxl.cell.cell.Cell):  # 适用于 openpyxl.cell.cell.MergedCel
         """
         if isinstance(self, MergedCell):
             ws = self.parent
-            xy = self.in_range().top[0]
-            return ws[excel_addr(*xy)]
+            x, y = self.in_range().top[0]
+            return ws.cell(x, y)
         else:
             return self
 
-    def celltype(self, *, return_mid_result=False):
+    def celltype(self, *, return_mode=False):
         """
-        :param return_mid_result: 是否返回运算的中间结果信息
+        :param return_mode: 是否返回运算的中间结果信息
             主要是在type=2的情景，有时候需要使用rng变量，可以这里直接返回，避免外部重复计算
         :return: 单元格类型
             0：普通单元格
@@ -281,19 +361,19 @@ class XlCell(openpyxl.cell.cell.Cell):  # 适用于 openpyxl.cell.cell.MergedCel
 
         TODO 这个函数还是可以看看能不能有更好的实现、提速
         """
-        result, mid_result = 0, {}
+        _type, status = 0, {}
         if isinstance(self, MergedCell):
-            result = 1
+            _type = 1
         elif isinstance(self.offset(1, 0), MergedCell) or isinstance(self.offset(0, 1), MergedCell):
             # 这里只能判断可能是合并单元格，具体是不是合并单元格，还要
             rng = self.in_range()
-            mid_result['rng'] = rng
-            result = 2 if hasattr(rng, 'size') else 0
+            status['rng'] = rng
+            _type = 2 if hasattr(rng, 'size') else 0
 
-        if return_mid_result:
-            return result, mid_result
+        if return_mode:
+            return _type, status
         else:
-            return result
+            return _type
 
     def isnone(self):
         """ 是普通单元格且值为None
@@ -473,6 +553,12 @@ class XlCell(openpyxl.cell.cell.Cell):  # 适用于 openpyxl.cell.cell.MergedCel
         xl_fmt = self.get_number_format()
         return xl_render_value(x, xl_fmt)
 
+    def address(self):
+        if isinstance(self, openpyxl.cell.cell.Cell):
+            return self.coordinate
+        else:  # 否则认为是合并单元格
+            return str(self)  # 标准库有自带方法，可以直接转的
+
 
 # 只有cell和mergecell都共同没有的成员方法，才添加进去
 __members = set(dir(XlCell)) - set(dir(openpyxl.cell.cell.Cell)) - \
@@ -483,6 +569,67 @@ inject_members(XlCell, openpyxl.cell.cell.MergedCell, __members)
 
 class XlWorksheet(openpyxl.worksheet.worksheet.Worksheet):
     """ 扩展标准的Workshhet功能 """
+
+    def get_raw_usedrange(self):
+        raw_used_range = build_range_address(left=self.min_column, top=self.min_row,
+                                             right=self.max_column, bottom=self.max_row)
+        return raw_used_range
+
+    def get_usedrange(self):
+        """ 定位有效数据区间
+        目前假设每个ws只有一个数据表，但以后可以考虑找多个used_range，多个数据表
+        """
+        # 1 先压缩范围
+        # 初始化边界值
+        left, right, top, bottom = 1, self.max_column, 1, self.max_row
+
+        # 找到最上方的行
+        for row in self.iter_rows():
+            if any(cell.value is not None for cell in row):
+                top = row[0].row
+                break
+
+        # 找到最左边的列
+        for col in self.iter_cols():
+            if any(cell.value is not None for cell in col):
+                left = col[0].column
+                break
+
+        # 找到最下方的行
+        rows = list(self.iter_rows(min_row=top, max_row=self.max_row))
+        for row in reversed(rows):
+            if any(cell.value is not None for cell in row):
+                bottom = row[0].row
+                break
+
+        # 找到最右边的列
+        cols = list(self.iter_cols(min_col=left, max_col=self.max_column))
+        for col in reversed(cols):
+            if any(cell.value is not None for cell in col):
+                right = col[0].column
+                break
+
+        # 2 然后还要再扩范围（根据合并单元格情况）
+        # 遍历当前区域里的cell
+        for row in self.iter_rows(min_row=top, max_row=bottom, min_col=left, max_col=right):
+            for cell in row:
+                # 如果是合并单元格，就扩展范围
+                t, status = cell.celltype(return_mode=True)
+                if t == 2:  # 每个合并单元格，只要遇到母单元格处理一次即可
+                    mc = status['rng']
+                    l, t, r, b = mc.bounds
+                    if l < left:
+                        left = l
+                    if t < top:
+                        top = t
+                    if r > right:
+                        right = r
+                    if b > bottom:
+                        bottom = b
+
+        used_range = build_range_address(left=left, top=top, right=right, bottom=bottom)
+
+        return used_range
 
     def copy_worksheet(self, dst_ws):
         """跨工作薄时复制表格内容的功能
@@ -1371,6 +1518,10 @@ class XlWorkbook(openpyxl.Workbook):
         """ 基于to_json计算的md5，一般用来判断不同workbook间是否相同 """
         return xlmd5(json.dumps(self.to_json(reduction_degree)))
 
+    def autofit(self):
+        for ws in self.worksheets:
+            ws.autofit()
+
     def extract_summary(self, *, samples_num=5, limit_length=2500):
         """ 更新后的函数：提取整个Excel工作簿的摘要信息 """
         wb = self
@@ -1381,7 +1532,7 @@ class XlWorkbook(openpyxl.Workbook):
             # 如果是标准工作表（Worksheet），使用现有的摘要提取机制
             if isinstance(ws, openpyxl.worksheet.worksheet.Worksheet):
                 # 找到使用范围和表头范围
-                used_range = find_used_range_optimized(ws)
+                used_range = ws.get_usedrange()
                 if used_range:
                     header_range, data_range = split_header_and_data(ws, used_range)
 
@@ -1443,21 +1594,20 @@ class XlWorkbook(openpyxl.Workbook):
             # 如果是标准工作表（Worksheet），使用现有的摘要提取机制
             if isinstance(ws, openpyxl.worksheet.worksheet.Worksheet):
                 # 找到使用范围和表头范围
-                used_range = find_used_range_optimized(ws)
+                used_range = ws.get_usedrange()
                 if used_range:
-                    raw_used_range = build_range_address(left=ws.min_column, top=ws.min_row,
-                                                         right=ws.max_column, bottom=ws.max_row)
+                    raw_used_range = ws.get_raw_usedrange()
                     summary = ({
                         "sheetName": ws.title,
                         "sheetType": "Worksheet",
                         "rawUsedRange": raw_used_range,
                         "usedRange": used_range,
-                        'data': extract_cells_content(ws)
+                        'cells': extract_cells_content(ws)
                     })
 
-                    if not summary['data']:  # 如果没有数据，则大概率是数据透视表，是计算出来的，读取不到~
+                    if not summary['cells']:  # 如果没有数据，则大概率是数据透视表，是计算出来的，读取不到~
                         summary['sheetType'] = 'PivotTable'
-                        del summary['data']
+                        del summary['cells']
                 else:
                     summary = ({
                         "sheetName": ws.title,
@@ -1482,12 +1632,64 @@ class XlWorkbook(openpyxl.Workbook):
 
         return workbook_summary
 
-    def autofit(self):
-        for ws in self.worksheets:
-            ws.autofit()
+    def extract_summary3(self):
+        """ 另一套按照单元格提取摘要的程序 """
+        wb = self
+
+        all_sheets_summary = []
+
+        for ws in wb._sheets:  # 非数据表，也要遍历出来，所以使用了_sheets
+            # 如果是标准工作表（Worksheet），使用现有的摘要提取机制
+            if isinstance(ws, openpyxl.worksheet.worksheet.Worksheet):
+                # 找到使用范围和表头范围
+                raw_used_range = ws.get_raw_usedrange()
+                if raw_used_range:
+                    used_range = ws.get_usedrange()
+                    summary = ({
+                        "sheetName": ws.title,
+                        "sheetType": "Worksheet",
+                        "rawUsedRange": raw_used_range,
+                        "usedRange": used_range,
+
+                    })
+                    summary['tables'] = ws.find_tables(used_range)
+
+                    # 'cells': extract_cells_content(ws)  # todo 改进点
+
+                    # todo 231213周三21:36，好久没看，我都不确定这种类型问题了，后面要再核对一遍
+                    if not summary['cells']:  # 如果没有数据，则大概率是数据透视表，是计算出来的，读取不到~
+                        summary['sheetType'] = 'PivotTable'
+                        del summary['cells']
+                else:
+                    summary = ({
+                        "sheetName": ws.title,
+                        "sheetType": "DialogOrMacroSheet",
+                        "usedRange": None,
+                    })
+
+            # 如果是其他类型的工作表，提供基础摘要
+            else:
+                summary = ({
+                    "sheetName": ws.title,
+                    "sheetType": ws.__class__.__name__  # 使用工作表的类名作为类型
+                })
+
+            all_sheets_summary.append(summary)
+
+        workbook_summary = {
+            "fileName": Path(self.path).name if self.path else None,
+            "sheetNames": wb.sheetnames,
+            "sheets": all_sheets_summary,
+        }
+
+        return workbook_summary
 
 
 inject_members(XlWorkbook, openpyxl.Workbook)
+
+
+def __3_hash():
+    """ 表格的哈希表达 """
 
 
 def excel2md5(file, reduction_degree=1):
@@ -1503,8 +1705,8 @@ def excel2md5(file, reduction_degree=1):
     return wb.to_md5(reduction_degree)
 
 
-def __提取表格摘要信息():
-    """ """
+def __4_extract_summary():
+    """ 提取表格摘要 """
 
 
 def parse_range_address(address):
@@ -1561,69 +1763,22 @@ def get_addr_area(addr):
         return 1
 
 
-class BuildRangeAddressProto:
-    def __call__(self, left=None, top=None, right=None, bottom=None):
-        """ 构建单元格范围地址。
+def build_range_address(left=None, top=None, right=None, bottom=None):
+    """ 构建单元格范围地址。
 
-        :return str: 单元格范围地址，例如 'A1', 'A1:B3', '1:3', 'A:B' 等。
-        """
-        start_cell = f"{get_column_letter(left) if left else ''}{top if top else ''}"
-        end_cell = f"{get_column_letter(right) if right else ''}{bottom if bottom else ''}"
-
-        # 当开始和结束单元格相同时，只返回一个单元格地址
-        if start_cell == end_cell:
-            return start_cell
-        # 当其中一个单元格是空字符串时，只返回另一个单元格地址
-        elif not start_cell or not end_cell:
-            return start_cell or end_cell
-        else:
-            return f"{start_cell}:{end_cell}"
-
-    def from_merged_cells(self, mc):
-        return self.__call__(*mc.bounds)
-
-
-# 这是一个仿函数
-build_range_address = BuildRangeAddressProto()
-
-
-def find_used_range_optimized(ws):
-    """ 定位有效数据区间
-    目前假设每个ws只有一个数据表，但以后可以考虑找多个used_range，多个数据表
+    :return str: 单元格范围地址，例如 'A1', 'A1:B3', '1:3', 'A:B' 等。
     """
-    # 初始化边界值
-    left, right, top, bottom = None, None, None, None
+    start_cell = f"{get_column_letter(left) if left else ''}{top if top else ''}"
+    end_cell = f"{get_column_letter(right) if right else ''}{bottom if bottom else ''}"
 
-    # 找到最上方的行
-    for row in ws.iter_rows():
-        if any(cell.value is not None for cell in row):
-            top = row[0].row
-            break
-
-    # 找到最左边的列
-    for col in ws.iter_cols():
-        if any(cell.value is not None for cell in col):
-            left = col[0].column
-            break
-
-    # 找到最下方的行
-    rows = list(ws.iter_rows(min_row=top, max_row=ws.max_row))
-    for row in reversed(rows):
-        if any(cell.value is not None for cell in row):
-            bottom = row[0].row
-            break
-
-    # 找到最右边的列
-    cols = list(ws.iter_cols(min_col=left, max_col=ws.max_column))
-    for col in reversed(cols):
-        if any(cell.value is not None for cell in col):
-            right = col[0].column
-            break
-
-    # 使用 build_range_address 获取 used_range
-    used_range = build_range_address(left=left, top=top, right=right, bottom=bottom)
-
-    return used_range
+    # 当开始和结束单元格相同时，只返回一个单元格地址
+    if start_cell == end_cell:
+        return start_cell
+    # 当其中一个单元格是空字符串时，只返回另一个单元格地址
+    elif not start_cell or not end_cell:
+        return start_cell or end_cell
+    else:
+        return f"{start_cell}:{end_cell}"
 
 
 def is_string_type(value):
@@ -1734,6 +1889,60 @@ def extract_header_structure(ws, header_range):
     return header_structure
 
 
+def extract_cells_content(ws):
+    """ 提取一个工作表中的所有单元格内容 """
+    cells = {}
+    for row in ws.rows:
+        for cell in row:
+            cell_type = cell.celltype()
+            if cell_type == 0:
+                v = cell.value
+                if v is not None:
+                    # cells[cell.coordinate] = v
+                    cells[cell.coordinate] = cell.get_render_value()
+                else:
+                    cells[cell.coordinate] = ''
+            elif cell_type == 2:
+                v = cell.value
+                if v is not None:
+                    rng = cell.in_range()
+                    addr = str(rng)
+                    cells[addr] = cell.get_render_value()
+                else:
+                    cells[cell.coordinate] = ''
+    return cells
+
+
+def extract_field_summaries(ws, header_range, data_range, samples_num=5):
+    """ 提取所有字段的摘要信息
+
+    :param samples_num: 要抽样的数据行数
+    """
+    # 1 数据范围信息
+    header_details = parse_range_address(header_range)
+    data_details = parse_range_address(data_range)
+    start_row = header_details['bottom'] + 1
+    end_row = data_details['bottom']
+
+    # 2 提前决定好所有字段统一抽样的数据行号
+    rows = list(range(header_details['bottom'] + 1, data_details['bottom'] + 1))
+    if len(rows) > samples_num:
+        rows = random.sample(rows, samples_num)
+        rows.sort()
+
+    # 3 提取所有字段的摘要信息
+    field_summaries = {}
+    for col in ws.iter_cols(min_col=header_details['left'], max_col=header_details['right']):
+        header_cell = ws.cell(header_details['bottom'], col[0].column)
+        if header_cell.celltype() != 1:  # todo 这里要改成不使用衍生单元格的场景
+            # 注意，原本摘要这里用的是.value，后面改成了.coordinate。原本的遇到重名就会出一些问题了~
+            field_summaries[header_cell.coordinate] = determine_field_type_and_summary(
+                ws, header_cell.column, start_row, end_row, rows
+            )
+
+    return field_summaries
+
+
 def determine_field_type_and_summary(ws, col, start_row, end_row, rows):
     """ 根据指定的列范围确定字段的摘要信息
 
@@ -1780,60 +1989,6 @@ def determine_field_type_and_summary(ws, col, start_row, end_row, rows):
     return summary
 
 
-def extract_field_summaries(ws, header_range, data_range, samples_num=5):
-    """ 提取所有字段的摘要信息
-
-    :param samples_num: 要抽样的数据行数
-    """
-    # 1 数据范围信息
-    header_details = parse_range_address(header_range)
-    data_details = parse_range_address(data_range)
-    start_row = header_details['bottom'] + 1
-    end_row = data_details['bottom']
-
-    # 2 提前决定好所有字段统一抽样的数据行号
-    rows = list(range(header_details['bottom'] + 1, data_details['bottom'] + 1))
-    if len(rows) > samples_num:
-        rows = random.sample(rows, samples_num)
-        rows.sort()
-
-    # 3 提取所有字段的摘要信息
-    field_summaries = {}
-    for col in ws.iter_cols(min_col=header_details['left'], max_col=header_details['right']):
-        header_cell = ws.cell(header_details['bottom'], col[0].column)
-        if header_cell.celltype() != 1:  # todo 这里要改成不使用衍生单元格的场景
-            # 注意，原本摘要这里用的是.value，后面改成了.coordinate。原本的遇到重名就会出一些问题了~
-            field_summaries[header_cell.coordinate] = determine_field_type_and_summary(
-                ws, header_cell.column, start_row, end_row, rows
-            )
-
-    return field_summaries
-
-
-def extract_cells_content(ws):
-    """ 提取一个工作表中的所有单元格内容 """
-    cells = {}
-    for row in ws.rows:
-        for cell in row:
-            cell_type = cell.celltype()
-            if cell_type == 0:
-                v = cell.value
-                if v is not None:
-                    # cells[cell.coordinate] = v
-                    cells[cell.coordinate] = cell.get_render_value()
-                else:
-                    cells[cell.coordinate] = ''
-            elif cell_type == 2:
-                v = cell.value
-                if v is not None:
-                    rng = cell.in_range()
-                    addr = build_range_address.from_merged_cells(rng)
-                    cells[addr] = cell.get_render_value()
-                else:
-                    cells[cell.coordinate] = ''
-    return cells
-
-
 class WorkbookSummary:
     """ 工作薄摘要相关处理功能 """
 
@@ -1871,7 +2026,7 @@ class WorkbookSummary:
             return sheets
 
         # 3 算出理论上要去掉几个样本，才能控制到理想长度
-        n = math.ceil((length1 - limit_length) / bias)
+        n = math.ceil(safe_div(length1 - limit_length, bias))
         m = 5 - n
         if m >= 0:
             for sheet in sheets:
@@ -2002,45 +2157,136 @@ def extract_workbook_summary(file_path, mode=0,
 
 
 def extract_workbook_summary2(file_path, *,
-                              ignore_errors=False, keep_links=False):
+                              timeout_seconds=None,
+                              ignore_errors=False,
+                              keep_links=False):
     """
     :param keep_links: 是否保留外部表格链接数据。如果保留，打开好像会有点问题。
     """
-    try:
-        wb: XlWorkbook = openpyxl.load_workbook(file_path, keep_links=keep_links)
-    except Exception as e:
-        if ignore_errors:
-            return {}
-        else:
-            raise e
+    # 1 读取文件wb
+    file_path = Path(file_path)
+    suffix = file_path.suffix.lower()
 
-    res = wb.extract_summary2()
-    res['fileName'] = Path(file_path).name
+    def read_file_by_type(file_path, suffix, keep_links=False):
+        # with TicToc('读取文件'):
+        if suffix in ('.xlsx', '.xlsm'):
+            wb = openpyxl.load_workbook(file_path, keep_links=keep_links)
+        elif suffix == '.xls':
+            wb = convert_xls_to_xlsx(file_path)
+        elif suffix == '.csv':
+            wb = convert_csv_to_xlsx(file_path)
+        else:
+            raise ValueError('不支持的文件类型')
+        return wb
+
+    def process_file(file_path, suffix, timeout_seconds=None, keep_links=False, ignore_errors=False):
+        try:
+            if timeout_seconds is None:
+                wb = read_file_by_type(file_path, suffix, keep_links)
+            else:
+                with Timeout(timeout_seconds):  # 使用之前定义的timeout上下文管理器
+                    wb = read_file_by_type(file_path, suffix, keep_links)
+        except Exception as e:
+            if ignore_errors:
+                return {}
+            else:
+                raise e
+        return wb
+
+    wb = process_file(file_path, suffix, timeout_seconds, keep_links, ignore_errors)
+
+    # 2 提取摘要
+    with TicToc('提取摘要'):
+        res = wb.extract_summary2()
+        res['fileName'] = Path(file_path).name
+
+    # todo 摘要精简？
+
     return res
 
 
-def sort_excel_files(file_paths):
-    """ 在文件清单中，把excel类型的文件优先排到前面 """
+def extract_workbook_summary2plus(file_path, **kwargs):
+    """ 增加了全局ratio的计算 """
+    # 1 主体摘要
+    data = extract_workbook_summary2(file_path, **kwargs)
+    if not data:
+        return data
 
-    def sort_key(filename: str) -> int:
-        """ 根据文件后缀给出权重排序值
+    # 2 增加一些特征计算
+    # todo 后续估计要改成按table的颗粒度统计以下特征
 
-        :param str filename: 文件名
-        :return int: 权重值（小的在前）
+    # 2.1 中文率
+    if 'chineseContentRatio' not in data:
+        texts = [data['fileName']]  # 文件名和表格名都要加上
+        texts += [x for x in data['sheetNames']]
 
-        >>> sort_key('test.xlsx')
-        1
-        >>> sort_key('demo.xls')
-        2
-        >>> sort_key('other.txt')
-        3
-        """
-        if re.search(r'\.xlsx$', filename):
-            return 1, filename
-        elif re.search(r'\.xl[^.]*$', filename):
-            return 2, filename
-        else:
-            return 3, filename
+        texts += [v for sheet in data['sheets'] for v in sheet.get('cells', {}).values() if v]
+        all_text = ''.join(map(str, texts))
+        data['chineseContentRatio'] = round(calc_chinese_ratio(all_text), 4)
 
-    file_paths2 = sorted(file_paths, key=sort_key)
-    return file_paths2
+    # 2.2 非空单元格率
+    if 'nonEmptyCellRatio' not in data:
+        content_area, total_area = 0, 0
+        for sheet in data['sheets']:
+            for addr, value in sheet.get('cells', {}).items():
+                area = get_addr_area(addr)
+                if value != '':
+                    content_area += area
+                total_area += area
+        data['nonEmptyCellRatio'] = round(safe_div(content_area, total_area), 4)
+
+    # 3 判断键值顺序
+    keys = list(data.keys())
+    ref_keys = ['fileName', 'chineseContentRatio', 'nonEmptyCellRatio', 'sheetNames', 'sheets']
+    if keys != ref_keys:
+        data = {k: data[k] for k in ref_keys if k in data}
+
+    return data
+
+
+def worksheet_find_tables(ws, used_range=None):
+    """ 找到该sheet里可能有哪些tables区域 """
+    if used_range is None:
+        used_range = ws.get_usedrange()
+
+    # 1 先给每个单元格计算一个权重标记
+
+    # 2
+
+
+def extract_workbook_summary3(file_path, *,
+                              timeout_seconds=None,
+                              ignore_errors=False,
+                              keep_links=False):
+    """
+    :param keep_links: 是否保留外部表格链接数据。如果保留，打开好像会有点问题。
+    """
+    # 1 读取文件wb
+    file_path = Path(file_path)
+    suffix = file_path.suffix.lower()
+    if suffix in ('.xlsx', '.xlsm'):
+        try:
+            if timeout_seconds is None:
+                wb: XlWorkbook = openpyxl.load_workbook(file_path, keep_links=keep_links)
+            else:
+                with Timeout(timeout_seconds):
+                    wb: XlWorkbook = openpyxl.load_workbook(file_path, keep_links=keep_links)
+        except Exception as e:
+            if ignore_errors:
+                return {}
+            else:
+                raise e
+    elif suffix == '.xls':  # 不推荐（这是在xlrd复现的一套摘要算法），只是部署的使用
+        wb = convert_xls_to_xlsx(file_path)
+    elif suffix == '.csv':
+        wb = convert_csv_to_xlsx(file_path)
+    else:
+        raise ValueError('不支持的文件类型')
+
+    # 2 提取摘要
+    res = wb.extract_summary3()
+    res['fileName'] = Path(file_path).name
+
+    # todo 摘要精简？
+
+    return res

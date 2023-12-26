@@ -1600,7 +1600,7 @@ class XlPath(type(pathlib.Path())):
             ext = '.' + t.extension
             ext0 = file_path.suffix
 
-            if ext0 in ('.docx', '.xlsx', '.pptx'):
+            if ext0 in ('.docx', '.xlsx', '.pptx', '.xlsm'):
                 ext0 = '.zip'
             elif ext0 in ('.JPG', '.jpeg'):
                 ext0 = '.jpg'
@@ -1751,7 +1751,8 @@ class XlPath(type(pathlib.Path())):
 
         # 六 文件配对
         if run_mode >= 6:
-            printf('\n六、文件配对（检查每个目录里stem名称是否配对，列出文件组成不单一的目录结构，请重点检查落单未配对的情况）')
+            printf(
+                '\n六、文件配对（检查每个目录里stem名称是否配对，列出文件组成不单一的目录结构，请重点检查落单未配对的情况）')
             prompt = False
             for root, dirs, files in os.walk(self):
                 suffix_counts = defaultdict(list)
@@ -1877,6 +1878,7 @@ class XlPath(type(pathlib.Path())):
             这个不仅用于分组，返回的字符串，也会作为字典序排序的依据，如果想用自然序，记得加natural_sort_key进行转换
         :param batch_name: 设置batch的名称，默认 'batch{}'
         :param bias: 希望用不到这个参数，只有中途出bug，需要继续处理的时候，用来自动增加编号
+            注意默认就是从1开始编号的，比如bias设成8的话，实际是从9开始编号的
         :param tail_limit: 限制数量少于多少的batch，合并到上一个batch中
         """
         from pyxllib.algo.pupil import Groups
@@ -1974,27 +1976,54 @@ class XlPath(type(pathlib.Path())):
             dst_dir.mkdir(parents=True, exist_ok=True)
 
     # 无法选定文件
-    def _move_selectable(self, dst_dir):
+    def _move_selectable(self, dst_dir, *, print_mode=False):
         """ 目录功能，将目录下可选中的文件移动到目标目录
 
-        1、要理解这个看似有点奇怪的功能，需要理解，在数据处理中，可能会拿到超长文件名的文件，
+        1、要理解这个看似有点奇怪的功能，需要了解一个背景，在数据处理中，可能会拿到超长文件名的文件，
             这种在windows平台虽然手动可以操作，但在代码中，会glob不到，强制指定也会说文件不存在
         2、为了解决这类文件问题，一般需要对其进行某种规则的重命名。因为linux里似乎不会限制文件名长度，所以要把这些特殊文件打包到linux里处理。
         3、因为这些文件本来就无法被选中，所以只能反向操作，将目录下的可选中文件移动到目标目录。
         """
-        for p in self.glob('*'):
-            if p.exists():
-                p.move(dst_dir / p.name)
+        for p in tqdm(self.glob('*'), disable=not print_mode):
+            # 231211周一16:03 一般本来就glob不到，现在的p就是存在的，但是可能以防万一加的捕捉，我现在也不敢删
+            if p.is_file():
+                try:
+                    p.move(dst_dir / p.name)
+                except FileNotFoundError:
+                    continue
 
-    def move_unselectable(self, dst_dir):
+    def move_unselectable(self, dst_dir, *, print_mode=False):
         """ 见_move_selectable，因为无法对这些特殊文件进行移动
         所以这里只是对_move_selectable的封装，中间通过文件重命名，来伪造移动了无法选中文件的操作效果
         """
         tempdir = self.create_tempdir_path(dir=self.parent)
         tempdir.mkdir(exist_ok=True)
-        self._move_selectable(tempdir)
+        self._move_selectable(tempdir, print_mode=print_mode)
         self.rename2(dst_dir)
         tempdir.move(self)
+
+    def rename_stem_until_not_exists(self):
+        """ 比较高级的一个操作，会按照某种规则不断重命名，直到是当前并不存在的文件名，常用在文件拷贝避免重名冲突等场景
+
+        todo 写个支持自定义规则的输出参数？
+        todo 有个首次要不要判断exists的问题，可能跟不同的业务场景有关，要思考怎么设计更好...
+        """
+
+        def add_stem(m):
+            a = int(m.group(1)) + 1
+            return f'({a})'
+
+        file = self
+        while file.exists():
+            stem = file.stem
+            m = re.search(r'\(\d+\)$', stem)
+            if m:  # 已经有目标范式的编号，继续累加
+                stem = re.sub(r'\((\d+)\)$', add_stem, stem)
+            else:  # 还没有编号的，直接从'2'开始编号
+                stem += ' (2)'
+            file = self.with_stem(stem.strip())  # 忽略最后空白，这个很容易出问题
+
+        return file
 
 
 def demo_file():
@@ -2506,3 +2535,81 @@ class TwinDirs:
     def copy_dir_structure(self):
         """ 复制目录结构 """
         self.src_dir.copy_dir_structure(self.dst_dir)
+
+
+class BatchFileRenamer:
+    """ 对一批数据，按照某种规则判重、重命名去重
+    一般是对stem重命名后，确保数据随意混合后名称也不会有出现重复
+    """
+
+    def __init__(self, _dir=None):
+        """
+        :param _dir: 输入待处理的第一个目录
+        """
+        # 所有待处理的文件
+        self.files = []
+        if _dir is not None:
+            self.add_dir(_dir)
+
+    def add_dir(self, _dir):
+        """ 添加一个目录下的所有文件
+        如果有比较零散的文件待处理，可以直接操作self.files
+
+        todo 目录的重命名？如果引入目录的重命名，算法会复杂非常多的，这个暂不考虑。
+        """
+        for f in XlPath(_dir).rglob_files():
+            self.files.append(f)
+
+    def get_key(self, file):
+        """ 计算一个文件的重复标识，不同文件之间的判重依据 """
+        # 默认的key，规则会比较严，stem不重复，大小写不重复
+        return file.stem.lower()
+
+    def get_new_name(self, file, exists_keys=None):
+        """ 输入的f必须是已经确定要进行重命名的文件
+
+        对于windows来说
+            是先假定在一个组中，增加编号
+            如果编号的文件已经存在，则换一个新的命名组
+
+        对我这里来说，就不搞这么复杂了，就是无脑加编号就行
+        """
+
+        def add_stem(m):
+            a = int(m.group(1)) + 1
+            return f'({a})'
+
+        stem = file.stem
+        while True:
+            m = re.search(r'\(\d+\)$', stem)
+            if m:  # 已经有目标范式的编号，继续累加
+                stem = re.sub(r'\((\d+)\)$', add_stem, stem)
+            else:  # 还没有编号的，直接从'2'开始编号
+                stem += ' (2)'
+
+            f2 = file.with_stem(stem.strip())  # 忽略最后空白，这个很容易出问题
+            k2 = self.get_key(f2)
+            if k2 not in exists_keys:  # 如果新的命名不会跟旧有文件有任何重复，循环就可以终止了
+                exists_keys.add(k2)
+                return f2
+
+    def rename_files(self, print_mode=False, exists_keys=None):
+        """ 对文件进行批量重命名 """
+        # 1 先遍历一遍文件，确认哪些文件是确定要重命名的
+        exists_keys = exists_keys or set()
+        repeat_name_files = []  # 确认要进行重命名的文件
+        for f in self.files:
+            k = self.get_key(f)
+            if k not in exists_keys:
+                exists_keys.add(k)
+            else:
+                repeat_name_files.append(f)
+
+        # 2 对需要重命名的文件进行操作
+        cnt = 0
+        for f in repeat_name_files:
+            cnt += 1
+            f2 = self.get_new_name(f, exists_keys)
+            if print_mode:
+                print(cnt, f.as_posix(), '-->', f2.name)
+            f.rename2(f2)
