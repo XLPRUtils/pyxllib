@@ -1028,3 +1028,16 @@ def shuffle_dict_keys(d):
     random.shuffle(keys)
     d = {k: d[k] for k in keys}
     return d
+
+
+def generate_int_hash_from_str(s):
+    """ 对字符串使用md5编码，然后转出一个数值哈希，一般是用来进行随机分组
+    比如获得一个整数后，对3取余，就是按照余数为0、1、2的情况分3组
+    """
+    return int(hashlib.md5(s.encode()).hexdigest(), 16)
+
+
+def get_groupid_from_string(s, n_groups):
+    """ 通过计算一个字符串的哈希值来对其进行分组，需要提前知道总组别数n_groups """
+    hash_value = generate_int_hash_from_str(s)
+    return hash_value % n_groups
