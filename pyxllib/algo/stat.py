@@ -330,7 +330,7 @@ def count_key_combinations(df, col_names, count_col_name='count'):
     return df2
 
 
-def pareto_accumulate(weights, accuracy=0.01, *, print_mode=False):
+def pareto_accumulate(weights, accuracy=0.01, *, print_mode=False, value_unit_type='K'):
     """ 帕累托累计
 
     可以用来分析主要出现的权重、频次
@@ -368,9 +368,9 @@ def pareto_accumulate(weights, accuracy=0.01, *, print_mode=False):
 
     # 2 结果展示
     def fmt(p):
-        from pyxllib.text.newbie import format_big_decimal
-        ls = [f'{p[0]}it≥{format_big_decimal(p[1])}',
-              f'{format_big_decimal(p[2])}({p[2] / total_size:.0%})']
+        from pyxllib.prog.newbie import human_readable_number
+        ls = [f'{human_readable_number(p[0], "万")}条≥{human_readable_number(p[1])}',
+              f'{human_readable_number(p[2], value_unit_type)}({p[2] / total_size:.0%})']
         return '，'.join(map(str, ls))
 
     total_size = points[-1][2]

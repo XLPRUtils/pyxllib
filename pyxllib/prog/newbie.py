@@ -251,6 +251,35 @@ def human_readable_size(n):
         return f'{round_int(n)}TB'
 
 
+def human_readable_number(value, base_type='K', precision=4):
+    """ 数字美化输出函数
+
+    :param float|int value: 要转换的数值
+    :param int precision: 有效数字的长度
+    :param str base_type: 进制类型，'K'为1000进制, 'KB'为1024进制（KiB同理）, '万'为中文万进制
+    :return: 美化后的字符串
+    """
+    if abs(value) < 1:
+        return f'{value:.{precision}g}'
+
+    # 设置不同进制的单位和基数
+    units, base = {
+        'K': (['', 'K', 'M', 'G', 'T', 'P', 'E', 'Z', 'Y'], 1000),
+        'KB': (['', 'KB', 'MB', 'GB', 'TB', 'PB', 'EB', 'ZB', 'YB'], 1024),
+        'KiB': (['', 'KiB', 'MiB', 'GiB', 'TiB', 'PiB', 'EiB', 'ZiB', 'YiB'], 1024),
+        '万': (['', '万', '亿', '兆', '京', '垓', '秭', '穰'], 10000)
+    }.get(base_type, ([''], 1))  # 默认为空单位和基数1
+
+    x, i = abs(value), 0
+    while x >= base and i < len(units) - 1:
+        x /= base
+        i += 1
+
+    x = f'{x:.{precision}g}'  # 四舍五入到指定精度
+    prefix = '-' if value < 0 else ''  # 负数处理
+    return f"{prefix}{x}{units[i]}"
+
+
 class CvtType:
     """ 这些系列的转换函数，转换失败统一报错为ValueError
 
@@ -371,16 +400,3 @@ def funcmsg(func):
         else:
             return f'装饰器：{type(func)}，无法定位'
     return f'函数名：{func.__name__}，来自文件：{func.__code__.co_filename}，所在行号={func.__code__.co_firstlineno}'
-
-
-def safe_div(a, b):
-    """ 安全除法，避免除数为0的情况
-
-    :param a: 被除数
-    :param b: 除数
-    :return: a/b，如果b为0，返回0
-    """
-    if b == 0:
-        return 0
-    else:
-        return a / b

@@ -39,8 +39,7 @@ try:
 except ModuleNotFoundError:
     pass
 
-from pyxllib.prog.newbie import safe_div
-from pyxllib.prog.pupil import inject_members, dprint, xlmd5, shuffle_dict_keys, Timeout
+from pyxllib.prog.pupil import inject_members, dprint, xlmd5, shuffle_dict_keys, Timeout, safe_div
 from pyxllib.prog.specialist import browser, TicToc
 from pyxllib.algo.specialist import product
 from pyxllib.text.pupil import calc_chinese_ratio

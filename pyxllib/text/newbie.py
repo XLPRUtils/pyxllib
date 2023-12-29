@@ -286,25 +286,3 @@ def fold_dict(d, m=5):
     vals = [f"'{k}': {v}" for k, v in d.items()]
     line = [', '.join(vals[i:i + 5]) for i in range(0, len(vals), m)]
     return '{' + ',\n'.join(line) + '}'
-
-
-def format_big_decimal(value):
-    """ 较大的十进制数值的美化展示
-
-    :param float|int value: 数值
-    :return: 整数值 + 单位
-        单位说明
-            kilo- =  1e3   = K-
-            mega- =  1e6   = M-
-            giga- =  1e9   = G-
-            tera- =  1e12  = T-
-            peta- =  1e15  = P-
-            exa- =   1e18  = E-
-            zetta- = 1e21  = Z-
-            yotta- = 1e24  = Y-
-    """
-    x, i, unit = int(value), 0, [''] + list('KMGTPEZY')
-    while x > 1000:
-        i += 1
-        x = round_int(x / 1000)
-    return f'{x}{unit[i]}'

@@ -10,7 +10,7 @@ import math
 import re
 import sys
 
-from pyxllib.prog.newbie import typename
+from pyxllib.prog.newbie import typename, human_readable_number
 from pyxllib.text.pupil import listalign, int2myalphaenum
 
 
@@ -97,7 +97,7 @@ class ValuesStat:
     def __len__(self):
         return self.n
 
-    def summary(self, valfmt='g'):
+    def summary(self, valfmt=lambda x: human_readable_number(x, '万', 4)):
         """ 输出性能分析报告，data是每次运行得到的时间数组
 
         :param valfmt: 数值显示的格式
@@ -109,37 +109,45 @@ class ValuesStat:
             也可以传入长度5的格式清单，表示 [和、均值、标准差、最小值、最大值] 一次展示的格式
         """
         if isinstance(valfmt, str) or callable(valfmt):
-            valfmt = [valfmt] * 5
+            valfmt = [valfmt] * 6
+
+        if len(valfmt) == 5:  # 兼容旧版格式化，默认是不填充"总数"的格式化的
+            valfmt = [lambda x: x] + valfmt
+        assert len(valfmt) == 6, f'valfmt长度必须是6，现在是{len(valfmt)}'
 
         ls = []
 
-        def format_value(value, format_spec):
+        def format_value(value, fmt_id):
             """ 根据指定的格式来格式化值 """
+            format_spec = valfmt[fmt_id]
+            if format_spec is None:
+                return ''
+
             if callable(format_spec):
                 return format_spec(value)
             else:
                 return f"{value:{format_spec}}"
 
         if self.n > 1:
-            ls.append(f'总数: {self.n}')  # 注意输出其实完整是6个值，还有个总数不用控制格式
-            if valfmt[0]:
-                ls.append(f'总和: {format_value(self.sum, valfmt[0])}')
-            if valfmt[1] or valfmt[2]:
-                mean_str = format_value(self.mean, valfmt[1]) if valfmt[1] else ''
-                std_str = format_value(self.std, valfmt[2]) if valfmt[2] else ''
+            ls.append(f'总数: {format_value(self.n, 0)}')  # 注意输出其实完整是6个值，还有个总数不用控制格式
+            if valfmt[1]:
+                ls.append(f'总和: {format_value(self.sum, 1)}')
+            if valfmt[2] or valfmt[3]:
+                mean_str = format_value(self.mean, 2)
+                std_str = format_value(self.std, 3)
                 if mean_str and std_str:
                     ls.append(f'均值标准差: {mean_str}±{std_str}')
                 elif mean_str:
                     ls.append(f'均值: {mean_str}')
                 elif std_str:
                     ls.append(f'标准差: {std_str}')
-            if valfmt[3]:
-                ls.append(f'最小值: {format_value(self.min, valfmt[3])}')
             if valfmt[4]:
-                ls.append(f'最大值: {format_value(self.max, valfmt[4])}')
+                ls.append(f'最小值: {format_value(self.min, 4)}')
+            if valfmt[5]:
+                ls.append(f'最大值: {format_value(self.max, 5)}')
             return '\t'.join(ls)
         elif self.n == 1:
-            return format_value(self.sum, valfmt[0] or 'g')
+            return format_value(self.sum, valfmt[1] or 'g')
         else:
             raise ValueError("无效的数据数量")
 

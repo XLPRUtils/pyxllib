@@ -1041,3 +1041,16 @@ def get_groupid_from_string(s, n_groups):
     """ 通过计算一个字符串的哈希值来对其进行分组，需要提前知道总组别数n_groups """
     hash_value = generate_int_hash_from_str(s)
     return hash_value % n_groups
+
+
+def safe_div(a, b):
+    """ 安全除法，避免除数为0的情况
+
+    :param a: 被除数
+    :param b: 除数
+    :return: a/b，如果b为0，返回0
+    """
+    if b == 0:
+        return a / sys.float_info.epsilon
+    else:
+        return a / b
