@@ -104,25 +104,23 @@ class XlBar(Bar):
 inject_members(XlBar, Bar)
 
 
-def get_render_body(chart):
-    """ 得到渲染后的核心html内容 """
-    from pyxllib.text.nestenv import NestEnv
-
-    # 1 得到完整的html内容
-    file = XlPath.tempfile(suffix='.html')
-    chart.render(path=str(file))
-    res = file.read_text()
-    file.delete()
-
-    # 2 得到body核心内容
-    res = NestEnv(res).xmltag('body', inner=True).string()
-
-    return res
-
-
 def render_echart_html(title='Awesome-pyecharts', body=''):
     from pyxllib.text.xmllib import get_jinja_template
     return get_jinja_template('echart_base.html').render(title=title, body=body)
+
+
+# 绘制帕累托累计图
+def draw_pareto_chart(data, accuracy=0.1, *, title='帕累托累积权重', value_unit_type='K'):
+    from pyxllib.algo.stat import pareto_accumulate
+    pts, labels = pareto_accumulate(data, accuracy=accuracy, value_unit_type=value_unit_type)
+    x = Line()
+    x.add_series(title, pts, labels=labels, label={'position': 'right'})
+    x.set_global_opts(
+        # x轴末尾要故意撑大一些，不然有部分内容会显示不全
+        xaxis_opts=opts.AxisOpts(name='条目数', max_=int(float(f'{pts[-1][0]*1.2:.2g}'))),
+        yaxis_opts=opts.AxisOpts(name='累积和')
+    )
+    return x
 
 
 if __name__ == '__main__':

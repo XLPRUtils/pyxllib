@@ -21,8 +21,8 @@ import os
 import re
 import sys
 
-from pyxllib.prog.newbie import RunOnlyOnce, safe_div
-from pyxllib.prog.pupil import dprint
+from pyxllib.prog.newbie import RunOnlyOnce
+from pyxllib.prog.pupil import dprint, safe_div
 from pyxllib.text.newbie import circlednumber2digits, digits2circlednumber, roman2digits, digits2roman
 
 

@@ -5,6 +5,7 @@
 # @Date   : 2022/04/12 08:59
 
 import json
+import re
 import sqlite3
 
 import pandas as pd
@@ -106,13 +107,24 @@ class SqlBase:
     def __3_execute(self):
         pass
 
-    def exec_col(self, *args, **kwargs):
-        """ 获得第1列的值，注意这个方法跟select_col很像，但更泛用，优先推荐使用exec_col
+    def exec2one(self, *args, **kwargs):
+        """ 获得第1行的值 """
+        return self.execute(*args, **kwargs).fetchone()[0]
 
-        >> self.exec_col('SELECT id FROM skindata')
-        """
-        for row in self.execute(*args, **kwargs):
-            yield row[0]
+    def exec2row(self, *args, **kwargs):
+        """ 获得第1行的值 """
+        return self.execute(*args, **kwargs).fetchone()
+
+    def exec2col(self, *args, **kwargs):
+        """ 获得第1列的值 """
+        return [row[0] for row in self.execute(*args, **kwargs).fetchall()]
+
+    # 兼容旧接口
+    exec_col = exec2col
+
+    def exec2df(self, *args, **kwargs):
+        """ 获得pandas.DataFrame类型的返回值 """
+        return pd.read_sql(*args, self, **kwargs)
 
     def __4_数据类型(self):
         pass
@@ -158,8 +170,10 @@ class SqlBase:
 
     def select_col(self, table_name, col):
         """ 获得一列数据，常使用的功能，所以做了一个封装
+
+        注意，"exec"前缀的方法一般返回的是迭代器，而"select"前缀获得一般是直接的全部列表、结果
         """
-        return [x[0] for x in self.execute(f'SELECT {col} FROM {table_name}').fetchall()]
+        return self.exec2col(f'SELECT {col} FROM {table_name}')
 
     def group_count(self, table_name, cols, count_column_name='cnt'):
         """ 【查】分组统计各组值组合出现次数
@@ -176,6 +190,53 @@ class SqlBase:
         records = self.execute(sql).fetchall()
         df = pd.DataFrame.from_records(records, columns=cols.split(',') + [count_column_name])
         return df
+
+    def get_count_by_altering_query(self, data_query: str) -> int:
+        """
+        从给定的SQL SELECT查询中获取行数计数。这个方法通过修改原始的SELECT查询，
+        将其转换为一个COUNT查询来实现计数。这种方法特别适用于在获取大量数据之前，
+        需要预估数据量的场景。
+
+        问题背景：
+        在进行大规模数据处理前，了解数据的规模可以帮助进行更有效的资源分配和性能优化。
+        传统的做法是分两步执行：首先计算数据总量，然后再执行实际的数据提取。
+        这个函数旨在通过单个查询来简化这一流程，减少数据库的负载和响应时间。
+
+        实现机制：
+        函数首先使用正则表达式识别出SQL查询的FROM关键词，这是因为无论SELECT查询的复杂程度如何，
+        计数的核心都是保留FROM及其后面的表和条件语句。然后，它构造一个新的COUNT查询，
+        替换原始查询中的SELECT部分。最后，函数执行这个新的查询并返回结果。
+
+        :param data_query (str): 原始的SQL SELECT查询字符串。
+        :return int: 查询结果的行数。
+
+        示例:
+        >> sql = SqlBase()
+        >> query = "SELECT id, name FROM users WHERE active = True"
+        >> count = sql.get_count_by_altering_query(query)
+        >> print(count)
+        45
+
+        注意:
+        - 这个函数假设输入的是合法的SQL SELECT查询。
+        - 函数依赖于数据库连接的execute方法能够正确执行转换后的COUNT查询。
+        - 在一些复杂的SQL查询中，特别是包含子查询、特殊函数或复杂的JOIN操作时，
+          请确保转换后的计数查询仍然有效。
+        """
+        # 使用正则表达式定位'FROM'（考虑各种大小写情况），并确保它前后是空格或语句的开始/结束
+        match = re.search(r'\bFROM\b', data_query, flags=re.IGNORECASE)
+        if match:
+            from_index = match.start()
+            count_query = 'SELECT COUNT(*) ' + data_query[from_index:]  # 构造计数查询
+            try:
+                result = self.execute(count_query).fetchone()  # 执行查询
+                return result[0] if result else 0  # 返回计数结果
+            except Exception as e:
+                print(f"Error executing count query: {e}")
+                return 0
+        else:
+            print("No 'FROM' keyword found in the data query.")
+            return 0
 
 
 class Connection(sqlite3.Connection, SqlBase):
@@ -219,12 +280,12 @@ class Connection(sqlite3.Connection, SqlBase):
     def __3_execute(self):
         pass
 
-    def exec_nametuple(self, *args, **kwargs):
+    def exec2nametuple(self, *args, **kwargs):
         cur = self.cursor()
         cur.row_factory = sqlite3.Row
         return cur.execute(*args, **kwargs)
 
-    def exec_dict(self, *args, **kwargs):
+    def exec2dict(self, *args, **kwargs):
         """ execute基础上，改成返回值为dict类型 """
 
         def dict_factory(cursor, row):
@@ -236,6 +297,9 @@ class Connection(sqlite3.Connection, SqlBase):
         cur = self.cursor()  # todo 不关是不是不好？如果出错了是不是会事务未结束导致无法修改表格结构？是否有auto close的机制？
         cur.row_factory = dict_factory
         return cur.execute(*args, **kwargs)
+
+    # 兼容老版本
+    exec_dict = exec2dict
 
     def __4_数据类型(self):
         pass

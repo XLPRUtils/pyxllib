@@ -70,7 +70,7 @@ class Connection(psycopg.Connection, SqlBase):
         """ 【查】表格有哪些字段
         """
         cmd = f"SELECT column_name FROM information_schema.columns WHERE table_name='{table_name}'"
-        return list(self.exec_col(cmd))
+        return self.exec2col(cmd)
 
     def ensure_column(self, table_name, col_name, *args, comment=None, **kwargs):
         super(Connection, self).ensure_column(table_name, col_name, *args, **kwargs)
@@ -401,7 +401,7 @@ class XlprDb(Connection):
         TODO 功能还可以增加：gpu显卡温度、硬盘读写速率检查、网络上传下载带宽
         """
         # 1 服务器列表
-        host_names = list(self.exec_col('SELECT host_name FROM hosts WHERE id > 1 ORDER BY id'))
+        host_names = self.exec2col('SELECT host_name FROM hosts WHERE id > 1 ORDER BY id')
         host_cpu_gb = {h: v for h, v in self.execute('SELECT host_name, cpu_gb FROM hosts')}
 
         # 2 去所有服务器取使用情况
@@ -466,7 +466,6 @@ class XlprDb(Connection):
         :param list ls: n*3，第1列是时间，第2列是总值，第3列是每个用户具体的数据
         """
         from pyecharts.charts import Line
-        from pyxllib.data.echarts import get_render_body
 
         map_user_name = {}
         for ks, v in self.execute('SELECT account_names, name FROM users'):
@@ -516,7 +515,7 @@ class XlprDb(Connection):
                              to_list([x[2].get(user, 0) for x in ls]),
                              areaStyle={}, stack='Total', emphasis={'focus': 'series'})
 
-        return get_render_body(chart), sum(all_users_usaged.values())
+        return '<body>' + chart.render_embed() + '</body>', sum(all_users_usaged.values())
 
     def dbview_cpu(self, recent=datetime.timedelta(days=1), date_trunc='hour'):
         from pyxllib.data.echarts import render_echart_html
