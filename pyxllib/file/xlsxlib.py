@@ -17,13 +17,14 @@ check_install_package('yattag')
 check_install_package('jsonpickle')
 
 from collections import Counter, OrderedDict, defaultdict
+import csv
 import datetime
+from itertools import islice
 import json
 import math
 from pathlib import Path
 import random
 import re
-import csv
 
 import xlrd
 
@@ -1780,6 +1781,28 @@ def build_range_address(left=None, top=None, right=None, bottom=None):
         return f"{start_cell}:{end_cell}"
 
 
+def combine_addresses(*addrs):
+    # 初始化最小和最大行列值
+    min_left, min_top, max_right, max_bottom = float('inf'), float('inf'), 0, 0
+
+    # 遍历所有地址
+    for addr in addrs:
+        # 解析每个地址
+        addr_dict = parse_range_address(addr)
+
+        # 更新最小和最大行列值
+        if addr_dict['left'] is not None:
+            min_left = min(min_left, addr_dict['left'])
+            max_right = max(max_right, addr_dict['right'] if addr_dict['right'] is not None else addr_dict['left'])
+        if addr_dict['top'] is not None:
+            min_top = min(min_top, addr_dict['top'])
+            max_bottom = max(max_bottom, addr_dict['bottom'] if addr_dict['bottom'] is not None else addr_dict['top'])
+
+    # 构建新的地址字符串
+    new_addr = f"{get_column_letter(min_left)}{min_top}:{get_column_letter(max_right)}{max_bottom}"
+    return new_addr
+
+
 def is_string_type(value):
     """检查值是否为字符串类型，不是数值或日期类型"""
     # 首先检查日期类型
@@ -2195,26 +2218,17 @@ def extract_workbook_summary2(file_path, *,
     wb = process_file(file_path, suffix, timeout_seconds, keep_links, ignore_errors)
 
     # 2 提取摘要
-    with TicToc('提取摘要'):
-        res = wb.extract_summary2()
-        res['fileName'] = Path(file_path).name
+    # with TicToc('提取摘要'):
+    res = wb.extract_summary2()
+    res['fileName'] = Path(file_path).name
 
     # todo 摘要精简？
 
     return res
 
 
-def extract_workbook_summary2plus(file_path, **kwargs):
-    """ 增加了全局ratio的计算 """
-    # 1 主体摘要
-    data = extract_workbook_summary2(file_path, **kwargs)
-    if not data:
-        return data
-
-    # 2 增加一些特征计算
-    # todo 后续估计要改成按table的颗粒度统计以下特征
-
-    # 2.1 中文率
+def update_raw_summary2(data):
+    # 1 中文率
     if 'chineseContentRatio' not in data:
         texts = [data['fileName']]  # 文件名和表格名都要加上
         texts += [x for x in data['sheetNames']]
@@ -2223,7 +2237,7 @@ def extract_workbook_summary2plus(file_path, **kwargs):
         all_text = ''.join(map(str, texts))
         data['chineseContentRatio'] = round(calc_chinese_ratio(all_text), 4)
 
-    # 2.2 非空单元格率
+    # 2 非空单元格率
     if 'nonEmptyCellRatio' not in data:
         content_area, total_area = 0, 0
         for sheet in data['sheets']:
@@ -2243,49 +2257,271 @@ def extract_workbook_summary2plus(file_path, **kwargs):
     return data
 
 
-def worksheet_find_tables(ws, used_range=None):
-    """ 找到该sheet里可能有哪些tables区域 """
-    if used_range is None:
-        used_range = ws.get_usedrange()
+def extract_workbook_summary2plus(file_path, **kwargs):
+    """ 增加了全局ratio的计算 """
+    # 1 主体摘要
+    data = extract_workbook_summary2(file_path, **kwargs)
+    if not data:
+        return data
 
-    # 1 先给每个单元格计算一个权重标记
+    # 2 增加一些特征计算
+    # todo 后续估计要改成按table的颗粒度统计以下特征
 
-    # 2
+    data = update_raw_summary2(data)
+    return data
 
 
-def extract_workbook_summary3(file_path, *,
-                              timeout_seconds=None,
-                              ignore_errors=False,
-                              keep_links=False):
-    """
-    :param keep_links: 是否保留外部表格链接数据。如果保留，打开好像会有点问题。
-    """
-    # 1 读取文件wb
-    file_path = Path(file_path)
-    suffix = file_path.suffix.lower()
-    if suffix in ('.xlsx', '.xlsm'):
-        try:
-            if timeout_seconds is None:
-                wb: XlWorkbook = openpyxl.load_workbook(file_path, keep_links=keep_links)
-            else:
-                with Timeout(timeout_seconds):
-                    wb: XlWorkbook = openpyxl.load_workbook(file_path, keep_links=keep_links)
-        except Exception as e:
-            if ignore_errors:
-                return {}
-            else:
-                raise e
-    elif suffix == '.xls':  # 不推荐（这是在xlrd复现的一套摘要算法），只是部署的使用
-        wb = convert_xls_to_xlsx(file_path)
-    elif suffix == '.csv':
-        wb = convert_csv_to_xlsx(file_path)
-    else:
-        raise ValueError('不支持的文件类型')
+def summary2summary3(summary2, summary_limit_len=3000):
+    def reduce_step1(y):
+        for sheet in y['sheets']:
+            new_cells = {}
+            for addr, val in sheet['cells'].items():
+                if val != '':
+                    new_cells[addr] = val
+            sheet['cells'] = new_cells
 
-    # 2 提取摘要
-    res = wb.extract_summary3()
-    res['fileName'] = Path(file_path).name
+        cur_summary_len = len(json.dumps(y, ensure_ascii=False))
+        return cur_summary_len
 
-    # todo 摘要精简？
+    def reduce_step2(y, cur_summary_len):
+        """ 这个算法主要是为了解决单个单元格内容过长，导致整个表格摘要的总长度超过了预设限制的问题。
+        在数据摘要或者信息提取的场景中，我们常常需要将信息压缩到一定长度以便展示或处理，但同时又希望保留尽可能多的有用信息。
+        这就要求我们智能地缩减内容，特别是在单元格内容不均匀，某些格特别长的情况下。
 
-    return res
+        **基本解决思路**：
+        1. 设定长度限制：首先明确总摘要长度的限制（`summary_limit_len`）和单个单元格内容的限制（`cell_limit_len`）。
+        2. 计算超额长度：计算当前总长度超出限制的部分（`delta_len`），这是我们需要通过截断来减少的目标长度。
+        3. 确定截断策略：为了尽可能保留有用信息，我们选择从最长的单元格开始截断，并且希望通过截断尽可能多的过长单元格来平衡摘要的总长度。
+
+        **具体的求解步骤**：
+        1. 筛选和排序：首先，从所有单元格中筛选出长度超过基准长度（`ref_cell_len`）的单元格，并按长度降序排序。
+        这样做是为了优先处理那些长度远超其他单元格的“异常”值。
+        2. 计算可能的减少长度：遍历这些超长单元格，逐个计算如果将当前单元格以及所有比它长的单元格都截断到下一个单元格的长度（或基准长度），
+        可以减少多少总长度。这个累计值被称为`possible_reduction`。
+        3. 确定截断点：在遍历的过程中，一旦`possible_reduction`达到或超过了我们的目标减少长度`delta_len`，或者遍历到了最后一个单元格，
+        我们就找到了一个合适的截断点。这个截断点将是当前单元格长度和下一个单元格长度（或基准长度）之间的某个值，确保截断后总长度不超过限制。
+        4. 执行截断：按照确定的截断点，更新所有需要截断的单元格的内容，并标记处理模式为“截断模式”。
+
+        通过这个算法，我们能够在满足总长度限制的前提下，尽可能多地保留每个单元格的内容，
+        特别是对于那些内容本身就不是很长的单元格，可以避免或减少不必要的信息损失。
+        """
+        delta_len = cur_summary_len - summary_limit_len  # 计算需要减少的长度
+        ref_cell_len = int(summary_limit_len * 0.05)  # 基准长度
+        # 获取所有单元格，及其长度，只考虑大于基准长度的单元格
+        all_cells = [(sheet, addr, val, len(val)) for sheet in y['sheets'] for addr, val in sheet['cells'].items()
+                     if isinstance(val, str) and len(val) > ref_cell_len]
+        # 按长度降序排序
+        all_cells.sort(key=lambda x: -x[3])
+        # 逐个尝试截断单元格直到满足长度要求
+        possible_reduction = 0
+        for i, (_, _, _, length) in enumerate(all_cells):
+            # 计算如果截断到下一个单元格长度会减少多少
+            next_len = all_cells[i + 1][3] if i + 1 < len(all_cells) else ref_cell_len
+            # 当前单元格长度与下一个单元格长度（或基准长度）的差值就是这一轮可能减少的长度
+            # 对于第i个单元格，它和之前所有更长的单元格都将减少这么多长度
+            possible_reduction += (length - next_len) * (i + 1)
+            # 确定截断长度
+            if possible_reduction >= delta_len or i == len(all_cells) - 1:
+                truncation_length = length - max(delta_len // (i + 1), next_len)
+                # 截断每个超长单元格
+                for j in range(i + 1):
+                    sheet, addr, val, _ = all_cells[j]
+                    sheet['cells'][addr] = sheet['cells'][addr][:max(truncation_length - 3, 5)] + '...'
+                break
+
+        return cur_summary_len - possible_reduction
+
+    def reduce_step3(y, cur_summary_len):
+        # 每个sheet本身其他摘要，按照5个单元格估算
+        total_cells_num = sum([(len(st['cells']) + 5) for st in y['sheets']])
+        avg_cell_len = cur_summary_len / total_cells_num
+        # 目标删除单元格数量，向上取整
+        target_reduce_cells_num = int((cur_summary_len - summary_limit_len) / avg_cell_len + 0.5)
+
+        # 相同区域，头尾至少要留2行，然后考虑压缩量，一般一块range至少要10行同构数据，进行中间至少6行的压缩描述才有意义
+        # 考虑重要性，应该是从末尾表格，末尾数据往前检索压缩，直到压缩量满足要求
+
+        for sheet in reversed(y['sheets']):
+            cells = sheet['cells']
+            # 1 对单元格，先按行分组
+            last_line_id = -1
+            row_groups = []
+            for addr, val in cells.items():
+                m = re.search(r'\d+', addr)
+                if not m:  # 应该都一定能找到的，这个判断是为了防止报错
+                    continue
+                line_id = int(m.group())
+
+                val_type_tag = '@' if isinstance(val, str) else '#'
+                cell_tag = re.sub(r'\d+', '', addr) + val_type_tag
+
+                if line_id == last_line_id:
+                    row_groups[-1].append([addr, cell_tag])
+                else:
+                    row_groups.append([[addr, cell_tag]])
+                last_line_id = line_id
+
+            # 2 算出每一行的row_tag，并按照row_tag再分组
+            last_row_tag = ''
+            rows_groups = []
+            for row in row_groups:
+                row_tag = ''.join([cell_tag for _, cell_tag in row])
+                if row_tag == last_row_tag:
+                    rows_groups[-1].append(row)
+                else:
+                    rows_groups.append([row])
+                last_row_tag = row_tag
+
+            # 3 开始压缩
+            def extract_cells_from_rows(rows):
+                for row in rows:
+                    for addr, _ in row:
+                        new_cells[addr] = cells[addr]
+
+            new_cells = {}
+            for rows in rows_groups:
+                if len(rows) < 10:
+                    extract_cells_from_rows(rows)
+                else:  # 压缩中间的数据
+                    # 如果评估到最终摘要可能太小，要收敛下删除的范围
+                    n, m = len(rows), len(rows[0])
+                    target_n = int(target_reduce_cells_num / m + 0.5)  # 本来应该删除多少行才行
+                    cur_n = n - 4 if target_n > n - 4 else target_n  # 实际删除多少行
+                    left_n = n - cur_n  # 剩余多少行
+                    b = left_n // 2
+                    a = left_n - b
+
+                    extract_cells_from_rows(rows[:a])
+                    addr = combine_addresses(rows[a][0][0], rows[-b - 1][-1][0])
+                    # new_cells[addr] = '这块区域的内容跟前面几行、后面几行的内容结构是一致的，省略显示'
+                    new_cells[addr] = '...'
+                    extract_cells_from_rows(rows[-b:])
+
+                    target_reduce_cells_num -= cur_n * m
+                    if target_reduce_cells_num <= 0:
+                        break
+
+            sheet['cells'] = new_cells
+
+        cur_summary_len = len(json.dumps(y, ensure_ascii=False))
+        return cur_summary_len
+
+    def reduce_step4(y, cur_summary_len):
+        # 1 预计要删除单元格数
+        # 每个sheet本身其他摘要，按照5个单元格估算
+        total_cells_num = sum([(len(st['cells']) + 5) for st in y['sheets']])
+        avg_cell_len = cur_summary_len / total_cells_num
+        # 目标删除单元格数量，向上取整
+        target_reduce_cells_num = int((cur_summary_len - summary_limit_len) / avg_cell_len + 0.5)
+
+        # 2 每张表格的单元格数
+        sheet_cells_num = [len(st['cells']) for st in y['sheets']]
+        total_cells_num = sum([n for n in sheet_cells_num])
+
+        # 3 所有的单元格如果都不够删，那就先把所有cells删了再说
+        if total_cells_num < target_reduce_cells_num:
+            for st in y['sheets']:
+                st['cells'] = {}
+            return len(json.dumps(y, ensure_ascii=False))
+
+        # 4 否则每张表按照比例删单元格，只保留前面部分的单元格
+        left_rate = 1 - target_reduce_cells_num / total_cells_num
+        while True:
+            for st in y['sheets']:
+                st['cells'] = dict(islice(st['cells'].items(), int(left_rate * len(st['cells']))))
+            cur_summary_len = len(json.dumps(y, ensure_ascii=False))
+            if cur_summary_len <= summary_limit_len:
+                return cur_summary_len
+            if left_rate * total_cells_num < 1:
+                break
+            else:  # 缩小保留比例，再试
+                left_rate *= 0.8
+
+        return cur_summary_len
+
+    def reduce_step5(y, cur_summary_len):
+        """ 计算平均每张表的长度，保留前面部分的表格 """
+        n = len(y['sheets'])
+        avg_sheet_len = cur_summary_len / n
+        target_reduce_sheet_num = int((cur_summary_len - summary_limit_len) / avg_sheet_len + 0.5)
+        y['sheets'] = y['sheets'][:n - target_reduce_sheet_num]
+
+        while y['sheets']:
+            cur_summary_len = len(json.dumps(y, ensure_ascii=False))
+            if cur_summary_len <= summary_limit_len:
+                return cur_summary_len
+            y['sheets'] = y['sheets'][:-1]  # 依次尝试删除最后一张表格的详细信息
+
+    def reduce_step_by_step(y):
+        mode_tags = [
+            'Delete empty cell',
+            'Omit the longer content and replace it with...',
+            'Omit lines with the same structure',
+            'Omit later lines',
+            'Omit later sheets'
+        ]
+
+        # 情况0：摘要本来就不大
+        cur_summary_len = len(json.dumps(y, ensure_ascii=False))
+        if cur_summary_len <= summary_limit_len:
+            return y
+
+        # 情况1：删除空单元格
+        cur_summary_len = reduce_step1(y)
+        if cur_summary_len <= summary_limit_len:
+            y['mode'] = ', '.join(mode_tags[:1])
+            return y
+
+        # 情况2：单个单元格内容过长的，省略显示
+        cur_summary_len = reduce_step2(y, cur_summary_len)
+        if cur_summary_len <= summary_limit_len:
+            y['mode'] = ', '.join(mode_tags[:2])
+            return y
+
+        # 情况3（核心）：同构数据，省略显示（有大量相同行数据，折叠省略表达）
+        cur_summary_len = reduce_step3(y, cur_summary_len)
+        if cur_summary_len <= summary_limit_len:
+            y['mode'] = ', '.join(mode_tags[:3])
+            return y
+
+        # 情况4：每张表都按比例删除后面部分的单元格
+        cur_summary_len = reduce_step4(y, cur_summary_len)
+        if cur_summary_len <= summary_limit_len:
+            y['mode'] = ', '.join(mode_tags[:4])
+            return y
+
+        # 情况5：从后往前删每张表格的详细信息
+        reduce_step5(y, cur_summary_len)
+        y['mode'] = ', '.join(mode_tags[:5])
+        return y
+
+    x = summary2
+    y = {
+        'fileName': x['fileName'],
+        'sheetNames': x['sheetNames'],
+        'sheets': x['sheets'],
+        'mode': 'Complete information',  # 模式0是全量数据
+    }
+
+    # 处理前确保下cells字段存在，避免后续很多处理过程要特判
+    for st in y['sheets']:
+        if 'cells' not in st:
+            st['cells'] = {}
+
+    y = reduce_step_by_step(y)
+
+    # 但是最后结果还是去掉空cells
+    for st in y['sheets']:
+        if not st['cells']:
+            del st['cells']
+
+    return y
+
+
+def extract_workbook_summary3(file_path, summary_limit_len=4000, **kwargs):
+    """ 增加了全局ratio的计算 """
+    data = extract_workbook_summary2plus(file_path, **kwargs)
+    if not data:
+        return data
+    data = summary2summary3(data, summary_limit_len)
+    return data

@@ -17,6 +17,8 @@ import pandas as pd
 from pyxllib.prog.pupil import dprint, typename
 from pyxllib.file.specialist import XlPath
 
+pd.options.display.unicode.east_asian_width = True  # 优化中文输出对齐问题
+
 
 def treetable(childreds, parents, arg3=None, nodename_colname=None):
     """ 输入childres子结点id列表，和parents父结点id列表

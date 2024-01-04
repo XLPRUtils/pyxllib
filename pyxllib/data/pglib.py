@@ -93,11 +93,13 @@ class Connection(psycopg.Connection, SqlBase):
         # cur.close()
         return data
 
-    def exec_dict(self, *args, **kwargs):
+    def exec2dict(self, *args, **kwargs):
         cur = self.cursor(row_factory=psycopg.rows.dict_row)
         data = cur.execute(*args, **kwargs)
         # cur.close()
         return data
+
+    exec_dict = exec2dict
 
     def __4_数据类型(self):
         pass

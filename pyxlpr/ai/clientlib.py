@@ -442,7 +442,8 @@ class XlAiClient:
         """ 通用文字识别（高精度版）: https://cloud.baidu.com/doc/OCR/s/1k3h7y3db """
         sz = 10 * 1024 ** 2
         buffer, ratio = self.adjust_image(image, max_length=8192, limit_b64buffer_size=sz, to_buffer=True)
-        result_dict = self.run_aipocr_with_db(self._aipocr.basicAccurate, buffer, options, save_buffer_threshold_size=sz)
+        result_dict = self.run_aipocr_with_db(self._aipocr.basicAccurate, buffer, options,
+                                              save_buffer_threshold_size=sz)
         result_dict = ToLabelmeLike.list_word(result_dict, 1 / ratio, 'words_result', 'words_result_num')
         return result_dict
 
@@ -1112,6 +1113,8 @@ class XlAiClient:
                               json=data, headers=self._priu_header, timeout=timeout)
         except requests.exceptions.Timeout:
             # 为了方便处理，统一也返回ConnectionError
+            raise requests.exceptions.ConnectionError()
+        except Exception:
             raise requests.exceptions.ConnectionError()
 
         if r.status_code == 200:
