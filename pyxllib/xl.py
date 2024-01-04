@@ -6,7 +6,13 @@
 
 """ pyxllib常用功能
 """
-import fire
+
+try:
+    import fire
+except:
+    # 除了模块找不到，在labelme场景可能还有AttributeError: 'NoneType' object has no attribute 'isatty'
+    # 遇到这种情况，都可以忽略
+    pass
 
 from pyxllib.file.packlib import *
 
