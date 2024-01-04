@@ -32,7 +32,7 @@ import requests
 from tqdm import tqdm
 
 try:
-    from transformers import GPT2TokenizerFast
+    from transformers import AutoTokenizer
 except ModuleNotFoundError:
     pass
 
@@ -54,13 +54,17 @@ class Tokenizer:
     def get_tokenizer(cls):
         """ 获取tokenizer，第一次调用时进行初始化 """
 
-        if Tokenizer._tokenizer is None:
+        if cls._tokenizer is None:
             # 根本没必要每次都尝试连接官网，本地有就不要老是sb的尝试连接huggingface
             # 而且官网连接也不稳，这里换成我自己的服务器中转
-            gpt2_dir = XlPath.tempdir() / 'huggingface_gpt2'
-            ensure_localdir(gpt2_dir, 'https://xmutpriu.com/download/huggingface_gpt2.zip')
-            Tokenizer._tokenizer = GPT2TokenizerFast.from_pretrained(gpt2_dir)
-        return Tokenizer._tokenizer
+            # gpt2_dir = XlPath.tempdir() / 'huggingface_gpt2'
+            # ensure_localdir(gpt2_dir, 'https://xmutpriu.com/download/huggingface_gpt2.zip')
+            # Tokenizer._tokenizer = GPT2TokenizerFast.from_pretrained(gpt2_dir)
+            # 240103周三21:23，hx给过的新评测模型
+            gpt2_dir = XlPath.tempdir() / 'Atom-CL-SS'
+            ensure_localdir(gpt2_dir, 'https://xmutpriu.com/download/Atom-CL-SS.zip')
+            cls._tokenizer = AutoTokenizer.from_pretrained(gpt2_dir, trust_remote_code=True)
+        return cls._tokenizer
 
     @classmethod
     def tokenize(cls, paragraph, max_length=500):
@@ -73,7 +77,7 @@ class Tokenizer:
         >>> Tokenizer.tokenize('Hello, world! 汉字 123.14 35')
         ['Hello', ',', 'Ġworld', '!', 'Ġæ', '±', 'ī', 'åŃ', 'Ĺ', 'Ġ123', '.', '14', 'Ġ35']
         """
-        tokenizer = Tokenizer.get_tokenizer()
+        tokenizer = cls.get_tokenizer()
 
         # 对段落进行切分
         paragraph_slices = [paragraph[i:i + max_length] for i in range(0, len(paragraph), max_length)]
