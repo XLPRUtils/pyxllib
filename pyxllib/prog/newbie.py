@@ -267,7 +267,7 @@ def human_readable_number(value, base_type='K', precision=4):
         'K': (['', 'K', 'M', 'G', 'T', 'P', 'E', 'Z', 'Y'], 1000),
         'KB': (['', 'KB', 'MB', 'GB', 'TB', 'PB', 'EB', 'ZB', 'YB'], 1024),
         'KiB': (['', 'KiB', 'MiB', 'GiB', 'TiB', 'PiB', 'EiB', 'ZiB', 'YiB'], 1024),
-        '万': (['', '万', '亿', '兆', '京', '垓', '秭', '穰'], 10000)
+        '万': (['', '万', '亿', '万亿', '亿亿'], 10000)
     }.get(base_type, ([''], 1))  # 默认为空单位和基数1
 
     x, i = abs(value), 0

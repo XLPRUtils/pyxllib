@@ -92,8 +92,8 @@ def is_valid_excel_range(range):
     if ':' in range:
         start, end = range.split(':')
         return (is_valid_excel_cell(start) or start.isdigit() or re.fullmatch(r'[A-Z]+', start)) and \
-               (is_valid_excel_cell(end) or end.isdigit() or re.fullmatch(r'[A-Z]+', end)) and \
-               start <= end
+            (is_valid_excel_cell(end) or end.isdigit() or re.fullmatch(r'[A-Z]+', end)) and \
+            start <= end
     else:
         return is_valid_excel_cell(range)
 
@@ -2181,9 +2181,13 @@ def extract_workbook_summary(file_path, mode=0,
 def extract_workbook_summary2(file_path, *,
                               timeout_seconds=None,
                               ignore_errors=False,
-                              keep_links=False):
+                              keep_links=False,
+                              mode=0):
     """
     :param keep_links: 是否保留外部表格链接数据。如果保留，打开好像会有点问题。
+    :param mode:
+        0，最原始的summary3摘要
+        1，添加当前工作表、单元格位置的信息
     """
     # 1 读取文件wb
     file_path = Path(file_path)
@@ -2221,6 +2225,13 @@ def extract_workbook_summary2(file_path, *,
     # with TicToc('提取摘要'):
     res = wb.extract_summary2()
     res['fileName'] = Path(file_path).name
+
+    if mode == 0:
+        pass
+    elif mode == 1:
+        res['ActiveSheet'] = wb.active.title
+        # todo py好像没办法提取Selection。但jsa、vba应该要尽力取出这些相关的特征，尤其在操作等场景很有用
+        # res['SelectionAddress'] = ...
 
     # todo 摘要精简？
 
@@ -2271,69 +2282,73 @@ def extract_workbook_summary2plus(file_path, **kwargs):
     return data
 
 
-def summary2summary3(summary2, summary_limit_len=3000):
-    def reduce_step1(y):
-        for sheet in y['sheets']:
+class WorkbookSummary3:
+    """ 计算summary3及衍生版本需要的一些功能组件 """
+
+    @classmethod
+    def reduce1_delete_empty_cell(cls, summary3):
+        """ 删除空单元格 """
+        for sheet in summary3['sheets']:
             new_cells = {}
             for addr, val in sheet['cells'].items():
                 if val != '':
                     new_cells[addr] = val
             sheet['cells'] = new_cells
 
-        cur_summary_len = len(json.dumps(y, ensure_ascii=False))
-        return cur_summary_len
+    @classmethod
+    def reduce2_truncate_overlong_cells(cls, summary3, summary_limit_len, *, cur_summary_len=None):
+        """ 截断过长的单元格内容以满足表格摘要总长度限制。
 
-    def reduce_step2(y, cur_summary_len):
-        """ 这个算法主要是为了解决单个单元格内容过长，导致整个表格摘要的总长度超过了预设限制的问题。
-        在数据摘要或者信息提取的场景中，我们常常需要将信息压缩到一定长度以便展示或处理，但同时又希望保留尽可能多的有用信息。
-        这就要求我们智能地缩减内容，特别是在单元格内容不均匀，某些格特别长的情况下。
+        此算法旨在处理单个或多个单元格内容过长时，整个表格摘要总长度超过预设限制的问题。在保留尽可能多的有用信息的同时，智能地缩减内容长度。
 
-        **基本解决思路**：
-        1. 设定长度限制：首先明确总摘要长度的限制（`summary_limit_len`）和单个单元格内容的限制（`cell_limit_len`）。
-        2. 计算超额长度：计算当前总长度超出限制的部分（`delta_len`），这是我们需要通过截断来减少的目标长度。
-        3. 确定截断策略：为了尽可能保留有用信息，我们选择从最长的单元格开始截断，并且希望通过截断尽可能多的过长单元格来平衡摘要的总长度。
+        :param dict summary3: 表格摘要数据，包含多个sheet及其单元格内容
+        :param int summary_limit_len: 表格摘要的最大长度限制
+        :param int cur_summary_len: 当前表格摘要的长度，如果不提供，则会计算
+        :return int: 调整后的表格摘要长度
 
-        **具体的求解步骤**：
-        1. 筛选和排序：首先，从所有单元格中筛选出长度超过基准长度（`ref_cell_len`）的单元格，并按长度降序排序。
-        这样做是为了优先处理那些长度远超其他单元格的“异常”值。
-        2. 计算可能的减少长度：遍历这些超长单元格，逐个计算如果将当前单元格以及所有比它长的单元格都截断到下一个单元格的长度（或基准长度），
-        可以减少多少总长度。这个累计值被称为`possible_reduction`。
-        3. 确定截断点：在遍历的过程中，一旦`possible_reduction`达到或超过了我们的目标减少长度`delta_len`，或者遍历到了最后一个单元格，
-        我们就找到了一个合适的截断点。这个截断点将是当前单元格长度和下一个单元格长度（或基准长度）之间的某个值，确保截断后总长度不超过限制。
-        4. 执行截断：按照确定的截断点，更新所有需要截断的单元格的内容，并标记处理模式为“截断模式”。
-
-        通过这个算法，我们能够在满足总长度限制的前提下，尽可能多地保留每个单元格的内容，
-        特别是对于那些内容本身就不是很长的单元格，可以避免或减少不必要的信息损失。
+        算法执行流程：
+        1. 计算基准单元格长度和当前摘要长度超出部分（delta_length）。
+        2. 筛选出超过基准长度的单元格并按长度降序排序。
+        3. 逐个尝试截断单元格直到总长度满足要求或处理完所有单元格。
         """
-        delta_len = cur_summary_len - summary_limit_len  # 计算需要减少的长度
-        ref_cell_len = int(summary_limit_len * 0.05)  # 基准长度
-        # 获取所有单元格，及其长度，只考虑大于基准长度的单元格
-        all_cells = [(sheet, addr, val, len(val)) for sheet in y['sheets'] for addr, val in sheet['cells'].items()
-                     if isinstance(val, str) and len(val) > ref_cell_len]
-        # 按长度降序排序
-        all_cells.sort(key=lambda x: -x[3])
-        # 逐个尝试截断单元格直到满足长度要求
+
+        # 如果未提供当前摘要长度，则计算之
+        if cur_summary_len is None:
+            cur_summary_len = len(json.dumps(summary3, ensure_ascii=False))
+
+        # 1. 计算基准单元格长度
+        total_cells_num = sum(len(st['cells']) + 5 for st in summary3['sheets'])
+        base_cell_length = int(-60 * math.log(total_cells_num, 10) + 260)  # 从200趋近到20
+        base_cell_length = min(int(summary_limit_len * 0.05), base_cell_length)
+        base_cell_length = max(int(summary_limit_len * 0.005), base_cell_length)
+
+        # 2. 预提取全部单元格数据信息并计算需要减少的长度
+        delta_length = cur_summary_len - summary_limit_len  # 计算需要减少的长度
+        overlong_cells = [(sheet, addr, val, len(val)) for sheet in summary3['sheets']
+                          for addr, val in sheet['cells'].items() if
+                          isinstance(val, str) and len(val) > base_cell_length]
+        overlong_cells.sort(key=lambda x: -x[3])  # 按长度降序排序
+
+        # 3. 逐个尝试截断单元格直到满足长度要求
         possible_reduction = 0
-        for i, (_, _, _, length) in enumerate(all_cells):
-            # 计算如果截断到下一个单元格长度会减少多少
-            next_len = all_cells[i + 1][3] if i + 1 < len(all_cells) else ref_cell_len
-            # 当前单元格长度与下一个单元格长度（或基准长度）的差值就是这一轮可能减少的长度
-            # 对于第i个单元格，它和之前所有更长的单元格都将减少这么多长度
+        for i, (_, _, _, length) in enumerate(overlong_cells):
+            next_len = overlong_cells[i + 1][3] if i + 1 < len(overlong_cells) else base_cell_length
             possible_reduction += (length - next_len) * (i + 1)
-            # 确定截断长度
-            if possible_reduction >= delta_len or i == len(all_cells) - 1:
-                truncation_length = length - max(delta_len // (i + 1), next_len)
-                # 截断每个超长单元格
+            if possible_reduction >= delta_length or i == len(overlong_cells) - 1:
                 for j in range(i + 1):
-                    sheet, addr, val, _ = all_cells[j]
-                    sheet['cells'][addr] = sheet['cells'][addr][:max(truncation_length - 3, 5)] + '...'
+                    sheet, addr, val, _ = overlong_cells[j]
+                    sheet['cells'][addr] = val[:next_len - 3] + '...'  # 更新单元格内容
                 break
 
         return cur_summary_len - possible_reduction
 
-    def reduce_step3(y, cur_summary_len):
+    @classmethod
+    def reduce3_fold_rows(cls, summary3, summary_limit_len, *, cur_summary_len=None):
+        if cur_summary_len is None:
+            cur_summary_len = len(json.dumps(summary3, ensure_ascii=False))
+
         # 每个sheet本身其他摘要，按照5个单元格估算
-        total_cells_num = sum([(len(st['cells']) + 5) for st in y['sheets']])
+        total_cells_num = sum([(len(st['cells']) + 5) for st in summary3['sheets']])
         avg_cell_len = cur_summary_len / total_cells_num
         # 目标删除单元格数量，向上取整
         target_reduce_cells_num = int((cur_summary_len - summary_limit_len) / avg_cell_len + 0.5)
@@ -2341,7 +2356,7 @@ def summary2summary3(summary2, summary_limit_len=3000):
         # 相同区域，头尾至少要留2行，然后考虑压缩量，一般一块range至少要10行同构数据，进行中间至少6行的压缩描述才有意义
         # 考虑重要性，应该是从末尾表格，末尾数据往前检索压缩，直到压缩量满足要求
 
-        for sheet in reversed(y['sheets']):
+        for sheet in reversed(summary3['sheets']):
             cells = sheet['cells']
             # 1 对单元格，先按行分组
             last_line_id = -1
@@ -2403,32 +2418,30 @@ def summary2summary3(summary2, summary_limit_len=3000):
 
             sheet['cells'] = new_cells
 
-        cur_summary_len = len(json.dumps(y, ensure_ascii=False))
-        return cur_summary_len
+    @classmethod
+    def reduce4_truncate_cells(cls, y, summary_limit_len, *, cur_summary_len=None):
+        if cur_summary_len is None:
+            cur_summary_len = len(json.dumps(y, ensure_ascii=False))
 
-    def reduce_step4(y, cur_summary_len):
         # 1 预计要删除单元格数
+        sheet_cells_num = [len(st['cells']) for st in y['sheets']]
         # 每个sheet本身其他摘要，按照5个单元格估算
-        total_cells_num = sum([(len(st['cells']) + 5) for st in y['sheets']])
+        total_cells_num = sum(sheet_cells_num) + len(sheet_cells_num) * 5
         avg_cell_len = cur_summary_len / total_cells_num
         # 目标删除单元格数量，向上取整
         target_reduce_cells_num = int((cur_summary_len - summary_limit_len) / avg_cell_len + 0.5)
 
-        # 2 每张表格的单元格数
-        sheet_cells_num = [len(st['cells']) for st in y['sheets']]
-        total_cells_num = sum([n for n in sheet_cells_num])
-
-        # 3 所有的单元格如果都不够删，那就先把所有cells删了再说
+        # 2 所有的单元格如果都不够删，那就先把所有cells删了再说
         if total_cells_num < target_reduce_cells_num:
             for st in y['sheets']:
                 st['cells'] = {}
             return len(json.dumps(y, ensure_ascii=False))
 
-        # 4 否则每张表按照比例删单元格，只保留前面部分的单元格
+        # 3 否则每张表按照比例删单元格，只保留前面部分的单元格
         left_rate = 1 - target_reduce_cells_num / total_cells_num
         while True:
-            for st in y['sheets']:
-                st['cells'] = dict(islice(st['cells'].items(), int(left_rate * len(st['cells']))))
+            for i, st in enumerate(y['sheets']):
+                st['cells'] = dict(islice(st['cells'].items(), int(left_rate * sheet_cells_num[i])))
             cur_summary_len = len(json.dumps(y, ensure_ascii=False))
             if cur_summary_len <= summary_limit_len:
                 return cur_summary_len
@@ -2439,8 +2452,12 @@ def summary2summary3(summary2, summary_limit_len=3000):
 
         return cur_summary_len
 
-    def reduce_step5(y, cur_summary_len):
+    @classmethod
+    def reduce5_truncate_sheets(cls, y, summary_limit_len, *, cur_summary_len=None):
         """ 计算平均每张表的长度，保留前面部分的表格 """
+        if cur_summary_len is None:
+            cur_summary_len = len(json.dumps(y, ensure_ascii=False))
+
         n = len(y['sheets'])
         avg_sheet_len = cur_summary_len / n
         target_reduce_sheet_num = int((cur_summary_len - summary_limit_len) / avg_sheet_len + 0.5)
@@ -2452,76 +2469,251 @@ def summary2summary3(summary2, summary_limit_len=3000):
                 return cur_summary_len
             y['sheets'] = y['sheets'][:-1]  # 依次尝试删除最后一张表格的详细信息
 
-    def reduce_step_by_step(y):
-        mode_tags = [
-            'Delete empty cell',
-            'Omit the longer content and replace it with...',
-            'Omit lines with the same structure',
-            'Omit later lines',
-            'Omit later sheets'
-        ]
+    @classmethod
+    def summary2_to_summary3(cls, summary2, summary_limit_len=4000):
+        """ 将summary2转换成summary3 """
 
-        # 情况0：摘要本来就不大
-        cur_summary_len = len(json.dumps(y, ensure_ascii=False))
-        if cur_summary_len <= summary_limit_len:
+        def reduce_step_by_step(y):
+            mode_tags = [
+                'Delete empty cell',
+                'Omit the longer content and replace it with...',
+                'Omit lines with the same structure',
+                'Omit later lines',
+                'Omit later sheets'
+            ]
+
+            # 0 摘要本来就不大
+            cur_summary_len = len(json.dumps(y, ensure_ascii=False))
+            if cur_summary_len <= summary_limit_len:
+                return y
+
+            # 1 删除空单元格
+            cls.reduce1_delete_empty_cell(y)
+            cur_summary_len = len(json.dumps(y, ensure_ascii=False))
+            if cur_summary_len <= summary_limit_len:
+                y['mode'] = ', '.join(mode_tags[:1])
+                return y
+
+            # 2 单个单元格内容过长的，省略显示
+            cur_summary_len = cls.reduce2_truncate_overlong_cells(y, summary_limit_len, cur_summary_len=cur_summary_len)
+            if cur_summary_len <= summary_limit_len:
+                y['mode'] = ', '.join(mode_tags[:2])
+                return y
+
+            # 3 同构数据，省略显示（有大量相同行数据，折叠省略表达）
+            cls.reduce3_fold_rows(y, summary_limit_len, cur_summary_len=cur_summary_len)
+            cur_summary_len = len(json.dumps(y, ensure_ascii=False))
+            if cur_summary_len <= summary_limit_len:
+                y['mode'] = ', '.join(mode_tags[:3])
+                return y
+
+            # 4 每张表都按比例删除后面部分的单元格
+            cur_summary_len = cls.reduce4_truncate_cells(y, summary_limit_len, cur_summary_len=cur_summary_len)
+            if cur_summary_len <= summary_limit_len:
+                y['mode'] = ', '.join(mode_tags[:4])
+                return y
+
+            # 5 从后往前删每张表格的详细信息
+            cls.reduce5_truncate_sheets(y, summary_limit_len, cur_summary_len=cur_summary_len)
+            y['mode'] = ', '.join(mode_tags[:5])
             return y
 
-        # 情况1：删除空单元格
-        cur_summary_len = reduce_step1(y)
-        if cur_summary_len <= summary_limit_len:
-            y['mode'] = ', '.join(mode_tags[:1])
-            return y
+        x = summary2
+        y = {
+            'fileName': x['fileName'],
+            'sheetNames': x['sheetNames'],
+            'sheets': x['sheets'],
+            'mode': 'Complete information',
+        }
 
-        # 情况2：单个单元格内容过长的，省略显示
-        cur_summary_len = reduce_step2(y, cur_summary_len)
-        if cur_summary_len <= summary_limit_len:
-            y['mode'] = ', '.join(mode_tags[:2])
-            return y
+        # 处理前确保下cells字段存在，避免后续很多处理过程要特判
+        for st in y['sheets']:
+            if 'cells' not in st:
+                st['cells'] = {}
 
-        # 情况3（核心）：同构数据，省略显示（有大量相同行数据，折叠省略表达）
-        cur_summary_len = reduce_step3(y, cur_summary_len)
-        if cur_summary_len <= summary_limit_len:
-            y['mode'] = ', '.join(mode_tags[:3])
-            return y
+        y = reduce_step_by_step(y)
 
-        # 情况4：每张表都按比例删除后面部分的单元格
-        cur_summary_len = reduce_step4(y, cur_summary_len)
-        if cur_summary_len <= summary_limit_len:
-            y['mode'] = ', '.join(mode_tags[:4])
-            return y
+        # 但是最后结果还是去掉空cells
+        for st in y['sheets']:
+            if not st['cells']:
+                del st['cells']
 
-        # 情况5：从后往前删每张表格的详细信息
-        reduce_step5(y, cur_summary_len)
-        y['mode'] = ', '.join(mode_tags[:5])
         return y
 
-    x = summary2
-    y = {
-        'fileName': x['fileName'],
-        'sheetNames': x['sheetNames'],
-        'sheets': x['sheets'],
-        'mode': 'Complete information',  # 模式0是全量数据
-    }
+    @classmethod
+    def reduce4b(cls, y, summary_limit_len, *, cur_summary_len=None, active_sheet_weight=0.5):
+        """
+        :param active_sheet_weight: 当前活动表格被删除的权重，0.5表示按比例被删除的量只有其他表格的一半
+        """
+        if cur_summary_len is None:
+            cur_summary_len = len(json.dumps(y, ensure_ascii=False))
 
-    # 处理前确保下cells字段存在，避免后续很多处理过程要特判
-    for st in y['sheets']:
-        if 'cells' not in st:
-            st['cells'] = {}
+        active_sheet = y['ActiveSheet']
 
-    y = reduce_step_by_step(y)
+        # 1 预计要删除单元格数
+        sheet_cells_num = [len(st['cells']) for st in y['sheets']]
+        # 每个sheet本身其他摘要，按照5个单元格估算
+        total_cells_num = sum(sheet_cells_num) + len(sheet_cells_num) * 5
+        avg_cell_len = cur_summary_len / total_cells_num
+        # 目标删除单元格数量，向上取整
+        target_reduce_cells_num = int((cur_summary_len - summary_limit_len) / avg_cell_len + 0.5)
 
-    # 但是最后结果还是去掉空cells
-    for st in y['sheets']:
-        if not st['cells']:
-            del st['cells']
+        # 2 对当前活动表格，会减小删除权重
+        # 标记当前活动表格的单元格数
+        active_sheet_index = [i for i, st in enumerate(y['sheets']) if st['sheetName'] == active_sheet][0]
+        active_cells_num = sheet_cells_num[active_sheet_index]
 
-    return y
+        # 计算权重系数
+        w = active_sheet_weight  # 当前激活表的权重系数
+        m = active_cells_num
+        n = total_cells_num
+        r = target_reduce_cells_num / n
+
+        # 计算非活动表格的额外权重系数
+        w2 = 1 + m * (1 - w) / (n - m)
+
+        # 3 所有的单元格如果都不够删，那就先把所有cells删了再说
+        if total_cells_num < target_reduce_cells_num:
+            for st in y['sheets']:
+                st['cells'] = {}
+            return len(json.dumps(y, ensure_ascii=False))
+
+        # 4 否则每张表按照比例删单元格，只保留前面部分的单元格
+        left_rate = 1 - r  # 原始保留比例
+        while True:
+            for i, st in enumerate(y['sheets']):
+                if i == active_sheet_index:
+                    # 当前激活的sheet保留更多单元格
+                    st['cells'] = dict(islice(st['cells'].items(), int(left_rate * w * sheet_cells_num[i])))
+                else:
+                    # 其他sheet按照w2权重删除单元格
+                    st['cells'] = dict(islice(st['cells'].items(), int(left_rate * w2 * sheet_cells_num[i])))
+            cur_summary_len = len(json.dumps(y, ensure_ascii=False))
+            if cur_summary_len <= summary_limit_len:
+                return cur_summary_len
+            if left_rate * total_cells_num < 1:
+                break
+            else:
+                left_rate *= 0.8  # 缩小保留比例，再试
+
+        return cur_summary_len
+
+    @classmethod
+    def reduce5b(cls, y, summary_limit_len, *, cur_summary_len=None):
+        """ 计算平均每张表的长度，保留前面部分的表格 """
+        if cur_summary_len is None:
+            cur_summary_len = len(json.dumps(y, ensure_ascii=False))
+
+        n = len(y['sheets'])
+        active_sheet_name = y['ActiveSheet']
+
+        avg_sheet_len = cur_summary_len / n
+        # target_reduce_sheet_num = int((cur_summary_len - summary_limit_len) / avg_sheet_len + 0.5)
+        # y['sheets'] = y['sheets'][:n - target_reduce_sheet_num]
+
+        while y['sheets']:
+            cur_summary_len = len(json.dumps(y, ensure_ascii=False))
+            if cur_summary_len <= summary_limit_len:
+                return cur_summary_len
+
+            # 如果最后一张表格是激活的表格，尝试删除前一张
+            if y['sheets'][-1]['sheetName'] == active_sheet_name:
+                if len(y['sheets']) > 1:
+                    y['sheets'] = y['sheets'][:-2] + [y['sheets'][-1]]
+                else:
+                    y['sheets'] = []
+            else:
+                y['sheets'] = y['sheets'][:-1]  # 删除最后一张表格的详细信息
+
+        return cur_summary_len
+
+    @classmethod
+    def summary2_to_summary3b(cls, summary2, summary_limit_len=4000):
+        """ 将summary2转换成summary3 """
+
+        def reduce_step_by_step(y):
+            mode_tags = [
+                'Delete empty cell',
+                'Omit the longer content and replace it with...',
+                'Omit lines with the same structure',
+                'Omit later lines',
+                'Omit later sheets'
+            ]
+
+            # 0 摘要本来就不大
+            cur_summary_len = len(json.dumps(y, ensure_ascii=False))
+            if cur_summary_len <= summary_limit_len:
+                return y
+
+            # 1 删除空单元格
+            cls.reduce1_delete_empty_cell(y)
+            cur_summary_len = len(json.dumps(y, ensure_ascii=False))
+            if cur_summary_len <= summary_limit_len:
+                y['mode'] = ', '.join(mode_tags[:1])
+                return y
+
+            # 2 单个单元格内容过长的，省略显示
+            cur_summary_len = cls.reduce2_truncate_overlong_cells(y, summary_limit_len, cur_summary_len=cur_summary_len)
+            if cur_summary_len <= summary_limit_len:
+                y['mode'] = ', '.join(mode_tags[:2])
+                return y
+
+            # 3 同构数据，省略显示（有大量相同行数据，折叠省略表达）
+            cls.reduce3_fold_rows(y, summary_limit_len, cur_summary_len=cur_summary_len)
+            cur_summary_len = len(json.dumps(y, ensure_ascii=False))
+            if cur_summary_len <= summary_limit_len:
+                y['mode'] = ', '.join(mode_tags[:3])
+                return y
+
+            # 4 每张表都按比例删除后面部分的单元格
+            cur_summary_len = cls.reduce4b(y, summary_limit_len, cur_summary_len=cur_summary_len)
+            if cur_summary_len <= summary_limit_len:
+                y['mode'] = ', '.join(mode_tags[:4])
+                return y
+
+            # 5 从后往前删每张表格的详细信息
+            cls.reduce5b(y, summary_limit_len, cur_summary_len=cur_summary_len)
+            y['mode'] = ', '.join(mode_tags[:5])
+            return y
+
+        x = summary2
+        y = {
+            'fileName': x['fileName'],
+            'sheetNames': x['sheetNames'],
+            'ActiveSheet': x['ActiveSheet'],  # 当期激活的工作表
+            # 'SelectionAddress': '',
+            'sheets': x['sheets'],
+            'mode': 'Complete information',
+        }
+
+        # 处理前确保下cells字段存在，避免后续很多处理过程要特判
+        for st in y['sheets']:
+            if 'cells' not in st:
+                st['cells'] = {}
+
+        y = reduce_step_by_step(y)
+
+        # 但是最后结果还是去掉空cells
+        for st in y['sheets']:
+            if not st['cells']:
+                del st['cells']
+
+        return y
 
 
 def extract_workbook_summary3(file_path, summary_limit_len=4000, **kwargs):
     """ 增加了全局ratio的计算 """
-    data = extract_workbook_summary2plus(file_path, **kwargs)
+    data = extract_workbook_summary2(file_path, **kwargs)
     if not data:
         return data
-    data = summary2summary3(data, summary_limit_len)
+    data = WorkbookSummary3.summary2_to_summary3(data, summary_limit_len)
+    return data
+
+
+def extract_workbook_summary3b(file_path, summary_limit_len=4000, **kwargs):
+    """ 增加了全局ratio的计算 """
+    data = extract_workbook_summary2(file_path, mode=1, **kwargs)
+    if not data:
+        return data
+    data = WorkbookSummary3.summary2_to_summary3b(data, summary_limit_len)
     return data
