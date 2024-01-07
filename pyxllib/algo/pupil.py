@@ -147,7 +147,7 @@ class ValuesStat:
                 ls.append(f'最大值: {format_value(self.max, 5)}')
             return '\t'.join(ls)
         elif self.n == 1:
-            return format_value(self.sum, valfmt[1] or 'g')
+            return format_value(self.sum, 1)
         else:
             raise ValueError("无效的数据数量")
 
