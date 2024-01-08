@@ -1000,7 +1000,17 @@ def xlmd5(content):
 
 @run_once()
 def get_hostname():
-    return socket.getfqdn()
+    hostname = socket.getfqdn()
+    return hostname
+
+
+@run_once()
+def get_hostname2():
+    """ 更加定制化的操作 """
+    hostname = socket.getfqdn()
+    hostname = hostname.replace('-', '_')
+    hostname = hostname.split('.')[0]
+    return hostname
 
 
 @run_once()
