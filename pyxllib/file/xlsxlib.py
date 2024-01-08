@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 # @Author : 陈坤泽
 # @Email  : 877362867@qq.com
-# @Date   : 2020/06/02
+# @Date   : 2024/01/07
 
 """
 扩展了些自己的openpyxl工具
@@ -48,7 +48,7 @@ from pyxllib.file.specialist import XlPath
 
 
 def __1_basic():
-    """ 基础组件 """
+    """ 表格的组件功能 """
 
 
 def excel_addr(n, m) -> str:
@@ -279,6 +279,19 @@ def sort_excel_files(file_paths):
     return file_paths2
 
 
+def excel2md5(file, reduction_degree=1):
+    try:
+        wb = openpyxl.load_workbook(file)
+    except (ValueError, TypeError) as e:
+        # 有些表格直接读取会失败，但使用read_only就能读了
+        wb = openpyxl.load_workbook(file, read_only=True)
+    except Exception as e:  # 还有其他zipfile.BadZipFile等错误
+        print(file, str(e))
+        return ''
+
+    return wb.to_md5(reduction_degree)
+
+
 def convert_csv_to_xlsx(csv_file):
     """ 将 csv 文件转换为 xlsx 文件 """
     wb = Workbook()
@@ -317,8 +330,8 @@ def convert_xls_to_xlsx(xls_file):
     return wb
 
 
-def __2_extend_methods():
-    """ 给各种类扩展的成员方法 """
+def __2_openpyxl_class():
+    """ 对openpyxl已有类的功能的增强 """
 
 
 class XlCell(openpyxl.cell.cell.Cell):  # 适用于 openpyxl.cell.cell.MergedCell，但这里不能多重继承
@@ -1632,80 +1645,11 @@ class XlWorkbook(openpyxl.Workbook):
 
         return workbook_summary
 
-    def extract_summary3(self):
-        """ 另一套按照单元格提取摘要的程序 """
-        wb = self
-
-        all_sheets_summary = []
-
-        for ws in wb._sheets:  # 非数据表，也要遍历出来，所以使用了_sheets
-            # 如果是标准工作表（Worksheet），使用现有的摘要提取机制
-            if isinstance(ws, openpyxl.worksheet.worksheet.Worksheet):
-                # 找到使用范围和表头范围
-                raw_used_range = ws.get_raw_usedrange()
-                if raw_used_range:
-                    used_range = ws.get_usedrange()
-                    summary = ({
-                        "sheetName": ws.title,
-                        "sheetType": "Worksheet",
-                        "rawUsedRange": raw_used_range,
-                        "usedRange": used_range,
-
-                    })
-                    summary['tables'] = ws.find_tables(used_range)
-
-                    # 'cells': extract_cells_content(ws)  # todo 改进点
-
-                    # todo 231213周三21:36，好久没看，我都不确定这种类型问题了，后面要再核对一遍
-                    if not summary['cells']:  # 如果没有数据，则大概率是数据透视表，是计算出来的，读取不到~
-                        summary['sheetType'] = 'PivotTable'
-                        del summary['cells']
-                else:
-                    summary = ({
-                        "sheetName": ws.title,
-                        "sheetType": "DialogOrMacroSheet",
-                        "usedRange": None,
-                    })
-
-            # 如果是其他类型的工作表，提供基础摘要
-            else:
-                summary = ({
-                    "sheetName": ws.title,
-                    "sheetType": ws.__class__.__name__  # 使用工作表的类名作为类型
-                })
-
-            all_sheets_summary.append(summary)
-
-        workbook_summary = {
-            "fileName": Path(self.path).name if self.path else None,
-            "sheetNames": wb.sheetnames,
-            "sheets": all_sheets_summary,
-        }
-
-        return workbook_summary
-
 
 inject_members(XlWorkbook, openpyxl.Workbook)
 
 
-def __3_hash():
-    """ 表格的哈希表达 """
-
-
-def excel2md5(file, reduction_degree=1):
-    try:
-        wb = openpyxl.load_workbook(file)
-    except (ValueError, TypeError) as e:
-        # 有些表格直接读取会失败，但使用read_only就能读了
-        wb = openpyxl.load_workbook(file, read_only=True)
-    except Exception as e:  # 还有其他zipfile.BadZipFile等错误
-        print(file, str(e))
-        return ''
-
-    return wb.to_md5(reduction_degree)
-
-
-def __4_extract_summary():
+def __3_extract_summary():
     """ 提取表格摘要 """
 
 
@@ -1911,6 +1855,52 @@ def extract_header_structure(ws, header_range):
     return header_structure
 
 
+def determine_field_type_and_summary(ws, col, start_row, end_row, rows):
+    """ 根据指定的列范围确定字段的摘要信息
+
+    :param rows: 由外部传入要抽样的数据编号
+    """
+    # 1 需要全量读取数据，获知主要格式，和数值范围
+    data = defaultdict(list)
+    for i in range(start_row, end_row + 1):
+        cell = ws.cell(i, col)
+        k, v = cell.get_number_format(), cell.value
+        data[k].append(v)
+
+    data2 = sorted(data.items(), key=lambda item: len(item[1]), reverse=True)
+    number_formats = [x[0] for x in data2]
+
+    # 2 获得要展示的样本值
+    sample_values = []
+    for i in rows:
+        cell = ws.cell(i, col)
+        value = cell.get_render_value()
+        if isinstance(value, str) and len(value) > 20:
+            value = value[:17] + '...'
+        sample_values.append(value)
+
+    # 3 数值范围（只要判断主类型的数值范围就行了）
+    numeric_range = None
+    for x in data2:
+        try:
+            fmt, values = x
+            values = [v for v in values if (v is not None and not isinstance(v, str))]
+            numeric_range = [min(values), max(values)]
+            numeric_range[0] = xl_render_value(numeric_range[0], fmt)
+            numeric_range[1] = xl_render_value(numeric_range[1], fmt)
+            break
+        except (TypeError, ValueError) as e:
+            pass
+
+    summary = {
+        "number_formats": number_formats,
+        "numeric_range": numeric_range,
+        "sample_values": sample_values,
+    }
+
+    return summary
+
+
 def extract_cells_content(ws):
     """ 提取一个工作表中的所有单元格内容 """
     cells = {}
@@ -1963,52 +1953,6 @@ def extract_field_summaries(ws, header_range, data_range, samples_num=5):
             )
 
     return field_summaries
-
-
-def determine_field_type_and_summary(ws, col, start_row, end_row, rows):
-    """ 根据指定的列范围确定字段的摘要信息
-
-    :param rows: 由外部传入要抽样的数据编号
-    """
-    # 1 需要全量读取数据，获知主要格式，和数值范围
-    data = defaultdict(list)
-    for i in range(start_row, end_row + 1):
-        cell = ws.cell(i, col)
-        k, v = cell.get_number_format(), cell.value
-        data[k].append(v)
-
-    data2 = sorted(data.items(), key=lambda item: len(item[1]), reverse=True)
-    number_formats = [x[0] for x in data2]
-
-    # 2 获得要展示的样本值
-    sample_values = []
-    for i in rows:
-        cell = ws.cell(i, col)
-        value = cell.get_render_value()
-        if isinstance(value, str) and len(value) > 20:
-            value = value[:17] + '...'
-        sample_values.append(value)
-
-    # 3 数值范围（只要判断主类型的数值范围就行了）
-    numeric_range = None
-    for x in data2:
-        try:
-            fmt, values = x
-            values = [v for v in values if (v is not None and not isinstance(v, str))]
-            numeric_range = [min(values), max(values)]
-            numeric_range[0] = xl_render_value(numeric_range[0], fmt)
-            numeric_range[1] = xl_render_value(numeric_range[1], fmt)
-            break
-        except (TypeError, ValueError) as e:
-            pass
-
-    summary = {
-        "number_formats": number_formats,
-        "numeric_range": numeric_range,
-        "sample_values": sample_values,
-    }
-
-    return summary
 
 
 class WorkbookSummary:
@@ -2232,8 +2176,6 @@ def extract_workbook_summary2(file_path, *,
         res['ActiveSheet'] = wb.active.title
         # todo py好像没办法提取Selection。但jsa、vba应该要尽力取出这些相关的特征，尤其在操作等场景很有用
         # res['SelectionAddress'] = ...
-
-    # todo 摘要精简？
 
     return res
 

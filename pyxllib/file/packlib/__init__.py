@@ -276,14 +276,18 @@ def smart_compress_zip(root, paths, check_func=None):
 
     root = XlPath(root)
     num = len(paths)
+    outfile = None
     if num > 1:
-        zipf = XlZipFile(root.name + '.zip', 'w', zipfile.ZIP_DEFLATED)
+        outfile = root.parent / XlPath(root.name + '.zip')
     elif num == 1:
-        zipf = XlZipFile(XlPath(paths[0]).name + '.zip', 'w', zipfile.ZIP_DEFLATED)
+        outfile = root.parent / (XlPath(paths[0]).name + '.zip')
     else:
         return
+    zipf = XlZipFile(outfile, 'w', zipfile.ZIP_DEFLATED)
 
     for subroot in paths:
         add_path(XlPath(subroot))
 
     zipf.close()
+
+    return outfile

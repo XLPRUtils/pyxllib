@@ -295,7 +295,7 @@ class XlSSHClient(paramiko.SSHClient):
                     return (XlPath(k) / relpath).parent
                 except ValueError:
                     pass
-            raise ValueError('找不到对应的map_path路径映射规则')
+            raise ValueError(f'找不到对应的map_path路径映射规则 {remote_path}')
 
     def __remote_dir(self, local_path, remote_dir):
         if remote_dir is not None:
@@ -415,7 +415,7 @@ class XlSSHClient(paramiko.SSHClient):
             remote_path = self.__remote_dir(local_path, None) / local_path.name
             local_dir = local_path.parent
         else:
-            remote_path = self.Path(remote_path)
+            remote_path = self.Path(remote_path.as_posix())
             local_dir = self.__local_dir(remote_path, local_dir)
             local_path = local_dir / remote_path.name
 
