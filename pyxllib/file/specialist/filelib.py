@@ -2594,7 +2594,10 @@ class BatchFileRenamer:
                 return f2
 
     def rename_files(self, print_mode=False, exists_keys=None):
-        """ 对文件进行批量重命名 """
+        """ 对文件进行批量重命名
+
+        这里分两轮运行，是有非常深的用意的，避免前面重命名的时候，没有见到后面可能会出现的重名文件
+        """
         # 1 先遍历一遍文件，确认哪些文件是确定要重命名的
         exists_keys = exists_keys or set()
         repeat_name_files = []  # 确认要进行重命名的文件

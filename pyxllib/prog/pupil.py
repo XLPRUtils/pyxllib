@@ -7,7 +7,7 @@
 
 """ 封装一些代码开发中常用的功能，工程组件 """
 import builtins
-from collections import Counter
+from collections import Counter, UserDict
 from concurrent.futures import ThreadPoolExecutor
 import ctypes
 import datetime
@@ -407,6 +407,7 @@ def check_install_package(package, speccal_install_name=None, *, user=False):
 
 def run_once(distinct_mode=0, *, limit=1):
     """ 装饰器，装饰的函数在一次程序里其实只会运行一次
+
     :param int|str distinct_mode:
         0，默认False，不区分输入的参数值（包括cls、self），强制装饰的函数只运行一次
         'str'，设为True或1时，仅以字符串化的差异判断是否是重复调用，参数不同，会判断为不同的调用，每种调用限制最多执行limit次
@@ -822,8 +823,18 @@ class DPrint:
         return sep.join(msg)
 
 
-def format_exception(e):
-    return ''.join(traceback.format_exception(type(e), e, e.__traceback__))
+def format_exception(e, mode=3):
+    if mode == 1:
+        # 仅获取异常类型的名称
+        text = ''.join(traceback.format_exception_only(type(e), e)).strip()
+    elif mode == 2:
+        # 获取异常类型的名称和附加的错误信息
+        text = f"{type(e).__name__}: {e}"
+    elif mode == 3:
+        text = ''.join(traceback.format_exception(type(e), e, e.__traceback__))
+    else:
+        raise ValueError
+    return text
 
 
 def prettifystr(s):
@@ -893,7 +904,7 @@ class OutputLogger(logging.Logger):
     也能在需要的时候指定文件路径，会自动将结果存储到文件中。
     """
 
-    def __init__(self, name='OutputLogger', *, log_file=None, log_mode='w', output_to_console=True):
+    def __init__(self, name='OutputLogger', *, log_file=None, log_mode='a', output_to_console=True):
         """
         :param str name: 记录器的名称。默认为 'OutputLogger'。
         :param log_file: 日志文件的路径。默认为 None，表示不输出到文件。
@@ -910,8 +921,9 @@ class OutputLogger(logging.Logger):
                                       '%Y-%m-%d %H:%M:%S')
 
         # 提前重置为空文件
-        with open(log_file, log_mode) as f:
-            f.write('')
+        if log_file is not None and log_mode == 'w':
+            with open(log_file, log_mode) as f:
+                f.write('')
 
         # 创建文件日志处理器
         if log_file:
@@ -943,6 +955,16 @@ class OutputLogger(logging.Logger):
                 f.write(msg)
 
         return msg
+
+    def tprint(self, *args, **kwargs):
+        """ 带时间戳的print """
+        self.print(utc_now2(), *args, **kwargs)
+
+    def log_json(self, data):
+        """ 类似print，但是是把数据按照json的格式进行记录整理，更加结构化，方便后期处理 """
+        data['time'] = utc_timestamp()
+        msg = json.dumps(data, ensure_ascii=False, default=str)
+        self.print(msg)
 
 
 class MultiProcessLauncher:
@@ -1064,3 +1086,38 @@ def safe_div(a, b):
         return a / sys.float_info.epsilon
     else:
         return a / b
+
+
+def inplace_decorate(parent, func_name, wrapper):
+    """ 将指定的函数替换为装饰器版本
+
+    当然，因为py一切皆对象，这里处理的不是函数，而是其他变量等对象也是可以的
+
+    这个功能跟直接把原代码替换修改了还是有区别的，如果原函数在被这个装饰之前，已经被其他地方调用，或者被装饰器补充，
+        太晚使用这个装饰，并不会改变前面已经运行、被捕捉的情况
+        遇到这种情况，也可以考虑在原函数定义后，直接紧接着加上这个函数重置
+
+    对于类成员方法，直接用这个设置可能也不行，只能去改源码了
+        比如要给函数加计算时间的部分，可以考虑使用 get_global_var 等来夸作用域记录时间数据
+    """
+
+    if hasattr(parent, func_name):
+        if callable(wrapper):  # 对函数的封装
+            original_func = getattr(parent, func_name)
+
+            @functools.wraps(original_func)
+            def decorated_func(*args, **kwargs):
+                return wrapper(original_func, *args, **kwargs)
+
+            setattr(parent, func_name, decorated_func)
+        else:  # 对数值的封装，不过如果是数值，其实也没必要调用这个函数，直接赋值就好了
+            return setattr(parent, func_name, wrapper)
+    else:  # 否则按照字典的模式来处理
+
+        original_func = parent[func_name]
+
+        @functools.wraps(original_func)
+        def decorated_func(*args, **kwargs):
+            return wrapper(original_func, *args, **kwargs)
+
+        parent[func_name] = decorated_func

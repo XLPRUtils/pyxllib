@@ -249,6 +249,9 @@ class PilImg(PIL.Image.Image):
         else:
             color = tuple(color)
 
+        # 如果图片通道数跟预设的color不同，要断言
+        assert self.n_channels() == len(color), f'图片通道数{self.n_channels}跟预设的color{color}不同'
+
         im = self
         bg = Image.new(im.mode, im.size, color)
         diff = ImageChops.difference(im, bg)
