@@ -278,9 +278,9 @@ def smart_compress_zip(root, paths, check_func=None):
     num = len(paths)
     outfile = None
     if num > 1:
-        outfile = root.parent / XlPath(root.name + '.zip')
+        outfile = root / XlPath(root.name + '.zip')
     elif num == 1:
-        outfile = root.parent / (XlPath(paths[0]).name + '.zip')
+        outfile = root / (XlPath(paths[0]).name + '.zip')
     else:
         return
     zipf = XlZipFile(outfile, 'w', zipfile.ZIP_DEFLATED)

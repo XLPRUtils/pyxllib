@@ -250,7 +250,7 @@ class Stdout:
             return
 
         try:
-            with open(self._path, self._mode) as f:
+            with open(self._path, self._mode, encodings='utf8', ignore_errors=True) as f:
                 f.write(self.result)
         except TypeError as e:
             logging.exception(e)

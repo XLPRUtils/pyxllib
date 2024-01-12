@@ -7,6 +7,7 @@
 """
 扩展了些自己的openpyxl工具
 """
+import time
 
 from pyxllib.prog.pupil import check_install_package, run_once
 
@@ -25,6 +26,7 @@ import math
 from pathlib import Path
 import random
 import re
+import io
 
 import xlrd
 
@@ -292,6 +294,22 @@ def excel2md5(file, reduction_degree=1):
     return wb.to_md5(reduction_degree)
 
 
+def convert_csv_text_to_xlsx(csv_text):
+    """ 将 csv 文本转换为 xlsx 文件 """
+    wb = Workbook()
+    sheet = wb.active
+
+    # 使用 io.StringIO 将 csv 文本转换为可读的文件对象
+    f = io.StringIO(csv_text)
+    reader = csv.reader(f)
+    for row_idx, row in enumerate(reader, start=1):
+        for col_idx, value in enumerate(row, start=1):
+            sheet.cell(row=row_idx, column=col_idx).value = value
+
+    f.close()
+    return wb
+
+
 def convert_csv_to_xlsx(csv_file):
     """ 将 csv 文件转换为 xlsx 文件 """
     wb = Workbook()
@@ -328,6 +346,117 @@ def convert_xls_to_xlsx(xls_file):
                 sheet.cell(row=row + 1, column=col + 1).value = xls_sheet.cell_value(row, col)
 
     return wb
+
+
+def parse_range_address(address):
+    """ 解析单元格范围地址。
+
+    :param str address: 单元格范围地址，例如 'A1', 'A1:B3', '1:3', 'A:B' 等。
+    :return dict: 一个包含 'left', 'top', 'right', 'bottom' 的字典。
+    """
+    # 初始化默认值
+    left, right, top, bottom = None, None, None, None
+
+    # 分割地址以获取开始和结束
+    parts = address.split(":")
+    start_cell = parts[0]
+    end_cell = parts[1] if len(parts) > 1 else start_cell
+
+    # 如果 start_cell 是行号
+    if start_cell.isdigit():
+        top = int(start_cell)
+    else:
+        # 尝试从 start_cell 提取列
+        try:
+            left = column_index_from_string(start_cell.rstrip('1234567890'))
+            top = int(''.join(filter(str.isdigit, start_cell))) if any(
+                char.isdigit() for char in start_cell) else None
+        except ValueError:
+            left = None
+
+    # 如果 end_cell 是行号
+    if end_cell.isdigit():
+        bottom = int(end_cell)
+    else:
+        # 尝试从 end_cell 提取列
+        try:
+            right = column_index_from_string(end_cell.rstrip('1234567890'))
+            bottom = int(''.join(filter(str.isdigit, end_cell))) if any(char.isdigit() for char in end_cell) else None
+        except ValueError:
+            right = None
+
+    # 如果只提供了一个部分 (例如 '1', 'A')，将最大值设置为最小值
+    if len(parts) == 1:
+        right = left if left is not None else right
+        bottom = top if top is not None else bottom
+
+    return {"left": left, "top": top, "right": right, "bottom": bottom}
+
+
+def get_addr_area(addr):
+    """ 一个range描述的面积 """
+    if ':' in addr:
+        d = parse_range_address(addr)
+        return (d['right'] - d['left'] + 1) * (d['bottom'] - d['top'] + 1)
+    else:
+        return 1
+
+
+def build_range_address(left=None, top=None, right=None, bottom=None):
+    """ 构建单元格范围地址。
+
+    :return str: 单元格范围地址，例如 'A1', 'A1:B3', '1:3', 'A:B' 等。
+    """
+    start_cell = f"{get_column_letter(left) if left else ''}{top if top else ''}"
+    end_cell = f"{get_column_letter(right) if right else ''}{bottom if bottom else ''}"
+
+    # 当开始和结束单元格相同时，只返回一个单元格地址
+    if start_cell == end_cell:
+        return start_cell
+    # 当其中一个单元格是空字符串时，只返回另一个单元格地址
+    elif not start_cell or not end_cell:
+        return start_cell or end_cell
+    else:
+        return f"{start_cell}:{end_cell}"
+
+
+def combine_addresses(*addrs):
+    # 初始化最小和最大行列值
+    min_left, min_top, max_right, max_bottom = float('inf'), float('inf'), 0, 0
+
+    # 遍历所有地址
+    for addr in addrs:
+        # 解析每个地址
+        addr_dict = parse_range_address(addr)
+
+        # 更新最小和最大行列值
+        if addr_dict['left'] is not None:
+            min_left = min(min_left, addr_dict['left'])
+            max_right = max(max_right, addr_dict['right'] if addr_dict['right'] is not None else addr_dict['left'])
+        if addr_dict['top'] is not None:
+            min_top = min(min_top, addr_dict['top'])
+            max_bottom = max(max_bottom, addr_dict['bottom'] if addr_dict['bottom'] is not None else addr_dict['top'])
+
+    # 构建新的地址字符串
+    new_addr = f"{get_column_letter(min_left)}{min_top}:{get_column_letter(max_right)}{max_bottom}"
+    return new_addr
+
+
+def is_string_type(value):
+    """ 检查值是否为字符串类型，不是数值或日期类型 """
+    # 首先检查日期类型
+    try:
+        pd.to_datetime(value, errors='raise')
+        return False
+    except (ValueError, TypeError, OverflowError):
+        pass
+
+    # 检查是否为浮点数类型
+    try:
+        float(value)
+        return False
+    except (ValueError, TypeError):
+        return True
 
 
 def __2_openpyxl_class():
@@ -588,60 +717,217 @@ class XlWorksheet(openpyxl.worksheet.worksheet.Worksheet):
                                              right=self.max_column, bottom=self.max_row)
         return raw_used_range
 
+    @run_once('id,str')  # 同一个表，同一行不会重复计算
+    def is_empty_row(self, row, start_col, end_col):
+        cur_col = start_col
+        # 特地提前检查下最后一列的那个单元格
+        if self.cell(row, end_col).value is not None:
+            return False
+        while cur_col <= end_col:
+            if self.cell(row, cur_col).value is not None:
+                return False
+            # 步长随着尝试的增加，也逐渐降低采样率
+            n = cur_col - start_col + 1
+            # 在最大值m=16384列情况下，/1000，最多检索3404个单元格，/100，最多检索569次，/50最多检索320次
+            # cur_col += (n // 50) + 1
+            # 再变形，加强前面权重，大大降低后面权重
+            if n <= 100:
+                cur_col += 1
+            else:  # 最多54次
+                cur_col += (n // 10)
+
+        return True
+
+    @run_once('id,str')  # 同一个表，同一列不会重复计算
+    def is_empty_column(self, col, start_row, end_row):
+        cur_row = start_row
+        # 特地提前检查下最后一行的那个单元格
+        if self.cell(end_row, col).value is not None:
+            return False
+        while cur_row <= end_row:
+            if self.cell(cur_row, col).value is not None:
+                return False
+            n = cur_row - start_row + 1
+            # 在最大值n=1048576行情况下，/1000，最多检索7535个单元格，/100，最多检索987次，/50最多检索530次
+            cur_row += (n // 1000) + 1
+        return True
+
+    def find_last_non_empty_row(self, start_row, end_row, start_col, end_col, m=30):
+        # 1 如果剩余行数不多（小于等于m），直接遍历这些行
+        if end_row - start_row <= m:  # 这里是兼容start_row大于end_row的情况的
+            for row in range(end_row, start_row - 1, -1):
+                if not self.is_empty_row(row, start_col, end_col):
+                    return row
+            return -1  # 如果都是空的，则返回-1
+
+        # 2 计算分割点
+        intervals = [(end_row - start_row) // (m - 1) * i + start_row for i in range(m - 1)] + [end_row]
+
+        # 3 反向遍历这些分割点，找到第一个非空行
+        for i in reversed(range(len(intervals))):
+            # 检查点全部都空，也不能判定全空，要检查前面半个区间
+            if i == 0 or not self.is_empty_row(intervals[i], start_col, end_col):
+                # 如果这是最后一个分割点，则直接返回它
+                if i == m - 1:
+                    return intervals[i]
+                # 否则，在这个分割点和下一个（一半二分的位置）之间递归查找
+                return self.find_last_non_empty_row(intervals[i],
+                                                    intervals[min(i + m // 2, m - 1)],
+                                                    start_col,
+                                                    end_col,
+                                                    m + 1)
+
+        # 如果所有分割点都是空的，则返回-1
+        return -1
+
+    def find_last_non_empty_column(self, start_col, end_col, start_row, end_row, m=30):
+        # dprint(end_col)
+
+        # 1 如果剩余列数不多（小于等于m），直接遍历这些列
+        if end_col - start_col <= m:
+            for col in range(end_col, start_col - 1, -1):
+                if not self.is_empty_column(col, start_row, end_row):
+                    return col
+            return -1  # 如果都是空的，则返回-1
+
+        # 2 计算分割点
+        intervals = [(end_col - start_col) // (m - 1) * i + start_col for i in range(m - 1)] + [end_col]
+
+        # 3 反向遍历这些分割点，找到第一个非空列
+        for i in reversed(range(len(intervals))):
+            if i == 0 or not self.is_empty_column(intervals[i], start_row, end_row):
+                # 如果这是最后一个分割点，则直接返回它
+                if i == m - 1:
+                    return intervals[i]
+                # 否则，在这个分割点和下一个（一半二分的位置）之间递归查找
+                return self.find_last_non_empty_column(intervals[i],
+                                                       intervals[min(i + m // 2, m - 1)],
+                                                       start_row,
+                                                       end_row,
+                                                       m + 1)
+        # 如果所有分割点都是空的，则返回-1
+        return -1
+
+    def find_first_non_empty_row(self, start_row, end_row, start_col, end_col, m=30):
+        # 1 如果剩余行数不多（小于等于m），直接遍历这些行
+        if end_row - start_row <= m:
+            for row in range(start_row, end_row + 1):
+                if not self.is_empty_row(row, start_col, end_col):
+                    return row
+            return -1  # 如果都是空的，则返回-1
+
+        # 2 计算分割点
+        intervals = [(end_row - start_row) // (m - 1) * i + start_row for i in range(m - 1)] + [end_row]
+
+        # 3 正向遍历这些分割点，找到第一个非空行
+        for i in range(len(intervals)):
+            if i == m - 1 or not self.is_empty_row(intervals[i], start_col, end_col):
+                # 如果这是第一个分割点，则直接返回它
+                if i == 0:
+                    return intervals[i]
+                # 否则，在这个分割点和前一个（一半二分的位置）之间递归查找
+                return self.find_first_non_empty_row(intervals[max(i - m // 2, 0)],
+                                                     intervals[i],
+                                                     start_col,
+                                                     end_col,
+                                                     m + 1)
+        # 如果所有分割点都是空的，则返回-1
+        return -1
+
+    def find_first_non_empty_column(self, start_col, end_col, start_row, end_row, m=30):
+        # 1 如果剩余列数不多（小于等于m），直接遍历这些列
+        if end_col - start_col <= m:
+            for col in range(start_col, end_col + 1):
+                if not self.is_empty_column(col, start_row, end_row):
+                    return col
+            return -1  # 如果都是空的，则返回-1
+
+        # 2 计算分割点
+        intervals = [(end_col - start_col) // (m - 1) * i + start_col for i in range(m - 1)] + [end_col]
+
+        # 3 正向遍历这些分割点，找到第一个非空列
+        for i in range(len(intervals)):
+            if i == m - 1 or not self.is_empty_column(intervals[i], start_row, end_row):
+                # 如果这是第一个分割点，则直接返回它
+                if i == 0:
+                    return intervals[i]
+                # 否则，在这个分割点和前一个（一半二分的位置）之间递归查找
+                return self.find_first_non_empty_column(intervals[max(i - m // 2, 0)],
+                                                        intervals[i],
+                                                        start_row,
+                                                        end_row,
+                                                        m + 1)
+        # 如果所有分割点都是空的，则返回-1
+        return -1
+
+    @run_once('id,str')  # 同一个表，同一行不会重复计算
     def get_usedrange(self):
-        """ 定位有效数据区间
-        目前假设每个ws只有一个数据表，但以后可以考虑找多个used_range，多个数据表
+        """ 定位有效数据区间。
+
+        背景：
+            在Excel工作表中，经常需要确定包含数据的有效区域。这是因为工作表可能包含大量的空白区域，
+            而实际数据仅占据一部分空间。有效地识别这个区域对于进一步的数据处理和分析至关重要。
+            如果暴力一行行遍历，遇到XFD1048576这种覆盖全范围的表，运行肯定会超时。
+
+        求解思路：
+            为了高效地定位有效数据区间，我们采用了分割点技术和二分查找的思想。
+            具体解释，以找第1~100行中最后一个非空行为例。
+            可以判断第1、50、100行是否是空行，如果50、100都是空行，那空行应该在第1~50的范围里，然后再判定第25行是否为空行。
+            但二分法可能不严谨，第50、100都是空行，中间也有可能有内容，比如第1~80行本来其实都有内容，只是恰好第50行空了。
+            所以在二分法的基础上，还需要把1~100行等间距取m个采样点来辅助检查。
+
+            通过调m的值的变化方法，可以在速度和精度之间做一个权衡。
+            这四个定界符，最最慢的是find_last_non_empty_row，重点调这个。
+
+        四个边界判定函数，工程上是可以整合的，但是整合后，太多if分支操作，会降低效率，这里为了运行速度，就拆分4个实现更好。
+            具体实现中，还有其他一些细节考虑优化。
+            比如先找最后行，再最后列，再第一行，第一列，这个顺序是有讲究的，可以减少很多不必要的遍历。
+            因为数据一般是比较高和窄的，所以应该先对行做处理。以及前面出现空区域的概率小，可以后面再处理。
+            而且就openpyxl而言，对列的遍历也是远慢于行的遍历的。
+
+        :param reset_bounds: 计算出新区域后，是否重置ws的边界值
         """
-        # 1 先压缩范围
+        from pyxllib.prog.newbie import get_global_var
+
         # 初始化边界值
-        left, right, top, bottom = 1, self.max_column, 1, self.max_row
+        left, right, top, bottom = self.min_column, self.max_column, self.min_row, self.max_row
 
-        # 找到最上方的行
-        for row in self.iter_rows():
-            if any(cell.value is not None for cell in row):
-                top = row[0].row
-                break
+        # start_time = time.time()
+        # 使用优化后的函数找到最下方的行和最右边的列
+        bottom = self.find_last_non_empty_row(top, bottom, left, right)
+        if bottom == -1:
+            return 'A1'  # 空表返回A1占位
+        right = self.find_last_non_empty_column(left, right, top, bottom)
+        if right == -1:
+            return 'A1'
 
-        # 找到最左边的列
-        for col in self.iter_cols():
-            if any(cell.value is not None for cell in col):
-                left = col[0].column
-                break
-
-        # 找到最下方的行
-        rows = list(self.iter_rows(min_row=top, max_row=self.max_row))
-        for row in reversed(rows):
-            if any(cell.value is not None for cell in row):
-                bottom = row[0].row
-                break
-
-        # 找到最右边的列
-        cols = list(self.iter_cols(min_col=left, max_col=self.max_column))
-        for col in reversed(cols):
-            if any(cell.value is not None for cell in col):
-                right = col[0].column
-                break
+        # 使用优化后的函数找到最上方的行和最左边的列
+        top = self.find_first_non_empty_row(top, bottom, left, right)
+        if top == -1:
+            return 'A1'
+        left = self.find_first_non_empty_column(left, right, top, bottom)
+        if left == -1:
+            return 'A1'
+        # get_global_var('get_usedrange_time')[-1] += time.time() - start_time
 
         # 2 然后还要再扩范围（根据合并单元格情况）
-        # 遍历当前区域里的cell
-        for row in self.iter_rows(min_row=top, max_row=bottom, min_col=left, max_col=right):
-            for cell in row:
-                # 如果是合并单元格，就扩展范围
-                t, status = cell.celltype(return_mode=True)
-                if t == 2:  # 每个合并单元格，只要遇到母单元格处理一次即可
-                    mc = status['rng']
-                    l, t, r, b = mc.bounds
-                    if l < left:
-                        left = l
-                    if t < top:
-                        top = t
-                    if r > right:
-                        right = r
-                    if b > bottom:
-                        bottom = b
+        # start_time = time.time()
+        top0, bottom0, left0, right0 = top, bottom, left, right
+        for merged_range in self.merged_cells.ranges:
+            l, t, r, b = merged_range.bounds
+            if top0 <= b <= bottom0 or top0 <= t <= bottom0:
+                if left0 <= r and l < left:
+                    left = l
+                if l <= right0 and r > right:
+                    right = r
+            if left0 <= r <= right0 or left0 <= l <= right0:
+                if top0 <= b and t < top:
+                    top = t
+                if t <= bottom0 and b > bottom:
+                    bottom = b
+        # get_global_var('expandrange_time')[-1] += time.time() - start_time
 
         used_range = build_range_address(left=left, top=top, right=right, bottom=bottom)
-
         return used_range
 
     def copy_worksheet(self, dst_ws):
@@ -1281,6 +1567,13 @@ class XlWorksheet(openpyxl.worksheet.worksheet.Worksheet):
                     current_alignment_dict.pop('wrapText', None)
                     cell.alignment = Alignment(wrapText=True, **current_alignment_dict)
 
+    @run_once('id,str')
+    def get_sorted_merged_cells(self):
+        """ 将合并单元格按照行列顺序排列。
+        """
+        rngs = list(sorted(self.merged_cells.ranges, key=lambda x: (x.min_row, x.min_col)))
+        return rngs
+
 
 inject_members(XlWorksheet, openpyxl.worksheet.worksheet.Worksheet, white_list=['_cells_by_row'])
 
@@ -1605,7 +1898,7 @@ class XlWorkbook(openpyxl.Workbook):
 
         for ws in wb._sheets:  # 非数据表，也要遍历出来，所以使用了_sheets
             # 如果是标准工作表（Worksheet），使用现有的摘要提取机制
-            if isinstance(ws, openpyxl.worksheet.worksheet.Worksheet):
+            if isinstance(ws, (openpyxl.worksheet.worksheet.Worksheet)):
                 # 找到使用范围和表头范围
                 used_range = ws.get_usedrange()
                 if used_range:
@@ -1651,117 +1944,6 @@ inject_members(XlWorkbook, openpyxl.Workbook)
 
 def __3_extract_summary():
     """ 提取表格摘要 """
-
-
-def parse_range_address(address):
-    """ 解析单元格范围地址。
-
-    :param str address: 单元格范围地址，例如 'A1', 'A1:B3', '1:3', 'A:B' 等。
-    :return dict: 一个包含 'left', 'top', 'right', 'bottom' 的字典。
-    """
-    # 初始化默认值
-    left, right, top, bottom = None, None, None, None
-
-    # 分割地址以获取开始和结束
-    parts = address.split(":")
-    start_cell = parts[0]
-    end_cell = parts[1] if len(parts) > 1 else start_cell
-
-    # 如果 start_cell 是行号
-    if start_cell.isdigit():
-        top = int(start_cell)
-    else:
-        # 尝试从 start_cell 提取列
-        try:
-            left = column_index_from_string(start_cell.rstrip('1234567890'))
-            top = int(''.join(filter(str.isdigit, start_cell))) if any(
-                char.isdigit() for char in start_cell) else None
-        except ValueError:
-            left = None
-
-    # 如果 end_cell 是行号
-    if end_cell.isdigit():
-        bottom = int(end_cell)
-    else:
-        # 尝试从 end_cell 提取列
-        try:
-            right = column_index_from_string(end_cell.rstrip('1234567890'))
-            bottom = int(''.join(filter(str.isdigit, end_cell))) if any(char.isdigit() for char in end_cell) else None
-        except ValueError:
-            right = None
-
-    # 如果只提供了一个部分 (例如 '1', 'A')，将最大值设置为最小值
-    if len(parts) == 1:
-        right = left if left is not None else right
-        bottom = top if top is not None else bottom
-
-    return {"left": left, "top": top, "right": right, "bottom": bottom}
-
-
-def get_addr_area(addr):
-    """ 一个range描述的面积 """
-    if ':' in addr:
-        d = parse_range_address(addr)
-        return (d['right'] - d['left'] + 1) * (d['bottom'] - d['top'] + 1)
-    else:
-        return 1
-
-
-def build_range_address(left=None, top=None, right=None, bottom=None):
-    """ 构建单元格范围地址。
-
-    :return str: 单元格范围地址，例如 'A1', 'A1:B3', '1:3', 'A:B' 等。
-    """
-    start_cell = f"{get_column_letter(left) if left else ''}{top if top else ''}"
-    end_cell = f"{get_column_letter(right) if right else ''}{bottom if bottom else ''}"
-
-    # 当开始和结束单元格相同时，只返回一个单元格地址
-    if start_cell == end_cell:
-        return start_cell
-    # 当其中一个单元格是空字符串时，只返回另一个单元格地址
-    elif not start_cell or not end_cell:
-        return start_cell or end_cell
-    else:
-        return f"{start_cell}:{end_cell}"
-
-
-def combine_addresses(*addrs):
-    # 初始化最小和最大行列值
-    min_left, min_top, max_right, max_bottom = float('inf'), float('inf'), 0, 0
-
-    # 遍历所有地址
-    for addr in addrs:
-        # 解析每个地址
-        addr_dict = parse_range_address(addr)
-
-        # 更新最小和最大行列值
-        if addr_dict['left'] is not None:
-            min_left = min(min_left, addr_dict['left'])
-            max_right = max(max_right, addr_dict['right'] if addr_dict['right'] is not None else addr_dict['left'])
-        if addr_dict['top'] is not None:
-            min_top = min(min_top, addr_dict['top'])
-            max_bottom = max(max_bottom, addr_dict['bottom'] if addr_dict['bottom'] is not None else addr_dict['top'])
-
-    # 构建新的地址字符串
-    new_addr = f"{get_column_letter(min_left)}{min_top}:{get_column_letter(max_right)}{max_bottom}"
-    return new_addr
-
-
-def is_string_type(value):
-    """检查值是否为字符串类型，不是数值或日期类型"""
-    # 首先检查日期类型
-    try:
-        pd.to_datetime(value, errors='raise')
-        return False
-    except (ValueError, TypeError, OverflowError):
-        pass
-
-    # 检查是否为浮点数类型
-    try:
-        float(value)
-        return False
-    except (ValueError, TypeError):
-        return True
 
 
 def score_row(row):
@@ -1901,27 +2083,56 @@ def determine_field_type_and_summary(ws, col, start_row, end_row, rows):
     return summary
 
 
-def extract_cells_content(ws):
-    """ 提取一个工作表中的所有单元格内容 """
-    cells = {}
-    for row in ws.rows:
-        for cell in row:
-            cell_type = cell.celltype()
-            if cell_type == 0:
-                v = cell.value
-                if v is not None:
-                    # cells[cell.coordinate] = v
-                    cells[cell.coordinate] = cell.get_render_value()
-                else:
-                    cells[cell.coordinate] = ''
-            elif cell_type == 2:
-                v = cell.value
-                if v is not None:
-                    rng = cell.in_range()
-                    addr = str(rng)
-                    cells[addr] = cell.get_render_value()
-                else:
-                    cells[cell.coordinate] = ''
+def extract_cells_content(ws, usedrange=None):
+    """ 提取一个工作表中的所有单元格内容
+
+    1、找出所有合并单元格，按照我的那个顺序先排序。记为堆栈a（sorted_merged_cells_stack）。
+        另外存一个已被使用的单元格集合b（初始空）（used_cells_set）。
+    2、按照A1, A2, A3,..., B1, B2,B3等顺序遍历到一个个单元格c（cell）。
+    3、对于每个c，先判断是否存在b中，如果存在b中，删除b中的c，并且跳过c的处理
+    4、否则判断与a的最前面的元素a0是否相交，如果相交，则从堆栈a导出a0，把a0存储到结果数组cells。并且把a0中其他衍生单元格地址存入b。
+    4、如果c不与a0相交，则c自身元素值写入cells。
+    """
+    # 1 预备
+    sorted_merged_cells_stack = ws.get_sorted_merged_cells()[::-1]
+    used_cells_set = set()
+    if usedrange is None:
+        usedrange = ws.get_usedrange()
+    usedrange_bound = parse_range_address(usedrange)
+    cells = {}  # 结果集合
+
+    # 2 遍历所有单元格
+    def get_val(cell):
+        val = cell.value
+        if val is None:
+            return ''
+        else:
+            # return cell.get_render_value()  # 如果感觉这步很慢，可以换一种更简洁的形式
+            return val
+
+    for i in range(usedrange_bound['top'], usedrange_bound['bottom'] + 1):
+        for j in range(usedrange_bound['left'], usedrange_bound['right'] + 1):
+            # 2.1 合并单元格的衍生单元格，直接跳过
+            if (i, j) in used_cells_set:
+                used_cells_set.remove((i, j))
+                continue
+            cell = ws.cell(i, j)
+
+            # 2.2 cell归属某组合并单元格（因为合并单元格排过序，所以只要很少的运算判断即可）
+            if (sorted_merged_cells_stack
+                    and sorted_merged_cells_stack[-1].min_row == i
+                    and sorted_merged_cells_stack[-1].min_col == j):
+                rng = sorted_merged_cells_stack.pop()
+                for rng_i in range(rng.min_row, rng.max_row + 1):
+                    for rng_j in range(rng.min_col, rng.max_col + 1):
+                        used_cells_set.add((rng_i, rng_j))
+                cells[rng.coord] = get_val(cell)
+                used_cells_set.remove((i, j))
+                continue
+
+            # 2.3 普通单元格
+            cells[cell.coordinate] = get_val(cell)
+
     return cells
 
 
@@ -2126,12 +2337,15 @@ def extract_workbook_summary2(file_path, *,
                               timeout_seconds=None,
                               ignore_errors=False,
                               keep_links=False,
+                              keep_vba=False,
                               mode=0):
     """
     :param keep_links: 是否保留外部表格链接数据。如果保留，打开好像会有点问题。
     :param mode:
         0，最原始的summary3摘要
         1，添加当前工作表、单元格位置的信息
+
+    注意这里没有提供read_only可选参数，是因为read_only=True模式在我这里是运行不了的。
     """
     # 1 读取文件wb
     file_path = Path(file_path)
@@ -2140,7 +2354,9 @@ def extract_workbook_summary2(file_path, *,
     def read_file_by_type(file_path, suffix, keep_links=False):
         # with TicToc('读取文件'):
         if suffix in ('.xlsx', '.xlsm'):
-            wb = openpyxl.load_workbook(file_path, keep_links=keep_links)
+            wb = openpyxl.load_workbook(file_path,
+                                        keep_links=keep_links,
+                                        keep_vba=keep_vba)
         elif suffix == '.xls':
             wb = convert_xls_to_xlsx(file_path)
         elif suffix == '.csv':

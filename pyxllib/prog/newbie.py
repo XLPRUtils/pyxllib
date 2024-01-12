@@ -400,3 +400,23 @@ def funcmsg(func):
         else:
             return f'装饰器：{type(func)}，无法定位'
     return f'函数名：{func.__name__}，来自文件：{func.__code__.co_filename}，所在行号={func.__code__.co_firstlineno}'
+
+
+def set_global_var(name, value):
+    """ 设置某个全局变量，一般用在一些特殊的需要跨作用域进行调试的场景
+    切勿！切勿！切勿用于正式功能，否则会导致难以维护控制的功能代码
+
+    为了避免和某些关键的全局变量名冲突，这里的变量命令统一会加上pyxllib_的前缀
+    """
+    g = globals()
+    name = f'pyxllib_{name}'
+    g[name] = value
+
+
+def get_global_var(name, default_value=None):
+    """ 获取某个全局变量的值 """
+    g = globals()
+    name = f'pyxllib_{name}'
+    if name not in g:
+        g[name] = default_value
+    return g[name]
