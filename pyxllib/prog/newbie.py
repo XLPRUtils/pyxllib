@@ -420,3 +420,25 @@ def get_global_var(name, default_value=None):
     if name not in g:
         g[name] = default_value
     return g[name]
+
+
+def convert_to_json_compatible(d, custom_converter=None):
+    """ 递归地将字典等类型转换为JSON兼容格式。对于非标准JSON类型，使用自定义转换器或默认转换为字符串。
+
+    :param d: 要转换的字典或列表。
+    :param custom_converter: 自定义转换函数，用于处理非标准JSON类型的值。
+    :return: 转换后的字典或列表。
+
+    todo 这个函数想法是好的，但总感觉精确性中，总容易有些问题的，需要更多的考察测试
+    """
+    if custom_converter is None:
+        custom_converter = str
+
+    if isinstance(d, dict):  # defaultdict呢？
+        return {k: convert_to_json_compatible(v, custom_converter) for k, v in d.items()}
+    elif isinstance(d, list):
+        return [convert_to_json_compatible(v, custom_converter) for v in d]
+    elif isinstance(d, (int, float, str, bool)) or d is None:
+        return d
+    else:
+        return custom_converter(d)
