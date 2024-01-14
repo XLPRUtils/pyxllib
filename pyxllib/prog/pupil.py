@@ -508,7 +508,7 @@ class Timeout:
     """ 对函数等待执行的功能，限制运行时间
 
     【实现思路】
-    1、最简单的方式是用signal.SIGALRM实现
+    1、最简单的方式是用signal.SIGALRM实现（包括三方库timeout-decorator也有这个局限）
         https://stackoverflow.com/questions/2281850/timeout-function-if-it-takes-too-long-to-finish
         但是这个不支持windows系统~~
     2、那windows和linux通用的做法，就是把原执行函数变成一个子线程来运行
@@ -519,6 +519,7 @@ class Timeout:
         是用一个Timer计时器子线程计时，当timeout超时，使用信号机制给主线程抛出一个异常
             ① 注意，不能子线程直接抛出异常，这样影响不了主线程
             ② 也不能直接抛出错误signal，这样会强制直接中断程序。应该抛出TimeoutError，让后续程序进行超时逻辑的处理
+            ③ 这里是让子线程抛出信号，主线程收到信号后，再抛出TimeoutError
 
     注意：这个函数似乎不支持多线程
     """
@@ -560,10 +561,12 @@ class Timeout:
         def send_signal():
             signal.raise_signal(signal.SIGABRT)
 
+        # 挂起一个警告器，如果"没人"管它，self.seconds就会抛出错误
         self.alarm = threading.Timer(self.seconds, send_signal)
         self.alarm.start()
 
     def __exit__(self, exc_type, exc_val, exc_tb):
+        # with已经运行完了，马上关闭警告器
         self.alarm.cancel()
 
 

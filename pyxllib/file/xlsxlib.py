@@ -42,7 +42,9 @@ try:
 except ModuleNotFoundError:
     pass
 
-from pyxllib.prog.pupil import inject_members, dprint, xlmd5, shuffle_dict_keys, Timeout, safe_div
+from pyxllib.prog.newbie import human_readable_number
+from pyxllib.prog.pupil import (inject_members, dprint, xlmd5, shuffle_dict_keys, Timeout,
+                                safe_div, format_exception, DictTool)
 from pyxllib.prog.specialist import browser, TicToc
 from pyxllib.algo.specialist import product
 from pyxllib.text.pupil import calc_chinese_ratio
@@ -249,8 +251,10 @@ def xl_render_value(x, xl_fmt):
         y = x.strftime(xlfmt2pyfmt_time(xl_fmt))
     elif isinstance(x, datetime.timedelta):
         y = str(x)
-    else:
+    elif isinstance(x, (str, int, float, bool)):  # 其他可以json化的数据类型
         y = x
+    else:  # ArrayFormula、DataTableFormula等无法json化的数据，提前转str
+        y = str(x)
     return y
 
 
@@ -2107,8 +2111,12 @@ def extract_cells_content(ws, usedrange=None):
         if val is None:
             return ''
         else:
-            # return cell.get_render_value()  # 如果感觉这步很慢，可以换一种更简洁的形式
-            return val
+            return cell.get_render_value()
+            # 如果感觉这步很慢，可以换一种更简洁的形式；但是发现下面这种对时间的格式显示还是太不智能。
+            # if not isinstance(val, (str, int, float, bool)):
+            #     return val
+            # else:
+            #     return str(val)
 
     for i in range(usedrange_bound['top'], usedrange_bound['bottom'] + 1):
         for j in range(usedrange_bound['left'], usedrange_bound['right'] + 1):
@@ -2334,25 +2342,27 @@ def extract_workbook_summary(file_path, mode=0,
 
 
 def extract_workbook_summary2(file_path, *,
-                              timeout_seconds=None,
-                              ignore_errors=False,
                               keep_links=False,
                               keep_vba=False,
-                              mode=0):
+                              mode=0,
+                              return_mode=0,
+                              **kwargs):
     """
     :param keep_links: 是否保留外部表格链接数据。如果保留，打开好像会有点问题。
     :param mode:
         0，最原始的summary3摘要
         1，添加当前工作表、单元格位置的信息
+    :param kwargs: 捕捉其他参数，主要是向下兼容，其实现在并没有用
 
     注意这里没有提供read_only可选参数，是因为read_only=True模式在我这里是运行不了的。
     """
-    # 1 读取文件wb
-    file_path = Path(file_path)
-    suffix = file_path.suffix.lower()
 
-    def read_file_by_type(file_path, suffix, keep_links=False):
-        # with TicToc('读取文件'):
+    # 1 读取文件wb
+    def read_file_by_type():
+        nonlocal load_time
+        nonlocal load_time
+        suffix = file_path.suffix.lower()
+        start_time = time.time()
         if suffix in ('.xlsx', '.xlsm'):
             wb = openpyxl.load_workbook(file_path,
                                         keep_links=keep_links,
@@ -2362,38 +2372,32 @@ def extract_workbook_summary2(file_path, *,
         elif suffix == '.csv':
             wb = convert_csv_to_xlsx(file_path)
         else:
-            raise ValueError('不支持的文件类型')
+            return None
+        load_time = time.time() - start_time
         return wb
 
-    def process_file(file_path, suffix, timeout_seconds=None, keep_links=False, ignore_errors=False):
-        try:
-            if timeout_seconds is None:
-                wb = read_file_by_type(file_path, suffix, keep_links)
-            else:
-                with Timeout(timeout_seconds):  # 使用之前定义的timeout上下文管理器
-                    wb = read_file_by_type(file_path, suffix, keep_links)
-        except Exception as e:
-            if ignore_errors:
-                return {}
-            else:
-                raise e
-        return wb
-
-    wb = process_file(file_path, suffix, timeout_seconds, keep_links, ignore_errors)
+    load_time = -1
+    file_path = Path(file_path)
+    res = {}
+    res['fileName'] = file_path.name
+    wb = read_file_by_type()
+    if wb is None:  # 不支持的文件类型，不报错，只是返回最基本的文件名信息
+        return res
 
     # 2 提取摘要
-    # with TicToc('提取摘要'):
-    res = wb.extract_summary2()
-    res['fileName'] = Path(file_path).name
+    summary2 = wb.extract_summary2()
+    DictTool.ior(res, summary2)
+    if mode == 1:
+        ws = wb.active
+        res['ActiveSheet'] = ws.title
+        res['Selection'] = ws.selected_cell
 
-    if mode == 0:
-        pass
-    elif mode == 1:
-        res['ActiveSheet'] = wb.active.title
-        # todo py好像没办法提取Selection。但jsa、vba应该要尽力取出这些相关的特征，尤其在操作等场景很有用
-        # res['SelectionAddress'] = ...
+    # res = convert_to_json_compatible(res)
 
-    return res
+    if return_mode == 1:
+        return res, load_time
+    else:
+        return res
 
 
 def update_raw_summary2(data):
@@ -2838,10 +2842,10 @@ class WorkbookSummary3:
         y = {
             'fileName': x['fileName'],
             'sheetNames': x['sheetNames'],
-            'ActiveSheet': x['ActiveSheet'],  # 当期激活的工作表
-            # 'SelectionAddress': '',
             'sheets': x['sheets'],
             'mode': 'Complete information',
+            'ActiveSheet': x['ActiveSheet'],  # 当期激活的工作表
+            'Selection': x['Selection'],
         }
 
         # 处理前确保下cells字段存在，避免后续很多处理过程要特判
@@ -2868,10 +2872,47 @@ def extract_workbook_summary3(file_path, summary_limit_len=4000, **kwargs):
     return data
 
 
-def extract_workbook_summary3b(file_path, summary_limit_len=4000, **kwargs):
-    """ 增加了全局ratio的计算 """
-    data = extract_workbook_summary2(file_path, mode=1, **kwargs)
-    if not data:
-        return data
-    data = WorkbookSummary3.summary2_to_summary3b(data, summary_limit_len)
-    return data
+def extract_workbook_summary3b(file_path,
+                               summary_limit_len=4000,
+                               timeout_seconds=60,
+                               return_mode=0,
+                               **kwargs):
+    """
+
+    :param summary_limit_len: 摘要长度限制
+    :param timeout_seconds: 超时限制
+    :param return_mode: 返回模式，0表示只返回摘要，1表示返回摘要和耗时
+    :param kwargs: 其他是summary2读取文件的时候的参数，其实都不太关键，一般不用特地设置
+    """
+    res = {}
+    res['fileName'] = file_path.name
+    load_time = summary2_time = summary3_time = -1
+
+    # with Timeout(timeout_seconds):
+    #     start_time = time.time()
+    #     res, load_time = extract_workbook_summary2(file_path, mode=1, return_mode=1, **kwargs)
+    #     summary2_time = time.time() - start_time - load_time
+    #     start_time = time.time()
+    #     res = WorkbookSummary3.summary2_to_summary3b(res, summary_limit_len)
+    #     summary3_time = time.time() - start_time
+
+    try:
+        with Timeout(timeout_seconds):
+            start_time = time.time()
+            res, load_time = extract_workbook_summary2(file_path, mode=1, return_mode=1, **kwargs)
+            # res = convert_to_json_compatible(res)
+            summary2_time = time.time() - start_time - load_time
+            start_time = time.time()
+            res = WorkbookSummary3.summary2_to_summary3b(res, summary_limit_len)
+            summary3_time = time.time() - start_time
+    except TimeoutError:
+        res['error'] = f'超时，未完成摘要提取：{timeout_seconds}秒'
+    except Exception as e:
+        # raise e
+        res['error'] = f'提取摘要时发生错误：{format_exception(e, 2)}'
+
+    if return_mode == 1:
+        return res, {'load_time': human_readable_number(load_time),
+                     'summary2_time': human_readable_number(summary2_time),
+                     'summary3_time': human_readable_number(summary3_time)}
+    return res
