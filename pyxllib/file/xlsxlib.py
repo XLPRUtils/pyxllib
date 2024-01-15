@@ -721,40 +721,58 @@ class XlWorksheet(openpyxl.worksheet.worksheet.Worksheet):
                                              right=self.max_column, bottom=self.max_row)
         return raw_used_range
 
-    @run_once('id,str')  # 同一个表，同一行不会重复计算
     def is_empty_row(self, row, start_col, end_col):
-        cur_col = start_col
-        # 特地提前检查下最后一列的那个单元格
-        if self.cell(row, end_col).value is not None:
-            return False
-        while cur_col <= end_col:
-            if self.cell(row, cur_col).value is not None:
+        if not hasattr(self, 'is_empty_row_cache'):
+            self.is_empty_row_cache = {}
+        key = (row, start_col, end_col)
+
+        def is_empty_row_core():
+            cur_col = start_col
+            # 特地提前检查下最后一列的那个单元格
+            if self.cell(row, end_col).value is not None:
                 return False
-            # 步长随着尝试的增加，也逐渐降低采样率
-            n = cur_col - start_col + 1
-            # 在最大值m=16384列情况下，/1000，最多检索3404个单元格，/100，最多检索569次，/50最多检索320次
-            # cur_col += (n // 50) + 1
-            # 再变形，加强前面权重，大大降低后面权重
-            if n <= 100:
-                cur_col += 1
-            else:  # 最多54次
-                cur_col += (n // 10)
+            while cur_col <= end_col:
+                if self.cell(row, cur_col).value is not None:
+                    return False
+                # 步长随着尝试的增加，也逐渐降低采样率
+                n = cur_col - start_col + 1
+                # 在最大值m=16384列情况下，/1000，最多检索3404个单元格，/100，最多检索569次，/50最多检索320次
+                # cur_col += (n // 50) + 1
+                # 再变形，加强前面权重，大大降低后面权重
+                if n <= 100:
+                    cur_col += 1
+                else:  # 最多54次
+                    cur_col += (n // 10)
 
-        return True
+            return True
 
-    @run_once('id,str')  # 同一个表，同一列不会重复计算
+        if key not in self.is_empty_row_cache:
+            self.is_empty_row_cache[key] = is_empty_row_core()
+
+        return self.is_empty_row_cache[key]
+
     def is_empty_column(self, col, start_row, end_row):
-        cur_row = start_row
-        # 特地提前检查下最后一行的那个单元格
-        if self.cell(end_row, col).value is not None:
-            return False
-        while cur_row <= end_row:
-            if self.cell(cur_row, col).value is not None:
+        if not hasattr(self, 'is_empty_column_cache'):
+            self.is_empty_column_cache = {}
+        key = (col, start_row, end_row)
+
+        def is_empty_column_core():
+            cur_row = start_row
+            # 特地提前检查下最后一行的那个单元格
+            if self.cell(end_row, col).value is not None:
                 return False
-            n = cur_row - start_row + 1
-            # 在最大值n=1048576行情况下，/1000，最多检索7535个单元格，/100，最多检索987次，/50最多检索530次
-            cur_row += (n // 1000) + 1
-        return True
+            while cur_row <= end_row:
+                if self.cell(cur_row, col).value is not None:
+                    return False
+                n = cur_row - start_row + 1
+                # 在最大值n=1048576行情况下，/1000，最多检索7535个单元格，/100，最多检索987次，/50最多检索530次
+                cur_row += (n // 1000) + 1
+            return True
+
+        if key not in self.is_empty_column_cache:
+            self.is_empty_column_cache[key] = is_empty_column_core()
+
+        return self.is_empty_column_cache[key]
 
     def find_last_non_empty_row(self, start_row, end_row, start_col, end_col, m=30):
         # 1 如果剩余行数不多（小于等于m），直接遍历这些行
@@ -864,7 +882,6 @@ class XlWorksheet(openpyxl.worksheet.worksheet.Worksheet):
         # 如果所有分割点都是空的，则返回-1
         return -1
 
-    @run_once('id,str')  # 同一个表，同一行不会重复计算
     def get_usedrange(self):
         """ 定位有效数据区间。
 
@@ -891,48 +908,48 @@ class XlWorksheet(openpyxl.worksheet.worksheet.Worksheet):
 
         :param reset_bounds: 计算出新区域后，是否重置ws的边界值
         """
-        from pyxllib.prog.newbie import get_global_var
+        if not hasattr(self, 'usedrange_cache'):
+            # 初始化边界值
+            left, right, top, bottom = self.min_column, self.max_column, self.min_row, self.max_row
 
-        # 初始化边界值
-        left, right, top, bottom = self.min_column, self.max_column, self.min_row, self.max_row
+            # start_time = time.time()
+            # 使用优化后的函数找到最下方的行和最右边的列
+            bottom = self.find_last_non_empty_row(top, bottom, left, right)
+            if bottom == -1:
+                return 'A1'  # 空表返回A1占位
+            right = self.find_last_non_empty_column(left, right, top, bottom)
+            if right == -1:
+                return 'A1'
 
-        # start_time = time.time()
-        # 使用优化后的函数找到最下方的行和最右边的列
-        bottom = self.find_last_non_empty_row(top, bottom, left, right)
-        if bottom == -1:
-            return 'A1'  # 空表返回A1占位
-        right = self.find_last_non_empty_column(left, right, top, bottom)
-        if right == -1:
-            return 'A1'
+            # 使用优化后的函数找到最上方的行和最左边的列
+            top = self.find_first_non_empty_row(top, bottom, left, right)
+            if top == -1:
+                return 'A1'
+            left = self.find_first_non_empty_column(left, right, top, bottom)
+            if left == -1:
+                return 'A1'
+            # get_global_var('get_usedrange_time')[-1] += time.time() - start_time
 
-        # 使用优化后的函数找到最上方的行和最左边的列
-        top = self.find_first_non_empty_row(top, bottom, left, right)
-        if top == -1:
-            return 'A1'
-        left = self.find_first_non_empty_column(left, right, top, bottom)
-        if left == -1:
-            return 'A1'
-        # get_global_var('get_usedrange_time')[-1] += time.time() - start_time
+            # 2 然后还要再扩范围（根据合并单元格情况）
+            # start_time = time.time()
+            top0, bottom0, left0, right0 = top, bottom, left, right
+            for merged_range in self.merged_cells.ranges:
+                l, t, r, b = merged_range.bounds
+                if top0 <= b <= bottom0 or top0 <= t <= bottom0:
+                    if left0 <= r and l < left:
+                        left = l
+                    if l <= right0 and r > right:
+                        right = r
+                if left0 <= r <= right0 or left0 <= l <= right0:
+                    if top0 <= b and t < top:
+                        top = t
+                    if t <= bottom0 and b > bottom:
+                        bottom = b
+            # get_global_var('expandrange_time')[-1] += time.time() - start_time
 
-        # 2 然后还要再扩范围（根据合并单元格情况）
-        # start_time = time.time()
-        top0, bottom0, left0, right0 = top, bottom, left, right
-        for merged_range in self.merged_cells.ranges:
-            l, t, r, b = merged_range.bounds
-            if top0 <= b <= bottom0 or top0 <= t <= bottom0:
-                if left0 <= r and l < left:
-                    left = l
-                if l <= right0 and r > right:
-                    right = r
-            if left0 <= r <= right0 or left0 <= l <= right0:
-                if top0 <= b and t < top:
-                    top = t
-                if t <= bottom0 and b > bottom:
-                    bottom = b
-        # get_global_var('expandrange_time')[-1] += time.time() - start_time
+            self.used_range = build_range_address(left=left, top=top, right=right, bottom=bottom)
 
-        used_range = build_range_address(left=left, top=top, right=right, bottom=bottom)
-        return used_range
+        return self.used_range
 
     def copy_worksheet(self, dst_ws):
         """跨工作薄时复制表格内容的功能
@@ -967,7 +984,6 @@ class XlWorksheet(openpyxl.worksheet.worksheet.Worksheet):
             else:
                 yield tuple(cells)
 
-    @run_once('id,str')
     def search(self, pattern, min_row=None, max_row=None, min_col=None, max_col=None, order=None, direction=0):
         """ 查找满足pattern正则表达式的单元格
 
@@ -987,40 +1003,50 @@ class XlWorksheet(openpyxl.worksheet.worksheet.Worksheet):
         >> ws.search('年段')
         <Cell '预算总表'.B2>
         """
-        # 1 定界
-        x1, x2 = max(min_row or 1, 1), min(max_row or self.max_row, self.max_row)
-        y1, y2 = max(min_col or 1, 1), min(max_col or self.max_column, self.max_column)
+        if not hasattr(self, 'search_cache'):
+            self.search_cache = {}
+        key = (pattern, min_row, max_row, min_col, max_col, order, direction)
 
-        # 2 遍历
-        if isinstance(pattern, datetime.date):
-            pattern = f'^{(pattern - datetime.date(1899, 12, 30)).days}$'
+        def get_search_core():
+            # 1 定界
+            x1, x2 = max(min_row or 1, 1), min(max_row or self.max_row, self.max_row)
+            y1, y2 = max(min_col or 1, 1), min(max_col or self.max_column, self.max_column)
 
-        if isinstance(pattern, (list, tuple)):
-            cel = None
-            for p in pattern:
-                cel = self.search(p, x1, x2, y1, y2, order)
-                if cel:
-                    # up, down, left, right 找到的单元格四边界
-                    l, u, r, d = getattr(cel.in_range(), 'bounds', (cel.column, cel.row, cel.column, cel.row))
-                    if direction == 0:
-                        x1, x2, y1, y2 = max(x1, d + 1), x2, max(y1, l), min(y2, r)
-                    elif direction == 1:
-                        x1, x2, y1, y2 = max(x1, u), min(x2, d), max(y1, r + 1), y2
-                    elif direction == 2:
-                        x1, x2, y1, y2 = x1, min(x2, u - 1), max(y1, l), min(y2, r)
-                    elif direction == 3:
-                        x1, x2, y1, y2 = max(x1, u), min(x2, d), y1, min(y2, l - 1)
+            # 2 遍历
+            if isinstance(pattern, datetime.date):
+                pattern = f'^{(pattern - datetime.date(1899, 12, 30)).days}$'
+
+            if isinstance(pattern, (list, tuple)):
+                cel = None
+                for p in pattern:
+                    cel = self.search(p, x1, x2, y1, y2, order)
+                    if cel:
+                        # up, down, left, right 找到的单元格四边界
+                        l, u, r, d = getattr(cel.in_range(), 'bounds', (cel.column, cel.row, cel.column, cel.row))
+                        if direction == 0:
+                            x1, x2, y1, y2 = max(x1, d + 1), x2, max(y1, l), min(y2, r)
+                        elif direction == 1:
+                            x1, x2, y1, y2 = max(x1, u), min(x2, d), max(y1, r + 1), y2
+                        elif direction == 2:
+                            x1, x2, y1, y2 = x1, min(x2, u - 1), max(y1, l), min(y2, r)
+                        elif direction == 3:
+                            x1, x2, y1, y2 = max(x1, u), min(x2, d), y1, min(y2, l - 1)
+                        else:
+                            raise ValueError(f'direction参数值错误{direction}')
                     else:
-                        raise ValueError(f'direction参数值错误{direction}')
-                else:
-                    return None
-            return cel
-        else:
-            if isinstance(pattern, str): pattern = re.compile(pattern)
-            for x, y in product(range(x1, x2 + 1), range(y1, y2 + 1), order=order):
-                cell = self.cell(x, y)
-                if cell.celltype() == 1: continue  # 过滤掉合并单元格位置
-                if pattern.search(str(cell.value)): return cell  # 返回满足条件的第一个值
+                        return None
+                return cel
+            else:
+                if isinstance(pattern, str): pattern = re.compile(pattern)
+                for x, y in product(range(x1, x2 + 1), range(y1, y2 + 1), order=order):
+                    cell = self.cell(x, y)
+                    if cell.celltype() == 1: continue  # 过滤掉合并单元格位置
+                    if pattern.search(str(cell.value)): return cell  # 返回满足条件的第一个值
+
+        if key not in self.search_cache:
+            self.search_cache[key] = get_search_core()
+
+        return self.search_cache[key]
 
     findcel = search
 
@@ -1571,12 +1597,12 @@ class XlWorksheet(openpyxl.worksheet.worksheet.Worksheet):
                     current_alignment_dict.pop('wrapText', None)
                     cell.alignment = Alignment(wrapText=True, **current_alignment_dict)
 
-    @run_once('id,str')
     def get_sorted_merged_cells(self):
         """ 将合并单元格按照行列顺序排列。
         """
-        rngs = list(sorted(self.merged_cells.ranges, key=lambda x: (x.min_row, x.min_col)))
-        return rngs
+        if not hasattr(self, 'sorted_merged_cells'):
+            self.sorted_merged_cells = list(sorted(self.merged_cells.ranges, key=lambda x: (x.min_row, x.min_col)))
+        return self.sorted_merged_cells
 
 
 inject_members(XlWorksheet, openpyxl.worksheet.worksheet.Worksheet, white_list=['_cells_by_row'])
@@ -2390,7 +2416,8 @@ def extract_workbook_summary2(file_path, *,
     if mode == 1:
         ws = wb.active
         res['ActiveSheet'] = ws.title
-        res['Selection'] = ws.selected_cell
+        if hasattr(ws, 'selected_cell'):
+            res['Selection'] = ws.selected_cell
 
     # res = convert_to_json_compatible(res)
 
@@ -2845,7 +2872,8 @@ class WorkbookSummary3:
             'sheets': x['sheets'],
             'mode': 'Complete information',
             'ActiveSheet': x['ActiveSheet'],  # 当期激活的工作表
-            'Selection': x['Selection'],
+            # 最多截取250个字符。（一般情况下这个很小的，只是在很极端情况，比如离散选中了非常多区域，这个可能就会太长
+            'Selection': x['Selection'][:250],
         }
 
         # 处理前确保下cells字段存在，避免后续很多处理过程要特判
@@ -2876,6 +2904,7 @@ def extract_workbook_summary3b(file_path,
                                summary_limit_len=4000,
                                timeout_seconds=60,
                                return_mode=0,
+                               debug=False,
                                **kwargs):
     """
 
@@ -2885,16 +2914,8 @@ def extract_workbook_summary3b(file_path,
     :param kwargs: 其他是summary2读取文件的时候的参数，其实都不太关键，一般不用特地设置
     """
     res = {}
-    res['fileName'] = file_path.name
+    res['fileName'] = Path(file_path).name
     load_time = summary2_time = summary3_time = -1
-
-    # with Timeout(timeout_seconds):
-    #     start_time = time.time()
-    #     res, load_time = extract_workbook_summary2(file_path, mode=1, return_mode=1, **kwargs)
-    #     summary2_time = time.time() - start_time - load_time
-    #     start_time = time.time()
-    #     res = WorkbookSummary3.summary2_to_summary3b(res, summary_limit_len)
-    #     summary3_time = time.time() - start_time
 
     try:
         with Timeout(timeout_seconds):
@@ -2905,10 +2926,13 @@ def extract_workbook_summary3b(file_path,
             start_time = time.time()
             res = WorkbookSummary3.summary2_to_summary3b(res, summary_limit_len)
             summary3_time = time.time() - start_time
-    except TimeoutError:
+    except TimeoutError as e:
+        if debug:
+            raise e
         res['error'] = f'超时，未完成摘要提取：{timeout_seconds}秒'
     except Exception as e:
-        # raise e
+        if debug:
+            raise e
         res['error'] = f'提取摘要时发生错误：{format_exception(e, 2)}'
 
     if return_mode == 1:

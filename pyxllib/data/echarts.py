@@ -29,7 +29,7 @@ class XlChart(Chart):
     def set_title(self, title):
         self.set_global_opts(title_opts=pyecharts.options.TitleOpts(title=title))
 
-    def add_series(self, name, data, *, type=None, color=None, is_selected=True, labels=None,
+    def add_series(self, name, data, *, type=None, color=None, labels=None,
                    **kwargs):
         """ 垃圾pyecharts，毁我青春~~
 
@@ -54,7 +54,7 @@ class XlChart(Chart):
                 kwargs['label']['formatter'] = fmt
 
         self._append_color(color)
-        self._append_legend(name, is_selected)
+        self._append_legend(name)
 
         self.options.get('series').append(
             {
