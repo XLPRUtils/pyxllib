@@ -32,7 +32,7 @@ import requests
 from tqdm import tqdm
 
 try:
-    from transformers import AutoTokenizer
+    from transformers import AutoTokenizer, GPT2TokenizerFast
 except ModuleNotFoundError:
     pass
 
