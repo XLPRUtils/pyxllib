@@ -117,7 +117,7 @@ def is_valid_excel_address(address):
         return is_valid_excel_cell(address)
 
 
-@run_once('str')
+@run_once('str', debug=True)
 def xlfmt2pyfmt_date(xl_fmt):
     """ 日期的渲染操作
 
@@ -213,7 +213,7 @@ def xlfmt2pyfmt_time(xl_fmt):
     return ':'.join(components)
 
 
-@run_once('str')
+# @run_once('str')
 def xlfmt2pyfmt_datetime(xl_fmt):
     """ 主要是针对日期、时间的渲染操作
 
@@ -224,12 +224,6 @@ def xlfmt2pyfmt_datetime(xl_fmt):
     if ':' in xl_fmt:
         py_fmt += ' ' + xlfmt2pyfmt_time(xl_fmt)
     return py_fmt
-
-
-@run_once('str')
-def xlfmt2pyfmt(xl_fmt):
-    """ 主要是针对日期、时间的渲染操作 """
-    return xl_fmt
 
 
 def xl_render_value(x, xl_fmt):
@@ -1005,9 +999,14 @@ class XlWorksheet(openpyxl.worksheet.worksheet.Worksheet):
         """
         if not hasattr(self, 'search_cache'):
             self.search_cache = {}
+
+        if isinstance(pattern, list):
+            pattern = tuple(pattern)
+
         key = (pattern, min_row, max_row, min_col, max_col, order, direction)
 
         def get_search_core():
+            nonlocal pattern
             # 1 定界
             x1, x2 = max(min_row or 1, 1), min(max_row or self.max_row, self.max_row)
             y1, y2 = max(min_col or 1, 1), min(max_col or self.max_column, self.max_column)
@@ -1016,7 +1015,7 @@ class XlWorksheet(openpyxl.worksheet.worksheet.Worksheet):
             if isinstance(pattern, datetime.date):
                 pattern = f'^{(pattern - datetime.date(1899, 12, 30)).days}$'
 
-            if isinstance(pattern, (list, tuple)):
+            if isinstance(pattern, tuple):
                 cel = None
                 for p in pattern:
                     cel = self.search(p, x1, x2, y1, y2, order)
@@ -2386,7 +2385,6 @@ def extract_workbook_summary2(file_path, *,
     # 1 读取文件wb
     def read_file_by_type():
         nonlocal load_time
-        nonlocal load_time
         suffix = file_path.suffix.lower()
         start_time = time.time()
         if suffix in ('.xlsx', '.xlsm'):
@@ -2408,7 +2406,10 @@ def extract_workbook_summary2(file_path, *,
     res['fileName'] = file_path.name
     wb = read_file_by_type()
     if wb is None:  # 不支持的文件类型，不报错，只是返回最基本的文件名信息
-        return res
+        if return_mode == 1:
+            return res, load_time
+        else:
+            return res
 
     # 2 提取摘要
     summary2 = wb.extract_summary2()
@@ -2475,6 +2476,12 @@ class WorkbookSummary3:
     """ 计算summary3及衍生版本需要的一些功能组件 """
 
     @classmethod
+    def count_length(cls, text):
+        if not isinstance(text, str):
+            text = json.dumps(text, ensure_ascii=False, default=str)
+        return len(text)
+
+    @classmethod
     def reduce1_delete_empty_cell(cls, summary3):
         """ 删除空单元格 """
         for sheet in summary3['sheets']:
@@ -2503,7 +2510,7 @@ class WorkbookSummary3:
 
         # 如果未提供当前摘要长度，则计算之
         if cur_summary_len is None:
-            cur_summary_len = len(json.dumps(summary3, ensure_ascii=False))
+            cur_summary_len = cls.count_length(summary3)
 
         # 1. 计算基准单元格长度
         total_cells_num = sum(len(st['cells']) + 5 for st in summary3['sheets'])
@@ -2534,7 +2541,7 @@ class WorkbookSummary3:
     @classmethod
     def reduce3_fold_rows(cls, summary3, summary_limit_len, *, cur_summary_len=None):
         if cur_summary_len is None:
-            cur_summary_len = len(json.dumps(summary3, ensure_ascii=False))
+            cur_summary_len = cls.count_length(summary3)
 
         # 每个sheet本身其他摘要，按照5个单元格估算
         total_cells_num = sum([(len(st['cells']) + 5) for st in summary3['sheets']])
@@ -2610,7 +2617,7 @@ class WorkbookSummary3:
     @classmethod
     def reduce4_truncate_cells(cls, y, summary_limit_len, *, cur_summary_len=None):
         if cur_summary_len is None:
-            cur_summary_len = len(json.dumps(y, ensure_ascii=False))
+            cur_summary_len = cls.count_length(y)
 
         # 1 预计要删除单元格数
         sheet_cells_num = [len(st['cells']) for st in y['sheets']]
@@ -2624,14 +2631,14 @@ class WorkbookSummary3:
         if total_cells_num < target_reduce_cells_num:
             for st in y['sheets']:
                 st['cells'] = {}
-            return len(json.dumps(y, ensure_ascii=False))
+            return cls.count_length(y)
 
         # 3 否则每张表按照比例删单元格，只保留前面部分的单元格
         left_rate = 1 - target_reduce_cells_num / total_cells_num
         while True:
             for i, st in enumerate(y['sheets']):
                 st['cells'] = dict(islice(st['cells'].items(), int(left_rate * sheet_cells_num[i])))
-            cur_summary_len = len(json.dumps(y, ensure_ascii=False))
+            cur_summary_len = cls.count_length(y)
             if cur_summary_len <= summary_limit_len:
                 return cur_summary_len
             if left_rate * total_cells_num < 1:
@@ -2645,7 +2652,7 @@ class WorkbookSummary3:
     def reduce5_truncate_sheets(cls, y, summary_limit_len, *, cur_summary_len=None):
         """ 计算平均每张表的长度，保留前面部分的表格 """
         if cur_summary_len is None:
-            cur_summary_len = len(json.dumps(y, ensure_ascii=False))
+            cur_summary_len = cls.count_length(y)
 
         n = len(y['sheets'])
         avg_sheet_len = cur_summary_len / n
@@ -2653,7 +2660,7 @@ class WorkbookSummary3:
         y['sheets'] = y['sheets'][:n - target_reduce_sheet_num]
 
         while y['sheets']:
-            cur_summary_len = len(json.dumps(y, ensure_ascii=False))
+            cur_summary_len = cls.count_length(y)
             if cur_summary_len <= summary_limit_len:
                 return cur_summary_len
             y['sheets'] = y['sheets'][:-1]  # 依次尝试删除最后一张表格的详细信息
@@ -2672,13 +2679,13 @@ class WorkbookSummary3:
             ]
 
             # 0 摘要本来就不大
-            cur_summary_len = len(json.dumps(y, ensure_ascii=False))
+            cur_summary_len = cls.count_length(y)
             if cur_summary_len <= summary_limit_len:
                 return y
 
             # 1 删除空单元格
             cls.reduce1_delete_empty_cell(y)
-            cur_summary_len = len(json.dumps(y, ensure_ascii=False))
+            cur_summary_len = cls.count_length(y)
             if cur_summary_len <= summary_limit_len:
                 y['mode'] = ', '.join(mode_tags[:1])
                 return y
@@ -2691,7 +2698,7 @@ class WorkbookSummary3:
 
             # 3 同构数据，省略显示（有大量相同行数据，折叠省略表达）
             cls.reduce3_fold_rows(y, summary_limit_len, cur_summary_len=cur_summary_len)
-            cur_summary_len = len(json.dumps(y, ensure_ascii=False))
+            cur_summary_len = cls.count_length(y)
             if cur_summary_len <= summary_limit_len:
                 y['mode'] = ', '.join(mode_tags[:3])
                 return y
@@ -2735,7 +2742,7 @@ class WorkbookSummary3:
         :param active_sheet_weight: 当前活动表格被删除的权重，0.5表示按比例被删除的量只有其他表格的一半
         """
         if cur_summary_len is None:
-            cur_summary_len = len(json.dumps(y, ensure_ascii=False))
+            cur_summary_len = cls.count_length(y)
 
         active_sheet = y['ActiveSheet']
 
@@ -2765,7 +2772,7 @@ class WorkbookSummary3:
         if total_cells_num < target_reduce_cells_num:
             for st in y['sheets']:
                 st['cells'] = {}
-            return len(json.dumps(y, ensure_ascii=False))
+            return cls.count_length(y)
 
         # 4 否则每张表按照比例删单元格，只保留前面部分的单元格
         left_rate = 1 - r  # 原始保留比例
@@ -2777,7 +2784,7 @@ class WorkbookSummary3:
                 else:
                     # 其他sheet按照w2权重删除单元格
                     st['cells'] = dict(islice(st['cells'].items(), int(left_rate * w2 * sheet_cells_num[i])))
-            cur_summary_len = len(json.dumps(y, ensure_ascii=False))
+            cur_summary_len = cls.count_length(y)
             if cur_summary_len <= summary_limit_len:
                 return cur_summary_len
             if left_rate * total_cells_num < 1:
@@ -2791,7 +2798,7 @@ class WorkbookSummary3:
     def reduce5b(cls, y, summary_limit_len, *, cur_summary_len=None):
         """ 计算平均每张表的长度，保留前面部分的表格 """
         if cur_summary_len is None:
-            cur_summary_len = len(json.dumps(y, ensure_ascii=False))
+            cur_summary_len = cls.count_length(y)
 
         n = len(y['sheets'])
         active_sheet_name = y['ActiveSheet']
@@ -2801,7 +2808,7 @@ class WorkbookSummary3:
         # y['sheets'] = y['sheets'][:n - target_reduce_sheet_num]
 
         while y['sheets']:
-            cur_summary_len = len(json.dumps(y, ensure_ascii=False))
+            cur_summary_len = cls.count_length(y)
             if cur_summary_len <= summary_limit_len:
                 return cur_summary_len
 
@@ -2830,13 +2837,13 @@ class WorkbookSummary3:
             ]
 
             # 0 摘要本来就不大
-            cur_summary_len = len(json.dumps(y, ensure_ascii=False))
+            cur_summary_len = cls.count_length(y)
             if cur_summary_len <= summary_limit_len:
                 return y
 
             # 1 删除空单元格
             cls.reduce1_delete_empty_cell(y)
-            cur_summary_len = len(json.dumps(y, ensure_ascii=False))
+            cur_summary_len = cls.count_length(y)
             if cur_summary_len <= summary_limit_len:
                 y['mode'] = ', '.join(mode_tags[:1])
                 return y
@@ -2849,7 +2856,7 @@ class WorkbookSummary3:
 
             # 3 同构数据，省略显示（有大量相同行数据，折叠省略表达）
             cls.reduce3_fold_rows(y, summary_limit_len, cur_summary_len=cur_summary_len)
-            cur_summary_len = len(json.dumps(y, ensure_ascii=False))
+            cur_summary_len = cls.count_length(y)
             if cur_summary_len <= summary_limit_len:
                 y['mode'] = ', '.join(mode_tags[:3])
                 return y
@@ -2872,9 +2879,10 @@ class WorkbookSummary3:
             'sheets': x['sheets'],
             'mode': 'Complete information',
             'ActiveSheet': x['ActiveSheet'],  # 当期激活的工作表
-            # 最多截取250个字符。（一般情况下这个很小的，只是在很极端情况，比如离散选中了非常多区域，这个可能就会太长
-            'Selection': x['Selection'][:250],
         }
+        if 'Selection' in x:
+            # 最多截取250个字符。（一般情况下这个很小的，只是在很极端情况，比如离散选中了非常多区域，这个可能就会太长
+            y['Selection'] = x['Selection'][:250]
 
         # 处理前确保下cells字段存在，避免后续很多处理过程要特判
         for st in y['sheets']:
@@ -2891,6 +2899,17 @@ class WorkbookSummary3:
         return y
 
 
+class WorkbookSummary3plus(WorkbookSummary3):
+    """ 标准的token计算方式，不过暂不打算实装使用 """
+
+    @classmethod
+    def count_length(cls, text):
+        from pyxlpr.data.gptlib import Tokenizer
+        if not isinstance(text, str):
+            text = json.dumps(text, ensure_ascii=False, default=str)
+        return Tokenizer.count_tokens(text)
+
+
 def extract_workbook_summary3(file_path, summary_limit_len=4000, **kwargs):
     """ 增加了全局ratio的计算 """
     data = extract_workbook_summary2(file_path, **kwargs)
@@ -2902,15 +2921,19 @@ def extract_workbook_summary3(file_path, summary_limit_len=4000, **kwargs):
 
 def extract_workbook_summary3b(file_path,
                                summary_limit_len=4000,
-                               timeout_seconds=60,
+                               timeout_seconds=10,
                                return_mode=0,
                                debug=False,
+                               len_mode=0,
                                **kwargs):
     """
 
     :param summary_limit_len: 摘要长度限制
     :param timeout_seconds: 超时限制
     :param return_mode: 返回模式，0表示只返回摘要，1表示返回摘要和耗时
+    :param len_mode:
+        0, 使用len作为token长度评估
+        1, 使用模型评估实际token长度
     :param kwargs: 其他是summary2读取文件的时候的参数，其实都不太关键，一般不用特地设置
     """
     res = {}
@@ -2924,7 +2947,10 @@ def extract_workbook_summary3b(file_path,
             # res = convert_to_json_compatible(res)
             summary2_time = time.time() - start_time - load_time
             start_time = time.time()
-            res = WorkbookSummary3.summary2_to_summary3b(res, summary_limit_len)
+            if len_mode == 1:
+                res = WorkbookSummary3plus.summary2_to_summary3b(res, summary_limit_len)
+            else:
+                res = WorkbookSummary3.summary2_to_summary3b(res, summary_limit_len)
             summary3_time = time.time() - start_time
     except TimeoutError as e:
         if debug:

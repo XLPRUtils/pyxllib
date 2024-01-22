@@ -405,7 +405,7 @@ def check_install_package(package, speccal_install_name=None, *, user=False):
         subprocess.check_call(cmds)
 
 
-def run_once(distinct_mode=0, *, limit=1):
+def run_once(distinct_mode=0, *, limit=1, debug=False):
     """ 装饰器，装饰的函数在一次程序里其实只会运行一次
 
     :param int|str distinct_mode:
@@ -449,6 +449,7 @@ def run_once(distinct_mode=0, *, limit=1):
             if x[0] < limit:
                 res = func(*args, **kwargs)
                 x = counter[tag] = [x[0] + 1, res]
+
             return x[1]
 
         return wrapper
@@ -924,9 +925,10 @@ class OutputLogger(logging.Logger):
                                       '%Y-%m-%d %H:%M:%S')
 
         # 提前重置为空文件
-        if log_file is not None and log_mode == 'w':
-            with open(log_file, log_mode) as f:
-                f.write('')
+        if log_file is not None:
+            if not os.path.isfile(log_file) or log_mode == 'w':
+                with open(log_file, 'w', encoding='utf8') as f:
+                    f.write('')
 
         # 创建文件日志处理器
         if log_file:
