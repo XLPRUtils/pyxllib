@@ -26,6 +26,8 @@ from io import StringIO
 import fire
 import pandas as pd
 from tqdm import tqdm
+import requests
+import requests_cache
 
 from pyxllib.text.pupil import chinese2digits, grp_chinese_char
 from pyxllib.file.xlsxlib import openpyxl
@@ -37,6 +39,74 @@ from pyxllib.data.sqlite import Connection
 from pyxllib.ext.seleniumlib import XlChrome
 
 
+class Xiaoetong:
+    """ 写一个觉观的api
+    """
+
+    def __init__(self):
+        self.app_id = ''
+        self.client_id = ''
+        self.secret_key = ''
+        self.token = ''
+
+    def login(self, app_id, client_id, secret_key):
+        """ 登录
+        """
+        self.app_id = app_id
+        self.client_id = client_id
+        self.secret_key = secret_key
+
+        # 启用缓存
+        requests_cache.install_cache('access_token_cache', expire_after=600)  # 设置缓存过期时间xx（单位：秒）
+        # 接口地址
+        url = "https://api.xiaoe-tech.com/token"
+        params = {
+            "app_id": self.app_id,
+            "client_id": self.client_id,
+            "secret_key": self.secret_key,
+            "grant_type": "client_credential"
+        }
+        response = requests.get(url, params=params)
+        if response.status_code == 200:
+            result = response.json()
+            if result['code'] == 0:
+                # access_token 是小鹅通开放api的全局唯一接口调用凭据，店铺调用各接口时都需使用 access_token ,开发者需要进行妥善保管；
+                self.token = result['data']['access_token']
+            else:
+                raise Exception("Error getting access token: {}".format(result['msg']))
+        else:
+            raise Exception("HTTP request failed with status code {}".format(response.status_code))
+
+    def get_alive_user_list(self, resource_id, page_size=100):
+        # 1 获取总页数
+        url = "https://api.xiaoe-tech.com/xe.alive.user.list/1.0.0"  # 接口地址【路径：API列表 -> 直播管理 -> 获取直播间用户列表】
+        data_1 = {
+            "access_token": self.token,
+            "resource_id": resource_id,
+            "page": 1,
+            "page_size": page_size
+        }
+        response_1 = requests.post(url, data=data_1)
+        result_1 = response_1.json()
+        page = math.ceil(result_1['data']['total'] / page_size)  # 页数
+
+        # 2 获取直播间用户数据
+        lst = result_1['data']['list']
+        for i in range(1, page):  # 为什么从1开始，因为第一页的数据上面已经获取到了，这里没必要从新获取一次
+            data = {
+                "access_token": self.token,
+                "resource_id": resource_id,
+                "page": i + 1,
+                "page_size": page_size
+            }
+            response = requests.post(url, data=data)
+            result = response.json()
+            data_1 = result['data']['list']
+            lst += data_1
+            # lst.extend(data_1)
+        return lst
+
+
 class 网课考勤:
     def __init__(self, today=None):
         self.返款标题 = ''
@@ -45,7 +115,6 @@ class 网课考勤:
         self.开课日期 = '2022-01-08'
         self.视频返款 = [20, 15, 10, 5, 0, 0]  # 直播(当堂)/第1天（当天）/第2天/第3天/第4天/第5天，完成观看的依次返款额。
         self.打卡返款 = {5: 100, 10: 150, 15: 200}  # 打卡满5/10/15次的返款额
-        self.课程链接 = []
         self._init(today)
 
         self.driver = None  # 浏览器脚本
@@ -75,7 +144,10 @@ class 网课考勤:
         self.当天课次2 = min(self.当天课次, self.课次数)
         self.结束课次 = self.当天课次 - len(self.视频返款) + 1  # 这是用于逻辑运算的，可能有负值
         self.结束课次2 = max(0, self.结束课次)
-        self.用户列表 = pd.read_csv(self.get_file('数据表/用户列表导出*.csv'), dtype={16: str})
+        try:
+            self.用户列表 = pd.read_csv(self.get_file('数据表/用户列表导出*.csv'), dtype={16: str})
+        except:
+            self.用户列表 = None
         # 用户列表 = 用户列表[用户列表['账号状态'] == '正常']
 
         self.考勤表出现次数 = Counter()
@@ -806,7 +878,7 @@ class 网课考勤:
         while True:
             driver.get('https://admin.xiaoe-tech.com/t/basic-platform/downloadCenter')
             if '任务撤回' in driver.locate('//*[@id="downloadsCenter"]/div[4]/div/div[4]/div[2]/table/tbody/tr[1]/'
-                                       'td[9]/div/div/span').text:
+                                           'td[9]/div/div/span').text:
                 time.sleep(1)
             else:
                 time.sleep(2)  # 不能下载太快，还是要稍微等一会
@@ -1352,10 +1424,12 @@ class 课次数据:
             return {'value': f'未开始', 'color': '白色'}
 
         # 1 遍历所有文件数据，获得所有最大值
-        data = self.用户观看数据[user_id]
+        data = self.用户观看数据[user_id]  # 这个类的功能框架，已经按照user_id进行了数据分组统计
         for x in data:
+            # 前两条是兼容以前的通用的直播课程数据
             直播分钟 = max(直播分钟, x.get('直播分钟', 0))
             回放分钟 = max(回放分钟, x.get('回放分钟', 0))
+            # 这一条是兼容禅宗特有的百分比进度
             百分比进度 = max(百分比进度, x.get('百分比进度', 0))
 
         # 2 归纳出本课次考勤结论

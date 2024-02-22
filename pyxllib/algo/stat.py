@@ -415,3 +415,18 @@ class ModifiableRow:
 
     def __setitem__(self, key, value):
         self.df.at[self.index, key] = value
+
+
+def print_full_dataframe(df):
+    """
+    临时设置以完整显示DataFrame的内容
+
+    :param pd.DataFrame df: 需要完整显示的DataFrame
+    """
+    with pd.option_context('display.max_rows', None,
+                           'display.max_columns', None,
+                           'display.width', 1000,
+                           'display.max_colwidth', None):
+        print(df)
+
+    pd.options('display.max_rows', 60)

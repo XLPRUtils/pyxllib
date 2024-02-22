@@ -332,17 +332,37 @@ def convert_xls_to_xlsx(xls_file):
 
     # 创建一个新的 openpyxl 工作簿
     wb = Workbook()
-    sheet = wb.active
+    ws = wb.active
 
     for i in range(xls_workbook.nsheets):
         xls_sheet = xls_workbook.sheet_by_index(i)
-        if i > 0:
-            sheet = wb.create_sheet(xls_sheet.name)
+        if i == 0:
+            # 为第一个工作表设置名称
+            ws.title = xls_sheet.name
+        else:
+            # 创建新的工作表并设置名称
+            ws = wb.create_sheet(title=xls_sheet.name)
         for row in range(xls_sheet.nrows):
             for col in range(xls_sheet.ncols):
                 # 将 xlrd 单元格的数据写入 openpyxl 单元格
-                sheet.cell(row=row + 1, column=col + 1).value = xls_sheet.cell_value(row, col)
+                ws.cell(row=row + 1, column=col + 1).value = xls_sheet.cell_value(row, col)
 
+    return wb
+
+
+def load_as_xlsx_file(file_path, keep_links=False, keep_vba=False):
+    file_path = Path(file_path)
+    suffix = file_path.suffix.lower()
+    if suffix in ('.xlsx', '.xlsm'):
+        wb = openpyxl.load_workbook(file_path,
+                                    keep_links=keep_links,
+                                    keep_vba=keep_vba)
+    elif suffix == '.xls':
+        wb = convert_xls_to_xlsx(file_path)
+    elif suffix == '.csv':
+        wb = convert_csv_to_xlsx(file_path)
+    else:
+        return None
     return wb
 
 
@@ -1480,7 +1500,7 @@ class XlWorksheet(openpyxl.worksheet.worksheet.Worksheet):
             cell.value = value
         return cell
 
-    def iterrows(self, key_column_name, mode='default', *, to_dict=None):
+    def iterrows(self, key_column_name, mode='auto', *, to_dict=None):
         """ 通过某个属性列作为key，判断数据所在行
 
         正常遍历行用iterrows，离散找数据用cell2
@@ -1488,6 +1508,7 @@ class XlWorksheet(openpyxl.worksheet.worksheet.Worksheet):
         :param key_column_name: 参考的主要字段名，判断数据起始行
         :param mode: 计算数据范围的一些细分方法，目前主要是数据结束位置的判断方法
             default: 从ws.max_row往前找到第一个key非空的单元格
+            auto: 基于一套智能的usedrange判定方法
             any_content: 从ws.max_row往前找到第一个含有值的行
             ... 待开发更多需求
         :param list[str] to_dict: 写出属性名，迭代的时候，返回除了下标，还有转换出的字典数据
@@ -1516,6 +1537,9 @@ class XlWorksheet(openpyxl.worksheet.worksheet.Worksheet):
                         break
                 if not empty_line:
                     break
+        elif mode == 'auto':
+            rng = parse_range_address(self.get_usedrange())
+            max_row = rng['bottom']
         else:
             raise NotImplementedError(f'{mode}')
 
@@ -2383,28 +2407,12 @@ def extract_workbook_summary2(file_path, *,
     """
 
     # 1 读取文件wb
-    def read_file_by_type():
-        nonlocal load_time
-        suffix = file_path.suffix.lower()
-        start_time = time.time()
-        if suffix in ('.xlsx', '.xlsm'):
-            wb = openpyxl.load_workbook(file_path,
-                                        keep_links=keep_links,
-                                        keep_vba=keep_vba)
-        elif suffix == '.xls':
-            wb = convert_xls_to_xlsx(file_path)
-        elif suffix == '.csv':
-            wb = convert_csv_to_xlsx(file_path)
-        else:
-            return None
-        load_time = time.time() - start_time
-        return wb
-
-    load_time = -1
     file_path = Path(file_path)
     res = {}
     res['fileName'] = file_path.name
-    wb = read_file_by_type()
+    start_time = time.time()
+    wb = load_as_xlsx_file(file_path, keep_links=keep_links, keep_vba=keep_vba)
+    load_time = time.time() - start_time
     if wb is None:  # 不支持的文件类型，不报错，只是返回最基本的文件名信息
         if return_mode == 1:
             return res, load_time

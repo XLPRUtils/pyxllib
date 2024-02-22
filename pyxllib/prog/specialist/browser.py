@@ -164,7 +164,6 @@ class Browser(Explorer):
                 # 其他系统的处理
                 pass
         super().__init__(app, shell)
-        super().__init__(app, shell)
 
     @classmethod
     def to_brower_file(cls, arg, file=None, clsmsg=True, to_html_args=None):

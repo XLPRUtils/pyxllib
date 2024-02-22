@@ -998,7 +998,7 @@ class MultiProcessLauncher:
         self.add_process(cmd, name=name)
 
     def stop_all(self):
-        """停止所有后台进程"""
+        """ 停止所有后台进程 """
         for worker in self.workers:
             worker.process.terminate()
         self.workers = []
