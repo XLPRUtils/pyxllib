@@ -16,6 +16,7 @@ import base64
 import bisect
 import collections
 import io
+import json
 import logging
 import os
 import re
@@ -954,3 +955,141 @@ def continuous_zero(s):
     [(0, 1), (2, 4)]
     """
     return [m.span() for m in re.finditer(r'0+', s)]
+
+
+class JsonEditConverter:
+    """ 将json转为编辑格式，以及再从编辑格式转换回json """
+
+    def __init__(self):
+        self.edit_format = []
+        self.path_regex = re.compile(r"json_path=(.*)")
+
+    def json_to_edit_format(self, obj, path=""):
+        if isinstance(obj, dict):
+            for key, value in obj.items():
+                new_path = f"{path}.{key}" if path else f"{key}"
+                self.json_to_edit_format(value, new_path)
+        elif isinstance(obj, list):
+            for i, item in enumerate(obj):
+                new_path = f"{path}[{i}]"
+                self.json_to_edit_format(item, new_path)
+        else:
+            type_tag = ""
+            if isinstance(obj, str):
+                type_tag = ",str"
+            elif isinstance(obj, bool):
+                type_tag = ",bool"
+            elif isinstance(obj, (int, float)):
+                type_tag = ",num"
+            elif obj is None:
+                type_tag = ",null"
+            self.edit_format.append(f"json_path={path}{type_tag}\n{obj}")
+
+    def main_json_to_edit_format(self, obj):
+        self.edit_format = []
+        self.json_to_edit_format(obj)
+        return '\n\n'.join(self.edit_format)
+
+    def edit_format_to_json(self, edit_str):
+        obj = None
+        lines = edit_str.strip().split("\n")
+        i = 0
+        while i < len(lines):
+            if lines[i].startswith("json_path="):
+                path_type_pair = lines[i].split(',')
+                path_str = path_type_pair[0][10:]
+                type_tag = path_type_pair[1] if len(path_type_pair) > 1 else ""
+                # 初始化 value_lines 列表收集可能的多行值
+                value_lines = []
+                i += 1  # 移动到可能的值的第一行
+                while i < len(lines) and not lines[i].startswith("json_path="):
+                    value_lines.append(lines[i])
+                    i += 1
+                # 将收集到的多行值合并为单一字符串
+                value = "\n".join(value_lines).rstrip()
+                if obj is None:
+                    obj = [] if path_str.strip().startswith("[") else {}
+                value = self._convert_value_based_on_type(value, type_tag)
+                if path_str:
+                    self._set_value_by_path(obj, path_str, value)
+                else:
+                    obj = value
+            else:
+                i += 1
+        return obj
+
+    def _convert_value_based_on_type(self, value, type_tag):
+        if type_tag == "bool":
+            return value.lower() == "true"
+        elif type_tag == "num":
+            try:
+                return float(value) if '.' in value else int(value)
+            except ValueError:
+                return value  # 保留为字符串如果转换失败
+        elif type_tag == "null":
+            return None
+        return value  # 默认返回原始字符串，适用于没有特定类型标记的情况
+
+    def _set_value_by_path(self, obj, path_str, value):
+        path_elements = self._parse_path(path_str)
+        current = obj
+        for i, element in enumerate(path_elements[:-1]):
+            if isinstance(element, int):  # 处理列表
+                while len(current) <= element:
+                    current.append(None)
+                if current[element] is None:
+                    current[element] = [] if isinstance(path_elements[i + 1], int) else {}
+                current = current[element]
+            else:  # 处理字典
+                if element not in current:
+                    current[element] = [] if isinstance(path_elements[i + 1], int) else {}
+                current = current[element]
+        last_element = path_elements[-1]
+        if isinstance(last_element, int) and isinstance(current, list):
+            while len(current) <= last_element:
+                current.append(None)
+            current[last_element] = value
+        else:
+            current[last_element] = value
+
+    def _parse_path(self, path_str):
+        """解析路径字符串为一个由字典键和列表索引组成的列表"""
+        elements = []
+        for part in re.split(r'\.|\[|\]', path_str):
+            if part.isdigit():  # 是数字，列表索引
+                elements.append(int(part))
+            elif part:  # 非空字符串，字典键
+                elements.append(part)
+        return elements
+
+
+def trial_jsoneditconveter():
+    def trial_data(json_obj):
+        converter = JsonEditConverter()
+        edit_text = converter.main_json_to_edit_format(json_obj)
+        print("转换为编辑格式:\n" + edit_text)
+        updated_json = converter.edit_format_to_json(edit_text)
+        print("解析后的JSON:\n" + json.dumps(updated_json, indent=4))
+
+    # 测试样例1：嵌套结构
+    json_obj1 = {
+        "name": "Example",
+        "details": {
+            "description": 123,
+            "tags": ["demo", "json"]
+        },
+        "items": [{"name": "Item 1"}, {"name": "Item 2"}]
+    }
+    #
+
+    # 测试样例2：list结构，以及各种特殊类型
+    json_obj2 = [1, 2, 3, True, '123', None, {'a': 1}]
+
+    # 测试样例3：无容器结构
+    json_obj3 = "Hello World!"
+    json_obj4 = 123
+
+    trial_data(json_obj1)
+    trial_data(json_obj2)
+    trial_data(json_obj3)
+    trial_data(json_obj4)
