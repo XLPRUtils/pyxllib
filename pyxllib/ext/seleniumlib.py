@@ -65,3 +65,12 @@ class XlChrome(webdriver.Chrome):
             return True
         except NoSuchWindowException:
             return False
+
+
+def get_global_driver(_driver_store=[None]):  # trick
+    """ 通过这个接口可以固定一个driver来使用 """
+    if _driver_store[0] is None:
+        _driver_store[0] = XlChrome()
+    if not _driver_store[0]:  # 如果驱动没了，重新启动
+        _driver_store[0] = XlChrome()
+    return _driver_store[0]
