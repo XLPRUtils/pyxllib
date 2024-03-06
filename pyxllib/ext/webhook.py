@@ -38,9 +38,16 @@ class DingtalkRobot:
     """
 
     def __init__(self, url, secret):
-        self.url = url
-        self.url += self.add_secret(secret)
+        self.base_url = url  # 原始url，不包含时间戳和签名
+        self.secret = secret
         self.headers = {"Content-Type": "application/json"}
+        self.last_timestamp = 0  # 初始化上次时间戳
+        self.update_url()  # 初始化时更新URL
+
+    def update_url(self):
+        """更新URL中的时间戳和签名"""
+        self.url = self.base_url + self.add_secret(self.secret)
+        self.last_timestamp = round(time.time())  # 更新上次时间戳
 
     @classmethod
     def add_secret(cls, secret):
@@ -51,23 +58,25 @@ class DingtalkRobot:
         string_to_sign_enc = string_to_sign.encode('utf-8')
         hmac_code = hmac.new(secret_enc, string_to_sign_enc, digestmod=hashlib.sha256).digest()
         sign = urllib.parse.quote_plus(base64.b64encode(hmac_code))
-
         return f'&timestamp={timestamp}&sign={sign}'
 
-    def push_data(self, data):
+    def send_data(self, data):
+        # 检查当前时间是否超过30分钟
+        if round(time.time()) - self.last_timestamp > 1800:  # 30 * 60
+            self.update_url()  # 更新URL
         try:
             requests.post(url=self.url, headers=self.headers, json=data)
-        except requests.exceptions.ConnectionError:  # 没网发送失败的时候也不报错
-            pass
+        except requests.exceptions.ConnectionError as e:  # 没网发送失败的时候也不报错
+            raise e
 
-    def push_text(self, content):
+    def send_text(self, content):
         msgtype = 'text'
         d = {}
         if content: d['content'] = content
         data = {"msgtype": msgtype, msgtype: d}
-        self.push_data(data)
+        self.send_data(data)
 
-    def push_link(self, text='', title='', pic_url='', message_url=''):
+    def send_link(self, text='', title='', pic_url='', message_url=''):
         msgtype = 'link'
         d = {}
         if text: d['text'] = text
@@ -75,18 +84,18 @@ class DingtalkRobot:
         if pic_url: d['picUrl'] = pic_url
         if message_url: d['messageUrl'] = message_url
         data = {"msgtype": msgtype, msgtype: d}
-        self.push_data(data)
+        self.send_data(data)
 
-    def push_markdown(self, text='', title=''):
+    def send_markdown(self, text='', title=''):
         msgtype = 'link'
         d = {}
         if text: d['text'] = text
         if title: d['title'] = title
         data = {"msgtype": msgtype, msgtype: d}
-        self.push_data(data)
+        self.send_data(data)
 
-    def push_actioncard(self, text='', title='', siggle_url='', siggle_title='', btn_orientation='0'):
+    def send_actioncard(self, text='', title='', siggle_url='', siggle_title='', btn_orientation='0'):
         raise NotImplementedError
 
-    def push_feedcard(self):
+    def send_feedcard(self):
         raise NotImplementedError

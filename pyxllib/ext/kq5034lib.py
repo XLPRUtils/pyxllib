@@ -50,7 +50,7 @@ class Xiaoetong:
         self.token = ''
 
     def login(self, app_id, client_id, secret_key):
-        """ 登录
+        """ 登录，获取token
         """
         self.app_id = app_id
         self.client_id = client_id
@@ -78,6 +78,8 @@ class Xiaoetong:
             raise Exception("HTTP request failed with status code {}".format(response.status_code))
 
     def get_alive_user_list(self, resource_id, page_size=100):
+        """ 获取直播间用户
+        """
         # 1 获取总页数
         url = "https://api.xiaoe-tech.com/xe.alive.user.list/1.0.0"  # 接口地址【路径：API列表 -> 直播管理 -> 获取直播间用户列表】
         data_1 = {
@@ -105,6 +107,37 @@ class Xiaoetong:
             lst += data_1
             # lst.extend(data_1)
         return lst
+
+    def get_elock_actor(self, activity_id, page_size=100):
+        """ 获取打卡参与用户
+        """
+        # 获取总页数
+        url = "https://api.xiaoe-tech.com/xe.elock.actor/1.0.0"     # 接口地址【路径：API列表 -> 打卡管理 -> 获取打卡参与用户】
+        data_1 = {
+            "access_token": self.token,
+            "activity_id": activity_id,
+            "page_index": 1,
+            "page_size": page_size
+        }
+        response_1 = requests.post(url, data=data_1)
+        result_1 = response_1.json()
+        page = math.ceil(result_1['data']['count'] / page_size)  # 页数
+        # 获取打卡用户数据
+        lst = result_1['data']['list']
+        for i in range(1, page):    # 为什么从1开始，因为第一页的数据上面已经获取到了，这里没必要从新获取一次
+            data = {
+                "access_token": self.token,
+                "activity_id": activity_id,
+                "page_index": i + 1,
+                "page_size": page_size
+            }
+            response = requests.post(url, data=data)
+            result = response.json()
+            data_1 = result['data']['list']
+            lst += data_1
+            # lst.extend(data_1)
+        return lst
+
 
 
 class 网课考勤:
@@ -649,6 +682,12 @@ class 网课考勤:
         if df is None:
             try:
                 df = pd.read_csv(files[-1])  # 221005周三09:19，小鹅通又双叒更新了
+            except UnicodeDecodeError:
+                pass
+            
+        if df is None:
+            try:
+                df = pd.read_csv(files[-1], encoding="ANSI")  # 240226周一11:21，
             except UnicodeDecodeError:
                 pass
 
