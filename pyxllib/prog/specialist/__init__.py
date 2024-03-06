@@ -114,7 +114,7 @@ def distribute_package(root, version=None, repository=None, *,
         f.write_text(s)
 
     # 3 打包
-    subprocess.run('python setup.py sdist')
+    subprocess.run('python setup.py sdist bdist_wheel')
 
     # 4 上传
     if upload:

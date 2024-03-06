@@ -568,6 +568,11 @@ class XlSSHClient(paramiko.SSHClient):
             self.exec(f'usermod -aG sudo {name}')
 
     def check_cpu_usage(self, *, print_mode=False):
+        """
+
+        下面代码的cmds拼接出来是这样的：
+        sudo ps --no-headers -eo "pcpu,pmem,user"|awk 'BEGIN{FS=OFS=" "}{a0[$3]+=$1; a1[$3]+=$2}END {for (i in a0) print i,a0[i],a1[i]}'|sort -rn -k1,2 -k2,3
+        """
         # 1 获取原始信息
         cmds = ['ps --no-headers -eo "pcpu,pmem,user"',  # 列出所有程序情况
                 # 使用awk，按用户分组统计cpu（百分比）、内存总使用量（绝对量）

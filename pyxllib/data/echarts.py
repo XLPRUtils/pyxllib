@@ -55,6 +55,7 @@ class XlChart(Chart):
 
         self._append_color(color)
         self._append_legend(name)
+        # self._append_legend(name, is_selected=True)
 
         self.options.get('series').append(
             {
@@ -117,7 +118,7 @@ def draw_pareto_chart(data, accuracy=0.1, *, title='帕累托累积权重', valu
     x.add_series(title, pts, labels=labels, label={'position': 'right'})
     x.set_global_opts(
         # x轴末尾要故意撑大一些，不然有部分内容会显示不全
-        xaxis_opts=opts.AxisOpts(name='条目数', max_=int(float(f'{pts[-1][0]*1.2:.2g}'))),
+        xaxis_opts=opts.AxisOpts(name='条目数', max_=int(float(f'{pts[-1][0] * 1.2:.2g}'))),
         yaxis_opts=opts.AxisOpts(name='累积和')
     )
     return x

@@ -430,3 +430,29 @@ def print_full_dataframe(df):
         print(df)
 
     pd.options('display.max_rows', 60)
+
+
+def custom_fillna(df, default_fill_value='', numeric_fill_value=None, specific_fill=None):
+    """ 使用更多灵活性填充DataFrame中的NaN值。
+
+    :param pandas.DataFrame df: 需要处理的DataFrame。
+    :param str default_fill_value: 非数值列中NaN的默认填充值。
+    :param numeric_fill_value: 数值列中NaN的填充值，如果不指定，则默认为None。
+    :param dict specific_fill: 指定列名及其NaN的填充值，如果不指定，则默认为None。
+    :return: 已根据指定标准填充NaN值的pandas.DataFrame。
+
+    >>> df = pd.DataFrame({'A': [1, 2, None], 'B': [None, 'x', 'y'], 'C': [None, None, None]})
+    >>> custom_fillna(df, 'filled', 0, {'C': 'special'})
+    """
+    for column in df.columns:
+        # 检查列是否在specific_fill中指定；如果是，则使用指定的值填充。
+        if specific_fill and column in specific_fill:
+            df[column] = df[column].fillna(specific_fill[column])
+        # 如果列是数值型且指定了numeric_fill_value，则使用numeric_fill_value填充。
+        elif numeric_fill_value is not None and pd.api.types.is_numeric_dtype(df[column]):
+            df[column] = df[column].fillna(numeric_fill_value)
+        # 否则，对非数值列使用default_fill_value进行填充。
+        elif pd.api.types.is_object_dtype(df[column]) or pd.api.types.is_string_dtype(df[column]):
+            df[column] = df[column].fillna(default_fill_value)
+        # 可以在这里添加更多条件，以处理其他数据类型，如datetime。
+    return df
