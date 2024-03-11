@@ -52,6 +52,17 @@ class Connection(psycopg.Connection, SqlBase):
     def __1_库(self):
         pass
 
+    def get_db_activities(self):
+        """
+        检索当前数据库的活动信息。
+        """
+        sql = """
+        SELECT pid, datname, usename, state, query, age(now(), query_start) AS "query_age"
+        FROM pg_stat_activity
+        WHERE state = 'active'
+        """
+        return self.exec2dict(sql).fetchall()
+
     def __2_表格(self):
         pass
 
@@ -140,6 +151,10 @@ class Connection(psycopg.Connection, SqlBase):
                 也可以写复杂的处理算法规则，详见 http://postgres.cn/docs/12/sql-insert.html
                 比如这里是插入的id重复的话，就把host_name替换掉，还可以指定nick_name替换为'abc'
                 注意前面的(id)是必须要输入的
+
+        注意：有个常见需求，是想插入后返回对应的id，但是这样就需要知道这张表自增的id字段名
+            以及还是很难获得插入后的id值，可以默认刚插入的id是最大的，但是这样并不安全，有风险
+            建议还是外部自己先计算全表最大的id值，自己实现自增，就能知道插入的这条数据的id了
         """
         ks = ','.join(cols.keys())
         vs = ','.join(['%s'] * (len(cols.keys())))
@@ -156,6 +171,7 @@ class Connection(psycopg.Connection, SqlBase):
         self.execute(query, params)
         if commit:
             self.commit()
+
 
     def insert_rows(self, table_name, keys, ls, *, on_conflict='DO NOTHING', commit=True):
         """ 【增】插入新数据
@@ -524,7 +540,8 @@ class XlprDb(Connection):
 
         args = ['CPU核心数（比如4核显示是400%）', date_trunc, recent, 'sum(hosts.cpu_number)*100']
 
-        htmltexts = ['<a target="_blank" href="https://www.yuque.com/xlpr/data/hnpb2g?singleDoc#"> 《服务器监控》工具使用文档 </a>']
+        htmltexts = [
+            '<a target="_blank" href="https://www.yuque.com/xlpr/data/hnpb2g?singleDoc#"> 《服务器监控》工具使用文档 </a>']
         res = self._get_host_trace_total('cpu', 'XLPR服务器 CPU 使用近况', *args)
         htmltexts.append(res[0])
 
@@ -546,7 +563,8 @@ class XlprDb(Connection):
 
         args = ['内存（单位：GB）', date_trunc, recent, 'sum(hosts.cpu_gb)']
 
-        htmltexts = ['<a target="_blank" href="https://www.yuque.com/xlpr/data/hnpb2g?singleDoc#"> 《服务器监控》工具使用文档 </a>']
+        htmltexts = [
+            '<a target="_blank" href="https://www.yuque.com/xlpr/data/hnpb2g?singleDoc#"> 《服务器监控》工具使用文档 </a>']
         res = self._get_host_trace_total('cpu_memory', 'XLPR服务器 内存 使用近况', *args)
         htmltexts.append(res[0])
 
@@ -570,7 +588,8 @@ class XlprDb(Connection):
 
         args = ['硬盘（单位：GB）', date_trunc, recent, 'sum(hosts.disk_gb)']
 
-        htmltexts = ['<a target="_blank" href="https://www.yuque.com/xlpr/data/hnpb2g?singleDoc#"> 《服务器监控》工具使用文档 </a>']
+        htmltexts = [
+            '<a target="_blank" href="https://www.yuque.com/xlpr/data/hnpb2g?singleDoc#"> 《服务器监控》工具使用文档 </a>']
         res = self._get_host_trace_total('disk_memory', 'XLPR服务器 DISK硬盘 使用近况', *args)
         htmltexts.append(res[0])
         htmltexts.append('注：xlpr4（四卡）服务器使用du计算/home大小有问题，未统计在列<br/>')
@@ -597,7 +616,8 @@ class XlprDb(Connection):
 
         args = ['显存（单位：GB）', date_trunc, recent, 'sum(hosts.gpu_gb)']
 
-        htmltexts = ['<a target="_blank" href="https://www.yuque.com/xlpr/data/hnpb2g?singleDoc#"> 《服务器监控》工具使用文档 </a>']
+        htmltexts = [
+            '<a target="_blank" href="https://www.yuque.com/xlpr/data/hnpb2g?singleDoc#"> 《服务器监控》工具使用文档 </a>']
         res = self._get_host_trace_total('gpu_memory', 'XLPR八台服务器 GPU显存 使用近况', *args)
         htmltexts.append(res[0])
 
@@ -641,3 +661,53 @@ class XlprDb(Connection):
                 self.update_row('files', {'dhash': computed_dhash}, {'id': file_id})
                 progress_bar.update(1)
             self.commit()
+
+    def append_history(self, table_name, where, backup_keys, *,
+                       can_merge=None,
+                       update_time=None,
+                       commit=False):
+        """ 为表格添加历史记录，请确保这个表有一个jsonb格式的historys字段
+
+        这里每次都会对关键字段进行全量备份，没有进行高级的优化。
+        所以只适用于一些历史记录功能场景。更复杂的还是需要另外自己定制。
+
+        :param table_name: 表名
+        :param where: 要记录的id的规则，请确保筛选后记录是唯一的
+        :param backup_keys: 需要备份的字段名
+        :param can_merge: 在某些情况下，history不需要非常冗余地记录，可以给定与上一条合并的规则
+            def can_merge(last, now):
+                "last是上一条字典记录，now是当前要记录的字典数据，
+                返回True，则用now替换last，并不新增记录"
+                ...
+
+        :param update_time: 更新时间，如果不指定则使用当前时间
+        """
+        # 1 获得历史记录
+        ops = ' AND '.join([f'{k}=%s' for k in where.keys()])
+        historys = self.exec2one(f'SELECT historys FROM {table_name} WHERE {ops}', list(where.values()))  or []
+        if historys:
+            status1 = historys[-1]
+        else:
+            status1 = {}
+
+        # 2 获得新记录
+        if update_time is None:
+            update_time = utc_timestamp()
+        status2 = self.exec2dict(f'SELECT {",".join(backup_keys)} FROM {table_name} WHERE {ops}',
+                                list(where.values())).fetchone()
+        status2['update_time'] = update_time
+
+        # 3 添加历史记录
+        if can_merge is None:
+            def can_merge(status1, status2):
+                for k in backup_keys:
+                    if status1.get(k) != status2.get(k):
+                        return False
+                return True
+
+        if historys and can_merge(status1, status2):
+            historys[-1] = status2
+        else:
+            historys.append(status2)
+
+        self.update_row(table_name, {'historys': historys}, where, commit=commit)

@@ -456,3 +456,17 @@ def custom_fillna(df, default_fill_value='', numeric_fill_value=None, specific_f
             df[column] = df[column].fillna(default_fill_value)
         # 可以在这里添加更多条件，以处理其他数据类型，如datetime。
     return df
+
+
+def dataframe_to_list(df):
+    """将DataFrame转换为列表结构，第一行是表头，其余是数据"""
+    # 获取表头（列名）作为第一个列表元素
+    headers = df.columns.tolist()
+
+    # 获取数据行，每一行作为一个列表，然后将所有这些列表收集到一个大列表中
+    data_rows = df.values.tolist()
+
+    # 将表头和数据行合并成最终的列表
+    result_list = [headers] + data_rows
+
+    return result_list
