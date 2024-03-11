@@ -109,7 +109,10 @@ class SqlBase:
 
     def exec2one(self, *args, **kwargs):
         """ 获得第1行的值 """
-        return self.execute(*args, **kwargs).fetchone()[0]
+        try:
+            return self.execute(*args, **kwargs).fetchone()[0]
+        except TypeError:
+            return None
 
     def exec2row(self, *args, **kwargs):
         """ 获得第1行的值 """

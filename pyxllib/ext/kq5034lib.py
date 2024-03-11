@@ -76,7 +76,7 @@ class Xiaoetong:
                 raise Exception("Error getting access token: {}".format(result['msg']))
         else:
             raise Exception("HTTP request failed with status code {}".format(response.status_code))
-
+        
     def get_alive_user_list(self, resource_id, page_size=100):
         """ 获取直播间用户
         """
