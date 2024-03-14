@@ -6,6 +6,7 @@
 
 
 """ 封装一些代码开发中常用的功能，工程组件 """
+
 import builtins
 from collections import Counter, UserDict
 from concurrent.futures import ThreadPoolExecutor
@@ -1126,3 +1127,38 @@ def inplace_decorate(parent, func_name, wrapper):
             return wrapper(original_func, *args, **kwargs)
 
         parent[func_name] = decorated_func
+
+
+def check_counter(data, top_n=10):
+    """ 将一个数据data转为Counter进行频数分析 """
+    # 1 如果是list、tuple类型，需要转counter
+    if isinstance(data, (list, tuple)):
+        data = Counter(data)
+    if not isinstance(data, Counter):
+        raise ValueError(f'输入的数据类型不对，应该是Counter类型，而不是{typename(data)}')
+
+    # 2 列出出现次数最多的top_n条目
+    # 打印基本统计信息
+    total_items = sum(data.values())
+    print(f"总条目数: {total_items}")
+
+    if top_n > 0:
+        top_items = data.most_common(top_n)
+        max_n = len(data)
+        print(f"出现次数最多的{min(top_n, max_n)}/{max_n}条数据:")
+        for item, count in top_items:
+            print(f"\t{item}\t{count}")
+
+    # 3 打印基本统计信息
+    # 对原始Counter的计数值进行再计数
+    count_frequencies = Counter(data.values())
+
+    # 打印各计数值出现的次数
+    print("各计数值出现的次数:")
+    for count, frequency in count_frequencies.most_common():
+        print(f"\t值为{count}的条目数\t{frequency}")
+
+
+def tprint(*args, **kwargs):
+    """ 带时间戳的print """
+    print(utc_now2(), *args, **kwargs)

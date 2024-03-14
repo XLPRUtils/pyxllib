@@ -172,7 +172,6 @@ class Connection(psycopg.Connection, SqlBase):
         if commit:
             self.commit()
 
-
     def insert_rows(self, table_name, keys, ls, *, on_conflict='DO NOTHING', commit=True):
         """ 【增】插入新数据
 
@@ -435,8 +434,8 @@ class XlprDb(Connection):
                 if gpu:
                     status['gpu_memory'] = ssh.check_gpu_usage(print_mode=True)
                 if disk:
-                    # 检查磁盘空间会很慢，如果超时可以跳过。
-                    status['disk_memory'] = ssh.check_disk_usage(print_mode=True, timeout=7200)
+                    # 检查磁盘空间会很慢，如果超时可以跳过。（设置超时6小时）
+                    status['disk_memory'] = ssh.check_disk_usage(print_mode=True, timeout=60 * 60 * 6)
             except Exception as e:
                 status = {'error': f'{str(type(e))[8:-2]}: {e}'}
                 print(status)
@@ -684,7 +683,7 @@ class XlprDb(Connection):
         """
         # 1 获得历史记录
         ops = ' AND '.join([f'{k}=%s' for k in where.keys()])
-        historys = self.exec2one(f'SELECT historys FROM {table_name} WHERE {ops}', list(where.values()))  or []
+        historys = self.exec2one(f'SELECT historys FROM {table_name} WHERE {ops}', list(where.values())) or []
         if historys:
             status1 = historys[-1]
         else:
@@ -694,7 +693,7 @@ class XlprDb(Connection):
         if update_time is None:
             update_time = utc_timestamp()
         status2 = self.exec2dict(f'SELECT {",".join(backup_keys)} FROM {table_name} WHERE {ops}',
-                                list(where.values())).fetchone()
+                                 list(where.values())).fetchone()
         status2['update_time'] = update_time
 
         # 3 添加历史记录
