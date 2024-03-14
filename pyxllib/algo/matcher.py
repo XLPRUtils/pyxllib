@@ -13,6 +13,8 @@ from pyxllib.prog.pupil import check_install_package
 # check_install_package('Levenshtein', 'python-Levenshtein')
 
 from collections import defaultdict
+import heapq
+import math
 import warnings
 
 warnings.filterwarnings("ignore", message="loaded more than 1 DLL from .libs:")
@@ -38,6 +40,53 @@ try:  # 层次聚类相关的功能
     from sklearn.cluster import AgglomerativeClustering
 except ModuleNotFoundError:
     pass
+
+
+def calculate_coeff_favoring_length(length1, length2, baseline=100, scale=10000):
+    """
+    根据两文本的长度计算相似度调整系数，以解决短文本过高相似度评分的问题。
+
+    短文本之间相似或完全相同的片段可能导致相似度评分过高，从而误判文本间的相关性比实际更高。
+    通过引入相似度调整系数来平衡评分，降低短文本之间的相似度得分，使评分更加合理和公平。
+
+    :param length1: 第一文本的长度
+    :param length2: 第二文本的长度
+    :param baseline: 基线长度，影响系数调整的起始点。
+    :param scale: 尺度长度，定义了系数增长到2的长度标准。
+    :return: 相似度调整系数。
+    """
+    total_length = length1 + length2
+    length_ratio = min(length1, length2) / max(length1, length2)
+
+    if total_length < baseline:
+        coefficient = 0.5 + 0.5 * (total_length / baseline)
+    else:
+        coefficient = 1 + (math.log1p(total_length - baseline + 1) / math.log1p(scale - baseline + 1))
+
+    # 考虑长度差异的影响
+    coefficient *= length_ratio
+
+    return coefficient
+
+
+def compute_text_similarity_favoring_length(text1, text2, baseline=100, scale=10000):
+    """
+    计算两段文本之间的相似度，引入长度调整系数以解决短文本过高相似度评分的问题。
+
+    :param text1: 第一段文本
+    :param text2: 第二段文本
+    :param baseline: 基线长度，影响系数调整的起始点。
+    :param scale: 尺度长度，定义了系数增长到2的长度标准。
+    :return: 加权后的相似度得分，范围在0到1之间。
+    """
+    base_similarity = Levenshtein.ratio(text1, text2)
+    coefficient = calculate_coeff_favoring_length(len(text1), len(text2), baseline, scale)
+
+    # 计算加权相似度
+    weighted_similarity = base_similarity * coefficient
+
+    # 确保相似度不会超过1
+    return min(weighted_similarity, 1.0)
 
 
 class DataMatcher:
@@ -160,6 +209,35 @@ class DataMatcher:
 
         center_idx = max(indices, key=lambda x: sum(get_similarity(x, y) for y in indices))
         return center_idx
+
+    def find_top_similar_pairs(self, top_n=1):
+        """找到最相近的top_n对数据。
+
+        :param top_n: 需要返回的最相似的数据对的数量。
+        :return: 一个列表，包含(top_n个)最相似数据对的索引和它们之间的相似度。
+        """
+        if len(self.data) < 2:
+            return []
+
+        # 初始化一个列表来保存最相似的数据对，使用最小堆来维护这个列表
+        # 最小堆能够保证每次都能快速弹出相似度最小的数据对
+        top_pairs = []
+
+        for i in tqdm(range(len(self.data))):
+            for j in range(i + 1, len(self.data)):
+                similarity = self.compute_similarity(self.data[i], self.data[j])
+
+                # 如果当前相似度对数量还未达到top_n，直接添加
+                if len(top_pairs) < top_n:
+                    heapq.heappush(top_pairs, (similarity, (i, j)))
+                else:
+                    # 如果当前对的相似度大于堆中最小的相似度，替换之
+                    if similarity > top_pairs[0][0]:
+                        heapq.heapreplace(top_pairs, (similarity, (i, j)))
+
+        # 将堆转换为排序后的列表返回
+        top_pairs.sort(reverse=True, key=lambda x: x[0])
+        return [(pair[1], pair[0]) for pair in top_pairs]
 
 
 class GroupedDataMatcher(DataMatcher):

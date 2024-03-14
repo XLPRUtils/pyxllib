@@ -14,6 +14,7 @@ import pandas as pd
 
 import jieba
 import jieba.posseg as pseg
+from simhash import Simhash
 
 from pyxllib.prog.pupil import DictTool, run_once
 from pyxllib.file.specialist import XlPath
@@ -163,14 +164,16 @@ class TextClassifier:
 
         return ct
 
-    def compute_tfidf(self, outfile=None, sheet_name='tf-idf', normalize=False, function_word_weight=0.2, add_flag=False):
+    def compute_tfidf(self, outfile=None, sheet_name='tf-idf', normalize=False, function_word_weight=0.2,
+                      add_flag=False):
         """ 重算tfidf表 """
         from math import log10
 
         # 1 统计频数和出现该词的文章数
         d = dict()
         for text in tqdm(self.texts, '词频统计'):
-            ct = self.get_text_tf(text, normalize=normalize, function_word_weight=function_word_weight, add_flag=add_flag)
+            ct = self.get_text_tf(text, normalize=normalize, function_word_weight=function_word_weight,
+                                  add_flag=add_flag)
             for k, v in ct.items():
                 if k not in d:
                     d[k] = [0, 0]
