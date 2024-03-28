@@ -14,10 +14,14 @@ from pyxllib.prog.pupil import check_install_package
 
 check_install_package('pyecharts')
 
+# import types
+
 import pyecharts
 from pyecharts import options as opts
 from pyecharts.commons.utils import JsCode
-from pyecharts.charts import Bar, Line
+from pyecharts.globals import ChartType
+from pyecharts import types
+from pyecharts.charts import Bar, Line, Radar
 from pyecharts.charts.chart import Chart
 
 from pyxllib.prog.pupil import inject_members
@@ -54,8 +58,7 @@ class XlChart(Chart):
                 kwargs['label']['formatter'] = fmt
 
         self._append_color(color)
-        self._append_legend(name)
-        # self._append_legend(name, is_selected=True)
+        self._append_legend(name, is_selected=True)
 
         self.options.get('series').append(
             {
@@ -100,6 +103,68 @@ class XlBar(Bar):
         >> browser(pyecharts.charts.Bar.from_list(numbers))
         """
         return cls.from_dict({'value': list(yaxis)}, xaxis=xaxis, title=title)
+
+    @classmethod
+    def from_data_split_into_groups(cls, data, groups, *, title=None):
+        """根据给定的组数自动拆分数据并生成条形图
+        :param list data: 数据清单
+        :param int groups: 要拆分成的组数
+        """
+        # 找到最大值和最小值
+        min_val, max_val = min(data), max(data)
+
+        # 计算间隔
+        interval = (max_val - min_val) / groups
+
+        # 分组和标签
+        group_counts = [0] * groups
+        labels = []
+        # todo 如果数据量特别大，这里应该排序后，再用特殊方法计算分组
+        for value in data:
+            index = min(int((value - min_val) / interval), groups - 1)
+            group_counts[index] += 1
+
+        for i in range(groups):
+            labels.append(f"{min_val + interval * i:.2f}-{min_val + interval * (i + 1):.2f}")
+        # t = cls.from_dict({'value': group_counts}, xaxis=labels, title=title)
+        
+        return cls.from_dict({'value': group_counts}, xaxis=labels, title=title)
+
+
+class XlRadar(Radar):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.color_idx = 0
+
+    def add(
+            self,
+            series_name: str,
+            data: types.Sequence[types.Union[opts.RadarItem, dict]],
+            *,
+            label_opts=None,
+            color: types.Optional[str] = None,
+            linestyle_opts=None,
+            **kwargs
+    ):
+        """ 标准库(2.0.5版)的雷达图颜色渲染有问题，这里要增加一个修正过程 """
+        if label_opts is None:
+            label_opts = opts.LabelOpts(is_show=False)
+
+        if linestyle_opts is None:
+            linestyle_opts = opts.LineStyleOpts(color=self.colors[self.color_idx % len(self.colors)])
+            self.color_idx += 1
+        elif linestyle_opts.get('color') is None:
+            linestyle_opts.update(color=self.colors[self.color_idx % len(self.colors)])
+            self.color_idx += 1
+
+        if color is None:
+            color = linestyle_opts.get('color')
+
+        return super(XlRadar, self).add(series_name, data,
+                                        label_opts=label_opts,
+                                        color=color,
+                                        linestyle_opts=linestyle_opts,
+                                        **kwargs)
 
 
 inject_members(XlBar, Bar)

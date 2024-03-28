@@ -28,7 +28,7 @@ class SingletonForEveryClass(type):
 
 
 class SingletonForEveryInitArgs(type):
-    """Python单例模式(Singleton)的N种实现 - 知乎: https://zhuanlan.zhihu.com/p/37534850
+    """ Python单例模式(Singleton)的N种实现 - 知乎: https://zhuanlan.zhihu.com/p/37534850
 
     注意！注意！注意！重要的事说三遍！
     这里的单例类不是传统意义上的单例类。

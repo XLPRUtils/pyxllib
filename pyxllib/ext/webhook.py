@@ -38,16 +38,9 @@ class DingtalkRobot:
     """
 
     def __init__(self, url, secret):
-        self.base_url = url  # 原始url，不包含时间戳和签名
-        self.secret = secret
+        self.url = url
+        self.url += self.add_secret(secret)
         self.headers = {"Content-Type": "application/json"}
-        self.last_timestamp = 0  # 初始化上次时间戳
-        self.update_url()  # 初始化时更新URL
-
-    def update_url(self):
-        """更新URL中的时间戳和签名"""
-        self.url = self.base_url + self.add_secret(self.secret)
-        self.last_timestamp = round(time.time())  # 更新上次时间戳
 
     @classmethod
     def add_secret(cls, secret):
@@ -61,9 +54,6 @@ class DingtalkRobot:
         return f'&timestamp={timestamp}&sign={sign}'
 
     def send_data(self, data):
-        # 检查当前时间是否超过30分钟
-        if round(time.time()) - self.last_timestamp > 1800:  # 30 * 60
-            self.update_url()  # 更新URL
         try:
             requests.post(url=self.url, headers=self.headers, json=data)
         except requests.exceptions.ConnectionError as e:  # 没网发送失败的时候也不报错

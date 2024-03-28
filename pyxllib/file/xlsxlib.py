@@ -552,7 +552,7 @@ class XlCell(openpyxl.cell.cell.Cell):  # 适用于 openpyxl.cell.cell.MergedCel
 
         :return: 涉及到合并单元格的情况，新单元格和原单元格已经不一样了，需要重新获取对象
         """
-        ct, mid_result = self.celltype(return_mode=True)
+        ct, mid_result = self.celltype(return_mid_result=True)
         x = self
         if ct:  # 如果是合并单元格，取消该区域的合并单元格
             rng = mid_result['rng'] if ('rng' in mid_result) else self.in_range()
@@ -590,7 +590,7 @@ class XlCell(openpyxl.cell.cell.Cell):  # 适用于 openpyxl.cell.cell.MergedCel
             一般这种清空，推荐先将数据库复制到一个临时sheet，再复制回原sheet更安全
         """
         from itertools import product
-        ct, mid_result = self.celltype(return_mode=True)
+        ct, mid_result = self.celltype(return_mid_result=True)
 
         if ct == 0:  # 普通单元格，只复制值和格式
             dst_cell = dst_cell.clear()

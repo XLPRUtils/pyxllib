@@ -15,13 +15,14 @@ from pyxllib.prog.pupil import check_install_package
 check_install_package('fire')  # 自动安装依赖包
 
 from collections import Counter, defaultdict
-from datetime import date
+from datetime import date, timedelta
 import datetime
 import math
 import os
 import re
 import time
 from io import StringIO
+import csv
 
 import fire
 import pandas as pd
@@ -76,7 +77,7 @@ class Xiaoetong:
                 raise Exception("Error getting access token: {}".format(result['msg']))
         else:
             raise Exception("HTTP request failed with status code {}".format(response.status_code))
-        
+
     def get_alive_user_list(self, resource_id, page_size=100):
         """ 获取直播间用户
         """
@@ -112,7 +113,7 @@ class Xiaoetong:
         """ 获取打卡参与用户
         """
         # 获取总页数
-        url = "https://api.xiaoe-tech.com/xe.elock.actor/1.0.0"     # 接口地址【路径：API列表 -> 打卡管理 -> 获取打卡参与用户】
+        url = "https://api.xiaoe-tech.com/xe.elock.actor/1.0.0"  # 接口地址【路径：API列表 -> 打卡管理 -> 获取打卡参与用户】
         data_1 = {
             "access_token": self.token,
             "activity_id": activity_id,
@@ -124,7 +125,7 @@ class Xiaoetong:
         page = math.ceil(result_1['data']['count'] / page_size)  # 页数
         # 获取打卡用户数据
         lst = result_1['data']['list']
-        for i in range(1, page):    # 为什么从1开始，因为第一页的数据上面已经获取到了，这里没必要从新获取一次
+        for i in range(1, page):  # 为什么从1开始，因为第一页的数据上面已经获取到了，这里没必要从新获取一次
             data = {
                 "access_token": self.token,
                 "activity_id": activity_id,
@@ -137,7 +138,6 @@ class Xiaoetong:
             lst += data_1
             # lst.extend(data_1)
         return lst
-
 
 
 class 网课考勤:
@@ -684,7 +684,7 @@ class 网课考勤:
                 df = pd.read_csv(files[-1])  # 221005周三09:19，小鹅通又双叒更新了
             except UnicodeDecodeError:
                 pass
-            
+
         if df is None:
             try:
                 df = pd.read_csv(files[-1], encoding="ANSI")  # 240226周一11:21，
@@ -958,6 +958,120 @@ class 网课考勤:
             str(退款金额))
         driver.locate('//*[@id="textInput"]').send_keys(退款原因)
         # driver.click('//*[@id="commitRefundApplyBtn"]')  # 建议手动点"提交申请"
+
+
+class 网课考勤2(网课考勤):
+    def login_xe(self):
+        self.xe = Xiaoetong()  # 实例化
+        self.xe.login(self.app_id,
+                      self.client_id,
+                      self.secret_key)  # 获取了token
+
+    # 依据课程链接，获取资源id（与课次）
+    def 获取课次与资源id(self):
+        课程链接 = self.课程链接[1:]
+        ls_resource_id = [""]
+        for item in 课程链接:  # 课次
+            resource_id = re.search(r"detail\?id=(.+?)\&", item)  # 资源id
+            ls_resource_id.append(resource_id.group(1))
+        return ls_resource_id
+
+    # 获取直播间用户数据
+    def 获取直播间用户数据(self, resource_id, path):
+        if path.is_file():
+            return
+            # 2）获取直播间用户数据：
+        lst = self.xe.get_alive_user_list(resource_id)
+        fieldnames = ['用户ID', '用户昵称', '备注名', '状态', '直播间停留时长(秒)', '直播间停留时长',
+                      '累计观看时长(秒)', '累计观看时长', '直播观看时长(秒)', '直播观看时长', '回放观看时长(秒)',
+                      '回放观看时长', '评论次数', '直播间成交金额']
+        p = path
+        with open(p, mode='w', newline='', encoding='utf-8') as file:
+            writer = csv.DictWriter(file, fieldnames=fieldnames)
+            writer.writeheader()
+            for x in lst:
+                record = {
+                    '用户ID': x['user_id'],
+                    '用户昵称': x['wx_nickname'],
+                    '备注名': None,
+                    '状态': "其它关联权益",
+                    '直播间停留时长(秒)': x['his_online_time'],
+                    '直播间停留时长': str(timedelta(seconds=x['his_online_time'])),
+                    '累计观看时长(秒)': x['his_learn_time'],
+                    '累计观看时长': str(timedelta(seconds=x['his_learn_time'])),
+                    '直播观看时长(秒)': x['his_learning_time'],
+                    '直播观看时长': str(timedelta(seconds=x['his_learning_time'])),
+                    '回放观看时长(秒)': x['his_learned_time'],
+                    '回放观看时长': str(timedelta(seconds=x['his_learned_time'])),
+                    '评论次数': x['comment_num'],
+                    '直播间成交金额': x['user_total_price']
+                }
+                writer.writerow(record)
+
+    def 获取课次列表(self):
+        return list(range(max(self.结束课次2, 1), self.当天课次2 + 1))
+
+    def 下载课程(self):
+        prfx = self.prfx
+        lt = self.获取课次与资源id()
+        for i in tqdm(self.获取课次列表()):
+            resource_id = lt[i]
+            formatted_date = self.today  # datetime.datetime.now().strftime("%Y-%m-%d")
+            path = prfx.format(x=i, y=formatted_date)
+            self.获取直播间用户数据(resource_id, self.root / "数据表" / path)
+
+    # 20240206 新增【针对打卡部分
+    def 获取打卡id(self):
+        """ 依据打卡链接，获取activity_id(打卡id)
+        """
+        打卡链接 = self.打卡链接[1:]
+        ls_activity_id = []
+        for item in 打卡链接:  # 课次
+            activity_id = re.search(r"\?activity_id=(.+?)\&", item)
+            ls_activity_id.append(activity_id.group(1))
+        return ls_activity_id
+
+    def 获取打卡参与用户(self, activity_id, path):
+        # 1）如果路径中已经有了，就跳过
+        if path.is_file():
+            return
+            # 2）获取打卡用户数据：
+        lst = self.xe.get_elock_actor(activity_id)
+        fieldnames = ['用户id', '用户昵称', '打卡昵称', '打卡分组', '姓名', '电话', '最近采集号码', '城市', '微信号',
+                      '打卡天数', '打卡次数', '被点赞数', '被评论数', '被点评数', '被精选数', '参与时间']
+        p = path
+        with open(p, mode='w', newline='', encoding='utf-8') as file:
+            writer = csv.DictWriter(file, fieldnames=fieldnames)
+            writer.writeheader()
+            for x in lst:
+                record = {
+                    '用户id': x['user_id'],
+                    '用户昵称': x['wx_nickname'],
+                    '打卡昵称': x['clock_nickname'],
+                    '打卡分组': None,
+                    '姓名': x['wx_nickname'],
+                    '电话': x['phone'],
+                    '最近采集号码': None,
+                    '城市': x['wx_city'],
+                    '微信号': None,
+                    '打卡天数': x['clock_days'],
+                    '打卡次数': x['clock_days'],
+                    '被点赞数': x['zan_count'],
+                    '被评论数': x['comment_count'],
+                    '被点评数': x['review_count'],
+                    '被精选数': 0,
+                    '参与时间': x['created_at']
+                }
+                writer.writerow(record)
+
+    def 下载打卡数据(self):
+        prfx = "{x}-" + f"《{self.返款标题}技术公益网课【中心教室】-日历打卡学员数据.csv"
+        lt = self.获取打卡id()
+        for i in tqdm(range(1)):
+            activity_id = lt[i]
+            formatted_date = self.today  # datetime.datetime.now().strftime("%Y-%m-%d")
+            path = prfx.format(x=formatted_date)
+            self.获取打卡参与用户(activity_id, self.root / "数据表" / path)
 
 
 class KqDb(Connection):
