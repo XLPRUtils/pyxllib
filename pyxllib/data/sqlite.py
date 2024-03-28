@@ -7,8 +7,11 @@
 import json
 import re
 import sqlite3
+import warnings
 
 import pandas as pd
+
+warnings.filterwarnings('ignore', message="pandas only support SQLAlchemy connectable")
 
 
 class SqlBase:

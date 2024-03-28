@@ -144,7 +144,9 @@ class XlBs4Tag(bs4.element.Tag):
             # 下个结点
             t = t.next_element
             i += 1
-        df1 = pd.DataFrame.from_records(ls1, columns=['element序号', '层级', '结构', '父结点', '当前结点', '属性值/字符串值', '直接子结点结构'])
+        df1 = pd.DataFrame.from_records(ls1,
+                                        columns=['element序号', '层级', '结构', '父结点', '当前结点', '属性值/字符串值',
+                                                 '直接子结点结构'])
         df2 = pd.DataFrame.from_records(ls2, columns=['序号', 'element序号', '当前结点', '属性名', '属性值'])
         return df1, df2
 
@@ -255,9 +257,9 @@ class XlBs4Tag(bs4.element.Tag):
         for h in self.find_all(re.compile(r'h\d')):
             if size:
                 part_size = h.section_text_size(size, fmt=True)
-                bc.add(int(h.name[1]), h.get_text().replace('\n', ' '), part_size)
+                bc.add(int(h.name[1]), h.get_text().replace('\n', ' ').strip(), part_size)
             else:
-                bc.add(int(h.name[1]), h.get_text().replace('\n', ' '))
+                bc.add(int(h.name[1]), h.get_text().replace('\n', ' ').strip())
 
         if 'page' not in kwargs:
             kwargs['page'] = size
