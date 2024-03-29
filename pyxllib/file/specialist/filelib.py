@@ -57,6 +57,28 @@ def __2_qiniu():
     pass
 
 
+class GetEtag:
+    """ 七牛原有etag功能基础上做封装 """
+
+    @classmethod
+    def from_bytes(cls, _bytes):
+        return qiniu.utils.etag_stream(io.BytesIO(_bytes))
+
+    @classmethod
+    def from_text(cls, text):
+        _bytes = text.encode('utf8')
+        return qiniu.utils.etag_stream(io.BytesIO(_bytes))
+
+    @classmethod
+    def from_file(cls, file):
+        return qiniu.etag(file)
+
+    @classmethod
+    def from_url(cls, url):
+        return cls(requests.get(url).content)
+
+
+# @deprecated.deprecated
 def get_etag(arg):
     """ 七牛原有etag功能基础上做封装
 
