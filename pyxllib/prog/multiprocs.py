@@ -10,8 +10,7 @@ import os
 import subprocess
 import sys
 import time
-
-import fire
+import atexit
 
 from pyxllib.prog.pupil import tprint
 
@@ -19,19 +18,38 @@ from pyxllib.prog.pupil import tprint
 class MultiProcessLauncher:
     def __init__(self):
         self.workers = []
+        atexit.register(self.cleanup)  # 在程序退出时注册清理方法
+
+    def _add_posix_process(self, cmd):
+        import ctypes
+        import signal
+
+        def _set_pdeathsig(sig=signal.SIGTERM):
+            """ Help function to ensure once parent process exits,
+            its children processes will automatically die on Linux.
+            """
+
+            def callable():
+                libc = ctypes.CDLL("libc.so.6")
+                return libc.prctl(1, sig)
+
+            return callable
+
+        preexec_fn = _set_pdeathsig(signal.SIGTERM)
+        p = subprocess.Popen(cmd.split(), preexec_fn=preexec_fn)
+
+        return p
 
     def add_process(self, cmd, name=None, **kwargs):
-        # if isinstance(cmd, str):
-        #     cmd = cmd.split()  # todo 这种硬切分是不严谨的，但应急先这样处理
-
-        if name is None:
-            name = cmd.split()[0]
-
-        p = subprocess.Popen(cmd)
-        # preexec_fn=_set_pdeathsig(signal.SIGTERM))
+        # 240329周五16:57，最新测试，好像不捕捉，主进程结束后子进程也是会自动结束的。跟我以前了解的机制似乎有点不一样。
+        #   但加着也算双重保险，不会出错吧。
+        if os.name == 'posix':
+            p = self._add_posix_process(cmd)
+        else:
+            p = subprocess.Popen(cmd)
 
         worker = {
-            'name': name,
+            'name': cmd.split()[0] if name is None else name,
             'process': p,
             'cmd': cmd,
             'status': 'running'  # 初始状态设为running
@@ -39,6 +57,15 @@ class MultiProcessLauncher:
         worker.update(kwargs)
 
         self.workers.append(worker)
+
+    def add_cur_py_process(self, cmd, name=None, **kwargs):
+        """ 添加当前python环境下的进程 """
+        if isinstance(cmd, str):
+            cmd = f'"{sys.executable}" {cmd}'
+        elif isinstance(cmd, list):
+            cmd = [sys.executable] + cmd
+
+        self.add_process(cmd, name, **kwargs)
 
     def manage(self):
         """ 进入交互管理界面 """
@@ -82,20 +109,13 @@ class MultiProcessLauncher:
             time.sleep(seconds)
             seconds = min(seconds + 1, 10)
 
-
-def trial_func(n):
-    for i in range(n):
-        print(i)
-        time.sleep(1)
-
-
-if __name__ == "__main__":
-
-    if len(sys.argv) > 1:
-        fire.Fire()
-    else:
-        launcher = MultiProcessLauncher()
-        launcher.add_process(f"{sys.executable} multiprocs.py trial_func 5", name="a")
-        launcher.add_process(f"{sys.executable} multiprocs.py trial_func 10", name="b")
-        launcher.add_process(f"{sys.executable} multiprocs.py trial_func 15", name="c")
-        launcher.wait_all()
+    def cleanup(self):
+        """ 在退出时终止所有子进程 """
+        for worker in self.workers:
+            process = worker['process']
+            if process.poll() is None:  # 如果进程还在运行
+                try:
+                    process.terminate()  # 尝试终止进程
+                    process.wait()  # 等待进程结束
+                except Exception as e:
+                    print(f"Error terminating process {worker['name']}: {e}")
