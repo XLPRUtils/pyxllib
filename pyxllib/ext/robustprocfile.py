@@ -13,6 +13,9 @@
 from collections import defaultdict, Counter
 import datetime
 import re
+import json
+
+from tqdm import tqdm
 
 from pyxllib.prog.pupil import check_counter, tprint
 from pyxllib.file.specialist import XlPath, refinepath
@@ -189,3 +192,128 @@ def remove_repeat_base(infile,
     new_len = len(data2)
     print(f'去重后剩余 {new_len}/{src_len} ≈ {new_len / src_len:.2%} 的数据')
     return data2
+
+
+class CacheJsonlFile:
+    """ 流式存储文件 """
+
+    def __init__(self, parent_dir, prefix_stem, tag, batch_size=2000):
+        self.parent_dir = parent_dir
+        self.prefix_stem = prefix_stem
+        self.tag = tag
+        self.cache_text_lines = []
+        self.batch_size = batch_size
+
+        # 缓存时的文件名
+        self.cache_file = XlPath(parent_dir) / f'{prefix_stem}_{tag}.cache.jsonl'
+        self.total = 0
+
+    def append(self, data):
+        for x in data:
+            if isinstance(x, str):
+                self.cache_text_lines.append(x)
+            else:
+                self.cache_text_lines.append(json.dumps(x, ensure_ascii=False))
+        if len(self.cache_text_lines) >= self.batch_size:
+            self.flush()
+
+    def flush(self):
+        """ 刷新，将当前缓存写入文件 """
+        if self.cache_text_lines:
+            if self.total == 0:  # 第一次写入时，删除旧缓存文件
+                self.cache_file.delete()
+
+            self.total += len(self.cache_text_lines)
+            self.parent_dir.mkdir(exist_ok=True, parents=True)
+            with open(self.cache_file, 'a', encoding='utf8') as f:
+                f.write('\n'.join(self.cache_text_lines) + '\n')
+            self.cache_text_lines = []
+
+    def save_all(self):
+        """ 最终存储的文件名 """
+        self.flush()
+        dst_file = self.cache_file.with_stem(f'{self.prefix_stem}_{self.tag}{self.total}_{get_timestamp()}')
+        self.cache_file.rename(dst_file)
+
+
+class CacheJsonlGroupFiles:
+    def __init__(self, parent_dir, prefix_stem, tag, group_func=None, batch_size=2000):
+        self.files = {}
+
+        self.parent_dir = parent_dir
+        self.prefix_stem = prefix_stem
+        self.tag = tag
+        self.group_func = group_func
+        self.batch_size = batch_size
+
+    def append(self, data):
+        groups = defaultdict(list)
+        if self.group_func:
+            for x in data:
+                groups[self.group_func(x)].append(x)
+        else:
+            groups[''] = data
+
+        for k, v in groups.items():
+            if k not in self.files:
+                subtag = f'{k}_{self.tag}' if k not in ('', None) else self.tag
+                self.files[k] = CacheJsonlFile(self.parent_dir, self.prefix_stem, subtag, self.batch_size)
+            self.files[k].append(v)
+
+    def save_all(self):
+        for file in self.files.values():
+            file.save_all()
+
+
+def process_single_file(root,
+                        infile,
+                        tag,
+                        row_func,
+                        *,
+                        cur_idx=1,
+                        total=None,
+                        if_exists='skip',
+                        group_func=None,
+                        batch_size=2000):
+    # 1 缓存路径
+    srcdir = XlPath(root)
+    infile = XlPath.init(infile, root=srcdir)
+    relpath = infile.relative_to(srcdir)
+
+    dstdir = srcdir.parent / f'{srcdir.name}_{tag}' / relpath.parent
+    errdir = srcdir.parent / f'{srcdir.name}_{tag}error' / relpath.parent
+
+    # 2 判断是不是已处理过的文件
+    stem = re.split(r'\d+_\d{14}', relpath.stem)[0]
+    dstfiles = list(dstdir.glob_files(f'{stem}*'))
+    errfiles = list(errdir.glob_files(f'{stem}*'))
+    # cache文件不算，不用管
+    check_files = [f for f in (dstfiles + errfiles) if not f.name.endswith('.cache.jsonl')]
+    if check_files:
+        if if_exists == 'skip':
+            return
+        elif if_exists == 'overwrite':
+            for f in check_files:
+                f.delete()
+        elif if_exists == 'error':
+            raise FileExistsError(f'目标文件已存在：{check_files}')
+        else:
+            return
+
+    # 3 处理数据
+    dstcgf = CacheJsonlGroupFiles(dstdir, infile.stem, tag, group_func, batch_size)
+    errcgf = CacheJsonlGroupFiles(errdir, infile.stem, tag + 'error', batch_size=batch_size)
+
+    for line in tqdm(infile.yield_line(), disable=total):
+        row = row_func(line)
+        if row:
+            dstcgf.append([row])
+        else:
+            errcgf.append([line])
+
+    dstcgf.save_all()
+    errcgf.save_all()
+    if total:
+        tprint(f'处理第{cur_idx}/{total}个文件：{infile.name} ==> {tag}')
+    else:
+        tprint(f'处理文件：{infile.name} ==> {tag}')
