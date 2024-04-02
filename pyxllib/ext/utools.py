@@ -222,6 +222,19 @@ class UtoolsFile(UtoolsBase):
         from pyxllib.ext.JLineViewer import start_jlineviewer
         start_jlineviewer(self.paths[0].as_posix())
 
+    def open_jsonl_with_excel(self):
+        """ 用excel打开jsonl文件 """
+        from pyxllib.algo.stat import write_dataframes_to_excel
+
+        file = self.paths[0].as_posix()
+        data = XlPath(file).read_jsonl()
+
+        file = XlPath.create_tempfile_path('.xlsx')
+        df = pd.DataFrame.from_dict(data)
+        write_dataframes_to_excel(file, {'Sheet1': df})
+
+        os.startfile(file)
+
 
 class UtoolsText(UtoolsBase):
 
