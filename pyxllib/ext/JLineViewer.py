@@ -476,7 +476,7 @@ def start_jlineviewer(fname=None):
     if isinstance(fname, list):  # 可以输入一个list字典数据，会转存到临时目录里查看
         tempfile = XlPath.tempfile(suffix='.jsonl')
         tempfile.write_jsonl(fname)
-        fname = tempfile
+        fname = tempfile.as_posix()
     if fname:
         ex.showDialog(fname=fname)
     sys.exit(app.exec_())

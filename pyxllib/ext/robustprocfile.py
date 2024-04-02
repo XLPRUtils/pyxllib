@@ -10,14 +10,19 @@
 半定制化的功能组件
 """
 
+from pyxllib.prog.pupil import check_install_package
+
+check_install_package('joblib')
+
 from collections import defaultdict, Counter
 import datetime
 import re
 import json
 
 from tqdm import tqdm
+from joblib import Parallel, delayed
 
-from pyxllib.prog.pupil import check_counter, tprint
+from pyxllib.prog.pupil import check_counter, tprint, typename
 from pyxllib.file.specialist import XlPath, refinepath
 
 
@@ -232,8 +237,9 @@ class CacheJsonlFile:
     def save_all(self):
         """ 最终存储的文件名 """
         self.flush()
-        dst_file = self.cache_file.with_stem(f'{self.prefix_stem}_{self.tag}{self.total}_{get_timestamp()}')
-        self.cache_file.rename(dst_file)
+        if self.cache_file.is_file():
+            dst_file = self.cache_file.with_stem(f'{self.prefix_stem}_{self.tag}{self.total}_{get_timestamp()}')
+            self.cache_file.rename(dst_file)
 
 
 class CacheJsonlGroupFiles:
@@ -274,7 +280,8 @@ def process_single_file(root,
                         total=None,
                         if_exists='skip',
                         group_func=None,
-                        batch_size=2000):
+                        batch_size=2000,
+                        debug=False):
     # 1 缓存路径
     srcdir = XlPath(root)
     infile = XlPath.init(infile, root=srcdir)
@@ -284,11 +291,22 @@ def process_single_file(root,
     errdir = srcdir.parent / f'{srcdir.name}_{tag}error' / relpath.parent
 
     # 2 判断是不是已处理过的文件
-    stem = re.split(r'\d+_\d{14}', relpath.stem)[0]
-    dstfiles = list(dstdir.glob_files(f'{stem}*'))
-    errfiles = list(errdir.glob_files(f'{stem}*'))
+    # stem = re.split(r'\d+_\d{14}', relpath.stem)[0]
+    stem = relpath.stem + f'_{tag}'
+    dstfiles = list(dstdir.glob_files(f'{stem}*.jsonl'))
+    errfiles = list(errdir.glob_files(f'{stem}*.jsonl'))
+
+    # 需要进一步过滤
+    def is_exists_old_file(f):
+        if f.name.endswith('.cache.jsonl'):
+            return False
+        stem2 = f.name[len(stem):]
+        if re.match(r'(error)?\d+_\d{14}.jsonl$', stem2):
+            return True
+
     # cache文件不算，不用管
-    check_files = [f for f in (dstfiles + errfiles) if not f.name.endswith('.cache.jsonl')]
+    check_files = [f for f in (dstfiles + errfiles) if is_exists_old_file(f)]
+
     if check_files:
         if if_exists == 'skip':
             return
@@ -301,15 +319,23 @@ def process_single_file(root,
             return
 
     # 3 处理数据
+    if debug:  # 如果开启调试模式，则关闭分组功能
+        group_func = None
     dstcgf = CacheJsonlGroupFiles(dstdir, infile.stem, tag, group_func, batch_size)
     errcgf = CacheJsonlGroupFiles(errdir, infile.stem, tag + 'error', batch_size=batch_size)
+    if debug:  # 如果开启调试模式，则单独分错误文件
+        errcgf = dstcgf
 
     for line in tqdm(infile.yield_line(), disable=total):
+        # todo 出错的数据，应该添加错误信息，也存成一个新的jsonl格式
         row = row_func(line)
-        if row:
+        if row and (not isinstance(row, dict) or row.get('status', 'ok') == 'ok'):
+            # 必须要有内容，但如果内容有个status字段且不是'ok'，也不能要
             dstcgf.append([row])
         else:
-            errcgf.append([line])
+            # 注意旧版存储的事line，但是新版的存储成row了
+            # 但如果row确实没内容，还是兼容旧版，存储line
+            errcgf.append([row or line])
 
     dstcgf.save_all()
     errcgf.save_all()
@@ -317,3 +343,124 @@ def process_single_file(root,
         tprint(f'处理第{cur_idx}/{total}个文件：{infile.name} ==> {tag}')
     else:
         tprint(f'处理文件：{infile.name} ==> {tag}')
+
+
+class StructureAnalyzer:
+    @classmethod
+    def item_to_json(cls, x, depth):
+        """ 获得字典结构的签名
+
+        todo 这个项目之后，可以对这个函数进一步优化精简，作为以后解析结构的一个通用工具
+        """
+        if depth <= 0:
+            return typename(x)
+
+        if isinstance(x, dict):
+            d = {}
+            keys = sorted(x.keys())
+            for k in keys:
+                d[k] = cls.item_to_json(x[k], depth - 1)
+        elif isinstance(x, list):
+            d = []
+            for k in x:
+                d.append(cls.item_to_json(k, depth - 1))
+        else:
+            d = typename(x)
+
+        return d
+
+    @classmethod
+    def item_to_str(cls, x, depth):
+        res = cls.item_to_json(x, depth)
+        return json.dumps(res)
+
+    @classmethod
+    def group_items(cls, items, depth):
+        ct = Counter()
+        groups = defaultdict(list)
+        for x in items:
+            desc = cls.item_to_str(x, depth)
+            ct[desc] += 1
+            groups[desc].append(x)
+        # 按照值的数量对groups排序
+        groups = dict(sorted(groups.items(), key=lambda x: -len(x[1])))
+        return groups
+
+    @classmethod
+    def get_items_structures(cls, items, savefile=None):
+        """ 获取jsonl数据的结构分布
+
+        :param list[json] items: 一组json数据
+        :return list[json]: 统计每种结构的分布数量，按树形结构，从多到少排序展示
+        """
+
+        def add_group(parent, items, depth, res):
+            tag = parent['depth'] if parent else ''
+            groups = cls.group_items(items, depth)
+            for i, (desc, items2) in enumerate(groups.items(), start=1):
+                if desc == parent['desc']:  # 再细化的结果跟父结点相同时，不再加深层级
+                    continue
+
+                d = {}
+                d['depth'] = f'{tag}-{i}' if tag else f'{i}'
+                d['count'] = len(items2)
+                d['desc'] = desc
+                d['structure'] = cls.item_to_json(items2[0], depth)
+                res.append(d)
+
+                add_group(d, items2, depth + 1, res)
+
+        res = []  # 初始化结果列表
+        add_group({'depth': '', 'desc': ''}, items, 1, res)  # 从空标签开始递归
+
+        if savefile:
+            XlPath(savefile).write_jsonl(res)
+
+        return res
+
+
+def process_batch_files(srcdir,
+                        dsttag,
+                        line_convert_func,
+                        pattern='*.jsonl',
+                        if_exists='skip',
+                        processes_num=1,
+                        group_func=None,
+                        batch_size=2000,
+                        debug=False,
+                        ):
+    """ 通用批处理函数
+
+    :param srcdir: 输入待处理的目录或文件
+    :param pattern: 文件名检索逻辑，如 '*'，'*.jsonl', '*_std*.jsonl'等
+    :param if_exists: 如果目标文件已存在，如何处理。'skip'跳过不重复处理，'overwrite'覆盖重新运行，'error'抛出报错
+    :param processes_num: 并发处理的进程数
+    :param batch_size: 每个文件缓存的条目数，超过这个数目后就会先写入文件
+    """
+    # 1 检索文件
+    srcdir = XlPath(srcdir)
+    if srcdir.is_file():
+        files = [srcdir.name]
+        srcdir = srcdir.parent
+    else:
+        files = [f.relpath(srcdir) for f in srcdir.rglob_files(pattern)]
+
+    file_num = len(files)
+
+    # 2 并发处理多个文件
+    backend = 'loky' if processes_num > 1 else 'sequential'
+    tasks = []
+    for i, f in enumerate(files, start=1):
+        task = delayed(process_single_file)(srcdir,
+                                            f,
+                                            dsttag,
+                                            line_convert_func,
+                                            cur_idx=i,
+                                            total=file_num,
+                                            if_exists=if_exists,
+                                            group_func=group_func,
+                                            batch_size=batch_size,
+                                            debug=debug)
+        tasks.append(task)
+
+    Parallel(n_jobs=processes_num, backend=backend)(tasks)
