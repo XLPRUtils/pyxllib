@@ -281,7 +281,14 @@ def process_single_file(root,
                         if_exists='skip',
                         group_func=None,
                         batch_size=2000,
-                        debug=False):
+                        debug=False,
+                        show_tqdm=False):
+    def finished():
+        if total:
+            tprint(f'处理第{cur_idx}/{total}个文件：{infile.name} ==> {tag}')
+        else:
+            tprint(f'处理文件：{infile.name} ==> {tag}')
+
     # 1 缓存路径
     srcdir = XlPath(root)
     infile = XlPath.init(infile, root=srcdir)
@@ -309,6 +316,7 @@ def process_single_file(root,
 
     if check_files:
         if if_exists == 'skip':
+            finished()
             return
         elif if_exists == 'overwrite':
             for f in check_files:
@@ -316,6 +324,7 @@ def process_single_file(root,
         elif if_exists == 'error':
             raise FileExistsError(f'目标文件已存在：{check_files}')
         else:
+            finished()
             return
 
     # 3 处理数据
@@ -326,7 +335,7 @@ def process_single_file(root,
     if debug:  # 如果开启调试模式，则单独分错误文件
         errcgf = dstcgf
 
-    for line in tqdm(infile.yield_line(), disable=total):
+    for line in tqdm(infile.yield_line(), desc=f'{infile.name} ==> {tag}', disable=not show_tqdm):
         # todo 出错的数据，应该添加错误信息，也存成一个新的jsonl格式
         row = row_func(line)
         if row and (not isinstance(row, dict) or row.get('status', 'ok') == 'ok'):
@@ -339,10 +348,7 @@ def process_single_file(root,
 
     dstcgf.save_all()
     errcgf.save_all()
-    if total:
-        tprint(f'处理第{cur_idx}/{total}个文件：{infile.name} ==> {tag}')
-    else:
-        tprint(f'处理文件：{infile.name} ==> {tag}')
+    finished()
 
 
 class StructureAnalyzer:
@@ -418,6 +424,30 @@ class StructureAnalyzer:
 
         return res
 
+    @classmethod
+    def compare_keys(cls, items):
+        """ 对从 get_items_structures 获得的数据，对比structure的覆盖情况 """
+        import pandas as pd
+        from pyxllib.algo.stat import custom_fillna
+
+        ls = []
+        for x in items:
+            row = {}
+            row['__depth'] = x['depth']
+            row['__count'] = x['count']
+            if isinstance(x['structure'], dict):
+                row.update(x['structure'])
+            elif isinstance(x['structure'], list):
+                row.update({f'[{k}]': v for k, v in enumerate(x['structure'])})
+            ls.append(row)
+
+        df = pd.DataFrame.from_dict(ls)
+        # 筛选df，depth中没有'-'
+        df = df[df['__depth'].apply(lambda x: '-' not in x)]
+        df = custom_fillna(df).T
+
+        return df
+
 
 def process_batch_files(srcdir,
                         dsttag,
@@ -460,7 +490,8 @@ def process_batch_files(srcdir,
                                             if_exists=if_exists,
                                             group_func=group_func,
                                             batch_size=batch_size,
-                                            debug=debug)
+                                            debug=debug,
+                                            show_tqdm=processes_num == 1)
         tasks.append(task)
 
     Parallel(n_jobs=processes_num, backend=backend)(tasks)

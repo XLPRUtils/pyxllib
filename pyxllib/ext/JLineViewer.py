@@ -390,9 +390,22 @@ class JLineViewer(QMainWindow):
         if parent is None:
             parent = QStandardItemModel()
             parent.setHorizontalHeaderLabels(['Key', 'Value'])
+
+        # if isinstance(data, dict):
+        #     for key, value in data.items():
+        #         self.dataToModel(key, value, parent)
+
+        # 判断数据类型，并相应处理
         if isinstance(data, dict):
             for key, value in data.items():
                 self.dataToModel(key, value, parent)
+        elif isinstance(data, list):
+            # 处理列表：创建一个无key的父项，将列表元素作为子项添加
+            self.dataToModel("List", data, parent)
+        else:
+            # 处理基本数据类型：创建一个单独的条目
+            self.dataToModel("Value", data, parent)
+
         return parent
 
     def dataToModel(self, key, value, parent):
