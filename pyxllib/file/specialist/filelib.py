@@ -1140,12 +1140,12 @@ class XlPath(type(pathlib.Path())):
         f = open(self, 'r', encoding=encoding)
         return chunked(f, batch_size)
 
-    def write_text(self, data, encoding='utf8', errors=None, newline=None):
-        with open(self, 'w', encoding=encoding, errors=errors, newline=newline) as f:
+    def write_text(self, data, encoding='utf8', mode='w', errors=None, newline=None):
+        with open(self, mode, encoding=encoding, errors=errors, newline=newline) as f:
             return f.write(data)
 
-    def write_text_unix(self, data, encoding='utf8', errors=None, newline='\n'):
-        with open(self, 'w', encoding=encoding, errors=errors, newline=newline) as f:
+    def write_text_unix(self, data, encoding='utf8', mode='w', errors=None, newline='\n'):
+        with open(self, mode, encoding=encoding, errors=errors, newline=newline) as f:
             return f.write(data)
 
     def read_pkl(self):
@@ -1214,10 +1214,15 @@ class XlPath(type(pathlib.Path())):
         else:
             return data
 
-    def write_jsonl(self, list_data, ensure_ascii=False, default=None):
+    def write_jsonl(self, list_data, ensure_ascii=False, default=None, mode='w'):
         """ 由于这种格式主要是跟商汤这边对接，就尽量跟它们的格式进行兼容 """
         content = '\n'.join([json.dumps(x, ensure_ascii=ensure_ascii, default=default) for x in list_data])
-        self.write_text_unix(content + '\n')
+        self.write_text_unix(content + '\n', mode=mode)
+
+    def add_json_line(self, data, ensure_ascii=False, default=None, mode='a'):
+        """ 在文件末尾添加一行JSON数据 """
+        content = json.dumps(data, ensure_ascii=ensure_ascii, default=default)
+        self.write_text_unix(content + '\n', mode=mode)
 
     def read_csv(self, encoding='utf8', *, errors='strict', return_mode: bool = False,
                  delimiter=',', quotechar='"', **kwargs):
@@ -1437,14 +1442,38 @@ class XlPath(type(pathlib.Path())):
                 shutil.copytree(self, dst)
 
     def move(self, dst, if_exists=None):
-        return self.rename2(dst, if_exists)
-
-    def rename2(self, dst, if_exists=None):
-        """ 相比原版的rename，搞了更多骚操作，但性能也会略微下降，所以重写一个功能名 """
         if not self.exists():
             return self
 
         dst = XlPath(dst)
+        if self == dst:
+            # 同一个文件，可能是调整了大小写名称
+            if self.as_posix() != dst.as_posix():
+                tmp = self.tempfile(dir=self.parent)  # self不一定是file，也可能是dir，但这个名称通用
+                self.rename(tmp)
+                self.delete()
+                tmp.rename(dst)
+        elif dst.exist_preprcs(if_exists):
+            self.rename(dst)
+        return dst
+
+    def rename2(self, new_name, if_exists=None):
+        """ 相比原版的rename，搞了更多骚操作，但性能也会略微下降，所以重写一个功能名
+
+        240416周二12:49，这个接口将真的只做重命名，不做移动！所以将会不再支持dst中出现"/"路径配置
+        """
+        if not self.exists():
+            return self
+
+        if '/' in new_name:
+            raise ValueError(f'rename2只能做重命名操作，目标路径中不能包含"/"')
+        elif '\\' in new_name:
+            raise ValueError(f'rename2只能做重命名操作，目标路径中不能包含"\\"')
+
+        if self.name == new_name:  # 没有修改名称，跟原来相同
+            return self
+
+        dst = self.parent / new_name
         if self == dst:
             # 同一个文件，可能是调整了大小写名称
             if self.as_posix() != dst.as_posix():
@@ -1621,6 +1650,10 @@ class XlPath(type(pathlib.Path())):
 
             ext = '.' + t.extension
             ext0 = file_path.suffix
+            if ext == ext0:
+                continue
+            elif ext == '.xls' and ext0 == '.et':
+                continue
 
             if ext0 in ('.docx', '.xlsx', '.pptx', '.xlsm'):
                 ext0 = '.zip'

@@ -45,26 +45,19 @@ class Xiaoetong:
     """
 
     def __init__(self):
-        self.app_id = ''
-        self.client_id = ''
-        self.secret_key = ''
         self.token = ''
 
     def login(self, app_id, client_id, secret_key):
         """ 登录，获取token
         """
-        self.app_id = app_id
-        self.client_id = client_id
-        self.secret_key = secret_key
-
         # 启用缓存
-        requests_cache.install_cache('access_token_cache', expire_after=600)  # 设置缓存过期时间xx（单位：秒）
+        # requests_cache.install_cache('access_token_cache', expire_after=None)  # 设置缓存过期时间xx（单位：秒）
         # 接口地址
         url = "https://api.xiaoe-tech.com/token"
         params = {
-            "app_id": self.app_id,
-            "client_id": self.client_id,
-            "secret_key": self.secret_key,
+            "app_id": app_id,
+            "client_id": client_id,
+            "secret_key": secret_key,
             "grant_type": "client_credential"
         }
         response = requests.get(url, params=params)
@@ -77,7 +70,8 @@ class Xiaoetong:
                 raise Exception("Error getting access token: {}".format(result['msg']))
         else:
             raise Exception("HTTP request failed with status code {}".format(response.status_code))
-
+        # return result['data']['access_token']
+    
     def get_alive_user_list(self, resource_id, page_size=100):
         """ 获取直播间用户
         """
@@ -966,7 +960,8 @@ class 网课考勤2(网课考勤):
         self.xe.login(self.app_id,
                       self.client_id,
                       self.secret_key)  # 获取了token
-
+        
+        return self.xe.token
     # 依据课程链接，获取资源id（与课次）
     def 获取课次与资源id(self):
         课程链接 = self.课程链接[1:]
@@ -1074,7 +1069,7 @@ class 网课考勤2(网课考勤):
             self.获取打卡参与用户(activity_id, self.root / "数据表" / path)
 
 
-class KqDb(Connection):
+class OldKqDb(Connection):
     """ 五一身心行修考勤工具 """
 
     def __init__(self, dbfile='5034.db', wbpath='考勤.xlsx', *args, **kwargs):

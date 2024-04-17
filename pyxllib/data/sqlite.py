@@ -8,6 +8,7 @@ import json
 import re
 import sqlite3
 import warnings
+from collections import defaultdict
 
 import pandas as pd
 
@@ -16,6 +17,9 @@ warnings.filterwarnings('ignore', message="pandas only support SQLAlchemy connec
 
 class SqlBase:
     """ Sql语法通用的功能 """
+
+    def __init__(self, *args, **kwargs):
+        self._commit_cache = defaultdict(list)
 
     def __1_库(self):
         pass
@@ -83,6 +87,12 @@ class SqlBase:
         if not isinstance(cols, str):
             cols = ','.join(map(str, cols))
         self.execute(f'CREATE INDEX {index_name} ON {table_name}({cols})')
+
+    def create_index2(self, table_name, cols):
+        """ 创建一个简单的索引，索引名字自动生成 """
+        if not isinstance(cols, str):
+            cols = ','.join(map(str, cols))
+        self.execute(f'CREATE INDEX idx_{table_name}_{cols.replace(",", "_")} ON {table_name}({cols})')
 
     def keep_top_n_rows(self, table_name, num, col_name='id'):
         """ 只保留一小部分数据，常用来做lite、demo数据示例文件
@@ -155,6 +165,32 @@ class SqlBase:
     def __5_增删改查(self):
         pass
 
+    def commit_base(self, commit_type, query, params=None):
+        """
+        :param commit_type:
+            -1，先真正缓存在本地
+            False，传统的事务机制，虽然不会更新数据，但每一条依然会连接数据库，其实速度回挺慢的
+            True，传统的事务机制，但每条都作为独立事务，直接更新了
+        """
+        if commit_type == -1:
+            self._commit_cache[query].append(params)
+        elif commit_type is False:
+            self.execute(query, params)
+        elif commit_type is True:
+            self.execute(query, params)
+            self.commit()
+
+    def commit_all(self):
+        if not self._commit_cache:
+            self.commit()
+            return
+
+        for query, params in self._commit_cache.items():
+            cur = self.cursor()
+            cur.executemany(query, params)
+            cur.close()
+            self.commit()
+
     def update_row(self, table_name, cols, where, *, commit=False):
         """ 【改】更新数据
 
@@ -170,9 +206,9 @@ class SqlBase:
         kvs = ','.join([f'{k}=%s' for k in cols.keys()])
         ops = ' AND '.join([f'{k}=%s' for k in where.keys()])
         vals = list(cols.values()) + list(where.values())
-        self.execute(f'UPDATE {table_name} SET {kvs} WHERE {ops}', self.cvt_types(vals))
-        if commit:
-            self.commit()
+        self.commit_base(commit,
+                         f'UPDATE {table_name} SET {kvs} WHERE {ops}',
+                         self.cvt_types(vals))
 
     def select_col(self, table_name, col):
         """ 获得一列数据，常使用的功能，所以做了一个封装

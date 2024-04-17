@@ -107,7 +107,7 @@ def process_dir_base(file_func, dir_path, correct_tag, error_tag,
 
     files = list(dir_path.rglob(pattern))
     for idx, file in enumerate(files, start=1):
-        tprint(f'处理第{idx}/{len(files)}个文件: {file.name} ==> {correct_tag}')
+        tprint(f'处理完第{idx}/{len(files)}个文件: {file.name} ==> {correct_tag}')
         process_file_base(file_func, file, correct_tag, error_tag,
                           correct_dir=correct_dir, error_dir=error_dir, reset=reset,
                           **kwargs)
