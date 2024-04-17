@@ -49,6 +49,10 @@ from pyxllib.data.sqlite import SqlBase
 
 class Connection(psycopg.Connection, SqlBase):
 
+    def __init__(self, *args, **kwargs):
+        psycopg.Connection.__init__(self, *args, **kwargs)
+        SqlBase.__init__(self, *args, **kwargs)
+
     def __1_库(self):
         pass
 
@@ -140,7 +144,7 @@ class Connection(psycopg.Connection, SqlBase):
     def __5_增删改查(self):
         pass
 
-    def insert_row(self, table_name, cols, *, on_conflict='DO NOTHING', commit=True):
+    def insert_row(self, table_name, cols, *, on_conflict='DO NOTHING', commit=False):
         """ 【增】插入新数据
 
         :param dict cols: 用字典表示的要插入的值
@@ -168,11 +172,9 @@ class Connection(psycopg.Connection, SqlBase):
             on_conflict = f'ON CONFLICT {on_conflict}'
         query += f' {on_conflict}'
 
-        self.execute(query, params)
-        if commit:
-            self.commit()
+        self.commit_base(commit, query, params)
 
-    def insert_rows(self, table_name, keys, ls, *, on_conflict='DO NOTHING', commit=True):
+    def insert_rows(self, table_name, keys, ls, *, on_conflict='DO NOTHING', commit=False):
         """ 【增】插入新数据
 
         :param str keys: 要插入的字段名，一个字符串，逗号,隔开属性值
@@ -194,9 +196,7 @@ class Connection(psycopg.Connection, SqlBase):
             on_conflict = f'ON CONFLICT {on_conflict}'
         query += f' {on_conflict}'
 
-        self.execute(query, params)
-        if commit:
-            self.commit()
+        self.commit_base(commit, query, params)
 
 
 """
@@ -392,7 +392,7 @@ class XlprDb(Connection):
         self.insert_row('xlapi', {'input': input, 'output': output,
                                   'elapse_ms': elapse_ms, 'update_time': utc_timestamp(8)},
                         on_conflict=on_conflict)
-
+        self.commit()
         return self.execute('SELECT id FROM xlapi WHERE input=%s', (input,)).fetchone()[0]
 
     def insert_row2xlserver(self, request, xlapi_id=0, **kwargs):
@@ -402,7 +402,7 @@ class XlprDb(Connection):
               'xlapi_id': xlapi_id}
         kw.update(kwargs)
         print(kw)  # 监控谁在用api
-        self.insert_row('xlserver', kw)
+        self.insert_row('xlserver', kw, commit=True)
 
     def __3_host_trace相关可视化(self):
         """ TODO dbview 改名 host_trace """
@@ -442,7 +442,8 @@ class XlprDb(Connection):
 
             if status:
                 self.insert_row('host_trace',
-                                {'host_name': host_name, 'status': status, 'update_time': utc_timestamp(8)})
+                                {'host_name': host_name, 'status': status, 'update_time': utc_timestamp(8)},
+                                commit=True)
             print()
 
     def _get_host_trace_total(self, mode, title, yaxis_name, date_trunc, recent, host_attr):

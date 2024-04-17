@@ -58,7 +58,8 @@ class XlChart(Chart):
                 kwargs['label']['formatter'] = fmt
 
         self._append_color(color)
-        self._append_legend(name, is_selected=True)
+        # self._append_legend(name, is_selected=True)
+        self._append_legend(name)
 
         self.options.get('series').append(
             {
@@ -192,3 +193,4 @@ def draw_pareto_chart(data, accuracy=0.1, *, title='帕累托累积权重', valu
 if __name__ == '__main__':
     with TicToc(__name__):
         pass
+

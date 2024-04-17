@@ -1145,7 +1145,7 @@ def check_counter(data, top_n=10):
     if top_n > 0:
         top_items = data.most_common(top_n)
         max_n = len(data)
-        print(f"出现次数最多的{min(top_n, max_n)}/{max_n}条数据:")
+        print(f"出现次数最多的{min(top_n, max_n)}/{max_n}条数据（频率）:")
         for item, count in top_items:
             print(f"\t{item}\t{count}")
 
@@ -1154,9 +1154,9 @@ def check_counter(data, top_n=10):
     count_frequencies = Counter(data.values())
 
     # 打印各计数值出现的次数
-    print("各计数值出现的次数:")
+    print("各计数值出现的次数，频率的频率（频率分布）:")
     for count, frequency in count_frequencies.most_common():
-        print(f"\t值为{count}的条目数\t{frequency}")
+        print(f"\t{count}\t{frequency}")
 
 
 def tprint(*args, **kwargs):

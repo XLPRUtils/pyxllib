@@ -30,6 +30,7 @@ import io
 
 import xlrd
 
+import filetype
 import openpyxl
 from openpyxl import Workbook
 from openpyxl.cell.cell import MergedCell
@@ -351,19 +352,70 @@ def convert_xls_to_xlsx(xls_file):
 
 
 def load_as_xlsx_file(file_path, keep_links=False, keep_vba=False):
+    """ 这个不能全信文件给的扩展名，需要智能判断 """
+
+    # 0 工具函数
+    @run_once()
+    def read_xlsx():
+        file = file_path
+        # 如果文件原本的后缀不是xlsx，openpyxl是读不了的，要绕个弯
+        if file.suffix[1:] not in ('xlsx', 'xlsm'):
+            with open(file_path, 'rb') as f2:
+                data = f2.read()
+            file = io.BytesIO(data)
+        try:
+            return openpyxl.load_workbook(file,
+                                          keep_links=keep_links,
+                                          keep_vba=keep_vba)
+        except Exception as e:
+            return
+
+    @run_once()
+    def read_xls():
+        try:
+            return convert_xls_to_xlsx(file_path)
+        except Exception as e:
+            return
+
+    @run_once()
+    def read_csv():
+        try:
+            return convert_csv_to_xlsx(file_path)
+        except Exception as e:
+            return
+
+    def read_test(suffix):
+        if suffix in ('xlsx', 'xlsm', 'zip'):
+            wb = read_xlsx()
+        elif suffix == 'xls':
+            wb = read_xls()
+        elif suffix == 'csv':
+            wb = read_csv()
+        else:
+            wb = None
+        return wb
+
+    # 1 优先相信用户输入的文件名类型
     file_path = Path(file_path)
-    suffix = file_path.suffix.lower()
-    if suffix in ('.xlsx', '.xlsm'):
-        wb = openpyxl.load_workbook(file_path,
-                                    keep_links=keep_links,
-                                    keep_vba=keep_vba)
-    elif suffix == '.xls':
-        wb = convert_xls_to_xlsx(file_path)
-    elif suffix == '.csv':
-        wb = convert_csv_to_xlsx(file_path)
-    else:
-        return None
-    return wb
+    suffix = file_path.suffix.lower()[1:]
+    wb = read_test(suffix)
+    if wb is not None:
+        return wb, suffix
+
+    # 2 如果处理不了，则尝试用filetype判断的类型
+    suffix2 = filetype.guess(file_path)
+    suffix2 = suffix2.extension if suffix2 else ''
+    wb = read_test(suffix2)
+    if wb is not None:
+        return wb, suffix2
+
+    # 3 如果还处理不了，再把其他可能的情况试一遍
+    for suffix in ('xlsx', 'xls', 'csv'):
+        wb = read_test(suffix)
+        if wb is not None:
+            return wb, suffix
+
+    return None, None
 
 
 def parse_range_address(address):
@@ -552,7 +604,7 @@ class XlCell(openpyxl.cell.cell.Cell):  # 适用于 openpyxl.cell.cell.MergedCel
 
         :return: 涉及到合并单元格的情况，新单元格和原单元格已经不一样了，需要重新获取对象
         """
-        ct, mid_result = self.celltype(return_mid_result=True)
+        ct, mid_result = self.celltype(return_mode=True)
         x = self
         if ct:  # 如果是合并单元格，取消该区域的合并单元格
             rng = mid_result['rng'] if ('rng' in mid_result) else self.in_range()
@@ -590,7 +642,7 @@ class XlCell(openpyxl.cell.cell.Cell):  # 适用于 openpyxl.cell.cell.MergedCel
             一般这种清空，推荐先将数据库复制到一个临时sheet，再复制回原sheet更安全
         """
         from itertools import product
-        ct, mid_result = self.celltype(return_mid_result=True)
+        ct, mid_result = self.celltype(return_mode=True)
 
         if ct == 0:  # 普通单元格，只复制值和格式
             dst_cell = dst_cell.clear()
@@ -1136,7 +1188,7 @@ class XlWorksheet(openpyxl.worksheet.worksheet.Worksheet):
 
         return df
 
-    def copy_range(self, src_addr, dst_cell, *, temp_sheet=False, return_mid_result=False):
+    def copy_range(self, src_addr, dst_cell, *, temp_sheet=False, return_mode=False):
         """ 将自身cell_range区间的内容、格式，拷贝到目标dst_cell里
 
         :param str src_addr: 自身的一片单元格范围
@@ -1158,7 +1210,7 @@ class XlWorksheet(openpyxl.worksheet.worksheet.Worksheet):
         mid_result = {}
         if temp_sheet:
             ws3 = self.parent.create_sheet('__copy_range')
-            mid_result = self.copy_range(src_addr, ws3['A1'], return_mid_result=True)
+            mid_result = self.copy_range(src_addr, ws3['A1'], return_mode=True)
             ws1 = ws3
             src_addr = f'A1:{excel_addr(mid_result["n"], mid_result["m"])}'
         else:
@@ -1193,7 +1245,7 @@ class XlWorksheet(openpyxl.worksheet.worksheet.Worksheet):
         if temp_sheet:
             self.parent.remove(ws1)
 
-        if return_mid_result:
+        if return_mode:
             return mid_result
 
     def reindex_columns(self, orders):
@@ -2411,7 +2463,8 @@ def extract_workbook_summary2(file_path, *,
     res = {}
     res['fileName'] = file_path.name
     start_time = time.time()
-    wb = load_as_xlsx_file(file_path, keep_links=keep_links, keep_vba=keep_vba)
+    wb, suffix = load_as_xlsx_file(file_path, keep_links=keep_links, keep_vba=keep_vba)
+    res['fileType'] = suffix or 'error'
     load_time = time.time() - start_time
     if wb is None:  # 不支持的文件类型，不报错，只是返回最基本的文件名信息
         if return_mode == 1:
@@ -2459,7 +2512,7 @@ def update_raw_summary2(data):
 
     # 3 判断键值顺序
     keys = list(data.keys())
-    ref_keys = ['fileName', 'chineseContentRatio', 'nonEmptyCellRatio', 'sheetNames', 'sheets']
+    ref_keys = ['fileName', 'fileType', 'chineseContentRatio', 'nonEmptyCellRatio', 'sheetNames', 'sheets']
     if keys != ref_keys:
         data = {k: data[k] for k in ref_keys if k in data}
 
@@ -2883,6 +2936,7 @@ class WorkbookSummary3:
         x = summary2
         y = {
             'fileName': x['fileName'],
+            'fileType': x['fileType'],
             'sheetNames': x['sheetNames'],
             'sheets': x['sheets'],
             'mode': 'Complete information',
@@ -2948,6 +3002,13 @@ def extract_workbook_summary3b(file_path,
     res['fileName'] = Path(file_path).name
     load_time = summary2_time = summary3_time = -1
 
+    def reduce_summary(summary):
+        """ 如果转json后的summary超过4K，去掉可能的sheets字段 """
+        s = json.dumps(summary, ensure_ascii=False)
+        if len(s) < 4000:
+            if 'sheets' in summary:
+                del summary['sheets']
+
     try:
         with Timeout(timeout_seconds):
             start_time = time.time()
@@ -2964,10 +3025,12 @@ def extract_workbook_summary3b(file_path,
         if debug:
             raise e
         res['error'] = f'超时，未完成摘要提取：{timeout_seconds}秒'
+        reduce_summary(res)
     except Exception as e:
         if debug:
             raise e
         res['error'] = f'提取摘要时发生错误：{format_exception(e, 2)}'
+        reduce_summary(res)
 
     if return_mode == 1:
         return res, {'load_time': human_readable_number(load_time),
