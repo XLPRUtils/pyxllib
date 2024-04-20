@@ -12,7 +12,10 @@ from collections import defaultdict
 
 import pandas as pd
 
+# 旧版的pandas警告
 warnings.filterwarnings('ignore', message="pandas only support SQLAlchemy connectable")
+# 新版的pandas警告多了个's‘
+warnings.filterwarnings('ignore', message="pandas only supports SQLAlchemy connectable")
 
 
 class SqlBase:
@@ -190,6 +193,8 @@ class SqlBase:
             cur.executemany(query, params)
             cur.close()
             self.commit()
+
+        self._commit_cache = defaultdict(list)
 
     def update_row(self, table_name, cols, where, *, commit=False):
         """ 【改】更新数据
