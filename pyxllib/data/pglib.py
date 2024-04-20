@@ -34,6 +34,7 @@ import json
 import json
 import textwrap
 import datetime
+import re
 
 from tqdm import tqdm
 
@@ -97,6 +98,37 @@ class Connection(psycopg.Connection, SqlBase):
         # 然后使用py的f字符串填充的话，要避免comment有引号等特殊字符，就用了特殊的转义标记$zyzf$
         # 暂时找不到更优雅的方式~~ 而且这个问题，可能以后其他特殊的sql语句也会遇到。。。
         self.execute(f"COMMENT ON COLUMN {table_name}.{col_name} IS $zyzf${comment}$zyzf$")
+        self.commit()
+
+    def reset_table_item_id(self, table_name, item_id_name=None, counter_name=None):
+        """ 重置表格的数据的id值，也重置计数器
+
+        :param item_id_name: 表格的自增id字段名，有一套我自己风格的自动推算算法
+        :param counter_name: 计数器字段名，如果有的话，也会重置
+        """
+        # 1 重置数据的编号
+        if item_id_name is None:
+            m = re.match(r'(.+?)(_table)?$', table_name)
+            item_id_name = m.group(1) + '_id'
+
+        sql = f"""WITH cte AS (
+    SELECT {item_id_name}, ROW_NUMBER() OVER (ORDER BY {item_id_name}) AS new_{item_id_name}
+    FROM {table_name}
+)
+UPDATE {table_name}
+SET {item_id_name} = cte.new_{item_id_name}
+FROM cte
+WHERE {table_name}.{item_id_name} = cte.{item_id_name}"""
+        self.execute(sql)  # todo 这种sql写法好像偶尔有bug会出问题
+        self.commit()
+
+        # 2 重置计数器
+        if counter_name is None:
+            counter_name = f'{table_name}_{item_id_name}_seq'
+
+        # 找到目前最大的id值
+        max_id = self.exec2one(f'SELECT MAX({item_id_name}) FROM {table_name}')
+        self.execute(f'ALTER SEQUENCE {counter_name} RESTART WITH {max_id + 1}')
         self.commit()
 
     def __3_execute(self):

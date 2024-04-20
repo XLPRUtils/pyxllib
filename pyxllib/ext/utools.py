@@ -130,8 +130,8 @@ class UtoolsBase:
         except OSError:  # 忽略错误的扩展名
             f1 = XlPath.init('left', XlPath.tempdir())
             f2 = XlPath.init('right', XlPath.tempdir())
-        f1.write_text(suffix)
-        f2.write_text(self.cmds['ClipText'])
+        f1.write_text(self.cmds['ClipText'])
+        f2.write_text(self.cmds['ClipText'] + '\n')
         bcompare(f1, f2, wait=False)
 
 
