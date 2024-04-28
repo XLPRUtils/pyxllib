@@ -979,7 +979,7 @@ class MultiProcessLauncher:
     def __init__(self):
         self.workers = []
 
-    def add_process(self, cmd, name=None, **kwargs):
+    def add_process_cmd(self, cmd, name=None, **kwargs):
         if name is None:
             name = cmd.split()[0]
 
@@ -988,7 +988,7 @@ class MultiProcessLauncher:
         worker.update(kwargs)
         self.workers.append(worker)
 
-    def add_python_module(self, module, args='', name=None):
+    def add_process_python_module(self, module, args='', name=None):
         """ 添加并启动一个Python模块作为后台进程。
 
         :param module: 要执行的Python模块名（python -m 后面的部分）
@@ -996,7 +996,7 @@ class MultiProcessLauncher:
         :param name: 进程的名称，默认为模块名
         """
         cmd = f'{sys.executable} -m {module} {args}'
-        self.add_process(cmd, name=name)
+        self.add_process_cmd(cmd, name=name)
 
     def stop_all(self):
         """ 停止所有后台进程 """

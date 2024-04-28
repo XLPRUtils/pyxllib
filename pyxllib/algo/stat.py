@@ -18,6 +18,10 @@ from pyxllib.prog.pupil import dprint, typename
 from pyxllib.file.specialist import XlPath
 
 pd.options.display.unicode.east_asian_width = True  # 优化中文输出对齐问题
+try:
+    pd.set_option('future.no_silent_downcasting', True)
+except Exception as e:
+    pass
 
 
 def treetable(childreds, parents, arg3=None, nodename_colname=None):
