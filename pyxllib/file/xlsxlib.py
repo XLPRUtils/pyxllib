@@ -2650,30 +2650,39 @@ class WorkbookSummary3:
                     for addr, _ in row:
                         new_cells[addr] = cells[addr]
 
-            new_cells = {}
-            for rows in rows_groups:
+            total_new_cells = []
+            for rows in reversed(rows_groups):
+                new_cells = {}
                 if len(rows) < 10:
                     extract_cells_from_rows(rows)
                 else:  # 压缩中间的数据
                     # 如果评估到最终摘要可能太小，要收敛下删除的范围
                     n, m = len(rows), len(rows[0])
                     target_n = int(target_reduce_cells_num / m + 0.5)  # 本来应该删除多少行才行
-                    cur_n = n - 4 if target_n > n - 4 else target_n  # 实际删除多少行
-                    left_n = n - cur_n  # 剩余多少行
-                    b = left_n // 2
-                    a = left_n - b
+                    if target_n <= 0:  # 如果删除的行数太少，那么就不压缩了
+                        extract_cells_from_rows(rows)
+                    else:
+                        cur_n = n - 4 if target_n > n - 4 else target_n  # 实际删除多少行
+                        left_n = n - cur_n  # 剩余多少行
+                        b = left_n // 2
+                        a = left_n - b
 
-                    extract_cells_from_rows(rows[:a])
-                    addr = combine_addresses(rows[a][0][0], rows[-b - 1][-1][0])
-                    # new_cells[addr] = '这块区域的内容跟前面几行、后面几行的内容结构是一致的，省略显示'
-                    new_cells[addr] = '...'
-                    extract_cells_from_rows(rows[-b:])
+                        extract_cells_from_rows(rows[:a])
+                        addr = combine_addresses(rows[a][0][0], rows[-b - 1][-1][0])
+                        # new_cells[addr] = '这块区域的内容跟前面几行、后面几行的内容结构是一致的，省略显示'
+                        new_cells[addr] = '...'
+                        extract_cells_from_rows(rows[-b:])
 
-                    target_reduce_cells_num -= cur_n * m
-                    if target_reduce_cells_num <= 0:
-                        break
+                        target_reduce_cells_num -= cur_n * m
+                        # 240429周一21:57，这两行不能开，否则会过渡精简。如果压缩够了，那么后面的单元格需要全量补上。
+                        # if target_reduce_cells_num <= 0:  # 满足以后不是直接break，而是要把后续的内容都保留
+                        #     break
+                total_new_cells.append(new_cells)
 
-            sheet['cells'] = new_cells
+            new_cells2 = {}
+            for rows in reversed(total_new_cells):
+                new_cells2.update(rows)
+            sheet['cells'] = new_cells2
 
     @classmethod
     def reduce4_truncate_cells(cls, y, summary_limit_len, *, cur_summary_len=None):
@@ -2805,6 +2814,7 @@ class WorkbookSummary3:
         if cur_summary_len is None:
             cur_summary_len = cls.count_length(y)
 
+        cur_summary_len0 = cur_summary_len
         active_sheet = y['ActiveSheet']
 
         # 1 预计要删除单元格数
@@ -2836,7 +2846,8 @@ class WorkbookSummary3:
             return cls.count_length(y)
 
         # 4 否则每张表按照比例删单元格，只保留前面部分的单元格
-        left_rate = 1 - r  # 原始保留比例
+        # todo 这里应该有更好的筛选机制，后续可以思考思考
+        left_rate = min((summary_limit_len + cur_summary_len) / 2 * cur_summary_len, 0.9)  # 首轮减小一点调整幅度
         while True:
             for i, st in enumerate(y['sheets']):
                 if i == active_sheet_index:
@@ -2848,10 +2859,10 @@ class WorkbookSummary3:
             cur_summary_len = cls.count_length(y)
             if cur_summary_len <= summary_limit_len:
                 return cur_summary_len
-            if left_rate * total_cells_num < 1:
+            if left_rate * total_cells_num < 1:  # 都没有单元格，别删了
                 break
-            else:
-                left_rate *= 0.8  # 缩小保留比例，再试
+            else:  # 更新保留比率，再试
+                left_rate *= min(summary_limit_len / cur_summary_len, 0.9)
 
         return cur_summary_len
 
