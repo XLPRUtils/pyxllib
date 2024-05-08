@@ -70,7 +70,7 @@ class TicToc:
 
     def tocvalue(self, restart=False):
         """
-        Return time elapsed since last call to tic().
+        Return time elapsed seconds since last call to tic().
 
         Optional argument:
             restart - Boolean specifying whether to restart the timer

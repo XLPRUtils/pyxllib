@@ -59,7 +59,7 @@ def infer_file_format(file_path):
 
 class UpgradeOfficeFile:
     @classmethod
-    def to_dir(cls, file_path, out_dir=None, fmt=None):
+    def to_dir(cls, file_path, out_dir=None, fmt=None, timeout=10):
         """ 将doc文件转换为docx文件
 
         :param file_path: 待升级的文件路径
@@ -86,20 +86,26 @@ class UpgradeOfficeFile:
             executor,
             '--headless',  # 无界面模式
             '--convert-to', fmt,  # 转换为docx格式
-            '--outdir', out_dir,  # 输出目录
+            '--outdir', str(out_dir),  # 输出目录
             file_path  # 输入文件路径
         ]
 
-        subprocess.run(command, check=True)
+        subprocess.run(command, timeout=timeout, check=True)
 
         # 返回转换后的文件路径
         base_name = os.path.basename(file_path)
         name, _ = os.path.splitext(base_name)
         new_file_path = os.path.join(out_dir, f"{name}.{fmt}")
+
+        # todo 以目标文件是否存在判断转换是否成功也是有一定bug的，可能目标文件本来就存在
+        #   但如果严谨判断，就要分析subprocess.run的输出结果了，那个太麻烦，先用简便方法处理
+        if not Path(new_file_path).exists():
+            raise ValueError(f"升级文档失败")
+
         return new_file_path
 
     @classmethod
-    def to_file(cls, in_file, out_file=None, fmt=None):
+    def to_file(cls, in_file, out_file=None, fmt=None, timeout=10):
         """ 可以指定转换出的文件名的版本
 
         :param in_file: 待转换的文件路径
@@ -126,7 +132,7 @@ class UpgradeOfficeFile:
         out_file.parent.mkdir(parents=True, exist_ok=True)
 
         # 调用upgrade_office_file函数进行转换
-        temp_file = cls.to_dir(in_file, out_dir=out_file.parent, fmt=fmt)
+        temp_file = cls.to_dir(in_file, out_dir=out_file.parent, fmt=fmt, timeout=timeout)
 
         # 将生成的临时文件重命名为out_file
         os.rename(temp_file, out_file)
@@ -134,7 +140,7 @@ class UpgradeOfficeFile:
         return out_file
 
     @classmethod
-    def to_tempfile(cls, in_file, fmt=None, *, timestamp_stem=False, create_subdir=False):
+    def to_tempfile(cls, in_file, fmt=None, *, timestamp_stem=False, create_subdir=False, timeout=10):
         """ 将文件转换为临时文件
 
         :param timestamp_stem: 时间戳文件名
@@ -151,8 +157,8 @@ class UpgradeOfficeFile:
 
         if timestamp_stem:
             stem = datetime.now().strftime('%Y%m%d.%H%M%S.%f')
-            out_file = cls.to_file(in_file, out_file=root / f"{stem}.{fmt}", fmt=fmt)
+            out_file = cls.to_file(in_file, out_file=root / f"{stem}.{fmt}", fmt=fmt, timeout=timeout)
         else:
-            out_file = cls.to_dir(in_file, out_dir=root, fmt=fmt)
+            out_file = cls.to_dir(in_file, out_dir=root, fmt=fmt, timeout=timeout)
 
         return out_file
