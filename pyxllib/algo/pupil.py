@@ -152,6 +152,78 @@ class ValuesStat:
             raise ValueError("无效的数据数量")
 
 
+class ValuesStat2:
+    """ 240509周四17:33，第2代统计器
+    """
+
+    def __init__(self, values=None, raw_values=None):
+        from statistics import pstdev, mean
+
+        # 支持输入可能带有非数值类型的raw_values
+        if raw_values:
+            values = [x for x in raw_values if isinstance(x, (int, float))]  # todo 可能需要更泛用的判断数值的方法
+
+        self.raw_values = raw_values
+        values = values or []
+        self.values = sorted(values)
+        if self.raw_values:
+            self.raw_n = len(self.raw_values)
+        else:
+            self.raw_n = 0
+        self.n = len(values)
+        self.sum = sum(values)
+        if self.n:
+            self.mean = mean(self.values)
+            self.std = pstdev(self.values)
+            self.min, self.max = self.values[0], self.values[-1]
+        else:
+            self.mean = self.std = self.min = self.max = float('nan')
+
+        self.dist = []
+
+    def __len__(self):
+        return self.n
+
+    def summary(self, unit='万', precision=4, percentile=5):
+        """ 文本汇总性的报告
+
+        :param percentile: 包括两个极值端点的切分点数，
+            设置2，就是不设置分位数，就是只展示最小、最大值
+            如果设置了3，就表示"中位数、二分位数"，在展示的时候，会显示50%位置的分位数值
+            如果设置了5，就相当于"四分位数"，会显示25%、50%、75%位置的分位数值
+        :param unit: 展示数值时使用的单位
+        :param precision: 展示数值时的精度
+        """
+        from statistics import quantiles
+
+        def fmt0(v):
+            return human_readable_number(v, '万')
+
+        def fmt(v):
+            return human_readable_number(v, unit, precision)
+
+        desc = []
+        if self.raw_n and self.raw_n > self.n:
+            desc.append(f"非数值数量：{fmt0(self.raw_n - self.n)}")
+
+        desc.append(f"总数：{fmt0(self.n)}")
+        desc.append(f"总和：{fmt(self.sum)}")
+        desc.append(f'均值±标准差：{fmt(self.mean)}±{fmt(self.std)}')
+
+        if self.values:
+            dist = [self.values[0]]
+            if percentile > 2:
+                quartiles = quantiles(self.values, n=percentile - 1)
+                dist += quartiles
+            dist.append(self.values[-1])
+
+            desc.append(f"分布：{'/'.join([fmt(v) for v in dist])}")
+        elif self.dist:  # 此时当前函数的percentile设置失效，以dist中存储的情况为准
+            desc.append(f"分布：{'/'.join([fmt(v) for v in self.dist])}")
+
+        return '\t'.join(desc)
+
+
 class Groups:
     def __init__(self, data):
         """ 分组

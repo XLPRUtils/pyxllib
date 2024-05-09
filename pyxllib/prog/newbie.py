@@ -267,13 +267,17 @@ def human_readable_number(value, base_type='K', precision=4):
         'K': (['', 'K', 'M', 'G', 'T', 'P', 'E', 'Z', 'Y'], 1000),
         'KB': (['', 'KB', 'MB', 'GB', 'TB', 'PB', 'EB', 'ZB', 'YB'], 1024),
         'KiB': (['', 'KiB', 'MiB', 'GiB', 'TiB', 'PiB', 'EiB', 'ZiB', 'YiB'], 1024),
-        '万': (['', '万', '亿', '万亿', '亿亿'], 10000)
+        '万': (['', '万', '亿', '万亿', '亿亿'], 10000),
+        '秒': (['秒', [60, '分'], [60, '时'], [24, '天'], [7, '周'], [4.345, '月'], [12, '年']], 60),
     }.get(base_type, ([''], 1))  # 默认为空单位和基数1
 
     x, i = abs(value), 0
     while x >= base and i < len(units) - 1:
         x /= base
         i += 1
+        if isinstance(units[i], list):
+            base = units[i][0]
+            units[i] = units[i][1]
 
     x = f'{x:.{precision}g}'  # 四舍五入到指定精度
     prefix = '-' if value < 0 else ''  # 负数处理

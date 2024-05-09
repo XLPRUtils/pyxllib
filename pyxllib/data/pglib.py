@@ -44,6 +44,7 @@ import psycopg.rows
 from pyxllib.prog.newbie import round_int
 from pyxllib.prog.pupil import utc_now, utc_timestamp
 from pyxllib.prog.specialist import XlOsEnv
+from pyxllib.algo.pupil import ValuesStat2
 from pyxllib.file.specialist import get_etag
 from pyxllib.data.sqlite import SqlBase
 
@@ -229,6 +230,76 @@ WHERE {table_name}.{item_id_name} = cte.{item_id_name}"""
         query += f' {on_conflict}'
 
         self.commit_base(commit, query, params)
+
+    def __6_高级统计(self):
+        pass
+
+    def get_field_valuesstat(self, table_name, field_name, percentile_count=5,
+                             cvt_numeric=True, by_data=False):
+        """ 获得指定表格的某个字段的统计特征ValuesStat2对象
+
+        :param table_name: 表名
+        :param field_name: 用于计算统计数据的字段名
+        :param percentile_count: 分位数的数量，例如 3 表示只计算中位数
+        :param by_data: 是否获得原始数据
+            默认只获得统计特征，不获得原始数据
+        """
+
+        def init_from_db_data():
+            values = self.exec2col(f'SELECT {field_name} FROM {table_name}')
+            if cvt_numeric:  # 这个是numeric格式字段，是"字符串"，要做个转换
+                values = [x and float(x) for x in values]
+
+            return ValuesStat2(raw_values=values)
+
+        def init_from_db():
+            # 构建基础的 SQL 查询
+            sql_query = f"""
+            SELECT 
+                COUNT(*) AS total_count,
+                COUNT({field_name}) AS non_null_count,
+                SUM({field_name}) AS total_sum,
+                AVG({field_name}) AS average,
+                STDDEV({field_name}) AS standard_deviation,
+                MIN({field_name}) AS min_value,
+                MAX({field_name}) AS max_value
+            """
+
+            percentiles = []
+            # 根据分位点的数量动态添加分位数计算
+            if percentile_count > 2:
+                step = 1 / (percentile_count - 1)
+                percentiles = [(i * step) for i in range(1, percentile_count - 1)]
+                percentiles_query = ", ".join(
+                    f"PERCENTILE_CONT({p:.2f}) WITHIN GROUP (ORDER BY {field_name}) AS percentile_{int(p * 100)}"
+                    for p in percentiles
+                )
+                sql_query += ", " + percentiles_query
+
+            sql_query += f" FROM {table_name};"
+
+            # 执行 SQL 查询
+            row = self.exec2dict(sql_query).fetchone()
+
+            # 创建一个新实例并将从数据库获得的数据填充到相应的属性
+            x = ValuesStat2()
+            x.raw_n = row['total_count']
+            x.n = row['non_null_count']
+            x.sum = row['total_sum']
+            x.mean = row['average']
+            x.std = row['standard_deviation']
+
+            # 如果计算了分位数，填充相应属性
+            x.dist = [row['min_value']] + [row[f"percentile_{int(p * 100)}"] for p in percentiles] + [row['max_value']]
+            if cvt_numeric:
+                x.dist = [float(x) for x in x.dist]
+
+            return x
+
+        if by_data:
+            return init_from_db_data()
+        else:
+            return init_from_db()
 
 
 """

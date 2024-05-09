@@ -10,6 +10,7 @@ check_install_package('moviepy')
 
 import cv2
 from moviepy.editor import VideoFileClip
+from moviepy.editor import cvsecs
 import numpy as np
 from tqdm import tqdm
 
@@ -137,3 +138,11 @@ class XlVideoFileClip(VideoFileClip):
 
 
 inject_members(XlVideoFileClip, VideoFileClip)
+
+
+def clip_video(input_file, output_file, start_time, end_time):
+    start_time = cvsecs(start_time)
+    end_time = cvsecs(end_time)
+    clip = VideoFileClip(input_file).subclip(start_time, end_time)
+    clip.write_videofile(output_file)
+    clip.reader.close()

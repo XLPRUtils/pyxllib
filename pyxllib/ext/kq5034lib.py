@@ -135,13 +135,14 @@ class Xiaoetong:
 
 
 class 网课考勤:
-    def __init__(self, today=None):
+    def __init__(self, today=None, *, 表格路径=None):
         self.返款标题 = ''
-        self.表格路径 = r'考勤.xlsx'
+        self.表格路径 = 表格路径 or r'考勤.xlsx'
         self.在线表格 = 'https://docs.qq.com/sheet/DUlF1UnRackJ2Vm5U'  # 生成日报用
         self.开课日期 = '2022-01-08'
         self.视频返款 = [20, 15, 10, 5, 0, 0]  # 直播(当堂)/第1天（当天）/第2天/第3天/第4天/第5天，完成观看的依次返款额。
         self.打卡返款 = {5: 100, 10: 150, 15: 200}  # 打卡满5/10/15次的返款额
+        self.课程链接 = []
         self._init(today)
 
         self.driver = None  # 浏览器脚本
