@@ -4,11 +4,12 @@
 # @Email  : 877362867@qq.com
 # @Date   : 2021/06/03 14:22
 
-import textwrap
+from bisect import bisect_right
 from collections import defaultdict, Counter
 import math
 import re
 import sys
+import textwrap
 
 from pyxllib.prog.newbie import typename, human_readable_number
 from pyxllib.text.pupil import listalign, int2myalphaenum
@@ -156,13 +157,17 @@ class ValuesStat2:
     """ 240509周四17:33，第2代统计器
     """
 
-    def __init__(self, values=None, raw_values=None):
+    def __init__(self, values=None, raw_values=None, data_type=None):
         from statistics import pstdev, mean
 
         # 支持输入可能带有非数值类型的raw_values
         if raw_values:
-            values = [x for x in raw_values if isinstance(x, (int, float))]  # todo 可能需要更泛用的判断数值的方法
+            if 'timestamp' in data_type:
+                values = [x.timestamp() for x in raw_values if hasattr(x, 'timestamp')]
+            else:
+                values = [x for x in raw_values if isinstance(x, (int, float))]  # todo 可能需要更泛用的判断数值的方法
 
+        self.date_type = data_type
         self.raw_values = raw_values
         values = values or []
         self.values = sorted(values)
@@ -171,49 +176,86 @@ class ValuesStat2:
         else:
             self.raw_n = 0
         self.n = len(values)
-        self.sum = sum(values)
+
+        if 'timestamp' in data_type:
+            self.sum = None
+        else:
+            self.sum = sum(values)
+
         if self.n:
             self.mean = mean(self.values)
             self.std = pstdev(self.values)
             self.min, self.max = self.values[0], self.values[-1]
         else:
-            self.mean = self.std = self.min = self.max = float('nan')
+            self.mean = self.std = self.min = self.max = None
 
-        self.dist = []
+        self.dist = None
 
     def __len__(self):
         return self.n
 
-    def summary(self, unit='万', precision=4, percentile=5):
+    def summary(self, unit=None, precision=4, percentile_count=5):
         """ 文本汇总性的报告
 
-        :param percentile: 包括两个极值端点的切分点数，
+        :param percentile_count: 包括两个极值端点的切分点数，
             设置2，就是不设置分位数，就是只展示最小、最大值
             如果设置了3，就表示"中位数、二分位数"，在展示的时候，会显示50%位置的分位数值
             如果设置了5，就相当于"四分位数"，会显示25%、50%、75%位置的分位数值
         :param unit: 展示数值时使用的单位
         :param precision: 展示数值时的精度
         """
+        import datetime
         from statistics import quantiles
 
+        # 1 各种细分的格式化方法
         def fmt0(v):
+            # 数量类整数的格式
             return human_readable_number(v, '万')
 
-        def fmt(v):
-            return human_readable_number(v, unit, precision)
+        def fmt1(v):
+            if isinstance(v, str):
+                return v
+            return human_readable_number(v, unit or 'K', precision)
 
+        def fmt2(v):
+            # 日期类数据的格式化
+            # todo 这个应该数据的具体格式来设置的，但是这个现在有点难写，先写死
+            if isinstance(v, str):
+                return v
+            elif isinstance(v, (int, float)):
+                v = datetime.datetime.fromtimestamp(v)
+
+            return v.strftime(unit or '%Y-%m-%d %H:%M:%S')
+
+        def fmt2b(v):
+            # 时间长度类数据的格式化
+            return human_readable_number(v, '秒')
+
+        if 'timestamp' in self.date_type:
+            fmt = fmt2
+            fmtb = fmt2b
+        else:
+            fmt = fmtb = fmt1
+
+        # 2 生成统计报告
         desc = []
         if self.raw_n and self.raw_n > self.n:
             desc.append(f"非数值数量：{fmt0(self.raw_n - self.n)}")
 
         desc.append(f"总数：{fmt0(self.n)}")
-        desc.append(f"总和：{fmt(self.sum)}")
-        desc.append(f'均值±标准差：{fmt(self.mean)}±{fmt(self.std)}')
+        if self.sum is not None:
+            desc.append(f"总和：{fmt(self.sum)}")
+        if self.mean is not None and self.std is not None:
+            desc.append(f'均值±标准差：{fmt(self.mean)}±{fmtb(self.std)}')
+        elif self.mean is not None:
+            desc.append(f'均值：{fmt(self.mean)}')
+        elif self.std is not None:
+            desc.append(f'标准差：{fmtb(self.std)}')
 
         if self.values:
             dist = [self.values[0]]
-            if percentile > 2:
-                quartiles = quantiles(self.values, n=percentile - 1)
+            if percentile_count > 2:
+                quartiles = quantiles(self.values, n=percentile_count - 1)
                 dist += quartiles
             dist.append(self.values[-1])
 
@@ -222,6 +264,27 @@ class ValuesStat2:
             desc.append(f"分布：{'/'.join([fmt(v) for v in self.dist])}")
 
         return '\t'.join(desc)
+
+    def calculate_ratios(self, x_values, fmt=False):
+        """ 计算并返回一个字典，其中包含每个 x_values 中的值与其小于等于该值的元素的比例
+
+        :param x_values: 一个数值列表，用来计算每个数值小于等于它的元素的比例
+        :param fmt: 直接将值格式化好
+        :return: 一个字典，键为输入的数值，值为对应的比例（百分比）
+        """
+        ratio_dict = {}
+        for x in x_values:
+            position = bisect_right(self.values, x)
+            if self.n > 0:
+                ratio = (position / self.n)
+            else:
+                ratio = 0
+            ratio_dict[x] = ratio
+
+        if fmt:
+            ratio_dict = {x: f'{ratio:.2%}' for x, ratio in ratio_dict.items()}
+
+        return ratio_dict
 
 
 class Groups:

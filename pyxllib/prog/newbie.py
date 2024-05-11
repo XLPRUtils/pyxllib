@@ -259,6 +259,9 @@ def human_readable_number(value, base_type='K', precision=4):
     :param str base_type: 进制类型，'K'为1000进制, 'KB'为1024进制（KiB同理）, '万'为中文万进制
     :return: 美化后的字符串
     """
+    if value is None:
+        return ''
+
     if abs(value) < 1:
         return f'{value:.{precision}g}'
 
