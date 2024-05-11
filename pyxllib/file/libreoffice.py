@@ -51,6 +51,7 @@ def infer_file_format(file_path):
     elif ext in ['.ppt', '.pptx']:
         fmt = 'pptx'
     elif ext in ['.xls', '.xlsx']:
+        # todo 其实excel还有xlsm的可能，但是用libreoffice可能没有微软365那样可以判断出宏的情况保存为xlsm
         fmt = 'xlsx'
     else:
         raise ValueError("不支持的文件格式")

@@ -46,7 +46,7 @@ from pyxllib.prog.pupil import utc_now, utc_timestamp
 from pyxllib.prog.specialist import XlOsEnv
 from pyxllib.algo.pupil import ValuesStat2
 from pyxllib.file.specialist import get_etag
-from pyxllib.data.sqlite import SqlBase
+from pyxllib.data.sqlite import SqlBase, SQLBuilder
 
 
 class Connection(psycopg.Connection, SqlBase):
@@ -147,6 +147,28 @@ WHERE {table_name}.{item_id_name} = cte.{item_id_name}"""
         # cur.close()
         return data
 
+    def exec2dict_batch(self, sql, batch_size=1000, **kwargs):
+        """ 分批返回数据的版本
+
+        :return:
+            第1个值，是一个迭代器，看起来仍然能一条一条返回，实际后台是按照batch_size打包获取的
+            第2个值，是数据总数
+        """
+        if not isinstance(sql, SQLBuilder):
+            raise ValueError('暂时只能搭配SQLBuilder使用')
+
+        num = self.exec2one(sql.build_count())
+        cur = self.exec2dict(sql.build_select(), **kwargs)
+
+        def yield_row():
+            while True:
+                rows = cur.fetchmany(batch_size)
+                if not rows:
+                    break
+                yield from rows
+
+        return yield_row(), num
+
     exec_dict = exec2dict
 
     def __4_数据类型(self):
@@ -235,7 +257,7 @@ WHERE {table_name}.{item_id_name} = cte.{item_id_name}"""
         pass
 
     def get_field_valuesstat(self, table_name, field_name, percentile_count=5,
-                             cvt_numeric=True, by_data=False):
+                             filter_condition=None, by_data=False):
         """ 获得指定表格的某个字段的统计特征ValuesStat2对象
 
         :param table_name: 表名
@@ -246,60 +268,71 @@ WHERE {table_name}.{item_id_name} = cte.{item_id_name}"""
         """
 
         def init_from_db_data():
-            values = self.exec2col(f'SELECT {field_name} FROM {table_name}')
-            if cvt_numeric:  # 这个是numeric格式字段，是"字符串"，要做个转换
+            sql = SQLBuilder(table_name)
+            if filter_condition:
+                sql.where(filter_condition)
+            values = self.exec2col(sql.build_select(field_name))
+            if data_type == 'numeric':
                 values = [x and float(x) for x in values]
-
-            return ValuesStat2(raw_values=values)
+            return ValuesStat2(raw_values=values, data_type=data_type)
 
         def init_from_db():
-            # 构建基础的 SQL 查询
-            sql_query = f"""
-            SELECT 
-                COUNT(*) AS total_count,
-                COUNT({field_name}) AS non_null_count,
-                SUM({field_name}) AS total_sum,
-                AVG({field_name}) AS average,
-                STDDEV({field_name}) AS standard_deviation,
-                MIN({field_name}) AS min_value,
-                MAX({field_name}) AS max_value
-            """
+            # 1 构建基础的 SQL 查询
+            sql = SQLBuilder(table_name)
+            sql.select("COUNT(*) AS total_count")
+            sql.select(f"COUNT({field_name}) AS non_null_count")
+            sql.select(f"MIN({field_name}) AS min_value")
+            sql.select(f"MAX({field_name}) AS max_value")
+            if 'timestamp' in data_type:
+                percentile_type = 'PERCENTILE_DISC'
+                # todo 其实时间类也可以"泛化"一种平均值、标准差算法的，这需要获取全量数据，然后自己计算
+            elif data_type == 'text':
+                percentile_type = 'PERCENTILE_DISC'
+            else:  # 默认是正常的数值类型
+                sql.select(f"SUM({field_name}) AS total_sum")
+                sql.select(f"AVG({field_name}) AS average")
+                sql.select(f"STDDEV({field_name}) AS standard_deviation")
+                percentile_type = 'PERCENTILE_CONT'
 
             percentiles = []
             # 根据分位点的数量动态添加分位数计算
             if percentile_count > 2:
                 step = 1 / (percentile_count - 1)
                 percentiles = [(i * step) for i in range(1, percentile_count - 1)]
-                percentiles_query = ", ".join(
-                    f"PERCENTILE_CONT({p:.2f}) WITHIN GROUP (ORDER BY {field_name}) AS percentile_{int(p * 100)}"
-                    for p in percentiles
-                )
-                sql_query += ", " + percentiles_query
+                for p in percentiles:
+                    sql.select(f"{percentile_type}({p:.2f}) WITHIN GROUP (ORDER BY {field_name}) "
+                               f"AS percentile_{int(p * 100)}")
 
-            sql_query += f" FROM {table_name};"
+            if filter_condition:
+                sql.where(filter_condition)
 
-            # 执行 SQL 查询
-            row = self.exec2dict(sql_query).fetchone()
+            row = self.exec2dict(sql.build_select()).fetchone()
 
-            # 创建一个新实例并将从数据库获得的数据填充到相应的属性
-            x = ValuesStat2()
+            # 2 统计展示
+            x = ValuesStat2(data_type=data_type)
             x.raw_n = row['total_count']
             x.n = row['non_null_count']
-            x.sum = row['total_sum']
-            x.mean = row['average']
-            x.std = row['standard_deviation']
+            if not x.n:
+                return x
+
+            x.sum = row.get('total_sum', None)
+            x.mean = row.get('average', None)
+            x.std = row.get('standard_deviation', None)
 
             # 如果计算了分位数，填充相应属性
             x.dist = [row['min_value']] + [row[f"percentile_{int(p * 100)}"] for p in percentiles] + [row['max_value']]
-            if cvt_numeric:
+            if data_type == 'numeric':
                 x.dist = [float(x) for x in x.dist]
 
             return x
 
+        data_type = self.get_column_data_type(table_name, field_name)
         if by_data:
-            return init_from_db_data()
+            vs = init_from_db_data()
         else:
-            return init_from_db()
+            vs = init_from_db()
+
+        return vs
 
 
 """

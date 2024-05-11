@@ -4,6 +4,7 @@
 # @Email  : 877362867@qq.com
 # @Date   : 2022/04/12 08:59
 
+import copy
 import json
 import re
 import sqlite3
@@ -16,6 +17,99 @@ import pandas as pd
 warnings.filterwarnings('ignore', message="pandas only support SQLAlchemy connectable")
 # 新版的pandas警告多了个's‘
 warnings.filterwarnings('ignore', message="pandas only supports SQLAlchemy connectable")
+
+
+class SQLBuilder:
+    def __init__(self, table=''):
+        self.table = table
+        self._select = []
+        self._set = []
+        self._where = []
+        self._order_by = []
+        self._group_by = []
+        self._limit = None  # 限制最多读多少条数据
+        self._offset = None  # 从第几条数据开始读
+
+    def copy(self):
+        # 拷贝一个当前状态的副本sql
+        return copy.deepcopy(self)
+
+    def __1_组件(self):
+        pass
+
+    def from_table(self, table):
+        self.table = table
+        return self
+
+    def select(self, *columns):
+        self._select.extend(columns)
+        return self
+
+    def set(self, *columns):
+        self._set.extend(columns)
+        return self
+
+    def where(self, condition):
+        self._where.append(condition)
+        return self
+
+    def group_by(self, *columns):
+        self._group_by.extend(columns)
+        return self
+
+    def order_by(self, *columns):
+        self._order_by.extend(columns)
+        return self
+
+    def limit(self, limit, offset=None):
+        self._limit = limit
+        self._offset = offset
+        return self
+
+    def __2_build_命令(self):
+        pass
+
+    def build_select(self, *columns):
+        if columns:
+            columns = self._select + list(columns)
+        else:
+            columns = self._select
+
+        sql = [f"SELECT {', '.join(columns) or '*'}", f"FROM {self.table}"]
+        if self._where:
+            sql.append(f"WHERE {' AND '.join(self._where)}")
+        if self._group_by:
+            sql.append(f"GROUP BY {', '.join(self._group_by)}")
+        if self._order_by:
+            sql.append(f"ORDER BY {', '.join(self._order_by)}")
+        if self._limit is not None:
+            limit_clause = f"LIMIT {self._limit}"
+            if self._offset is not None:
+                limit_clause += f" OFFSET {self._offset}"
+            sql.append(limit_clause)
+        return '\n'.join(sql)
+
+    def build_count(self):
+        sql = [f"SELECT COUNT(*)", f"FROM {self.table}"]
+        if self._where:
+            sql.append(f"WHERE {' AND '.join(self._where)}")
+        if self._group_by:
+            sql.append(f"GROUP BY {', '.join(self._group_by)}")
+        return '\n'.join(sql)
+
+    def build_update(self):
+        sql = [f"UPDATE {self.table}"]
+        if self._set:
+            sql.append(f"SET {', '.join(self._set)}")
+        if self._where:
+            sql.append(f"WHERE {' AND '.join(self._where)}")
+        return '\n'.join(sql)
+
+    def build_check_data_type(self, column):
+        sql = SQLBuilder('information_schema.columns')
+        sql.select(f"data_type")
+        sql.where(f"table_name='{self.table}' AND column_name='{column}'")
+        return sql.build_select()
 
 
 class SqlBase:
@@ -284,6 +378,10 @@ class SqlBase:
         else:
             print("No 'FROM' keyword found in the data query.")
             return 0
+
+    def get_column_data_type(self, table_name, col_name):
+        """ 获取表格中某一列的数据类型 """
+        return self.exec2one(SQLBuilder(table_name).build_check_data_type(col_name))
 
 
 class Connection(sqlite3.Connection, SqlBase):

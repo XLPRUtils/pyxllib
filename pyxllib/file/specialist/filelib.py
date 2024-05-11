@@ -1465,7 +1465,9 @@ class XlPath(type(pathlib.Path())):
         if not self.exists():
             return self
 
-        if '/' in new_name:
+        if not isinstance(new_name, str):
+            raise ValueError(f'rename2只能做重命名操作，目标路径必须是一个str')
+        elif '/' in new_name:
             raise ValueError(f'rename2只能做重命名操作，目标路径中不能包含"/"')
         elif '\\' in new_name:
             raise ValueError(f'rename2只能做重命名操作，目标路径中不能包含"\\"')
@@ -1484,6 +1486,14 @@ class XlPath(type(pathlib.Path())):
         elif dst.exist_preprcs(if_exists):
             self.rename(dst)
         return dst
+
+    def rename_stem(self, stem, if_exists=None):
+        """ 重命名文件的stem """
+        return self.rename2(stem + self.suffix, if_exists)
+
+    def rename_suffix(self, suffix, if_exists=None):
+        """ 重命名文件的suffix """
+        return self.rename2(self.stem + suffix, if_exists)
 
     def delete(self):
         if self.is_file():
@@ -2504,33 +2514,54 @@ class DirsFileFinder:
         for d in dirs:
             self.add_dir(d)
 
-    def add_dir(self, p):
+    def add_dir(self, p, cvt_name_func=None):
         """ 添加备用检索目录
         当前面的目录找不到匹配项的时候，会使用备用目录的文件
         备用目录可以一直添加，有多个，优先级逐渐降低
+
+        :param cvt_name_func: 对名称做个转换再匹配
         """
         files = list(XlPath(p).rglob_files())
-        for f in files:
-            self.names[f.name].append(f)
-            self.stems[f.stem].append(f)
+        if cvt_name_func:
+            for f in files:
+                self.names[cvt_name_func(f.name)].append(f)
+                self.stems[cvt_name_func(f.stem)].append(f)
+        else:
+            for f in files:
+                self.names[f.name].append(f)
+                self.stems[f.stem].append(f)
 
     def find_name(self, name):
         """ 返回第一个匹配的结果 """
-        names = self.find_names(name)
-        if names:
-            return names[0]
+        files = self.find_names(name)
+        if files:
+            return files[0]
 
     def find_names(self, name):
         """ 返回所有匹配的结果 """
         return self.names[name]
 
     def find_stem(self, stem):
-        stems = self.find_stems(stem)
-        if stems:
-            return stems[0]
+        files = self.find_stems(stem)
+        if files:
+            return files[0]
 
     def find_stems(self, stem):
         return self.stems[stem]
+
+    def find_prefix_name(self, prefix_name, suffix=None):
+        files = self.find_prefix_names(prefix_name, suffix=suffix)
+        if files:
+            return files[0]
+
+    def find_prefix_names(self, prefix_name, suffix=None):
+        """ name中前缀为prefix_name """
+        filess = [files for name, files in self.names.items() if name.startswith(prefix_name)]
+        # 将嵌套的list展平
+        files = [file for files in filess for file in files]
+        if suffix:
+            files = [file for file in files if file.suffix == suffix]
+        return files
 
 
 class TwinDirs:
