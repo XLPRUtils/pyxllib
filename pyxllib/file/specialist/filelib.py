@@ -1437,9 +1437,9 @@ class XlPath(type(pathlib.Path())):
         dst = XlPath(dst)
         if dst.exist_preprcs(if_exists):
             if self.is_file():
-                shutil.copy2(self, dst)
+                return shutil.copy2(self, dst)
             else:
-                shutil.copytree(self, dst)
+                return shutil.copytree(self, dst)
 
     def move(self, dst, if_exists=None):
         if not self.exists():

@@ -16,7 +16,10 @@ from pyxllib.file.specialist import File, Dir, filesmatch, get_encoding, XlPath
 # BCompare.exe， bcompare函数要用
 
 class BCompare(Explorer):
-    def __init__(self, app='BCompare', shell=False):
+    def __init__(self, app='bcomp', shell=False):
+        """
+        240512周日20:06，本来写的是BCompare，但是友鑫mac电脑上发现似乎有问题，所以改成bcomp，这种在windows上也能用
+        """
         super().__init__(app, shell)
 
     @classmethod
@@ -48,7 +51,7 @@ class BCompare(Explorer):
         default_suffix = None
         for i, arg in enumerate(args):
             f = XlPath.safe_init(arg)
-            if f.is_file():  # 是文件对象，且存在
+            if f is not None and f.is_file():  # 是文件对象，且存在
                 new_args.append(f)
                 if not default_suffix:
                     default_suffix = f.suffix

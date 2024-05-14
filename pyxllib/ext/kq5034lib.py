@@ -28,7 +28,7 @@ import fire
 import pandas as pd
 from tqdm import tqdm
 import requests
-import requests_cache
+# import requests_cache
 
 from pyxllib.text.pupil import chinese2digits, grp_chinese_char
 from pyxllib.file.xlsxlib import openpyxl

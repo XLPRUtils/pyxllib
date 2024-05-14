@@ -19,7 +19,7 @@ warnings.filterwarnings('ignore', message="pandas only support SQLAlchemy connec
 warnings.filterwarnings('ignore', message="pandas only supports SQLAlchemy connectable")
 
 
-class SQLBuilder:
+class SqlBuilder:
     def __init__(self, table=''):
         self.table = table
         self._select = []
@@ -51,6 +51,25 @@ class SQLBuilder:
 
     def where(self, condition):
         self._where.append(condition)
+        return self
+
+    def where_in(self, column, values):
+        if values is None:
+            return self
+
+        if isinstance(values, str):
+            values = [values]
+        values_str = ', '.join(f"'{str(value)}'" for value in values)
+        if len(values) == 1:
+            self._where.append(f"{column} = {values_str[0]}")
+        else:
+            self._where.append(f"{column} IN ({values_str})")
+        return self
+
+    def where_or(self, *conditions):
+        """ 输入的这一批条件，作为OR组合后成为一个整体条件
+        """
+        self._where.append(f"({' OR '.join(conditions)})")
         return self
 
     def group_by(self, *columns):
@@ -106,7 +125,7 @@ class SQLBuilder:
         return '\n'.join(sql)
 
     def build_check_data_type(self, column):
-        sql = SQLBuilder('information_schema.columns')
+        sql = SqlBuilder('information_schema.columns')
         sql.select(f"data_type")
         sql.where(f"table_name='{self.table}' AND column_name='{column}'")
         return sql.build_select()
@@ -381,7 +400,7 @@ class SqlBase:
 
     def get_column_data_type(self, table_name, col_name):
         """ 获取表格中某一列的数据类型 """
-        return self.exec2one(SQLBuilder(table_name).build_check_data_type(col_name))
+        return self.exec2one(SqlBuilder(table_name).build_check_data_type(col_name))
 
 
 class Connection(sqlite3.Connection, SqlBase):

@@ -6,8 +6,10 @@
 
 from bisect import bisect_right
 from collections import defaultdict, Counter
+import datetime
 import math
 import re
+from statistics import quantiles
 import sys
 import textwrap
 
@@ -194,7 +196,8 @@ class ValuesStat2:
     def __len__(self):
         return self.n
 
-    def summary(self, unit=None, precision=4, percentile_count=5):
+    def _summary(self, unit=None, precision=4, percentile_count=5):
+        """ 返回字典结构的总结 """
         """ 文本汇总性的报告
 
         :param percentile_count: 包括两个极值端点的切分点数，
@@ -204,8 +207,6 @@ class ValuesStat2:
         :param unit: 展示数值时使用的单位
         :param precision: 展示数值时的精度
         """
-        import datetime
-        from statistics import quantiles
 
         # 1 各种细分的格式化方法
         def fmt0(v):
@@ -238,19 +239,20 @@ class ValuesStat2:
             fmt = fmtb = fmt1
 
         # 2 生成统计报告
-        desc = []
+        desc = {}
         if self.raw_n and self.raw_n > self.n:
-            desc.append(f"非数值数量：{fmt0(self.raw_n - self.n)}")
+            desc["总数"] = f"{fmt0(self.n)}/{fmt0(self.raw_n)}≈{self.n / self.raw_n:.2%}"
+        else:
+            desc["总数"] = f"{fmt0(self.n)}"
 
-        desc.append(f"总数：{fmt0(self.n)}")
         if self.sum is not None:
-            desc.append(f"总和：{fmt(self.sum)}")
+            desc["总和"] = f"{fmt(self.sum)}"
         if self.mean is not None and self.std is not None:
-            desc.append(f'均值±标准差：{fmt(self.mean)}±{fmtb(self.std)}')
+            desc["均值±标准差"] = f"{fmt(self.mean)}±{fmtb(self.std)}"
         elif self.mean is not None:
-            desc.append(f'均值：{fmt(self.mean)}')
+            desc["均值"] = f"{fmt(self.mean)}"
         elif self.std is not None:
-            desc.append(f'标准差：{fmtb(self.std)}')
+            desc["标准差"] = f"{fmtb(self.std)}"
 
         if self.values:
             dist = [self.values[0]]
@@ -259,11 +261,24 @@ class ValuesStat2:
                 dist += quartiles
             dist.append(self.values[-1])
 
-            desc.append(f"分布：{'/'.join([fmt(v) for v in dist])}")
-        elif self.dist:  # 此时当前函数的percentile设置失效，以dist中存储的情况为准
-            desc.append(f"分布：{'/'.join([fmt(v) for v in self.dist])}")
+            desc["分布"] = '/'.join([fmt(v) for v in dist])
+        elif self.dist:
+            desc["分布"] = '/'.join([fmt(v) for v in self.dist])
 
-        return '\t'.join(desc)
+        return desc
+
+    def summary(self, unit=None, precision=4, percentile_count=5):
+        """ 文本汇总性的报告
+
+        :param percentile_count: 包括两个极值端点的切分点数，
+            设置2，就是不设置分位数，就是只展示最小、最大值
+            如果设置了3，就表示"中位数、二分位数"，在展示的时候，会显示50%位置的分位数值
+            如果设置了5，就相当于"四分位数"，会显示25%、50%、75%位置的分位数值
+        :param unit: 展示数值时使用的单位
+        :param precision: 展示数值时的精度
+        """
+        desc = self._summary(unit, precision, percentile_count)
+        return '\t'.join([f"{key}: {value}" for key, value in desc.items()])
 
     def calculate_ratios(self, x_values, fmt=False):
         """ 计算并返回一个字典，其中包含每个 x_values 中的值与其小于等于该值的元素的比例
