@@ -13,6 +13,7 @@ import subprocess
 import sys
 import datetime
 import platform
+import re
 
 import pandas as pd
 from bs4 import BeautifulSoup
@@ -118,9 +119,12 @@ class Explorer:
         TODO 获得返回值分析
         """
         args = [self.app] + list(args)
+
         if 'shell' not in kwargs:
             kwargs.update({'shell': self.shell})
-
+        if re.match(r'open\s', self.app):
+            args = args[0] + ' ' + args[1]
+            kwargs.update({'shell': True})
         try:
             if wait:
                 subprocess.run(args, **kwargs)
@@ -161,6 +165,7 @@ class Browser(Explorer):
                 # 这里默认设置为 'google-chrome'，如果你想使用其他的浏览器，例如Firefox，可以修改为 'firefox'
                 app = 'google-chrome'
             else:
+                app = 'open -a "Google Chrome"'
                 # 其他系统的处理
                 pass
         super().__init__(app, shell)
@@ -232,7 +237,8 @@ class Browser(Explorer):
         :param file: 默认可以不输入，会按七牛的etag哈希值生成临时文件
             如果输入，则按照指定的名称生成文件
         """
-        if XlPath.safe_init(arg).is_file():
+        f = XlPath.safe_init(arg)
+        if f is not None and f.is_file():
             file = arg
         else:
             file = str(self.to_brower_file(arg, file, clsmsg=clsmsg, to_html_args=to_html_args))

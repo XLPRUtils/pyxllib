@@ -46,7 +46,7 @@ from pyxllib.prog.pupil import utc_now, utc_timestamp
 from pyxllib.prog.specialist import XlOsEnv
 from pyxllib.algo.pupil import ValuesStat2
 from pyxllib.file.specialist import get_etag
-from pyxllib.data.sqlite import SqlBase, SQLBuilder
+from pyxllib.data.sqlite import SqlBase, SqlBuilder
 
 
 class Connection(psycopg.Connection, SqlBase):
@@ -154,7 +154,7 @@ WHERE {table_name}.{item_id_name} = cte.{item_id_name}"""
             第1个值，是一个迭代器，看起来仍然能一条一条返回，实际后台是按照batch_size打包获取的
             第2个值，是数据总数
         """
-        if not isinstance(sql, SQLBuilder):
+        if not isinstance(sql, SqlBuilder):
             raise ValueError('暂时只能搭配SQLBuilder使用')
 
         num = self.exec2one(sql.build_count())
@@ -256,42 +256,42 @@ WHERE {table_name}.{item_id_name} = cte.{item_id_name}"""
     def __6_高级统计(self):
         pass
 
-    def get_field_valuesstat(self, table_name, field_name, percentile_count=5,
-                             filter_condition=None, by_data=False):
+    def get_column_valuesstat(self, table_name, column, percentile_count=5,
+                              filter_condition=None, by_data=False):
         """ 获得指定表格的某个字段的统计特征ValuesStat2对象
 
         :param table_name: 表名
-        :param field_name: 用于计算统计数据的字段名
+        :param column: 用于计算统计数据的字段名
         :param percentile_count: 分位数的数量，例如 3 表示只计算中位数
         :param by_data: 是否获得原始数据
             默认只获得统计特征，不获得原始数据
         """
 
         def init_from_db_data():
-            sql = SQLBuilder(table_name)
+            sql = SqlBuilder(table_name)
             if filter_condition:
                 sql.where(filter_condition)
-            values = self.exec2col(sql.build_select(field_name))
+            values = self.exec2col(sql.build_select(column))
             if data_type == 'numeric':
                 values = [x and float(x) for x in values]
             return ValuesStat2(raw_values=values, data_type=data_type)
 
         def init_from_db():
             # 1 构建基础的 SQL 查询
-            sql = SQLBuilder(table_name)
+            sql = SqlBuilder(table_name)
             sql.select("COUNT(*) AS total_count")
-            sql.select(f"COUNT({field_name}) AS non_null_count")
-            sql.select(f"MIN({field_name}) AS min_value")
-            sql.select(f"MAX({field_name}) AS max_value")
-            if 'timestamp' in data_type:
+            sql.select(f"COUNT({column}) AS non_null_count")
+            sql.select(f"MIN({column}) AS min_value")
+            sql.select(f"MAX({column}) AS max_value")
+            if data_type and 'timestamp' in data_type:
                 percentile_type = 'PERCENTILE_DISC'
                 # todo 其实时间类也可以"泛化"一种平均值、标准差算法的，这需要获取全量数据，然后自己计算
             elif data_type == 'text':
                 percentile_type = 'PERCENTILE_DISC'
             else:  # 默认是正常的数值类型
-                sql.select(f"SUM({field_name}) AS total_sum")
-                sql.select(f"AVG({field_name}) AS average")
-                sql.select(f"STDDEV({field_name}) AS standard_deviation")
+                sql.select(f"SUM({column}) AS total_sum")
+                sql.select(f"AVG({column}) AS average")
+                sql.select(f"STDDEV({column}) AS standard_deviation")
                 percentile_type = 'PERCENTILE_CONT'
 
             percentiles = []
@@ -300,7 +300,7 @@ WHERE {table_name}.{item_id_name} = cte.{item_id_name}"""
                 step = 1 / (percentile_count - 1)
                 percentiles = [(i * step) for i in range(1, percentile_count - 1)]
                 for p in percentiles:
-                    sql.select(f"{percentile_type}({p:.2f}) WITHIN GROUP (ORDER BY {field_name}) "
+                    sql.select(f"{percentile_type}({p:.2f}) WITHIN GROUP (ORDER BY {column}) "
                                f"AS percentile_{int(p * 100)}")
 
             if filter_condition:
@@ -326,7 +326,7 @@ WHERE {table_name}.{item_id_name} = cte.{item_id_name}"""
 
             return x
 
-        data_type = self.get_column_data_type(table_name, field_name)
+        data_type = self.get_column_data_type(table_name, column)
         if by_data:
             vs = init_from_db_data()
         else:
