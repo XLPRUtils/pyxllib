@@ -163,6 +163,7 @@ class ValuesStat2:
         from statistics import pstdev, mean
 
         # 支持输入可能带有非数值类型的raw_values
+        data_type = data_type or ''
         if raw_values:
             if 'timestamp' in data_type:
                 values = [x.timestamp() for x in raw_values if hasattr(x, 'timestamp')]

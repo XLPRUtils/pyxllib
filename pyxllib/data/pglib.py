@@ -45,7 +45,7 @@ from pyxllib.prog.newbie import round_int
 from pyxllib.prog.pupil import utc_now, utc_timestamp
 from pyxllib.prog.specialist import XlOsEnv
 from pyxllib.algo.pupil import ValuesStat2
-from pyxllib.file.specialist import get_etag
+from pyxllib.file.specialist import get_etag, StreamJsonlWriter
 from pyxllib.data.sqlite import SqlBase, SqlBuilder
 
 
@@ -158,11 +158,15 @@ WHERE {table_name}.{item_id_name} = cte.{item_id_name}"""
             raise ValueError('暂时只能搭配SQLBuilder使用')
 
         num = self.exec2one(sql.build_count())
-        cur = self.exec2dict(sql.build_select(), **kwargs)
+        offset = 0
 
         def yield_row():
+            nonlocal offset
             while True:
-                rows = cur.fetchmany(batch_size)
+                sql2 = sql.copy()
+                sql2.limit(batch_size, offset)
+                rows = self.exec2dict(sql2.build_select(), **kwargs).fetchall()
+                offset += batch_size
                 if not rows:
                     break
                 yield from rows
@@ -191,8 +195,10 @@ WHERE {table_name}.{item_id_name} = cte.{item_id_name}"""
             return 'boolean'
         elif isinstance(val, float):
             return 'float4'
-        elif isinstance(val, dict):
+        elif isinstance(val, (dict, list)):
             return 'jsonb'
+        elif isinstance(val, datetime.datetime):
+            return 'timestamp'
         else:  # 其他list等类型，可以用json.dumps或str转文本存储
             return 'text'
 
@@ -333,6 +339,47 @@ WHERE {table_name}.{item_id_name} = cte.{item_id_name}"""
             vs = init_from_db()
 
         return vs
+
+    def export_jsonl(self, file_path, table_name, key_col=None, batch_size=1000):
+        """ 将某个表导出为本地jsonl文件
+
+        :param table_name: 表名
+            支持传入SqlBuilder对象，这样可以更灵活的控制导出的数据规则
+        :param file_path: 导出的文件路径
+        :param batch_size: 每次读取的行数和保存的行数
+        :param key_col: 作为主键的列名，如果有的话，会自动去重
+            强烈推荐要设置
+            实际不一定要用主键，只要是有顺序值的列就行
+
+        todo 暴力最简单的版本不难写，我纠结的是缓存机制，还有bytes类型数据会有点大等问题
+            还需要先支持一个通用的缓存写文件功能
+        """
+        # 1 sql
+        if isinstance(table_name, str):
+            sql = SqlBuilder(table_name)
+            sql.select('*')
+        else:
+            sql = table_name
+            m = re.search(r'FROM (\w+)', sql.build_select())
+            table_name = m.group(1) if m else 'table'
+        assert isinstance(sql, SqlBuilder)
+
+        file_path = XlPath(file_path)
+        if key_col:
+            sql.order_by(key_col)
+            if file_path.is_file():
+                # 读取现有数据，找出主键最大值
+                data = file_path.read_jsonl(batch_size=1000)
+                max_val = max([x[key_col] for x in data]) if data else None
+                if max_val is not None:
+                    sql.where(f'{key_col} > {max_val}')
+
+        # 2 获取数据
+        file = StreamJsonlWriter(file_path, batch_size=batch_size)  # 流式存储
+        rows, total = self.exec2dict_batch(sql, batch_size=batch_size)
+        for row in tqdm(rows, total=total, desc=table_name):
+            file.append_line(row)
+        file.flush()
 
 
 """

@@ -1184,30 +1184,46 @@ class XlPath(type(pathlib.Path())):
             json.dump(data, f, **kwargs)
 
     def read_jsonl(self, encoding='utf8', max_items=None, *,
-                   errors='strict', return_mode: bool = False):
+                   errors='strict', return_mode=0, batch_size=None):
         """ 从文件中读取JSONL格式的数据
 
         :param str encoding: 文件编码格式，默认为utf8
         :param str errors: 读取文件时的错误处理方式，默认为strict
         :param bool return_mode: 是否返回文件编码格式，默认为False
+            0, 读取全量数据返回
+            1，返回文件编码格式
         :param int max_items: 限制读取的条目数，默认为None，表示读取所有条目
+        :param int batch_size:
+            默认为None，表示一次性读取所有数据
+            如果设置了数值，则会流式读取，常用语太大，超过内存大小等的jsonl文件读取
+                注意如果设置了大小，只是底层每次一批读取的大小，但返回的data仍然是一维的数据格式迭代器
         :return: 返回读取到的数据列表，如果return_mode为True，则同时返回文件编码格式
 
         >> read_jsonl('data.jsonl', max_items=10)  # 读取前10条数据
         """
-        s, encoding = self.read_text(encoding=encoding, errors=errors, return_mode=True)
+        if batch_size is None:
+            s, encoding = self.read_text(encoding=encoding, errors=errors, return_mode=True)
 
-        data = []
-        # todo 这一步可能不够严谨，不同的操作系统文件格式不同。但使用splitlines也不太好，在数据含有NEL等特殊字符时会多换行。
-        for line in s.split('\n'):
-            if line:
-                try:  # 注意，这里可能会有数据读取失败
-                    data.append(json.loads(line))
-                except json.decoder.JSONDecodeError:
-                    pass
-            # 如果达到了限制的条目数，就停止读取
-            if max_items is not None and len(data) >= max_items:
-                break
+            data = []
+            # todo 这一步可能不够严谨，不同的操作系统文件格式不同。但使用splitlines也不太好，在数据含有NEL等特殊字符时会多换行。
+            for line in s.split('\n'):
+                if line:
+                    try:  # 注意，这里可能会有数据读取失败
+                        data.append(json.loads(line))
+                    except json.decoder.JSONDecodeError:
+                        pass
+                # 如果达到了限制的条目数，就停止读取
+                if max_items is not None and len(data) >= max_items:
+                    break
+        else:
+            def get_data():
+                for line in self.yield_line(batch_size, encoding=encoding):
+                    try:  # 注意，这里可能会有数据读取失败
+                        yield json.loads(line)
+                    except json.decoder.JSONDecodeError:
+                        pass
+
+            data = get_data()
 
         if return_mode:
             return data, encoding
@@ -1777,7 +1793,7 @@ class XlPath(type(pathlib.Path())):
 
         return file_summary
 
-    def _check_dir_summary(self, print_mode=True, hash_func=None, run_mode=99):
+    def _check_dir_summary(self, print_mode=True, hash_func=None, run_mode=31):
         """ 对文件夹情况进行通用的状态检查
 
         :param hash_func: 可以传入自定义的hash函数，用于第四块的重复文件运算
@@ -1794,28 +1810,28 @@ class XlPath(type(pathlib.Path())):
 
         # 一 目录大小，二 各后缀文件大小
         msg = []
-        if run_mode >= 1:  # 1和2目前是绑定一起运行的
+        if run_mode & 1:  # 1和2目前是绑定一起运行的
             printf('【' + self.as_posix() + '】目录检查')
             printf('\n'.join(self.check_size('list')))
 
         # 三 重名文件
-        if run_mode >= 3:
+        if run_mode & 2:
             printf('\n三、重名文件（忽略大小写，跨目录检查name重复情况）')
             printf('\n'.join(self.check_repeat_name_files(print_mode=False)))
 
         # 四 重复文件
-        if run_mode >= 4:
+        if run_mode & 4:
             printf('\n四、重复文件（etag相同）')
             printf('\n'.join(self.check_repeat_files(print_mode=False, hash_func=hash_func)))
 
         # 五 错误扩展名
-        if run_mode >= 5:
+        if run_mode & 8:
             printf('\n五、错误扩展名')
             for i, (f1, suffix2) in enumerate(self.xglob_faker_suffix_files('**/*'), start=1):
                 printf(f'{i}、{f1.relpath(self)} -> {suffix2}')
 
         # 六 文件配对
-        if run_mode >= 6:
+        if run_mode & 16:
             printf(
                 '\n六、文件配对（检查每个目录里stem名称是否配对，列出文件组成不单一的目录结构，请重点检查落单未配对的情况）')
             prompt = False
@@ -2089,6 +2105,48 @@ class XlPath(type(pathlib.Path())):
             file = self.with_stem(stem.strip())  # 忽略最后空白，这个很容易出问题
 
         return file
+
+
+class StreamJsonlWriter:
+    """ 流式存储，主要用于存储文本化、jsonl格式数据 """
+
+    def __init__(self, file_path, batch_size=2000, *,
+                 delete_origin_file=False, json_default=str):
+        self.file_path = XlPath(file_path)
+        self.cache_text_lines = []
+        self.batch_size = batch_size
+        self.total_lines = 0
+
+        self.delete_origin_file = delete_origin_file
+        self.json_default = json_default
+
+    def append_line(self, line):
+        self.append_lines([line])
+
+    def append_lines(self, data):
+        """
+        :param list data: 添加一组数据
+        """
+        for x in data:
+            if isinstance(x, str):
+                self.cache_text_lines.append(x)
+            else:
+                self.cache_text_lines.append(json.dumps(x, ensure_ascii=False,
+                                                        default=self.json_default))
+        if len(self.cache_text_lines) >= self.batch_size:
+            self.flush()
+
+    def flush(self):
+        """ 刷新，将当前缓存写入文件 """
+        if self.cache_text_lines:
+            if self.total_lines == 0 and self.delete_origin_file:  # 第一次写入时，删除旧缓存文件
+                self.file_path.delete()
+
+            self.total_lines += len(self.cache_text_lines)
+            self.file_path.parent.mkdir(exist_ok=True, parents=True)
+            with open(self.file_path, 'a', encoding='utf8') as f:
+                f.write('\n'.join(self.cache_text_lines) + '\n')
+            self.cache_text_lines = []
 
 
 def demo_file():
