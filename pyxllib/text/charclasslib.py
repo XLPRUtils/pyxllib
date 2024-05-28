@@ -2,6 +2,7 @@
 # -*- coding: utf-8 -*-
 # @Author : 陈坤泽
 # @Email  : 877362867@qq.com
+# @Date   : 2023/12/29
 
 """
 字符分类
@@ -67,7 +68,7 @@ def get_charclass_num(content):
     return ct2
 
 
-def get_charclass_rate(content):
+def get_charclass_rate(content, round_digits=4):
     """ 检查字符类型分布数量 """
     ct = get_charclass_num(content)
 
@@ -80,12 +81,18 @@ def get_charclass_rate(content):
     ct2 = Counter()
     for k, v in ct.most_common():
         ct2[k] = v / total
+        if round_digits is not None:
+            ct2[k] = round(ct2[k], round_digits)
     return ct2
 
 
 def check_language_from_counter(ct):
-    """ 检查语言类型 """
-    # todo 这里的规则应该还可以再优化，以及不同的业务场景，这些规则应该也要再调整
+    """ 检查语言类型
+
+    todo 这里的规则应该还可以再优化，以及不同的业务场景，这些规则应该也要再调整
+        这个比例最早是给表格设计的，表格很可能表头是中文，中间都是英文、数字数据，此时仍然归为中文
+        但如果是一般性的文档，可能要提高中文的比例，才能视为中文文档
+    """
 
     if '繁体汉字' in ct:
         if safe_div(ct['繁体汉字'], ct['常用汉字']) > 0.1:
@@ -95,7 +102,7 @@ def check_language_from_counter(ct):
         return '中文'
 
     if '其他字符' in ct:
-        if ct['其他字符'] / ct['字母'] > 0.1:
+        if safe_div(ct['其他字符'], ct['字母']) > 0.1:
             return '其他'
 
     if '字母' in ct:

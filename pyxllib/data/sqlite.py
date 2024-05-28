@@ -50,7 +50,13 @@ class SqlBuilder:
         return self
 
     def where(self, condition):
-        self._where.append(condition)
+        if isinstance(condition, (list, tuple)):
+            self._where.extend(condition)
+        elif isinstance(condition, str):
+            self._where.append(condition)
+        else:
+            raise ValueError(f'不支持的where条件类型{type(condition)}')
+
         return self
 
     def where_in(self, column, values):
@@ -85,7 +91,7 @@ class SqlBuilder:
         self._offset = offset
         return self
 
-    def __2_build_命令(self):
+    def __2_build_初级命令(self):
         pass
 
     def build_select(self, *columns):
@@ -124,7 +130,11 @@ class SqlBuilder:
             sql.append(f"WHERE {' AND '.join(self._where)}")
         return '\n'.join(sql)
 
+    def __3_build_中级命令(self):
+        pass
+
     def build_check_data_type(self, column):
+        """ 检查column的数据类型 """
         sql = SqlBuilder('information_schema.columns')
         sql.select(f"data_type")
         sql.where(f"table_name='{self.table}' AND column_name='{column}'")

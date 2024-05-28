@@ -41,7 +41,7 @@ from tqdm import tqdm
 import psycopg
 import psycopg.rows
 
-from pyxllib.prog.newbie import round_int
+from pyxllib.prog.newbie import round_int, human_readable_number
 from pyxllib.prog.pupil import utc_now, utc_timestamp
 from pyxllib.prog.specialist import XlOsEnv
 from pyxllib.algo.pupil import ValuesStat2
@@ -62,12 +62,10 @@ class Connection(psycopg.Connection, SqlBase):
         """
         检索当前数据库的活动信息。
         """
-        sql = """
-        SELECT pid, datname, usename, state, query, age(now(), query_start) AS "query_age"
-        FROM pg_stat_activity
-        WHERE state = 'active'
-        """
-        return self.exec2dict(sql).fetchall()
+        sql = SqlBuilder('pg_stat_activity')
+        sql.select('pid', 'datname', 'usename', 'state', 'query', 'age(now(), query_start) AS "query_age"')
+        sql.where("state = 'active'")
+        return self.exec2dict(sql.build_select()).fetchall()
 
     def __2_表格(self):
         pass
@@ -147,15 +145,23 @@ WHERE {table_name}.{item_id_name} = cte.{item_id_name}"""
         # cur.close()
         return data
 
-    def exec2dict_batch(self, sql, batch_size=1000, **kwargs):
+    def exec2dict_batch(self, sql, batch_size=1000, use_offset=None, **kwargs):
         """ 分批返回数据的版本
 
+        :param use_offset: 是否使用offset分页，会根据sql中是否含有where自动判断，但有时候最好明确指定以防错误
+            如果外部sql每次操作，会改变数据库的情况，导致sql的where规则虽然没变，但是数据本身发生变化，则offset应该要关闭
+                每次取对应的满足条件的数据即可
+                这种情况，也需要本函数内部主动执行commit_all的
+            否则，只是一种遍历查询，没有where或者where获取的数据情况是不会变化的，则要使用offset
         :return:
             第1个值，是一个迭代器，看起来仍然能一条一条返回，实际后台是按照batch_size打包获取的
             第2个值，是数据总数
         """
         if not isinstance(sql, SqlBuilder):
             raise ValueError('暂时只能搭配SQLBuilder使用')
+
+        if use_offset is None:
+            use_offset = not sql._where
 
         num = self.exec2one(sql.build_count())
         offset = 0
@@ -164,9 +170,12 @@ WHERE {table_name}.{item_id_name} = cte.{item_id_name}"""
             nonlocal offset
             while True:
                 sql2 = sql.copy()
+                if not use_offset:  # 如果不使用offset，那么缓存的sql操作需要全部提交，确保数据都更新后，再提取数据
+                    self.commit_all()
                 sql2.limit(batch_size, offset)
                 rows = self.exec2dict(sql2.build_select(), **kwargs).fetchall()
-                offset += batch_size
+                if use_offset:
+                    offset += len(rows)
                 if not rows:
                     break
                 yield from rows
@@ -340,10 +349,10 @@ WHERE {table_name}.{item_id_name} = cte.{item_id_name}"""
 
         return vs
 
-    def export_jsonl(self, file_path, table_name, key_col=None, batch_size=1000):
+    def export_jsonl(self, file_path, table_name, key_col=None, batch_size=1000, print_mode=0):
         """ 将某个表导出为本地jsonl文件
 
-        :param table_name: 表名
+        :param str|SqlBuilder table_name: 表名
             支持传入SqlBuilder对象，这样可以更灵活的控制导出的数据规则
         :param file_path: 导出的文件路径
         :param batch_size: 每次读取的行数和保存的行数
@@ -377,9 +386,63 @@ WHERE {table_name}.{item_id_name} = cte.{item_id_name}"""
         # 2 获取数据
         file = StreamJsonlWriter(file_path, batch_size=batch_size)  # 流式存储
         rows, total = self.exec2dict_batch(sql, batch_size=batch_size)
-        for row in tqdm(rows, total=total, desc=table_name):
+        for row in tqdm(rows, total=total, desc=f'从{table_name}表导出数据', disable=not print_mode):
             file.append_line(row)
         file.flush()
+
+    def check_db_tables_size(self, db_name=None):
+        """ 查看指定数据下所有表格的大小 """
+        from datetime import datetime
+        import pandas as pd
+
+        if db_name is None:
+            # 使用sql获取当前self所在数据库
+            db_name = self.exec2one("SELECT current_database()")
+
+        data = []
+        tables = self.exec2col("SELECT table_name FROM information_schema.tables WHERE table_schema='public'")
+        for table_name in tables:
+            row = {
+                'database': db_name,
+                'table_name': table_name,
+            }
+            sz = self.exec2one(f"SELECT pg_total_relation_size('public.{table_name}')")
+            if not sz:
+                continue
+            lines = self.exec2one(f"SELECT COUNT(*) FROM {table_name}")
+            row['size'], row['lines'] = sz, lines
+            row['readable_size'] = human_readable_number(sz, 'KB')
+            row['perline_size'] = human_readable_number(sz / lines, 'KB') if lines else -1
+            row['update_time'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            data.append(row)
+
+        df = pd.DataFrame.from_dict(data)
+        if len(df):
+            df.sort_values(['size'], ascending=False, inplace=True)
+        df.reset_index(drop=True, inplace=True)
+        return df
+
+    def check_multi_db_size(self, db_list):
+        """ 这个功能一般要用postgres账号，才有权限处理所有数据库 """
+        from datetime import datetime
+        import pandas as pd
+
+        data = []
+        for db in db_list:
+            row = {
+                'name': db,
+            }
+            sz = self.exec2one(f"SELECT pg_database_size('{db}')")
+            row['size'] = sz
+            row['readable_size'] = human_readable_number(sz, 'KB')
+            row['update_time'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+
+            data.append(row)
+
+        df = pd.DataFrame.from_dict(data)
+        df.sort_values(['size'], ascending=False, inplace=True)
+        df.reset_index(drop=True, inplace=True)
+        return df
 
 
 """
