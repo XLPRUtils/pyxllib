@@ -25,7 +25,6 @@ import io
 import logging
 import warnings
 
-from jinja2 import Template
 from openpyxl import Workbook
 import pandas as pd
 import requests
@@ -41,6 +40,7 @@ from pyxllib.prog.specialist import browser, TicToc
 from pyxllib.algo.pupil import ValuesStat
 from pyxllib.file.specialist import XlPath, JsonlDataFile, JsonlDataDir, TwinDirs, ensure_localdir
 from pyxllib.file.xlsxlib import extract_workbook_summary
+from pyxllib.text.jinjalib import set_template, set_meta_template
 
 
 def __1_生成提问数据():
@@ -179,18 +179,6 @@ def check_conversation_lengths(all_texts, n_values=(4, 4),
         fmts = [None, '.0%', '.0%', '.0%', '.0%']
         print(f'token/len比率统计 {ValuesStat(ratios).summary(fmts)}')
         # 比率越大，代表越接近中文场景，汉字越多，要注意len的控制不要让token某些场合超出长度
-
-
-def set_template(s, *args, **kwargs):
-    """ todo 这个名字会不会太容易冲突了？ """
-    return Template(s.strip(), *args, **kwargs)
-
-
-def set_meta_template(s, meta_start='[[', meta_end=']]', **kwargs):
-    """ 支持预先用某些格式渲染后，再返回标准渲染模板 """
-    t = Template(s.strip(), variable_start_string=meta_start,
-                 variable_end_string=meta_end).render(**kwargs)
-    return Template(t)
 
 
 class StyleParser:

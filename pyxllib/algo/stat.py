@@ -254,6 +254,7 @@ def xlpivot(df, index=None, columns=None, values=None):
     :param columns: 列划分方式
     :param values: 显示的值
         Callable[items, value]：输出一个函数
+        list[str]: 支持输入属性列表，表示显示原始值的意思。如果原始值不唯一，则逗号分开拼接后显示。但这种用法就不太算是传统意义的数据透视表了
     :return: 数据透视表的表格
 
     使用示例：
@@ -261,6 +262,8 @@ def xlpivot(df, index=None, columns=None, values=None):
         x = items.iloc[0]
         return f'{x["precision"]:.0f}，{x["recall"]:.0f}，{x["hmean"]:.2f}，{x["fps"]}'  # 返回显示的值
     >> df2 = xlpivot(df, ['model_type'], ['dataset', 'total_frame'], {'precision，recall，hmean，fps': func})
+
+    注意技巧：如果要在分组后约束特定顺序，可以使用特殊前缀进行编号对齐
     """
 
     # 1 将分组的格式标准化
@@ -275,6 +278,17 @@ def xlpivot(df, index=None, columns=None, values=None):
     index_, columns_ = reset_groups(index), reset_groups(columns)
 
     # 2 目标值的格式标准化
+    def make_col_func(col):
+        def func(rows):
+            if len(rows):
+                return ', '.join(map(str, rows[col].values))
+            return ''
+
+        return func
+
+    if isinstance(values, (list, tuple)):
+        values = {v: make_col_func(v) for v in values}
+
     if callable(values):
         values_ = {'values': values}
     elif isinstance(values, dict):

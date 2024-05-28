@@ -286,3 +286,15 @@ def fold_dict(d, m=5):
     vals = [f"'{k}': {v}" for k, v in d.items()]
     line = [', '.join(vals[i:i + 5]) for i in range(0, len(vals), m)]
     return '{' + ',\n'.join(line) + '}'
+
+
+def remove_prefix(original_string, prefix):
+    if original_string.startswith(prefix):
+        return original_string[len(prefix):]
+    return original_string
+
+
+def remove_suffix(original_string, suffix):
+    if original_string.endswith(suffix):
+        return original_string[:-len(suffix)]
+    return original_string

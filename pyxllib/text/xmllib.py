@@ -32,6 +32,7 @@ from pyxllib.algo.pupil import SearchBase
 from pyxllib.text.newbie import xldictstr
 from pyxllib.text.pupil import shorten, ensure_gbk, BookContents, strwidth, grp_chinese_char
 from pyxllib.file.specialist import File, Dir, get_etag
+from pyxllib.text.jinjalib import get_jinja_template
 
 
 class XlBs4Tag(bs4.element.Tag):
@@ -668,14 +669,6 @@ class HtmlParser:
             x = self.root.get_nonempty_children(*idxs)
             # 自动执行函数
             getattr(self, method)(x)
-
-
-def get_jinja_template(name, **kwargs):
-    from jinja2 import Environment
-    from pyxllib.file.specialist import XlPath
-
-    template = Environment(**kwargs).from_string((XlPath(__file__).parent / f'templates/{name}').read_text())
-    return template
 
 
 def concat_htmlbody(ls):
