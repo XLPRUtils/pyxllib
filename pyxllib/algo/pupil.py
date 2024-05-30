@@ -281,7 +281,7 @@ class ValuesStat2:
         desc = self._summary(unit, precision, percentile_count)
         return '\t'.join([f"{key}: {value}" for key, value in desc.items()])
 
-    def calculate_ratios(self, x_values, fmt=False):
+    def calculate_ratios(self, x_values, fmt=False, unit=False):
         """ 计算并返回一个字典，其中包含每个 x_values 中的值与其小于等于该值的元素的比例
 
         :param x_values: 一个数值列表，用来计算每个数值小于等于它的元素的比例
@@ -297,8 +297,13 @@ class ValuesStat2:
                 ratio = 0
             ratio_dict[x] = ratio
 
+        def unit_func(x):
+            if unit:
+                return human_readable_number(x, unit, 4)
+            return x
+
         if fmt:
-            ratio_dict = {x: f'{ratio:.2%}' for x, ratio in ratio_dict.items()}
+            ratio_dict = {unit_func(x): f'{ratio:.2%}' for x, ratio in ratio_dict.items()}
 
         return ratio_dict
 

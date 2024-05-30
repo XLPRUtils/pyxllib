@@ -297,6 +297,8 @@ def xlpivot(df, index=None, columns=None, values=None):
         raise TypeError
 
     # 3 分组
+    assert len(df), 'df是空的'
+
     keys = index_ + columns_
     dfgp = df.groupby(keys)
     data = defaultdict(list)
