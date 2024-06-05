@@ -9,7 +9,7 @@ from pyxllib.prog.pupil import check_install_package
 # cachetools，通用缓存工具，适用范围更广
 check_install_package('cachetools')
 # cached-property，类属性特用工具，相对比较简洁些
-check_install_package('cached-property')
+check_install_package('cached_property', 'cached-property')
 
 # 对于普通函数，一般用lru_cache即可
 from functools import lru_cache
@@ -27,6 +27,14 @@ from cached_property import threaded_cached_property_with_ttl  # 线程 + 限时
 # 进一步封装的更通用、自己常用的装饰器
 
 def xlcache(maxsize=128, *, ttl=None, lock=None, property=False):
+    """ 那些工具接口太复杂难记，自己封装一个统一的工具
+
+    就是一个装饰器，最大缓存多少项，然后是否要开多线程安全，是否要设置限时重置，是否是作为类成员属性修饰
+
+    :param property: 是否作为类成员属性修饰，不过一般不建议通过这里设置，
+        而是外部再加一层@property，不然IDE会识别不了这是一个property，影响开发
+
+    """
     def decorator(func):
         if property:
             if ttl is not None:
