@@ -1089,7 +1089,7 @@ class XlPath(type(pathlib.Path())):
         src_dir = XlPath(src_dir)
         stem = src_dir.name
 
-        pattern = filename_template.format(stem=stem, index="(\d+)", suffix=".*")
+        pattern = filename_template.format(stem=stem, index=r"(\d+)", suffix=".*")
         files = [file for file in src_dir.iterdir() if re.match(pattern, file.name)]  # 获取目录中符合模式的文件
 
         self.merge_from_files(files, ignore_empty_lines_between_files=True, encoding=encoding)
@@ -1217,11 +1217,12 @@ class XlPath(type(pathlib.Path())):
                     break
         else:
             def get_data():
-                for line in self.yield_line(batch_size, encoding=encoding):
-                    try:  # 注意，这里可能会有数据读取失败
-                        yield json.loads(line)
-                    except json.decoder.JSONDecodeError:
-                        pass
+                for batch in self.yield_line(batch_size=batch_size, encoding=encoding):
+                    for line in batch:
+                        try:  # 注意，这里可能会有数据读取失败
+                            yield json.loads(line)
+                        except json.decoder.JSONDecodeError:
+                            pass
 
             data = get_data()
 
@@ -2541,7 +2542,7 @@ def myoswalk(root, filter_rule=None, recur=True):
 
 
 def mygetfiles(root, filter_rule=None, recur=True):
-    """对myoswalk进一步封装，返回所有匹配的文件
+    r""" 对myoswalk进一步封装，返回所有匹配的文件
     会递归查找所有子文件
 
     可以这样遍历一个目录下的所有文件：

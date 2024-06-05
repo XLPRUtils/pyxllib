@@ -379,13 +379,14 @@ WHERE {table_name}.{item_id_name} = cte.{item_id_name}"""
             if file_path.is_file():
                 # 读取现有数据，找出主键最大值
                 data = file_path.read_jsonl(batch_size=1000)
-                max_val = max([x[key_col] for x in data]) if data else None
-                if max_val is not None:
-                    sql.where(f'{key_col} > {max_val}')
+                if data:
+                    max_val = max([x[key_col] for x in data]) if data else None
+                    if max_val is not None:
+                        sql.where(f'{key_col} > {max_val}')
 
         # 2 获取数据
         file = StreamJsonlWriter(file_path, batch_size=batch_size)  # 流式存储
-        rows, total = self.exec2dict_batch(sql, batch_size=batch_size)
+        rows, total = self.exec2dict_batch(sql, batch_size=batch_size, use_offset=True)
         for row in tqdm(rows, total=total, desc=f'从{table_name}表导出数据', disable=not print_mode):
             file.append_line(row)
         file.flush()

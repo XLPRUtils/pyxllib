@@ -271,12 +271,12 @@ class ValuesStat2:
     def summary(self, unit=None, precision=4, percentile_count=5):
         """ 文本汇总性的报告
 
+        :param unit: 展示数值时使用的单位
+        :param precision: 展示数值时的精度
         :param percentile_count: 包括两个极值端点的切分点数，
             设置2，就是不设置分位数，就是只展示最小、最大值
             如果设置了3，就表示"中位数、二分位数"，在展示的时候，会显示50%位置的分位数值
             如果设置了5，就相当于"四分位数"，会显示25%、50%、75%位置的分位数值
-        :param unit: 展示数值时使用的单位
-        :param precision: 展示数值时的精度
         """
         desc = self._summary(unit, precision, percentile_count)
         return '\t'.join([f"{key}: {value}" for key, value in desc.items()])
