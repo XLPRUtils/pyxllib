@@ -16,6 +16,7 @@ from DrissionPage import ChromiumPage
 from DrissionPage._base.base import BasePage, BaseElement
 
 from pyxllib.prog.pupil import inject_members
+from pyxllib.text.pupil import strfind
 
 
 def get_latest_not_dev_tab(page=None):
@@ -24,7 +25,7 @@ def get_latest_not_dev_tab(page=None):
         page = ChromiumPage()
     tabs = page.get_tabs()
     for tab in tabs:
-        if tab.url.startswith('devtools://'):
+        if strfind(tab.url, ['devtools://', 'chrome-extension://']) != -1:
             continue
         return tab
 

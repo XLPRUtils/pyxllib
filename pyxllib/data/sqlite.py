@@ -78,6 +78,22 @@ class SqlBuilder:
         self._where.append(f"({' OR '.join(conditions)})")
         return self
 
+    def where_mod(self, column, divisor, remainder):
+        """ 输入的column列的值对divisor取余，筛选出余数为remainder的记录
+        """
+        condition = f"({column} % {divisor} = {remainder})"
+        self._where.append(condition)
+        return self
+
+    def where_mod2(self, desc):
+        """ 使用一种特殊的格式化标记来设置规则
+
+        :param desc: 例如 'id%2=1'
+        """
+        column, divisor_remainder = desc.split('%')
+        divisor, remainder = map(int, divisor_remainder.split('='))
+        return self.where_mod(column, divisor, remainder)
+
     def group_by(self, *columns):
         self._group_by.extend(columns)
         return self
@@ -138,6 +154,16 @@ class SqlBuilder:
         sql = SqlBuilder('information_schema.columns')
         sql.select(f"data_type")
         sql.where(f"table_name='{self.table}' AND column_name='{column}'")
+        return sql.build_select()
+
+    def build_group_count(self, columns, count_column_name='cnt'):
+        sql = SqlBuilder(self.table)
+        if isinstance(columns, (list, tuple)):
+            columns = ', '.join(columns)
+        sql.select(columns, f"COUNT(*) {count_column_name}")
+        sql.group_by(columns)
+        sql.order_by(f'{count_column_name} DESC')
+        sql._where = self._where.copy()
         return sql.build_select()
 
 
