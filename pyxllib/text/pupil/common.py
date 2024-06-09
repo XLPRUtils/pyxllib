@@ -1093,3 +1093,29 @@ def trial_jsoneditconveter():
     trial_data(json_obj2)
     trial_data(json_obj3)
     trial_data(json_obj4)
+
+
+class UrlQueryBuilder:
+    def __init__(self):
+        self.params = {}
+
+    def add_param(self, key, value):
+        if value is not None:
+            self.params[key] = value
+        return self
+
+    def remove_param(self, key):
+        if key in self.params:
+            del self.params[key]
+        return self
+
+    def update_param(self, key, value):
+        self.add_param(key, value)
+        return self
+
+    def build_query(self):
+        query_string = '&'.join([f'{key}={value}' for key, value in self.params.items()])
+        return ('?' + query_string) if query_string else ''
+
+    def build_url(self, url):
+        return f'{url}{self.build_query()}'
