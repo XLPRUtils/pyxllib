@@ -24,6 +24,8 @@ from cached_property import cached_property_with_ttl  # 限时缓存，单位秒
 from cached_property import threaded_cached_property_with_ttl  # 线程 + 限时
 
 
+# todo 240609周日21:19 https://github.com/awolverp/cachebox，据说这个缓存库速度更快的多
+
 # 进一步封装的更通用、自己常用的装饰器
 
 def xlcache(maxsize=128, *, ttl=None, lock=None, property=False):

@@ -555,6 +555,9 @@ class Timeout:
         return wrapper
 
     def __enter__(self):
+        if self.seconds == 0:  # 可以设置0来关闭超时功能
+            return
+
         def overtime(signum, frame):
             raise TimeoutError(f'with 上下文代码块运行超时 > [{self.seconds} 秒]')
 
@@ -568,6 +571,9 @@ class Timeout:
         self.alarm.start()
 
     def __exit__(self, exc_type, exc_val, exc_tb):
+        if self.seconds == 0:
+            return
+
         # with已经运行完了，马上关闭警告器
         self.alarm.cancel()
 
@@ -973,30 +979,78 @@ class OutputLogger(logging.Logger):
         self.print(msg)
 
 
+class ProcessWorker:
+    """ 代表一个单独的工作进程 """
+
+    def __init__(self, name, process, port=None, locations=None,
+                 raw_cmd=None):
+        """
+
+        :param name: 进程昵称
+        :param process: 进程对象
+        :param port: 是否有执行所在端口
+        :param locations: 是否有url地址映射，一般用于nginx等配置
+        """
+        self.name = name
+        self.process = process
+        self.port = port
+        self.locations = locations
+        self.raw_cmd = raw_cmd
+
+    def terminate(self):
+        """ 比较优雅结束进程的方法 """
+        if self.process is not None:
+            self.process.terminate()
+
+    def kill(self):
+        """ 有时候需要强硬的kill方法来结束进程 """
+        if self.process is not None:
+            self.process.kill()
+
+
 class MultiProcessLauncher:
     """ 注意这个类暂时只有linux能使用 """
 
     def __init__(self):
         self.workers = []
 
-    def add_process_cmd(self, cmd, name=None, **kwargs):
+    def add_process_cmd(self,
+                        cmd,
+                        name=None,
+                        shell=False,
+                        **kwargs):
+        """
+
+        :param shell: 默认直接跟系统交互，此时cmd应该输入数组格式
+            如果shell=True，则启用shell进行交互操作，这种情况会更适合管道等模式的处理，此时cmd应该输入字符串格式
+
+        """
         if name is None:
-            name = cmd.split()[0]
+            cmd2 = cmd.split() if isinstance(cmd, str) else cmd
+            name = cmd2[0]
 
-        p = subprocess.Popen(cmd.split(), preexec_fn=self._set_pdeathsig(signal.SIGTERM))
-        worker = {'name': name, 'process': p, 'command': cmd}
-        worker.update(kwargs)
+        proc = subprocess.Popen(cmd,
+                                shell=shell,
+                                preexec_fn=self._set_pdeathsig())
+
+        worker = ProcessWorker(name, proc, raw_cmd=cmd, **kwargs)
         self.workers.append(worker)
+        return worker
 
-    def add_process_python_module(self, module, args='', name=None):
+    def add_process_python_module(self, module, args='', name=None, shell=False):
         """ 添加并启动一个Python模块作为后台进程。
 
         :param module: 要执行的Python模块名（python -m 后面的部分）
-        :param args: 模块的参数
+        :param str|list args: 模块的参数
         :param name: 进程的名称，默认为模块名
         """
-        cmd = f'{sys.executable} -m {module} {args}'
-        self.add_process_cmd(cmd, name=name)
+        cmd = [f'{sys.executable}', '-m', f'{module}']
+        if isinstance(args, str):
+            cmd.append(args)
+        else:
+            cmd += list(args)
+
+        return self.add_process_cmd(cmd, name, shell=shell)
 
     def stop_all(self):
         """ 停止所有后台进程 """
@@ -1004,14 +1058,48 @@ class MultiProcessLauncher:
             worker.process.terminate()
         self.workers = []
 
-    def _set_pdeathsig(self, sig=signal.SIGTERM):
+    def _set_pdeathsig(self, sig=None):
         """ 在主服务退出时，这些进程也会全部自动关闭 """
 
         def callable():
+            import signal
+            sig2 = signal.SIGTERM if sig is None else sig
             libc = ctypes.CDLL("libc.so.6")
-            return libc.prctl(1, sig)
+            return libc.prctl(1, sig2)
 
-        return callable
+        if sys.platform == 'win32':
+            # windows系统暂设为空
+            return None
+        else:
+            return callable
+
+    def run_endless(self):
+        """ 一直运行，直到用户输入kill命令
+
+        poll：
+            如果进程仍在运行，poll()方法返回None。
+            如果进程已经结束，poll()方法返回进程的退出码（exit code）。
+                如果进程正常结束，退出码通常为0。
+                如果进程异常结束，退出码通常是一个非零值，表示异常的类型或错误码。
+        """
+        import pandas as pd
+        from pyxllib.algo.stat import print_full_dataframe
+
+        while True:
+            cmd = input('>>>')
+            if cmd == 'kill':
+                self.stop_all()
+                break
+            elif cmd == 'count':
+                # 需要实际检查现有进程
+                m = sum([1 for worker in self.workers if worker.process.poll() is None])
+                print(f'有{m}个进程正在运行')
+            elif cmd == 'list':  # 列出所有进程（转df查看）
+                ls = []
+                for worker in self.workers:
+                    ls.append([worker.name, worker.process.pid, worker.process.poll(), worker.raw_cmd])
+                df = pd.DataFrame(ls, columns=['name', 'pid', 'poll', 'args'])
+                print_full_dataframe(df)
 
 
 def xlmd5(content):
@@ -1096,6 +1184,8 @@ def safe_div(a, b):
 
 def inplace_decorate(parent, func_name, wrapper):
     """ 将指定的函数替换为装饰器版本
+    允许在运行时动态地将一个函数或方法替换为其装饰版本。通常用于添加日志、性能测试、事务处理等。
+    （既然可以写成装饰版本，相当于其实要完全替换成另外的函数也是可以的）
 
     当然，因为py一切皆对象，这里处理的不是函数，而是其他变量等对象也是可以的
 

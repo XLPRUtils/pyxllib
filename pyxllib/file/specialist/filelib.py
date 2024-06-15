@@ -887,6 +887,7 @@ class XlPath(type(pathlib.Path())):
             return 0
 
     def mtime(self):
+        """ 文件的修改时间 """
         # windows会带小数，linux使用%Ts只有整数部分。
         # 这里不用四舍五入，取整数部分就是对应的。
         return int(os.stat(self).st_mtime)
@@ -1287,6 +1288,7 @@ class XlPath(type(pathlib.Path())):
 
     def write_auto(self, data, *args, if_exists=None, **kwargs):
         """ 根据文件后缀自动识别写入函数 """
+        self.parent.mkdir(exist_ok=True, parents=True)
         mode = self.suffix.lower()[1:]
         write_func = getattr(self, 'write_' + mode, None)
         if self.exist_preprcs(if_exists):
@@ -2283,8 +2285,11 @@ class PathGroups(Groups):
         return ls
 
 
-def cache_file(file, make_data_func: Callable[[], Any] = None, *, reset=False, **kwargs):
-    """ 局部函数功能结果缓存
+def cache_file(file, make_data_func: Callable[[], Any] = None, *,
+               mode='read_first',
+               cache_time=None,
+               **kwargs):
+    """ 能将局部函数功能结果缓存进文件的功能
 
     输入的文件file如果存在则直接读取内容；
     否则用make_data_func生成，并且备份一个file文件
@@ -2292,20 +2297,51 @@ def cache_file(file, make_data_func: Callable[[], Any] = None, *, reset=False, *
     :param file: 需要缓存的文件路径
     :param make_data_func: 如果文件不存在，则需要生成一份，要提供数据生成函数
         cache_file可以当装饰器用，此时不用显式指定该参数
-    :param reset: 如果file是否已存在，都用make_data_func强制重置一遍
+    :param mode:
+        read_first（默认）: 优先尝试从已有文件读取
+        generate_first: 函数生成优先
+    :param cache_time: 文件缓存时间，单位为秒，默认为None，表示始终使用缓存文件
+        如果设置60，表示超过60秒后，需要重新优先从函数获得更新内容
     :param kwargs: 可以传递read、write支持的扩展参数
-    :return: 从缓存文件直接读取到的数据
+    :return: 读取到的数据
     """
+    from datetime import datetime, timedelta
+    from pyxllib.prog.pupil import format_exception
 
     def decorator(func):
         def wrapper(*args2, **kwargs2):
+
             f = XlPath.init(file, XlPath.tempdir())
-            if f.exists() and not reset:  # 文件存在，直接读取返回
-                data = f.read_auto(**kwargs)
-            else:  # 文件不存在则要生成一份数据
+
+            # 1 优先看是不是需要先从文件读取数据
+            if mode == 'read_first' and f.is_file():
+                if cache_time is None:
+                    return f.read_auto(**kwargs)
+
+                current_time = datetime.now()
+                last_modified = datetime.fromtimestamp(f.mtime())  # 获取文件的修改时间
+                if not isinstance(cache_time, timedelta):
+                    cache_time2 = timedelta(seconds=cache_time)
+                else:
+                    cache_time2 = cache_time
+
+                if cache_time is None or (current_time - last_modified <= cache_time2):
+                    return f.read_auto(**kwargs)
+
+            # 2 如果需要重新生成数据，且没有已存在的保底文件
+            if not f.is_file():
                 data = func(*args2, **kwargs2)
                 f.write_auto(data, **kwargs)
-            return data
+                return data
+
+            # 3 需要重新生成，但是有保底文件
+            try:
+                data = func(*args2, **kwargs2)
+                f.write_auto(data, **kwargs)
+                return data
+            except Exception as e:
+                print(format_exception(e))
+                return f.read_auto(**kwargs)
 
         return wrapper
 
