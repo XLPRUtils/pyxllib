@@ -36,6 +36,7 @@ from openpyxl import Workbook
 from openpyxl.cell.cell import MergedCell
 from openpyxl.styles import Font, Alignment
 from openpyxl.utils.cell import get_column_letter, column_index_from_string
+import openpyxl.worksheet.formula
 import pandas as pd
 
 try:
@@ -518,7 +519,7 @@ def is_string_type(value):
     try:
         pd.to_datetime(value, errors='raise')
         return False
-    except (ValueError, TypeError, OverflowError):
+    except (ValueError, TypeError, OverflowError, AttributeError):
         pass
 
     # 检查是否为浮点数类型
@@ -573,10 +574,18 @@ class XlCell(openpyxl.cell.cell.Cell):  # 适用于 openpyxl.cell.cell.MergedCel
 
         TODO 这个函数还是可以看看能不能有更好的实现、提速
         """
+
+        def try_offset(x, y):
+            try:
+                return isinstance(self.offset(x, y), MergedCell)
+            except ValueError:
+                # 有可能会越界：ValueError: Row numbers must be between 1 and 1048576
+                return False
+
         _type, status = 0, {}
         if isinstance(self, MergedCell):
             _type = 1
-        elif isinstance(self.offset(1, 0), MergedCell) or isinstance(self.offset(0, 1), MergedCell):
+        elif try_offset(1, 0) or try_offset(0, 1):
             # 这里只能判断可能是合并单元格，具体是不是合并单元格，还要
             rng = self.in_range()
             status['rng'] = rng
@@ -761,7 +770,10 @@ class XlCell(openpyxl.cell.cell.Cell):  # 适用于 openpyxl.cell.cell.MergedCel
         注意，遇到公式是很难计算处理的，大概率只能保持原公式显示
         因为日期用的比较多，需要时常获得真实的渲染效果，所以这里封装一个接口
         """
+
         x = self.value
+        if isinstance(x, openpyxl.worksheet.formula.ArrayFormula):  # 数组公式要特别渲染
+            return x.text
         xl_fmt = self.get_number_format()
         return xl_render_value(x, xl_fmt)
 

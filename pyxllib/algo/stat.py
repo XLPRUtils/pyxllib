@@ -449,7 +449,7 @@ def print_full_dataframe(df):
                            'display.max_colwidth', None):
         print(df)
 
-    pd.options('display.max_rows', 60)
+    pd.options.display.max_rows = 60
 
 
 def custom_fillna(df, default_fill_value='', numeric_fill_value=None, specific_fill=None):
