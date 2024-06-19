@@ -90,6 +90,8 @@ class SqlBuilder:
 
         :param desc: 例如 'id%2=1'
         """
+        if not desc:
+            return
         column, divisor_remainder = desc.split('%')
         divisor, remainder = map(int, divisor_remainder.split('='))
         return self.where_mod(column, divisor, remainder)
@@ -362,6 +364,19 @@ class SqlBase:
         vals = list(cols.values()) + list(where.values())
         self.commit_base(commit,
                          f'UPDATE {table_name} SET {kvs} WHERE {ops}',
+                         self.cvt_types(vals))
+
+    def delete_row(self, table_name, where, *, commit=False):
+        """ 【删】删除数据
+
+        :param dict where: 怎么匹配到对应记录
+        :param commit: 建议减小commit频率，会极大降低性能
+        :return:
+        """
+        ops = ' AND '.join([f'{k}=%s' for k in where.keys()])
+        vals = list(where.values())
+        self.commit_base(commit,
+                         f'DELETE FROM {table_name} WHERE {ops}',
                          self.cvt_types(vals))
 
     def select_col(self, table_name, col):

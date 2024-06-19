@@ -1037,6 +1037,21 @@ class MultiProcessLauncher:
         self.workers.append(worker)
         return worker
 
+    def add_process_python(self, file, args='', name=None, shell=False):
+        """ 添加并启动一个Python模块作为后台进程。
+
+        :param file: 要执行的Python文件路径
+        :param str|list args: 模块的参数
+        :param name: 进程的名称，默认为模块名
+        """
+        cmd = [f'{sys.executable}', f'{file}']
+        if isinstance(args, str):
+            cmd.append(args)
+        else:
+            cmd += list(args)
+
+        return self.add_process_cmd(cmd, name, shell=shell)
+
     def add_process_python_module(self, module, args='', name=None, shell=False):
         """ 添加并启动一个Python模块作为后台进程。
 
@@ -1100,6 +1115,42 @@ class MultiProcessLauncher:
                     ls.append([worker.name, worker.process.pid, worker.process.poll(), worker.raw_cmd])
                 df = pd.DataFrame(ls, columns=['name', 'pid', 'poll', 'args'])
                 print_full_dataframe(df)
+
+
+def support_multi_processes(default_processes=1):
+    """ 对函数进行扩展，支持并发多进程运行
+
+    注意被装饰的函数，需要支持 process_count、process_id 两个参数，来获得总进程数，当前进程id的信息
+    """
+
+    def decorator(func):
+
+        def wrapper(*args, **kwargs):
+            process_count = int(kwargs.pop('process_count', default_processes))
+            process_id = kwargs.pop('process_id', None)
+
+            if process_count == 1 or process_id is not None:
+                if process_id is None:
+                    return func(*args, **kwargs)
+                else:
+                    return func(*args, **kwargs, process_count=process_count, process_id=process_id)
+            else:
+                mpl = MultiProcessLauncher()
+                for i in range(int(process_count)):
+                    cmds = [func.__name__,
+                            '--process_count', str(process_count),
+                            '--process_id', str(i)
+                            ]
+                    cmds.extend(map(str, args))  # 添加位置参数
+                    for k, v in kwargs.items():
+                        cmds.append(f'--{k}')  # 添加关键字参数的键
+                        cmds.append(str(v))  # 添加关键字参数的值
+                    mpl.add_process_python(sys.argv[0], cmds)
+                mpl.run_endless()
+
+        return wrapper
+
+    return decorator
 
 
 def xlmd5(content):
