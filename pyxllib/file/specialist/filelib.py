@@ -2312,6 +2312,7 @@ def cache_file(file, make_data_func: Callable[[], Any] = None, *,
         def wrapper(*args2, **kwargs2):
 
             f = XlPath.init(file, XlPath.tempdir())
+            f.parent.mkdir(exist_ok=True, parents=True)
 
             # 1 优先看是不是需要先从文件读取数据
             if mode == 'read_first' and f.is_file():
