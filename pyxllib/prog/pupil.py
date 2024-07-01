@@ -34,6 +34,7 @@ import threading
 import time
 import traceback
 from urllib.parse import urlparse
+import re
 
 from pyxllib.prog.newbie import classproperty, typename
 
@@ -1133,10 +1134,14 @@ def support_multi_processes(default_processes=1):
                 if process_id is None:
                     return func(*args, **kwargs)
                 else:
-                    return func(*args, **kwargs, process_count=process_count, process_id=process_id)
+                    return func(*args, **kwargs, process_count=process_count, process_id=int(process_id))
             else:
                 mpl = MultiProcessLauncher()
                 for i in range(int(process_count)):
+                    if isinstance(process_id, int) and i != process_id:
+                        continue
+
+                    # todo 这样使用有个坑，process_count、process_id都是以str类型传入的，开发者下游使用容易出问题
                     cmds = [func.__name__,
                             '--process_count', str(process_count),
                             '--process_id', str(i)
@@ -1303,3 +1308,8 @@ def check_counter(data, top_n=10):
 def tprint(*args, **kwargs):
     """ 带时间戳的print """
     print(utc_now2(), *args, **kwargs)
+
+
+def is_valid_identifier(name):
+    """ 判断是否是合法的标识符 """
+    return re.match(r'^[a-zA-Z_][a-zA-Z0-9_]*$', name)

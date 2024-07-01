@@ -89,6 +89,8 @@ class SqlBuilder:
         """ 使用一种特殊的格式化标记来设置规则
 
         :param desc: 例如 'id%2=1'
+
+        todo 我好像傻了，画蛇添足，这个功能好像直接用 .where 就能完成~
         """
         if not desc:
             return
@@ -148,6 +150,7 @@ class SqlBuilder:
             sql.append(f"WHERE {' AND '.join(self._where)}")
         return '\n'.join(sql)
 
+
     def __3_build_中级命令(self):
         pass
 
@@ -167,7 +170,6 @@ class SqlBuilder:
         sql.order_by(f'{count_column_name} DESC')
         sql._where = self._where.copy()
         return sql.build_select()
-
 
 class SqlBase:
     """ Sql语法通用的功能 """

@@ -42,7 +42,7 @@ import psycopg
 import psycopg.rows
 
 from pyxllib.prog.newbie import round_int, human_readable_number
-from pyxllib.prog.pupil import utc_now, utc_timestamp
+from pyxllib.prog.pupil import utc_now, utc_timestamp, is_valid_identifier
 from pyxllib.prog.specialist import XlOsEnv
 from pyxllib.algo.pupil import ValuesStat2
 from pyxllib.file.specialist import get_etag, StreamJsonlWriter
@@ -271,12 +271,14 @@ WHERE {table_name}.{item_id_name} = cte.{item_id_name}"""
     def __6_高级统计(self):
         pass
 
-    def get_column_valuesstat(self, table_name, column, percentile_count=5,
-                              filter_condition=None, by_data=False):
+    def get_column_valuesstat(self, table_name, column, filter_condition=None,
+                              percentile_count=5,
+                              by_data=False, data_type=None):
         """ 获得指定表格的某个字段的统计特征ValuesStat2对象
 
         :param table_name: 表名
         :param column: 用于计算统计数据的字段名
+            不一定是标准的字段名
         :param percentile_count: 分位数的数量，例如 3 表示只计算中位数
         :param by_data: 是否获得原始数据
             默认只获得统计特征，不获得原始数据
@@ -289,7 +291,15 @@ WHERE {table_name}.{item_id_name} = cte.{item_id_name}"""
             values = self.exec2col(sql.build_select(column))
             if data_type == 'numeric':
                 values = [x and float(x) for x in values]
-            return ValuesStat2(raw_values=values, data_type=data_type)
+            vs = ValuesStat2(raw_values=values, data_type=data_type)
+
+            if data_type == 'text' and is_valid_identifier(column):
+                vs0 = self.get_column_valuesstat(table_name, column, filter_condition=filter_condition,
+                                                 percentile_count=percentile_count, by_data=False)
+                vs.n = vs0.n
+                vs.dist = vs0.dist
+
+            return vs
 
         def init_from_db():
             # 1 构建基础的 SQL 查询
@@ -341,7 +351,12 @@ WHERE {table_name}.{item_id_name} = cte.{item_id_name}"""
 
             return x
 
-        data_type = self.get_column_data_type(table_name, column)
+        data_type = data_type or self.get_column_data_type(table_name, column)
+
+        # 如果不是标准的列名，强制获取数据
+        if not is_valid_identifier(column):
+            by_data = True
+
         if by_data:
             vs = init_from_db_data()
         else:
