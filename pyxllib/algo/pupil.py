@@ -157,6 +157,9 @@ class ValuesStat:
 
 class ValuesStat2:
     """ 240509周四17:33，第2代统计器
+
+    240628周五14:05 todo 关于各种特殊格式数据，怎么计算是个问题
+        这问题可能有些复杂，近期估计没空折腾，留以后有空折腾的一个大坑了
     """
 
     def __init__(self, values=None, raw_values=None, data_type=None):
@@ -306,6 +309,33 @@ class ValuesStat2:
             ratio_dict = {unit_func(x): f'{ratio:.2%}' for x, ratio in ratio_dict.items()}
 
         return ratio_dict
+
+    def group_count(self, max_entries=None, min_count=None):
+        """ 统计每种取值出现的次数，并根据条件过滤结果
+
+        :param max_entries: 最多显示的条目数
+        :param min_count: 显示的条目至少出现的次数
+        """
+        from collections import Counter
+
+        # 使用Counter来计数每个值出现的次数
+        counts = Counter(self.values or self.raw_values)
+
+        # 根据min_count过滤计数结果
+        if min_count is not None:
+            counts = {k: v for k, v in counts.items() if v >= min_count}
+
+        # 根据max_entries限制结果数量
+        if max_entries is not None:
+            # 按出现次数降序排列，然后选取前max_entries项
+            most_common = counts.most_common(max_entries)
+            # 转换回字典形式
+            counts = dict(most_common)
+        else:
+            # 如果没有指定max_entries，则保持所有满足min_count的结果
+            counts = dict(sorted(counts.items(), key=lambda item: item[1], reverse=True))
+
+        return counts
 
 
 class Groups:

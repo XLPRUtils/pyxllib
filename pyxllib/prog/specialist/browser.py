@@ -230,6 +230,9 @@ class Browser(Explorer):
             file = file.rename(get_etag(str(file)) + file.suffix, if_exists='replace')
         self.__call__(arg, file, **kwargs)
 
+    def url(self, *args, wait=True, **kwargs):
+        super().__call__(*args, wait=wait, **kwargs)
+
     def __call__(self, arg, file=None, *, wait=True, clsmsg=True, to_html_args=None,
                  **kwargs):  # NOQA Browser的操作跟标准接口略有差异
         """ 该版本会把arg转存文件重设为文件名

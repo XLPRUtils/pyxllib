@@ -69,7 +69,10 @@ def get_charclass_num(content):
 
 
 def get_charclass_rate(content, round_digits=4):
-    """ 检查字符类型分布数量 """
+    """ 检查字符类型分布数量
+
+    :param str content: 文本内容
+    """
     ct = get_charclass_num(content)
 
     # 这一类权重要翻倍
@@ -93,6 +96,8 @@ def check_language_from_counter(ct):
         这个比例最早是给表格设计的，表格很可能表头是中文，中间都是英文、数字数据，此时仍然归为中文
         但如果是一般性的文档，可能要提高中文的比例，才能视为中文文档
     """
+    ct['常用汉字'] = ct.get('常用汉字', 0)
+    ct['偏僻汉字'] = ct.get('偏僻汉字', 0)
 
     if '繁体汉字' in ct:
         if safe_div(ct['繁体汉字'], ct['常用汉字']) > 0.1:

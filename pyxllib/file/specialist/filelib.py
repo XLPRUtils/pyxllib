@@ -1124,6 +1124,22 @@ class XlPath(type(pathlib.Path())):
         else:
             return s
 
+    def read_text2(self):
+        """ 智能识别编码的文本读取，这里收集了我见过的一些常见类型 """
+        for encoding in ['utf8',
+                         'gbk',
+                         'gb18030',
+                         'utf_16',
+                         'cp932',  # 日文，Shift-JIS
+                         'Big5',  # 繁体字，Big5
+                         'big5hkscs',  # 繁体字
+                         ]:
+            try:
+                content = self.read_text(encoding=encoding)
+                return content, encoding
+            except (UnicodeDecodeError, UnicodeError):
+                continue
+
     def readlines_batch(self, batch_size, *, encoding='utf8'):
         """ 将文本行打包，每次返回一个批次多行数据
 

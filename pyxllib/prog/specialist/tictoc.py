@@ -12,6 +12,7 @@ from humanfriendly import format_timespan
 
 from pyxllib.algo.pupil import natural_sort, ValuesStat
 from pyxllib.text.pupil import shorten, listalign
+from pyxllib.prog.newbie import human_readable_number
 
 __tictoc = """
 基于 pytictoc 代码，做了些自定义扩展
@@ -40,13 +41,15 @@ class TicToc:
     TicToc.elapsed   #t.end - t.start; i.e., time elapsed from t.start when t.toc() or t.tocvalue() was last called
     """
 
-    def __init__(self, title='', *, disable=False):
+    def __init__(self, title='', *, disable=False, min_display_seconds=None):
         """Create instance of TicToc class."""
         self.start = timeit.default_timer()
         self.end = float('nan')
         self.elapsed = float('nan')
         self.title = title
         self.disable = disable
+        # 只有达到这个时间，才会显示耗时
+        self.min_display_seconds = min_display_seconds
 
     def tic(self):
         """Start the timer."""
@@ -64,7 +67,7 @@ class TicToc:
         self.elapsed = self.end - self.start
         if not self.disable:
             # print(f'{self.title} {msg} {self.elapsed:.3f} 秒.')
-            print(f'{self.title} {msg} elapsed {format_timespan(self.elapsed)}.')
+            print(f'{self.title} {msg} elapsed {human_readable_number(self.elapsed, "秒")}.')
         if restart:
             self.start = timeit.default_timer()
 
@@ -84,14 +87,14 @@ class TicToc:
     @staticmethod
     def process_time(msg='time.process_time():'):
         """计算从python程序启动到目前为止总用时"""
-        print(f'{msg} {format_timespan(time.process_time())}.')
+        print(f'{msg} {human_readable_number(time.process_time(), "秒")}.')
 
     def __enter__(self):
         """Start the timer when using TicToc in a context manager."""
         from pyxllib.prog.specialist import get_xllog
 
         if self.title == '__main__' and not self.disable:
-            get_xllog().info(f'time.process_time(): {format_timespan(time.process_time())}.')
+            get_xllog().info(f'time.process_time(): {human_readable_number(time.process_time(), "秒")}.')
         self.start = timeit.default_timer()
 
     def __exit__(self, exc_type, exc_val, exc_tb):
@@ -102,10 +105,10 @@ class TicToc:
         xllog = get_xllog()
 
         if exc_tb is None:
-            if not self.disable:
-                xllog.info(f'{self.title} finished in {format_timespan(elapsed)}.')
+            if not self.disable and (self.min_display_seconds is None or elapsed >= self.min_display_seconds):
+                xllog.info(f'{self.title} finished in {human_readable_number(elapsed, "秒")}.')
         else:
-            xllog.info(f'{self.title} interrupt in {format_timespan(elapsed)},')
+            xllog.info(f'{self.title} interrupt in {human_readable_number(elapsed, "秒")},')
 
 
 __timer = """

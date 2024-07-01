@@ -7,6 +7,8 @@
 """
 扩展了些自己的openpyxl工具
 """
+import copy
+
 import time
 
 from pyxllib.prog.pupil import check_install_package, run_once
@@ -2463,7 +2465,7 @@ def extract_workbook_summary2(file_path, *,
     """
     :param keep_links: 是否保留外部表格链接数据。如果保留，打开好像会有点问题。
     :param mode:
-        0，最原始的summary3摘要
+        0，最原始的summary2摘要
         1，添加当前工作表、单元格位置的信息
     :param kwargs: 捕捉其他参数，主要是向下兼容，其实现在并没有用
 
@@ -3015,7 +3017,10 @@ def extract_workbook_summary3b(file_path,
 
     :param summary_limit_len: 摘要长度限制
     :param timeout_seconds: 超时限制
-    :param return_mode: 返回模式，0表示只返回摘要，1表示返回摘要和耗时
+    :param return_mode: 返回模式
+        0，表示只返回摘要
+        1，表示返回摘要和耗时
+        2, 再增加返回summary2
     :param len_mode:
         0, 使用len作为token长度评估
         1, 使用模型评估实际token长度
@@ -3024,6 +3029,7 @@ def extract_workbook_summary3b(file_path,
     res = {}
     res['fileName'] = Path(file_path).name
     load_time = summary2_time = summary3_time = -1
+    summary2_res = {}
 
     def reduce_summary(summary):
         """ 如果转json后的summary超过4K，去掉可能的sheets字段 """
@@ -3037,6 +3043,7 @@ def extract_workbook_summary3b(file_path,
             start_time = time.time()
             res, load_time = extract_workbook_summary2(file_path, mode=1, return_mode=1, **kwargs)
             # res = convert_to_json_compatible(res)
+            summary2_res = copy.deepcopy(res)
             summary2_time = time.time() - start_time - load_time
             start_time = time.time()
             if len_mode == 1:
@@ -3055,8 +3062,13 @@ def extract_workbook_summary3b(file_path,
         res['error'] = f'提取摘要时发生错误：{format_exception(e, 2)}'
         reduce_summary(res)
 
-    if return_mode == 1:
-        return res, {'load_time': human_readable_number(load_time),
+    time_dict = {'load_time': human_readable_number(load_time),
                      'summary2_time': human_readable_number(summary2_time),
                      'summary3_time': human_readable_number(summary3_time)}
+
+    if return_mode == 1:
+        return res, time_dict
+    elif return_mode == 2:
+        return res, time_dict, summary2_res
+
     return res

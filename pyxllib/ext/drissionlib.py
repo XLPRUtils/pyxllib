@@ -18,7 +18,6 @@ from DrissionPage._base.base import BasePage, BaseElement
 from pyxllib.prog.pupil import inject_members
 from pyxllib.text.pupil import strfind
 
-
 def get_latest_not_dev_tab(page=None):
     """ 开发工具本身也会算一个tab，这个函数返回最新的一个不是开发工具的tab """
     if page is None:
@@ -80,7 +79,7 @@ class XlBasePage(BasePage):
             'tag:downloads-item')
         for item in items:
             loc = unquote(item.sr('tag:img').attr('src').replace('+', ' '))
-            file = re.search(r'path=(.+?)(&scale=\d+x)?$', loc).group(1)
+            file = re.search(r'path=(.+?)(&scale=(\d+(\.\d+)?)x)?$', loc).group(1)
 
             files.append({
                 'file': file,
