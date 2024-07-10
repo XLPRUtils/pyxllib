@@ -883,10 +883,6 @@ class 网课考勤:
         # 然后自己手动操作验证码
         # 以及选择"店铺"
 
-    def 登录微信支付(self):
-        driver = self.ensure_driver()
-        driver.get('https://pay.weixin.qq.com/index.php/core/home/login')
-
     def 下载课次考勤数据(self, 起始课=None, 终止课=None, 文件名前缀=''):
         if 起始课 is None:
             起始课 = max(1, self.结束课次)
@@ -943,16 +939,6 @@ class 网课考勤:
 
     def 批量退款(self):
         self.driver.get('https://pay.weixin.qq.com/index.php/xphp/cbatchrefund/batch_refund#/pages/index/index')
-
-    def 申请单条退款(self, 凭证号, 退款金额=0, 退款原因=''):
-        driver = self.ensure_driver()
-        driver.get('https://pay.weixin.qq.com/index.php/core/refundapply')
-        driver.locate('//*[@id="app"]/div/div[2]/div[2]/div[2]/div/span/input').send_keys(凭证号)
-        driver.click('//*[@id="applyRefundBtn"]')  # 申请退款
-        driver.locate('//*[@id="app"]/div/div[2]/div[2]/div[3]/div[2]/div/div[1]/div/span[1]/input').send_keys(
-            str(退款金额))
-        driver.locate('//*[@id="textInput"]').send_keys(退款原因)
-        # driver.click('//*[@id="commitRefundApplyBtn"]')  # 建议手动点"提交申请"
 
 
 class 网课考勤2(网课考勤):
@@ -1693,11 +1679,6 @@ def 下载课次考勤数据(课程链接, 检查文本=''):
     driver.click('//*[@id="tab-studentTab"]/span')  # 直播间用户
     driver.click('//*[@id="pane-studentTab"]/div/div[2]/div[2]/form/div[2]/button[2]/span/span')  # 导出列表
     driver.click('//*[@id="data-export-container"]/div/div[2]/div/div[2]/div[2]/button[2]/span/span')  # 导出
-
-
-def 登录微信支付():
-    driver = get_driver()
-    driver.get('https://pay.weixin.qq.com/index.php/core/home/login')
 
 
 def 聚合读取考勤数据(data_dir, name, judge_minute=30):
