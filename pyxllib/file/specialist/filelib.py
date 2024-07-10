@@ -1476,20 +1476,33 @@ class XlPath(type(pathlib.Path())):
             else:
                 return shutil.copytree(self, dst)
 
-    def move(self, dst, if_exists=None):
+    def move(self, dst, *, cross_disk=False, if_exists=None):
+        """
+        :param cross_disk: 是否可能涉及跨磁盘操作
+        """
         if not self.exists():
             return self
 
-        dst = XlPath(dst)
-        if self == dst:
-            # 同一个文件，可能是调整了大小写名称
-            if self.as_posix() != dst.as_posix():
-                tmp = self.tempfile(dir=self.parent)  # self不一定是file，也可能是dir，但这个名称通用
-                self.rename(tmp)
-                self.delete()
-                tmp.rename(dst)
-        elif dst.exist_preprcs(if_exists):
-            self.rename(dst)
+        if cross_disk:  # 显式设置跨磁盘操作
+            dst = self.copy(dst, if_exists=if_exists)
+            self.delete()
+            return dst
+
+        try:
+            dst = XlPath(dst)
+            if self == dst:
+                # 同一个文件，可能是调整了大小写名称
+                if self.as_posix() != dst.as_posix():
+                    tmp = self.tempfile(dir=self.parent)  # self不一定是file，也可能是dir，但这个名称通用
+                    self.rename(tmp)
+                    self.delete()
+                    tmp.rename(dst)
+            elif dst.exist_preprcs(if_exists):
+                self.rename(dst)
+        except OSError:
+            # 有可能是跨磁盘操作，这个时候就只能先拷贝再删除了
+            dst = self.copy(dst, if_exists=if_exists)
+            self.delete()
         return dst
 
     def rename2(self, new_name, if_exists=None):
