@@ -113,6 +113,9 @@ class UtoolsBase:
 
         self.outfmt = self.cmds['outfmt'] if 'outfmt' in self.cmds else outfmt
 
+
+class UtoolsName(UtoolsBase):
+
     def check_cmds(self):
         """ 显示所有参数值 """
         df = pd.DataFrame.from_records([(k, v) for k, v in self.cmds.items()],
@@ -133,6 +136,113 @@ class UtoolsBase:
         f1.write_text(self.cmds['ClipText'])
         f2.write_text(self.cmds['ClipText'] + '\n')
         bcompare(f1, f2, wait=False)
+
+    @clipboard_decorator(copy=False, typing=True)
+    def common_dir(self):
+        # 目录路径生成工具
+        from pyxlpr.data.datasets import common_path
+
+        def func(name, unix_path=False):
+            p = getattr(common_path, name)
+
+            if unix_path:
+                # 因为用了符号链接，实际位置会变回D:/slns，这里需要反向替换下
+                p = str(p).replace('D:/slns', 'D:/home/chenkunze/slns')
+                p = str(p)[2:]
+            else:
+                # slns比较特别，本地要重定向到D:/slns
+                p = str(p).replace('D:/home/chenkunze/slns', 'D:/slns')
+                p = p.replace('/', '\\')
+
+            return p
+
+        return fire.Fire(func, self.cmds['subinput'], 'CommonDir')
+
+    def wdate(self):
+        """ week dates 输入一周的简略日期值 """
+
+        def func(start):
+            weektag = '一二三四五六日'
+            for i in range(7):
+                dt = parse_datetime(start) + datetime.timedelta(i)
+                type_text(dt.strftime('%y%m%d') + f'周{weektag[dt.weekday()]}')
+                pyautogui.press('down')
+
+        fire.Fire(func, self.cmds['subinput'], 'wdate')
+
+    def input_digits(self):
+        """ 输入数字 """
+
+        def func(start, stop, step=1):
+            for i in range(start, stop, step):
+                pyautogui.write(str(i))
+                pyautogui.press('down')
+
+        fire.Fire(func, self.cmds['subinput'], 'input_digits')
+
+    def __win32(self):
+        """ win32相关自动化
+
+        目前主要是word自动化相关的功能，这里有很多demo可以学习怎么用win32做word的自动化
+        """
+        pass
+
+    def browser(self):
+        """ 将内容复制到word，另存为html文件后，用浏览器打开查看 """
+        from pyxllib.file.docxlib import rebuild_document_by_word
+
+        file = fire.Fire(rebuild_document_by_word, self.cmds['subinput'], 'browser')
+        browser(file)
+
+    def create_text_image(self):
+        from pyxllib.xl import XlPath
+        from pyxllib.xlcv import xlpil, create_text_image
+
+        @clipboard_decorator('html')
+        def func(text, font_size=20, *, size=None, xy=None, bg_color=None, text_color=None):
+            im = create_text_image(text, size, xy=xy, font_size=font_size, bg_color=bg_color, text_color=text_color)
+            # 这种只能语雀里用
+            data = xlpil.to_buffer(im, b64encode=True).decode()
+            res = '<img src="data:image/jpg;base64,' + data + '"/>'
+            # 这种只能onenote、qq、微信里用
+            p = XlPath.tempdir() / 'create_text_image.jpg'
+            im.save(p)
+            res += f'<img src="{p}"/>'
+            # 那么我把两种都复制，就能兼容多种场景了~~
+            return res
+
+        fire.Fire(func, self.cmds['subinput'], 'create_text_image')
+
+
+class UtoolsText(UtoolsBase):
+    def __init__(self, cmds, *, outfmt='text'):
+        super().__init__(cmds, outfmt=outfmt)
+
+    @clipboard_decorator(paste=True)
+    def coderegex(self):
+        # tt = TicToc()
+        s = self.cmds['ClipText']
+        return eval(self.cmds['subinput'])
+        # print(f'finished in {format_timespan(tt.tocvalue())}.')
+
+    def refine_text(self, func, rtype='text', *, copy=True, paste=True, typing=False):
+        from functools import partial
+
+        @clipboard_decorator(rtype=rtype, copy=copy, paste=paste, typing=typing)
+        def _refine():
+            return fire.Fire(partial(func, self.cmds['ClipText']),
+                             self.cmds['subinput'], func.__name__)
+
+        return _refine()
+
+    def bc_text(self, func):
+        """ 用bc软件打开，对比前后文本变化，有用户自己决定如何处理保留 """
+        from functools import partial
+        from pyxllib.prog.specialist import bcompare
+
+        text1 = self.cmds['ClipText']
+        text2 = fire.Fire(partial(func, text1), self.cmds['subinput'], func.__name__)
+        bcompare(text1, text2)
 
 
 class UtoolsFile(UtoolsBase):
@@ -234,116 +344,6 @@ class UtoolsFile(UtoolsBase):
         write_dataframes_to_excel(file, {'Sheet1': df})
 
         os.startfile(file)
-
-
-class UtoolsText(UtoolsBase):
-
-    @clipboard_decorator(copy=False, typing=True)
-    def common_dir(self):
-        # 目录路径生成工具
-        from pyxlpr.data.datasets import common_path
-
-        def func(name, unix_path=False):
-            p = getattr(common_path, name)
-
-            if unix_path:
-                # 因为用了符号链接，实际位置会变回D:/slns，这里需要反向替换下
-                p = str(p).replace('D:/slns', 'D:/home/chenkunze/slns')
-                p = str(p)[2:]
-            else:
-                # slns比较特别，本地要重定向到D:/slns
-                p = str(p).replace('D:/home/chenkunze/slns', 'D:/slns')
-                p = p.replace('/', '\\')
-
-            return p
-
-        return fire.Fire(func, self.cmds['subinput'], 'CommonDir')
-
-    def wdate(self):
-        """ week dates 输入一周的简略日期值 """
-
-        def func(start):
-            weektag = '一二三四五六日'
-            for i in range(7):
-                dt = parse_datetime(start) + datetime.timedelta(i)
-                type_text(dt.strftime('%y%m%d') + f'周{weektag[dt.weekday()]}')
-                pyautogui.press('down')
-
-        fire.Fire(func, self.cmds['subinput'], 'wdate')
-
-    def input_digits(self):
-        """ 输入数字 """
-
-        def func(start, stop, step=1):
-            for i in range(start, stop, step):
-                pyautogui.write(str(i))
-                pyautogui.press('down')
-
-        fire.Fire(func, self.cmds['subinput'], 'input_digits')
-
-    def __win32(self):
-        """ win32相关自动化
-
-        目前主要是word自动化相关的功能，这里有很多demo可以学习怎么用win32做word的自动化
-        """
-        pass
-
-    def browser(self):
-        """ 将内容复制到word，另存为html文件后，用浏览器打开查看 """
-        from pyxllib.file.docxlib import rebuild_document_by_word
-
-        file = fire.Fire(rebuild_document_by_word, self.cmds['subinput'], 'browser')
-        browser(file)
-
-    def create_text_image(self):
-        from pyxllib.xl import XlPath
-        from pyxllib.xlcv import xlpil, create_text_image
-
-        @clipboard_decorator('html')
-        def func(text, font_size=20, *, size=None, xy=None, bg_color=None, text_color=None):
-            im = create_text_image(text, size, xy=xy, font_size=font_size, bg_color=bg_color, text_color=text_color)
-            # 这种只能语雀里用
-            data = xlpil.to_buffer(im, b64encode=True).decode()
-            res = '<img src="data:image/jpg;base64,' + data + '"/>'
-            # 这种只能onenote、qq、微信里用
-            p = XlPath.tempdir() / 'create_text_image.jpg'
-            im.save(p)
-            res += f'<img src="{p}"/>'
-            # 那么我把两种都复制，就能兼容多种场景了~~
-            return res
-
-        fire.Fire(func, self.cmds['subinput'], 'create_text_image')
-
-
-class UtoolsRegex(UtoolsBase):
-    def __init__(self, cmds, *, outfmt='text'):
-        super().__init__(cmds, outfmt=outfmt)
-
-    @clipboard_decorator(paste=True)
-    def coderegex(self):
-        # tt = TicToc()
-        s = self.cmds['ClipText']
-        return eval(self.cmds['subinput'])
-        # print(f'finished in {format_timespan(tt.tocvalue())}.')
-
-    def refine_text(self, func, rtype='text', *, copy=True, paste=True, typing=False):
-        from functools import partial
-
-        @clipboard_decorator(rtype=rtype, copy=copy, paste=paste, typing=typing)
-        def _refine():
-            return fire.Fire(partial(func, self.cmds['ClipText']),
-                             self.cmds['subinput'], func.__name__)
-
-        return _refine()
-
-    def bc_text(self, func):
-        """ 用bc软件打开，对比前后文本变化，有用户自己决定如何处理保留 """
-        from functools import partial
-        from pyxllib.prog.specialist import bcompare
-
-        text1 = self.cmds['ClipText']
-        text2 = fire.Fire(partial(func, text1), self.cmds['subinput'], func.__name__)
-        bcompare(text1, text2)
 
 
 if __name__ == '__main__':
