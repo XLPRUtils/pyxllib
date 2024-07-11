@@ -937,9 +937,6 @@ class 网课考勤:
                 else:
                     time.sleep(1)
 
-    def 批量退款(self):
-        self.driver.get('https://pay.weixin.qq.com/index.php/xphp/cbatchrefund/batch_refund#/pages/index/index')
-
 
 class 网课考勤2(网课考勤):
     def login_xe(self):
