@@ -150,7 +150,6 @@ class SqlBuilder:
             sql.append(f"WHERE {' AND '.join(self._where)}")
         return '\n'.join(sql)
 
-
     def __3_build_中级命令(self):
         pass
 
@@ -170,6 +169,7 @@ class SqlBuilder:
         sql.order_by(f'{count_column_name} DESC')
         sql._where = self._where.copy()
         return sql.build_select()
+
 
 class SqlBase:
     """ Sql语法通用的功能 """
