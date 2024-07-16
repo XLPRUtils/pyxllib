@@ -3063,8 +3063,8 @@ def extract_workbook_summary3b(file_path,
         reduce_summary(res)
 
     time_dict = {'load_time': human_readable_number(load_time),
-                     'summary2_time': human_readable_number(summary2_time),
-                     'summary3_time': human_readable_number(summary3_time)}
+                 'summary2_time': human_readable_number(summary2_time),
+                 'summary3_time': human_readable_number(summary3_time)}
 
     if return_mode == 1:
         return res, time_dict
