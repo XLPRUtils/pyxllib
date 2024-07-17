@@ -17,13 +17,20 @@ from pyxllib.file.specialist import File, Dir
 
 
 def download_file(url, fn=None, *, encoding=None, if_exists=None, ext=None, temp=False):
-    """ 类似writefile，只是源数据是从url里下载
+    r""" 类似writefile，只是源数据是从url里下载
 
     :param url: 数据下载链接
     :param fn: 保存位置，会从url智能提取文件名
     :param if_exists: 详见 File.write 参数解释
     :para temp: 将文件写到临时文件夹
     :return:
+
+    >> download_file(image_url)  # 保存在当前工作目录下
+    D:/home/chenkunze/slns/xlproject/xlsln/ckz2024/2560px-Gfp-wisconsin-madison-the-nature-boardwalk.jpg
+    >> download_file(image_url, fn=r"D:/home/chenkunze/slns/xlproject/xlsln/ckz2024/a.png")  # 指定路径
+    D:/home/chenkunze/slns/xlproject/xlsln/ckz2024/a.png
+    >> download_file(image_url, fn=r"D:/home/chenkunze/slns/xlproject/xlsln/ckz2024")  # 暂不支持目录
+    ValueError: 不能用目录初始化一个File对象 D:\home\chenkunze\slns\xlproject\xlsln\ckz2023
     """
     if not fn: fn = url.split('/')[-1]
     root = Dir.TEMP if temp else None
