@@ -1129,6 +1129,7 @@ def support_multi_processes(default_processes=1):
         def wrapper(*args, **kwargs):
             process_count = int(kwargs.pop('process_count', default_processes))
             process_id = kwargs.pop('process_id', None)
+            shell = kwargs.pop('shell', False)
 
             if process_count == 1 or process_id is not None:
                 if process_id is None:
@@ -1150,7 +1151,7 @@ def support_multi_processes(default_processes=1):
                     for k, v in kwargs.items():
                         cmds.append(f'--{k}')  # 添加关键字参数的键
                         cmds.append(str(v))  # 添加关键字参数的值
-                    mpl.add_process_python(sys.argv[0], cmds)
+                    mpl.add_process_python(sys.argv[0], cmds, shell=shell)
                 mpl.run_endless()
 
         return wrapper

@@ -58,13 +58,17 @@ class Connection(psycopg.Connection, SqlBase):
     def __1_库(self):
         pass
 
-    def get_db_activities(self):
+    def get_db_activities(self, datname=None):
         """
         检索当前数据库的活动信息。
+
+        :param datname: 这个字段理论上应该要能自动检测出来才对，但这会急着没空钻研，先手动输入吧
         """
         sql = SqlBuilder('pg_stat_activity')
         sql.select('pid', 'datname', 'usename', 'state', 'query', 'age(now(), query_start) AS "query_age"')
         sql.where("state = 'active'")
+        if datname:
+            sql.where(f"datname = '{datname}'")
         return self.exec2dict(sql.build_select()).fetchall()
 
     def __2_表格(self):
