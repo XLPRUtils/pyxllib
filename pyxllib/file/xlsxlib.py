@@ -121,7 +121,7 @@ def is_valid_excel_address(address):
         return is_valid_excel_cell(address)
 
 
-@run_once('str', debug=True)
+@run_once('str')
 def xlfmt2pyfmt_date(xl_fmt):
     """ 日期的渲染操作
 
@@ -2478,7 +2478,11 @@ def extract_workbook_summary2(file_path, *,
     res['fileName'] = file_path.name
     start_time = time.time()
     wb, suffix = load_as_xlsx_file(file_path, keep_links=keep_links, keep_vba=keep_vba)
-    res['fileType'] = suffix or 'error'
+    if suffix:
+        res['fileType'] = suffix
+    else:
+        res['error'] = 'fileType error'
+
     load_time = time.time() - start_time
     if wb is None:  # 不支持的文件类型，不报错，只是返回最基本的文件名信息
         if return_mode == 1:
@@ -2959,6 +2963,9 @@ class WorkbookSummary3:
             return y
 
         x = summary2
+        if 'error' in x:
+            return x
+
         y = {
             'fileName': x['fileName'],
             'fileType': x['fileType'],

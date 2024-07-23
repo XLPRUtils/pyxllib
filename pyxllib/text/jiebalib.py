@@ -250,7 +250,7 @@ class TextClassifier:
         return sims[:maxn]
 
     def refine_vecs(self):
-        """ 优化向量数据 """
+        """ 优化向量数据，去掉权重小余0.0001的维度 """
         # 1 计算每个向量的长度
         vecs = []
         for vec in tqdm(self.vecs, '优化向量'):

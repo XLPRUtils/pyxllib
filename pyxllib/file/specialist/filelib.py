@@ -1112,7 +1112,7 @@ class XlPath(type(pathlib.Path())):
             s = str(best_match)
             encoding = best_match.encoding
         else:
-            with open(self, 'r', encoding=encoding) as f:
+            with open(self, 'r', encoding=encoding, errors=errors) as f:
                 s = f.read()
 
         # 如果用\r\n作为换行符会有一些意外不好处理
@@ -1212,7 +1212,7 @@ class XlPath(type(pathlib.Path())):
         :param int max_items: 限制读取的条目数，默认为None，表示读取所有条目
         :param int batch_size:
             默认为None，表示一次性读取所有数据
-            如果设置了数值，则会流式读取，常用语太大，超过内存大小等的jsonl文件读取
+            如果设置了数值，则会流式读取，常用于太大，超过内存大小等的jsonl文件读取
                 注意如果设置了大小，只是底层每次一批读取的大小，但返回的data仍然是一维的数据格式迭代器
         :return: 返回读取到的数据列表，如果return_mode为True，则同时返回文件编码格式
 
@@ -1248,10 +1248,10 @@ class XlPath(type(pathlib.Path())):
         else:
             return data
 
-    def write_jsonl(self, list_data, ensure_ascii=False, default=None, mode='w'):
+    def write_jsonl(self, list_data, ensure_ascii=False, default=None, mode='w', errors=None):
         """ 由于这种格式主要是跟商汤这边对接，就尽量跟它们的格式进行兼容 """
         content = '\n'.join([json.dumps(x, ensure_ascii=ensure_ascii, default=default) for x in list_data])
-        self.write_text_unix(content + '\n', mode=mode)
+        self.write_text_unix(content + '\n', mode=mode, errors=errors)
 
     def add_json_line(self, data, ensure_ascii=False, default=None, mode='a'):
         """ 在文件末尾添加一行JSON数据 """
