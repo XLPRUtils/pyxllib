@@ -59,6 +59,16 @@ class SqlBuilder:
 
         return self
 
+    def where_dict_match(self, items):
+        """ 输入一个字典，要求每个key的字段对应上具体的某个取值value """
+        for k, v in items.items():
+            if isinstance(v, str):
+                self._where.append(f"{k} = '{v}'")
+            elif isinstance(v, (int, float)):
+                self._where.append(f"{k} = {v}")
+            else:
+                raise TypeError
+
     def where_in(self, column, values):
         if values is None:
             return self

@@ -1,4 +1,5 @@
 import os
+import json
 from json import dumps as jsonDumps
 from json import loads as jsonLoads
 from pathlib import Path
@@ -423,6 +424,10 @@ class Chat:
         })
         answer: str = completion.choices[0].message.content
         self._messages.add_many(*messages, {"role": "assistant", "content": answer})
+
+        if response_json:
+            answer = json.loads(answer)
+
         return answer
 
     def query_image(self, prompt,

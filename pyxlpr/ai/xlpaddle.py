@@ -22,6 +22,8 @@ import humanfriendly
 
 import paddle
 import paddle.inference as paddle_infer
+import paddle.io
+# from paddle.io import DataLoader, Dataset
 
 from pyxllib.algo.pupil import natural_sort
 from pyxllib.xl import XlPath, browser
@@ -53,18 +55,13 @@ class SequenceDataset(paddle.io.Dataset):
         if self.labels is not None:
             return x, self.labels[index]
         else:
-            return x
+            return x 
 
 
 def build_testdata_loader(samples, *, labels=None, transform=None, **kwargs):
-    """ 简化的一个创建paddle的DataLoader的函数。主要用于简化部署阶段的推理。
-
-    :param samples: list类型的输入格式
     """
-    import paddle.fluid.dataloader.fetcher
-    # 暂时不知道怎么关闭这个警告，先用暴力方法
-    paddle.fluid.dataloader.fetcher._WARNING_TO_LOG = False
-
+    简化的一个创建paddle的DataLoader的函数。主要用于简化部署阶段的推理。
+    """
     if isinstance(samples, paddle.io.DataLoader):
         return samples
     elif isinstance(samples, paddle.io.Dataset):
