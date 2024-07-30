@@ -25,7 +25,7 @@ import requests
 from humanfriendly import parse_size
 
 from pyxllib.prog.newbie import human_readable_size
-from pyxllib.prog.pupil import get_installed_packages
+from pyxllib.prog.pupil import get_installed_packages, aligned_range, percentage_and_value
 from pyxllib.prog.xlosenv import XlOsEnv
 from pyxllib.file.specialist import cache_file
 
@@ -215,3 +215,130 @@ class ProgressBar:
                 time.sleep(1)
             pbar.n = self.progress
             pbar.refresh()
+
+
+class BitMaskTool:
+    """ 二进制位掩码工具
+
+    概念术语
+        bitval，每一个位上的具体取值，0或1
+        bitsum，所有位上的取值的和，即二进制数的十进制表示
+    """
+
+    def __init__(self, bit_names=None, bitsum_counter=None):
+        """ 初始化 BitMaskTool 对象
+
+        :param list bit_names: 每一位功能开启时，显示的标签名。未输入时，填充0,1,2,3...注意总数，要按域宽对齐
+        :param dict/list bitsum_counter: 各种值出现的次数，可以是一个字典或者一个包含出现次数的列表
+        """
+        # 1 每一位功能开启时，显示的标签名。未输入时，填充0,1,2,3...注意总数，要按域宽对齐
+        if bit_names is None:
+            bit_names = list(aligned_range(len(bit_names)))
+        self.bit_names = bit_names
+        # 2 各种值出现的次数
+        if isinstance(bitsum_counter, (list, tuple)):
+            bitsum_counter = Counter(bitsum_counter)
+        self.bitsum_counter = bitsum_counter or {}
+
+    def get_bitsum_names(self, bitsum):
+        """ 从bitsum得到names的拼接
+
+        >> get_bitsum_names(3)
+        '语义定位,图表'
+        """
+        if not isinstance(bitsum, int):
+            try:
+                bitsum = int(bitsum)
+            except ValueError:
+                bitsum = 0
+
+        tags = []
+        for i, k in enumerate(self.bit_names):
+            if (1 << i) & bitsum:
+                tags.append(k)
+        return ','.join(tags)
+
+    def count_bitsum_relations(self, target_bitsum, relation='='):
+        """ 计算特定关系的 bitsum 数量
+
+        :param int target_bitsum: 目标 bitsum
+        :param str relation: 关系类型，可以是 '=', '⊂', '⊃'
+            假设bitval对应的bit_names为n1,n2,n3,n4。
+            那么bitsum相当于是bitval的一个集合
+            比如a={n1,n3,n4}，b={n1,n3}，因为a完全包含b，所以认为a⊃b，或者a⊋b、b⊂a、b⊊a
+        :return int: 符合条件的 bitsum 数量
+        """
+        count = 0
+        if relation == '=':
+            # 直接计算等于 target_bitsum 的数量
+            count = self.bitsum_counter.get(target_bitsum, 0)
+        elif relation == '⊂':
+            # 计算所有被 target_bitsum 包含的 bitsum 的数量
+            for bitsum, num in self.bitsum_counter.items():
+                if bitsum and bitsum & target_bitsum == bitsum:
+                    count += num
+        elif relation == '⊃':
+            # 计算所有包含 target_bitsum 的 bitsum 的数量
+            for bitsum, num in self.bitsum_counter.items():
+                if bitsum & target_bitsum == target_bitsum:
+                    count += num
+        return count
+
+    def check_bitflag(self, max_bitsum_len=None, reletion='=',
+                      filter_zero=False, sort_by=None, *,
+                      min_bitsum_len=0):
+        """ 检查并返回 bitsum 关系的 DataFrame
+
+        :param int max_bitsum_len: 最大 bitsum 长度
+        :param str reletion: 关系类型，可以是 '=', '⊂', '⊃'
+            支持输入多个字符，表示要同时计算多种关系
+        :param bool filter_zero: 是否过滤掉零值
+        :param None|str sort_by: 排序字段
+            None, 默认排序
+            count, 按照数量从大到小排序
+            bitsum, 按照 bitsum 从小到大排序
+        :param int min_bitsum_len: 最小 bitsum 长度
+        :return: 包含 bitsum 关系的 DataFrame
+        """
+        from itertools import combinations
+
+        total = sum(self.bitsum_counter.values())
+        rows, columns = [], ['类型', '名称', '百分比.次数']
+        rows.append([-1, '总计', total])
+
+        if max_bitsum_len is None:
+            max_bitsum_len = len(self.bit_names)
+
+        bitvals = [(1 << i) for i in range(len(self.bit_names))]
+        for m in range(min_bitsum_len, max_bitsum_len + 1):
+            for comb in combinations(bitvals, m):
+                bitsum = sum(comb)
+                count = self.count_bitsum_relations(bitsum, relation=reletion)
+                if filter_zero and count == 0:
+                    continue
+                rows.append([f'{reletion}{bitsum}',
+                             self.get_bitsum_names(bitsum),
+                             count])
+
+        if sort_by == 'count':
+            rows.sort(key=lambda x: x[2], reverse=True)
+        elif sort_by == 'bitsum':
+            rows.sort(key=lambda x: int(x[0][1:]) if isinstance(x[0], str) else x[0])
+
+        df = pd.DataFrame.from_records(rows, columns=columns)
+        df['百分比.次数'] = percentage_and_value(df['百分比.次数'], 2, total=total)
+        return df
+
+    def report(self):
+        """ 生成统计报告 """
+        html_content = []
+
+        html_content.append('<h1>1 包含每一位bitval特征的数量</h1>')
+        df1 = self.check_bitflag(1, '⊃')
+        html_content.append(df1.to_html())
+
+        html_content.append('<h1>2 每一种具体bitsum组合的数量</h1>')
+        df2 = self.check_bitflag(reletion='=', filter_zero=True, sort_by='bitsum')
+        html_content.append(df2.to_html())
+
+        return '\n'.join(html_content)

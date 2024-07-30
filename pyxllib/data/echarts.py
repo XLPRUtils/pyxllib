@@ -75,28 +75,71 @@ class XlChart(Chart):
 inject_members(XlChart, Chart)
 
 
+class XlLine(Line):
+    @classmethod
+    def from_dict(cls, yaxis, xaxis=None, *, title=None,
+                  xaxis_name=None, yaxis_name=None, **kwargs):
+        """ 查看一个数据的折线图
+
+        :param list|dict yaxis: 列表数据，或者字典name: values表示的多组数据
+        """
+        c = cls()
+
+        if isinstance(yaxis, (list, tuple)):
+            yaxis = {'value': yaxis}
+        if xaxis is None:
+            xaxis = list(range(max([len(v) for v in yaxis.values()])))
+        c.add_xaxis(xaxis)
+        for k, v in yaxis.items():
+            c.add_yaxis(k, v)
+
+        configs = {
+            'tooltip_opts': opts.TooltipOpts(trigger="axis"),
+            **kwargs,
+        }
+        c.set_global_opts(tooltip_opts=opts.TooltipOpts(trigger="axis"))
+        if title:
+            configs['title_opts'] = opts.TitleOpts(title=title)
+        if xaxis_name:
+            configs['xaxis_opts'] = opts.AxisOpts(name=xaxis_name, axislabel_opts=opts.LabelOpts(rotate=45, interval=0))
+        if yaxis_name:
+            configs['yaxis_opts'] = opts.AxisOpts(name=yaxis_name)
+        c.set_global_opts(**configs)
+        return c
+
+
 class XlBar(Bar):
 
     @classmethod
-    def from_dict(cls, yaxis, xaxis=None, *, title=None):
+    def from_dict(cls, yaxis, xaxis=None, *, title=None,
+                  xaxis_name=None, yaxis_name=None, **kwargs):
         """ 查看一个数据的条形图
 
-        :param dict yaxis: 列表数据，或者字典name: values表示的多组数据
+        :param list|dict yaxis: 列表数据，或者字典name: values表示的多组数据
         """
-        b = cls()
+        c = cls()
 
+        if isinstance(yaxis, (list, tuple)):
+            yaxis = {'value': yaxis}
         if xaxis is None:
             xaxis = list(range(max([len(v) for v in yaxis.values()])))
-
-        b.add_xaxis(xaxis)
-
+        c.add_xaxis(xaxis)
         for k, v in yaxis.items():
-            b.add_yaxis(k, v)
+            c.add_yaxis(k, v)
 
+        configs = {
+            'tooltip_opts': opts.TooltipOpts(trigger="axis"),
+            **kwargs,
+        }
+        c.set_global_opts(tooltip_opts=opts.TooltipOpts(trigger="axis"))
         if title:
-            b.set_title(title)
-
-        return b
+            configs['title_opts'] = opts.TitleOpts(title=title)
+        if xaxis_name:
+            configs['xaxis_opts'] = opts.AxisOpts(name=xaxis_name)
+        if yaxis_name:
+            configs['yaxis_opts'] = opts.AxisOpts(name=yaxis_name)
+        c.set_global_opts(**configs)
+        return c
 
     @classmethod
     def from_list(cls, yaxis, xaxis=None, *, title=None):
@@ -128,11 +171,13 @@ class XlBar(Bar):
         for i in range(groups):
             labels.append(f"{min_val + interval * i:.2f}-{min_val + interval * (i + 1):.2f}")
         # t = cls.from_dict({'value': group_counts}, xaxis=labels, title=title)
-        
+
         return cls.from_dict({'value': group_counts}, xaxis=labels, title=title)
 
 
 class XlRadar(Radar):
+    """ 雷达图 """
+
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.color_idx = 0
@@ -193,4 +238,3 @@ def draw_pareto_chart(data, accuracy=0.1, *, title='帕累托累积权重', valu
 if __name__ == '__main__':
     with TicToc(__name__):
         pass
-

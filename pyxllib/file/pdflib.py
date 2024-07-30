@@ -19,7 +19,7 @@ from pyxllib.prog.newbie import round_int, decode_bitflags
 from pyxllib.prog.pupil import DictTool, inject_members, dprint
 from pyxllib.prog.specialist import browser
 from pyxllib.algo.newbie import round_unit
-from pyxllib.algo.pupil import get_number_width
+from pyxllib.prog.pupil import get_number_width
 from pyxllib.file.specialist import XlPath, writefile, get_etag
 from pyxllib.cv.expert import xlcv, xlpil
 from pyxlpr.data.labelme import LabelmeDict

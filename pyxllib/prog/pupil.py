@@ -1314,3 +1314,53 @@ def tprint(*args, **kwargs):
 def is_valid_identifier(name):
     """ 判断是否是合法的标识符 """
     return re.match(r'^[a-zA-Z_][a-zA-Z0-9_]*$', name)
+
+
+def get_number_width(n):
+    """ 判断数值n的长度
+
+    参考资料：https://jstrieb.github.io/posts/digit-length/
+
+    >>> get_number_width(0)
+    1
+    >>> get_number_width(9)
+    1
+    >>> get_number_width(10)
+    2
+    >>> get_number_width(97)
+    2
+    """
+    # assert n > 0
+    # return math.ceil(math.log10(n + 1))
+
+    return 1 if n == 0 else (math.floor(math.log10(n)) + 1)
+
+
+def aligned_range(start, stop=None, step=1):
+    """ 返回按照域宽对齐的数字序列 """
+    if stop is None:
+        start, stop = 0, start
+
+    max_width = get_number_width(stop - step)
+    format_str = '{:0' + str(max_width) + 'd}'
+
+    return [format_str.format(i) for i in range(start, stop, step)]
+
+
+def percentage_and_value(numbers, precision=2, *, total=None, sep='.'):
+    """ 对输入的一串数值，转换成一种特殊的表达格式 "百分比.次数"
+
+    :param list numbers: 数值列表
+    :param int precision: 百分比的精度（小数点后的位数），默认为 2
+    :param int total: 总数，如果不输入，则默认为输入数值的和
+    :param str sep: 分隔符
+    :return: 整数部分是比例，小数部分是原始数值的整数部分
+    """
+    if total is None:
+        total = sum(numbers)
+    width = get_number_width(total)
+    result = []
+    for num in numbers:
+        percent = safe_div(num, total) * 10 ** precision
+        result.append(f"{percent:.0f}{sep}{num:0{width}d}")
+    return result

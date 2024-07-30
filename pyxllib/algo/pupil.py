@@ -7,7 +7,6 @@
 from bisect import bisect_right
 from collections import defaultdict, Counter
 import datetime
-import math
 import re
 from statistics import quantiles
 import sys
@@ -480,26 +479,6 @@ def matchpairs(xs, ys, cmp_func, least_score=sys.float_info.epsilon, *,
             y_used.add(j)
 
     return pairs
-
-
-def get_number_width(n):
-    """ 判断数值n的长度
-
-    参考资料：https://jstrieb.github.io/posts/digit-length/
-
-    >>> get_number_width(0)
-    1
-    >>> get_number_width(9)
-    1
-    >>> get_number_width(10)
-    2
-    >>> get_number_width(97)
-    2
-    """
-    # assert n > 0
-    # return math.ceil(math.log10(n + 1))
-
-    return 1 if n == 0 else (math.floor(math.log10(n)) + 1)
 
 
 class SearchBase:
