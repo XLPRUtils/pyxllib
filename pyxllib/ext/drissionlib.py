@@ -51,6 +51,34 @@ def get_dp_page(dp_page=None) -> 'XlPage':
         return ChromiumPage()
 
 
+def get_dp_tab(dp_page=None) -> 'XlPage':
+    """ 智能获取一个标签页tab
+
+    :param dp_page:
+        默认None, 返回默认的page，一般就是当前页面
+        True, 新建一个page
+        str, 新建一个对应url的page
+        func(tab), 通过规则筛选tab，返回符合条件的第1个tab，否则新建一个tab
+    """
+
+    if isinstance(dp_page, ChromiumPage):
+        return dp_page.latest_tab
+    elif isinstance(dp_page, ChromiumTab):
+        return dp_page
+    elif callable(dp_page):
+        page0 = ChromiumPage()
+        for tab in page0.get_tabs():
+            if dp_page(tab):
+                return tab
+        return page0.new_tab()
+    elif dp_page is True:
+        return ChromiumPage().new_tab()
+    elif isinstance(dp_page, str):
+        return ChromiumPage().new_tab(dp_page)
+    else:
+        return ChromiumPage().latest_tab
+
+
 def get_latest_not_dev_tab(page=None):
     """ 开发工具本身也会算一个tab，这个函数返回最新的一个不是开发工具的tab """
     if page is None:
