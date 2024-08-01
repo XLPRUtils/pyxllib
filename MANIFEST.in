@@ -1,3 +1,4 @@
 include README.md
 include requirements.txt
+recursive-include pyxllib *.html
 recursive-include pyxlpr *.py *.txt
