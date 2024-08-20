@@ -12,6 +12,12 @@ check_install_package('scp')
 # 对 paramiko 进一步封装的库
 # check_install_package('fabric')
 
+import warnings
+from cryptography.utils import CryptographyDeprecationWarning
+
+# 忽略特定的警告
+warnings.filterwarnings("ignore", category=CryptographyDeprecationWarning)
+
 from collections import defaultdict
 import pathlib
 import re
