@@ -237,6 +237,8 @@ def xl_render_value(x, xl_fmt):
     注意，遇到公式是很难计算处理的，大概率只能保持原公式显示
     因为日期用的比较多，需要时常获得真实的渲染效果，所以这里封装一个接口
 
+    对于JSA等场景，直接使用Cell.Text获取渲染值就行，不需要这里这么复杂的实现
+
     >>> xl_render_value(datetime.datetime(2020, 1, 1), 'yyyy-mm-dd')
     '2020-01-01'
     """
@@ -369,56 +371,59 @@ def load_as_xlsx_file(file_path, keep_links=False, keep_vba=False):
         try:
             return openpyxl.load_workbook(file,
                                           keep_links=keep_links,
-                                          keep_vba=keep_vba)
+                                          keep_vba=keep_vba), ''
         except Exception as e:
-            return
+            if isinstance(e, TimeoutError):  # 这里触发的是总的超时设定
+                raise e
+            return None, format_exception(e, 2)
 
     @run_once()
     def read_xls():
         try:
-            return convert_xls_to_xlsx(file_path)
+            return convert_xls_to_xlsx(file_path), ''
         except Exception as e:
-            return
+            return None, format_exception(e, 2)
 
     @run_once()
     def read_csv():
         try:
-            return convert_csv_to_xlsx(file_path)
+            return convert_csv_to_xlsx(file_path), ''
         except Exception as e:
-            return
+            return None, format_exception(e, 2)
 
     def read_test(suffix):
         if suffix in ('xlsx', 'xlsm', 'zip'):
-            wb = read_xlsx()
+            wb, error = read_xlsx()
         elif suffix == 'xls':
-            wb = read_xls()
+            wb, error = read_xls()
         elif suffix == 'csv':
-            wb = read_csv()
+            wb, error = read_csv()
         else:
-            wb = None
-        return wb
+            wb, error = None, f'不支持的文件类型：{suffix}'
+        return wb, error
 
     # 1 优先相信用户输入的文件名类型
     file_path = Path(file_path)
     suffix = file_path.suffix.lower()[1:]
-    wb = read_test(suffix)
+    wb, error = read_test(suffix)
     if wb is not None:
         return wb, suffix
 
     # 2 如果处理不了，则尝试用filetype判断的类型
     suffix2 = filetype.guess(file_path)
     suffix2 = suffix2.extension if suffix2 else ''
-    wb = read_test(suffix2)
+    wb, _ = read_test(suffix2)
     if wb is not None:
         return wb, suffix2
 
     # 3 如果还处理不了，再把其他可能的情况试一遍
     for suffix in ('xlsx', 'xls', 'csv'):
-        wb = read_test(suffix)
+        wb, _ = read_test(suffix)
         if wb is not None:
             return wb, suffix
 
-    return None, None
+    # 4 确实是处理不了的类型，返回报错信息
+    return None, error
 
 
 def parse_range_address(address):
@@ -2030,7 +2035,7 @@ class XlWorkbook(openpyxl.Workbook):
                         'cells': extract_cells_content(ws)
                     })
 
-                    if not summary['cells']:  # 如果没有数据，则大概率是数据透视表，是计算出来的，读取不到~
+                    if not summary['cells']:  # 如果没有数据，则大概率是数据透视表，是计算出来的，读取不到~ 但是JSA等场景应该有办法获得
                         summary['sheetType'] = 'PivotTable'
                         del summary['cells']
                 else:
@@ -2478,10 +2483,10 @@ def extract_workbook_summary2(file_path, *,
     res['fileName'] = file_path.name
     start_time = time.time()
     wb, suffix = load_as_xlsx_file(file_path, keep_links=keep_links, keep_vba=keep_vba)
-    if suffix:
-        res['fileType'] = suffix
+    if wb is None:
+        res['error'] = f'Load file error。{suffix}'
     else:
-        res['error'] = 'fileType error'
+        res['fileType'] = suffix
 
     load_time = time.time() - start_time
     if wb is None:  # 不支持的文件类型，不报错，只是返回最基本的文件名信息

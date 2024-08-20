@@ -102,7 +102,11 @@ def search_download_file(file_name):
     for file in files:
         if file_name in file['file']:  # 正常情况下的匹配
             return file
-        if file_name in file['file'].replace('+', ' '):  # 但有时候'+'好像有点特别
+    for file in files:
+        file2 = file['file'].replace('+', ' ')
+        if file_name in file2:  # 但有时候'+'好像有点特别
+            return file
+        if file_name in re.sub(r'\s+', ' ', file2):
             return file
 
 

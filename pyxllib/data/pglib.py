@@ -801,6 +801,136 @@ class XlprDb(Connection):
 
         return '<body>' + chart.render_embed() + '</body>', sum(all_users_usaged.values())
 
+#   cdx_edit    
+    def _get_database_trace_total(self, title, yaxis_name, date_trunc, recent, link_name):
+        ls = self.execute(textwrap.dedent(f"""\
+            WITH cte1 AS(
+                SELECT link_name, jsonb_each(status::jsonb) AS db_data, date_trunc('{date_trunc}', update_time) ttime
+                FROM database_trace WHERE update_time > %s AND link_name = '{link_name}'
+            ), cte2 AS(
+                SELECT ttime, link_name, (db_data).key AS table_name, ((db_data).value->> '_total')::bigint AS total
+                FROM cte1
+            )
+            SELECT ttime, jsonb_object_agg(table_name, total) AS aggregated_json,SUM(total) as total
+            FROM cte2
+            GROUP BY ttime
+            ORDER BY ttime"""), ((utc_now(8) - recent).isoformat(timespec='seconds'),)).fetchall()
+        return self.database_create_stack_chart(title, ls, yaxis_name=yaxis_name)
+
+
+    def _get_database_trace_per_host(self, db, title, yaxis_name, date_trunc, recent, link_name):
+        ls = self.execute(textwrap.dedent(f"""\
+            WITH cte1 AS (
+                SELECT link_name, jsonb_each(status::jsonb) AS db_data, date_trunc('{date_trunc}', update_time) ttime
+                FROM database_trace WHERE update_time > %s AND link_name = '{link_name}'
+                ), cte2 AS (
+                    SELECT ttime, link_name, (db_data).key AS table_name, (db_data).value AS size_text
+                    FROM cte1
+                ), cte3 AS (
+                    SELECT ttime, table_name, each.key AS key, each.value AS value
+                    FROM cte2, jsonb_each_text(size_text) AS each(key, value)
+                )
+                SELECT ttime, jsonb_object_agg(key,
+                    CASE
+                        WHEN key = '_total' THEN NULL
+                        ELSE (value::jsonb ->> 'size')::bigint  -- Handle other keys as usual
+                    END
+                ) FILTER (WHERE key != '_total') AS aggregated_result,  -- 确保 _total 不在 aggregated_result 中
+                MAX(CASE WHEN key = '_total' THEN value::bigint ELSE NULL END) AS total  -- 单独提取 _total 的值
+                FROM cte3
+                WHERE (key = '_total' OR value::jsonb ? 'size')  -- Ensure that '_total' is included
+                AND table_name = '{db}'
+                GROUP BY ttime
+                ORDER BY ttime"""), ((utc_now(8) - recent).isoformat(timespec='seconds'),)).fetchall()
+        return self.database_create_stack_chart(title, ls, yaxis_name=yaxis_name)
+
+    def database_create_stack_chart(self, title, ls, *, yaxis_name=''):
+        """ 创建展示表
+    
+        :param title: 表格标题
+        :param list ls: n*3，第1列是时间，第3列是总值，第2列是每个用户具体的数据
+        """
+        from pyecharts.charts import Line
+        all_database_usaged = Counter()
+        last_time = None
+        for x in ls:
+            hours = 0 if last_time is None else ((x[0] - last_time).total_seconds() / 3600)
+            last_time = x[0]
+            for k, v in x[1].items():
+                if k == '_total':
+                    continue
+                all_database_usaged[k] += v * hours
+    
+        for i, x in enumerate(ls):
+            ct = Counter()
+            for k, v in x[1].items():
+                ct[k] += v
+            ls[i] = (x[0], ct, int(x[2]))
+    
+        # 2 转图表可视化
+        def to_list(values):
+            return [(x[0], v) for x, v in zip(ls, values)]
+    
+        def pretty_val(v):
+            return round_int(v) if v > 100 else round(v, 2)
+    
+        chart = Line()
+        chart.set_title(title)
+        chart.options['xAxis'][0].update({'min': ls[0][0], 'type': 'time',
+                                          # 'minInterval': 3600 * 1000 * 24,
+                                          'name': '时间', 'nameGap': 50, 'nameLocation': 'middle'})
+        chart.options['yAxis'][0].update({'name': yaxis_name, 'nameGap': 50, 'nameLocation': 'middle'})
+        # 目前是比较暴力的方法调整排版，后续要研究是不是能更自动灵活些
+        chart.options['legend'][0].update({'top': '6%', 'icon': 'pin'})
+        chart.options['grid'] = [{'top': 55 + len(all_database_usaged) * 4 , 'containLabel': True}]
+        chart.options['tooltip'].opts.update({'axisPointer': {'type': 'cross'}, 'trigger': 'item'})
+    
+        chart.add_series(f'total {pretty_val(ls[0][2]/1024/1024/1024):g}', to_list([x[2]/1024/1024/1024 for x in ls]), areaStyle={})
+        for database, usaged in all_database_usaged.most_common():
+            usaged = usaged / ((ls[-1][0] - ls[0][0]).total_seconds() / 3600 + 1e-9)
+            chart.add_series(f'{database} {pretty_val(usaged/1024/1024/1024):g}',
+                             to_list([x[1].get(database, 0)/1024/1024/1024 for x in ls]),
+                             areaStyle={}, stack='Total', emphasis={'focus': 'series'})
+        return '<body>' + chart.render_embed() + '</body>'
+
+    def dbview_xldb1_memory(self,recent=datetime.timedelta(days=30), date_trunc='hour'):
+        from pyxllib.data.echarts import render_echart_html
+        
+        db_list = ['st', 'xlpr', 'stdata', 'kq5034', 'ckz']
+        args = ['数据库大小(GB)', date_trunc, recent, 'xldb1']
+        htmltexts = []
+
+        res = self._get_database_trace_total('XLDB1数据库使用近况', *args)
+        htmltexts.append(res)
+
+        data_stats = []
+        for idx,db in enumerate(db_list,start=1):
+            data_stats.append(self._get_database_trace_per_host(db,f'{db}', *args))
+        htmltexts += data_stats
+
+        self.commit()
+        h = render_echart_html('database_cdx', body='<br/>'.join(htmltexts))
+        return h
+        
+    def dbview_xldb2_memory(self, recent=datetime.timedelta(days=30), date_trunc='hour'):
+        from pyxllib.data.echarts import render_echart_html
+    
+        db_list = ['st', 'ragdata']
+        args = ['数据库大小(GB)', date_trunc, recent, 'xldb2']
+        htmltexts = []
+    
+        res = self._get_database_trace_total('XLDB2数据库使用近况', *args)
+        htmltexts.append(res)
+    
+        data_stats = []
+        for idx, db in enumerate(db_list, start=1):
+            data_stats.append(self._get_database_trace_per_host(db, f'{db}', *args))
+        htmltexts += data_stats
+    
+        self.commit()
+        h = render_echart_html('database_cdx', body='<br/>'.join(htmltexts))
+        return h
+
     def dbview_cpu(self, recent=datetime.timedelta(days=1), date_trunc='hour'):
         from pyxllib.data.echarts import render_echart_html
 
