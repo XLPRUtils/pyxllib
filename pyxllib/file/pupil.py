@@ -140,7 +140,7 @@ def gen_file_filter(s):
 
 
 def getfiles(root, filter_rule=None):
-    """对os.walk进一步封装，返回所有匹配的文件
+    r""" 对os.walk进一步封装，返回所有匹配的文件
 
     可以这样遍历一个目录下的所有文件：
     for f in getfiles(r'C:\pycode\code4101py', r'.py'):

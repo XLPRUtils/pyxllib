@@ -865,7 +865,7 @@ class LatexNestEnv(NestEnv):
         return self.nest(core, invert)
 
     def latexenv1(self, inner=False, invert=False):
-        """ 定位文本中所有最外层的 \begin、\end 环境
+        r""" 定位文本中所有最外层的 \begin、\end 环境
 
         这个函数需要依赖基础功能latexenv来实现
         """

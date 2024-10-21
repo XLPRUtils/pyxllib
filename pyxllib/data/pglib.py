@@ -194,7 +194,7 @@ WHERE {table_name}.{item_id_name} = cte.{item_id_name}"""
     @classmethod
     def cvt_type(cls, val):
         if isinstance(val, (dict, list)):
-            val = json.dumps(val, ensure_ascii=False)
+            val = json.dumps(val, ensure_ascii=False, default=str)
         # 注意list数组类型读、写都会自动适配py
         return val
 
@@ -781,27 +781,30 @@ class XlprDb(Connection):
         def pretty_val(v):
             return round_int(v) if v > 100 else round(v, 2)
 
-        chart = Line()
-        chart.set_title(title)
-        chart.options['xAxis'][0].update({'min': ls[0][0], 'type': 'time',
-                                          # 'minInterval': 3600 * 1000 * 24,
-                                          'name': '时间', 'nameGap': 50, 'nameLocation': 'middle'})
-        chart.options['yAxis'][0].update({'name': yaxis_name, 'nameGap': 50, 'nameLocation': 'middle'})
-        # 目前是比较暴力的方法调整排版，后续要研究是不是能更自动灵活些
-        chart.options['legend'][0].update({'top': '6%', 'icon': 'pin'})
-        chart.options['grid'] = [{'top': 55 + len(all_users_usaged) * 4, 'containLabel': True}]
-        chart.options['tooltip'].opts.update({'axisPointer': {'type': 'cross'}, 'trigger': 'item'})
+        try:
+            chart = Line()
+            chart.set_title(title)
+            chart.options['xAxis'][0].update({'min': ls[0][0], 'type': 'time',
+                                              # 'minInterval': 3600 * 1000 * 24,
+                                              'name': '时间', 'nameGap': 50, 'nameLocation': 'middle'})
+            chart.options['yAxis'][0].update({'name': yaxis_name, 'nameGap': 50, 'nameLocation': 'middle'})
+            # 目前是比较暴力的方法调整排版，后续要研究是不是能更自动灵活些
+            chart.options['legend'][0].update({'top': '6%', 'icon': 'pin'})
+            chart.options['grid'] = [{'top': 55 + len(all_users_usaged) * 4, 'containLabel': True}]
+            chart.options['tooltip'].opts.update({'axisPointer': {'type': 'cross'}, 'trigger': 'item'})
 
-        chart.add_series(f'total{pretty_val(ls[0][1]):g}', to_list([x[1] for x in ls]), areaStyle={})
-        for user, usaged in all_users_usaged.most_common():
-            usaged = usaged / ((ls[-1][0] - ls[0][0]).total_seconds() / 3600 + 1e-9)
-            chart.add_series(f'{user}{pretty_val(usaged):g}',
-                             to_list([x[2].get(user, 0) for x in ls]),
-                             areaStyle={}, stack='Total', emphasis={'focus': 'series'})
+            chart.add_series(f'total{pretty_val(ls[0][1]):g}', to_list([x[1] for x in ls]), areaStyle={})
+            for user, usaged in all_users_usaged.most_common():
+                usaged = usaged / ((ls[-1][0] - ls[0][0]).total_seconds() / 3600 + 1e-9)
+                chart.add_series(f'{user}{pretty_val(usaged):g}',
+                                 to_list([x[2].get(user, 0) for x in ls]),
+                                 areaStyle={}, stack='Total', emphasis={'focus': 'series'})
 
-        return '<body>' + chart.render_embed() + '</body>', sum(all_users_usaged.values())
+            return '<body>' + chart.render_embed() + '</body>', sum(all_users_usaged.values())
+        except Exception as e:
+            return str(e), 0
 
-#   cdx_edit    
+    #   cdx_edit
     def _get_database_trace_total(self, title, yaxis_name, date_trunc, recent, link_name):
         ls = self.execute(textwrap.dedent(f"""\
             WITH cte1 AS(
@@ -816,7 +819,6 @@ class XlprDb(Connection):
             GROUP BY ttime
             ORDER BY ttime"""), ((utc_now(8) - recent).isoformat(timespec='seconds'),)).fetchall()
         return self.database_create_stack_chart(title, ls, yaxis_name=yaxis_name)
-
 
     def _get_database_trace_per_host(self, db, title, yaxis_name, date_trunc, recent, link_name):
         ls = self.execute(textwrap.dedent(f"""\
@@ -860,20 +862,20 @@ class XlprDb(Connection):
                 if k == '_total':
                     continue
                 all_database_usaged[k] += v * hours
-    
+
         for i, x in enumerate(ls):
             ct = Counter()
             for k, v in x[1].items():
                 ct[k] += v
             ls[i] = (x[0], ct, int(x[2]))
-    
+
         # 2 转图表可视化
         def to_list(values):
             return [(x[0], v) for x, v in zip(ls, values)]
-    
+
         def pretty_val(v):
             return round_int(v) if v > 100 else round(v, 2)
-    
+
         chart = Line()
         chart.set_title(title)
         chart.options['xAxis'][0].update({'min': ls[0][0], 'type': 'time',
@@ -882,51 +884,52 @@ class XlprDb(Connection):
         chart.options['yAxis'][0].update({'name': yaxis_name, 'nameGap': 50, 'nameLocation': 'middle'})
         # 目前是比较暴力的方法调整排版，后续要研究是不是能更自动灵活些
         chart.options['legend'][0].update({'top': '6%', 'icon': 'pin'})
-        chart.options['grid'] = [{'top': 55 + len(all_database_usaged) * 4 , 'containLabel': True}]
+        chart.options['grid'] = [{'top': 55 + len(all_database_usaged) * 4, 'containLabel': True}]
         chart.options['tooltip'].opts.update({'axisPointer': {'type': 'cross'}, 'trigger': 'item'})
-    
-        chart.add_series(f'total {pretty_val(ls[0][2]/1024/1024/1024):g}', to_list([x[2]/1024/1024/1024 for x in ls]), areaStyle={})
+
+        #chart.add_series(f'total {pretty_val(ls[0][2] / 1024 / 1024 / 1024):g}',
+        #                 to_list([x[2] / 1024 / 1024 / 1024 for x in ls]), areaStyle={})
         for database, usaged in all_database_usaged.most_common():
             usaged = usaged / ((ls[-1][0] - ls[0][0]).total_seconds() / 3600 + 1e-9)
-            chart.add_series(f'{database} {pretty_val(usaged/1024/1024/1024):g}',
-                             to_list([x[1].get(database, 0)/1024/1024/1024 for x in ls]),
+            chart.add_series(f'{database} {pretty_val(usaged / 1024 / 1024 / 1024):g}',
+                             to_list([x[1].get(database, 0) / 1024 / 1024 / 1024 for x in ls]),
                              areaStyle={}, stack='Total', emphasis={'focus': 'series'})
         return '<body>' + chart.render_embed() + '</body>'
 
-    def dbview_xldb1_memory(self,recent=datetime.timedelta(days=30), date_trunc='hour'):
+    def dbview_xldb1_memory(self, recent=datetime.timedelta(days=180), date_trunc='day'):
         from pyxllib.data.echarts import render_echart_html
-        
-        db_list = ['st', 'xlpr', 'stdata', 'kq5034', 'ckz']
+
+        db_list = ['stdata', 'xlpr', 'st', 'ckz']
         args = ['数据库大小(GB)', date_trunc, recent, 'xldb1']
         htmltexts = []
 
-        res = self._get_database_trace_total('XLDB1数据库使用近况', *args)
+        res = self._get_database_trace_total('xldb1数据库使用近况', *args)
         htmltexts.append(res)
 
         data_stats = []
-        for idx,db in enumerate(db_list,start=1):
-            data_stats.append(self._get_database_trace_per_host(db,f'{db}', *args))
+        for idx, db in enumerate(db_list, start=1):
+            data_stats.append(self._get_database_trace_per_host(db, f'{db}', *args))
         htmltexts += data_stats
 
         self.commit()
         h = render_echart_html('database_cdx', body='<br/>'.join(htmltexts))
         return h
-        
-    def dbview_xldb2_memory(self, recent=datetime.timedelta(days=30), date_trunc='hour'):
+
+    def dbview_xldb2_memory(self, recent=datetime.timedelta(days=180), date_trunc='day'):
         from pyxllib.data.echarts import render_echart_html
-    
-        db_list = ['st', 'ragdata']
+
+        db_list = ['ragdata', 'kq5034']
         args = ['数据库大小(GB)', date_trunc, recent, 'xldb2']
         htmltexts = []
-    
-        res = self._get_database_trace_total('XLDB2数据库使用近况', *args)
+
+        res = self._get_database_trace_total('xldb2数据库使用近况', *args)
         htmltexts.append(res)
-    
+
         data_stats = []
         for idx, db in enumerate(db_list, start=1):
             data_stats.append(self._get_database_trace_per_host(db, f'{db}', *args))
         htmltexts += data_stats
-    
+
         self.commit()
         h = render_echart_html('database_cdx', body='<br/>'.join(htmltexts))
         return h
@@ -977,7 +980,7 @@ class XlprDb(Connection):
         h = render_echart_html('cpu_memory', body='<br/>'.join(htmltexts))
         return h
 
-    def dbview_disk_memory(self, recent=datetime.timedelta(days=30), date_trunc='day'):
+    def dbview_disk_memory(self, recent=datetime.timedelta(days=360), date_trunc='day'):
         """ 查看disk硬盘使用近况
         """
         from pyxllib.data.echarts import render_echart_html

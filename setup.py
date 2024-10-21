@@ -41,14 +41,16 @@ flask-jwt-extended
 fastapi
 arts
 uvicorn
+openai2
 """
 # pywin32
+# openai2里有个import arts的东西，这个arts才是作者原本的库
 
 _dir = Path(__file__).parent
 
 setup(
     name='pyxllib',  # pip 安装时用的名字
-    version='0.3.126',  # 当前版本，每次更新上传到pypi都需要修改; 第4位版本号一般是修紧急bug
+    version='0.3.130',  # 当前版本，每次更新上传到pypi都需要修改; 第4位版本号一般是修紧急bug
     author='code4101',
     author_email='877362867@qq.com',
     url='https://github.com/XLPRUtils/pyxllib',

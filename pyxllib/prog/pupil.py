@@ -603,6 +603,7 @@ def inject_members(from_obj, to_obj, member_list=None, *,
     # 把XlDocxTable的成员方法绑定到docx.table.Table里
     >> inject_members(XlDocxTable, docx.table.Table)
 
+    240826周一，其他可参考学习的三方现成工具库：from fastcore.foundation import patch
     """
     # 1 整理需要注入的方法清单
     dst = set(dir(to_obj))
@@ -1029,10 +1030,13 @@ class MultiProcessLauncher:
         if name is None:
             cmd2 = cmd.split() if isinstance(cmd, str) else cmd
             name = cmd2[0]
-
-        proc = subprocess.Popen(cmd,
-                                shell=shell,
-                                preexec_fn=self._set_pdeathsig())
+        if sys.platform == 'darwin':
+            proc = subprocess.Popen(cmd,
+                                    shell=shell)
+        else:
+            proc = subprocess.Popen(cmd,
+                                    shell=shell,
+                                    preexec_fn=self._set_pdeathsig())
 
         worker = ProcessWorker(name, proc, raw_cmd=cmd, **kwargs)
         self.workers.append(worker)
@@ -1118,6 +1122,73 @@ class MultiProcessLauncher:
                 print_full_dataframe(df)
 
 
+def support_multi_processes_hyx(default_processes=1):
+    """ 对函数进行扩展，支持并发多进程运行
+    增加重跑
+    注意被装饰的函数，需要支持 process_count、process_id 两个参数，来获得总进程数，当前进程id的信息
+    """
+
+    def decorator(func):
+
+        def wrapper(*args, **kwargs):
+            process_count = int(kwargs.pop('process_count', default_processes))
+            process_id = kwargs.pop('process_id', None)
+            shell = kwargs.pop('shell', False)
+
+            if process_count == 1 or process_id is not None:
+                if process_id is None:
+                    return func(*args, **kwargs)
+                else:
+                    return func(*args, **kwargs, process_count=process_count, process_id=int(process_id))
+            else:
+                mpl = MultiProcessLauncher()
+                for i in range(int(process_count)):
+                    if isinstance(process_id, int) and i != process_id:
+                        continue
+
+                    '''
+                    sys.argv[0] 为 /Users/youx/NutstoreCloudBridge/slns/xlproject/xlproject/m2404ragdata/b清洗/hyx240806统计图表数.py
+                    将其转化为 xlproject.m2404ragdata.b清洗.hyx240806统计图表数 
+                    '''
+                    header = 'xlproject.code4101'
+
+                    root_directory_name = 'xlproject'
+                    occurrence = 2
+                    path = sys.argv[0]
+
+                    # 查找第 occurrence 次出现的 root_directory_name 位置
+                    positions = [i for i in range(len(path)) if path.startswith(root_directory_name, i)]
+                    if len(positions) < occurrence:
+                        raise ValueError(
+                            f"Path does not contain {occurrence} occurrences of the root directory name: {root_directory_name}")
+
+                    # 提取并转换为模块名称
+                    index = positions[occurrence - 1]
+                    module_name = os.path.splitext(path[index:])[0].replace(os.path.sep, '.')
+
+                    # todo 这样使用有个坑，process_count、process_id都是以str类型传入的，开发者下游使用容易出问题
+                    cmds = [
+                            'run_python_module',
+                            '--wait_mode',
+                            '60',
+                            module_name,
+                            func.__name__,
+                            '--process_count', str(process_count),
+                            '--process_id', str(i)
+                            ]
+                    cmds.extend(map(str, args))  # 添加位置参数
+                    for k, v in kwargs.items():
+                        cmds.append(f'--{k}')  # 添加关键字参数的键
+                        cmds.append(str(v))  # 添加关键字参数的值
+
+                    mpl.add_process_python_module(header, cmds, shell=shell)
+                mpl.run_endless()
+
+        return wrapper
+
+    return decorator
+
+
 def support_multi_processes(default_processes=1):
     """ 对函数进行扩展，支持并发多进程运行
 
@@ -1151,6 +1222,7 @@ def support_multi_processes(default_processes=1):
                     for k, v in kwargs.items():
                         cmds.append(f'--{k}')  # 添加关键字参数的键
                         cmds.append(str(v))  # 添加关键字参数的值
+
                     mpl.add_process_python(sys.argv[0], cmds, shell=shell)
                 mpl.run_endless()
 

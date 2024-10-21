@@ -883,7 +883,7 @@ class StrIdxBack:
         self.keystr = s
 
     def delchars(self, pattern, flags=0):
-        """模仿正则的替换语法
+        r""" 模仿正则的替换语法
         但是不用输入替换目标s，以及目标格式，因为都是删除操作
 
         利用正则可以知道被删除的是哪个区间范围

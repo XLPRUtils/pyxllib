@@ -923,7 +923,7 @@ class XlPath(type(pathlib.Path())):
                 res.add(p.relative_to(self).as_posix())
         return res
 
-    def relpath(self, ref_dir) -> str:
+    def relpath(self, ref_dir) -> 'XlPath':
         r""" 当前路径，相对于ref_dir的路径位置
 
         >>> File('C:/a/b/c.txt').relpath('C:/a/')

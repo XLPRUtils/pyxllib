@@ -15,7 +15,10 @@ import logging
 from unittest.mock import MagicMock
 import math
 from types import SimpleNamespace
+from typing import Union
 
+import requests
+from loguru import logger as loguru_logger
 from tqdm import tqdm
 from joblib import Parallel, delayed
 from openai import OpenAI, AsyncOpenAI
@@ -130,11 +133,11 @@ class Chat:
 
     recently_request_data: dict  # 最近一次请求所用的参数
     default_api_key = None
-    default_base_url = "https://console.chatdata.online/v1"
+    default_base_url = "https://platform.llmprovider.ai/v1"
 
     def __init__(self,
                  # kwargs
-                 api_key: str | AKPool = None,
+                 api_key: Union[str, AKPool] = None,
                  base_url: str = None,  # base_url 参数用于修改基础URL
                  timeout=None,
                  max_retries=None,
@@ -143,7 +146,7 @@ class Chat:
                  model: Literal["gpt-4-1106-preview", "gpt-4-vision-preview",
                  "gpt-4", "gpt-4-0314", "gpt-4-0613",
                  "gpt-4-32k", "gpt-4-32k-0314", "gpt-4-32k-0613", "gpt-3.5-turbo",
-                 "gpt-4o", "gpt-4-turbo"] = "gpt-3.5-turbo",
+                 "gpt-4o", "gpt-4-turbo"] = "gpt-4o-mini",
                  # Chat
                  msg_max_count: int = None,
                  # kwargs
@@ -174,7 +177,7 @@ class Chat:
     def __1_原作者提供功能(self):
         pass
 
-    def reset_api_key(self, api_key: str | AKPool):
+    def reset_api_key(self, api_key: Union[str, AKPool]):
         if isinstance(api_key, AKPool):
             self._akpool = api_key
         else:
@@ -281,7 +284,7 @@ class Chat:
     def fetch_messages(self):
         return list(self._messages)
 
-    def add_dialogs(self, *ms: dict | system_msg | user_msg | assistant_msg):
+    def add_dialogs(self, *ms: Union[dict, system_msg, user_msg, assistant_msg]):
         '''
         添加历史对话
         '''
@@ -289,20 +292,35 @@ class Chat:
         self._messages.add_many(*messages)
 
     def __getattr__(self, name):
-        match name:  # 兼容旧代码
-            case 'asy_request':
-                return self.async_request
-            case 'forge':
-                return self.add_dialogs
-            case 'pin':
-                return self.pin_messages
-            case 'unpin':
-                return self.unpin_messages
-            case 'dump':
-                return self._dump
-            case 'load':
-                return self._load
-        raise AttributeError(name)
+        # match name:  # 兼容旧代码
+        #     case 'asy_request':
+        #         return self.async_request
+        #     case 'forge':
+        #         return self.add_dialogs
+        #     case 'pin':
+        #         return self.pin_messages
+        #     case 'unpin':
+        #         return self.unpin_messages
+        #     case 'dump':
+        #         return self._dump
+        #     case 'load':
+        #         return self._load
+        # raise AttributeError(name)
+
+        if name == 'asy_request':
+            return self.async_request
+        elif name == 'forge':
+            return self.add_dialogs
+        elif name == 'pin':
+            return self.pin_messages
+        elif name == 'unpin':
+            return self.unpin_messages
+        elif name == 'dump':
+            return self._dump
+        elif name == 'load':
+            return self._load
+        else:
+            raise AttributeError(name)
 
     def _dump(self, fpath: str):
         """ 存档 """
@@ -480,6 +498,144 @@ class Chat:
         return image_url
 
 
+class Chat2:
+    default_api_key = None
+    default_base_url = 'https://beta.gpt4api.plus'
+
+    def __init__(self, api_key=None,
+                 gizmo_id=None,
+                 *,
+                 base_url=None,
+                 model='gpt-4o-mini'):
+        """
+        :param gizmo_id: gpts的id，比如 https://chatgpt.com/g/g-ABCD1234-ce-shi。则id就是"g-ABCD1234"
+            后面的gpts的名称变了没关系，前面前缀的id不要变就行
+        """
+        self.api_key = api_key or self.default_api_key
+        self.base_url = base_url or self.default_base_url
+        self.gizmo_id = gizmo_id  # 是否有action模块需要点击确认
+
+        self.headers = {
+            'Authorization': f'Bearer {self.api_key}'
+        }
+        self.session_state = {
+            'stream': False,
+            'model': model,
+        }
+
+        self.messages = list()  # 历史记录
+
+    def _upload_file(self, file_path, file_type='my_files', parent_payload=None):
+        """ 上传文件
+
+        :param payload: 如果传入外部主payload自动，会自动添加已上传的文件的状态内容信息
+        """
+        # 1 请求
+        url = f"{self.base_url}/chat/uploaded"
+        payload = {'type': file_type}
+        if 'conversation_id' in self.session_state:
+            payload['conversation_id'] = self.session_state['conversation_id']
+        files = [
+            ('files', (Path(file_path).name, open(file_path, 'rb')))
+        ]
+        resp = requests.post(url, headers=self.headers, data=payload, files=files)
+        resp_json = resp.json()
+
+        # 2 保存状态
+        self.session_state['conversation_id'] = resp_json['conversation_id']
+        self.messages.append(resp_json)
+        if parent_payload:
+            key_name = 'attachments' if file_type == 'my_files' else 'parts'
+            if key_name not in parent_payload:
+                parent_payload[key_name] = []
+            parent_payload[key_name].append(resp_json[key_name[:-1]])
+
+        return resp_json
+
+    def _upload_image(self, image_path, parent_payload=None):
+        """ 上传图片 """
+        return self._upload_file(image_path, 'multimodal', parent_payload=parent_payload)
+
+    def query(self, message, *, files=None, images=None):
+        # 1 预备
+        if self.gizmo_id:
+            url = f"{self.base_url}/chat/action"
+        else:
+            url = f"{self.base_url}/chat/all-tools"
+
+        headers = self.headers.copy()
+        # headers['Content-Type'] = 'application/json'
+
+        # 2 api初步配置
+        payload = self.session_state.copy()
+        payload['message'] = message
+        if self.gizmo_id:
+            payload['gizmo_id'] = self.gizmo_id
+
+        # 3 添加文件
+        if files:
+            if isinstance(files, str):
+                files = [files]
+            for file in files:
+                self._upload_file(file, parent_payload=payload)
+
+        # 4 添加图片
+        if images:
+            if isinstance(images, str):
+                images = [images]
+            for image in images:
+                self._upload_image(image, parent_payload=payload)
+
+        # 5 请求
+        # resp = requests.post(url, headers=headers, data=json.dumps(payload))
+        resp = requests.post(url, headers=headers, json=payload)  # 我觉得应该可以改这样调用，但还没测试
+        resp_json = resp.json()
+
+        # 6 保存状态
+        self.session_state['conversation_id'] = resp_json['conversation_id']
+        self.session_state['parent_message_id'] = resp_json['message_id']
+        self.messages.append(resp_json)
+
+        return '\n\n'.join(resp_json['contents'][-1]['message']['content']['parts'])
+
+
+class DifyChat:
+    default_base_url = 'http://localhost'
+
+    def __init__(self, app_key, *,
+                 conversation_id=None,
+                 user=None,
+                 base_url=None):
+        self.app_key = app_key
+        self.base_url = base_url or self.default_base_url
+
+        self.headers = {
+            'Authorization': f'Bearer {self.app_key}',
+        }
+
+        self.conversation_state = {
+            'inputs': {},
+            # 'response_mode': 'streaming',
+            'conversation_id': conversation_id or '',
+            'user': user or 'code4101',
+        }
+
+    def query(self, query, *, files=None, images=None):
+        """ files、images等后期再加
+        """
+        # 1 请求
+        payload = self.conversation_state.copy()
+        payload['query'] = query
+        resp = requests.post(f'{self.base_url}/v1/chat-messages',
+                             headers=self.headers, json=payload)
+        resp_json = resp.json()  # 如果需要可以打印这个字典看结构
+
+        # 2 保存状态
+        self.conversation_state['conversation_id'] = resp_json.get('conversation_id', '')
+
+        return resp_json['answer']
+
+
 def __2_信息摘要():
     pass
 
@@ -580,8 +736,7 @@ class CompressContent:
               expect_len=None,
               max_round=-1,
               text_spliter=None,
-              style=None,
-              model='gpt-3.5-turbo',
+              model='gpt-4o-mini',
               soft_merge_prompt=None,
               calc_len=None,
               logger=None,
@@ -606,7 +761,6 @@ class CompressContent:
         :param func text_spliter: 文本分割器，默认使用均切
             均匀切分，在不超过segment_len的情况下，尽量保持每段文本长度相同
             后续要支持langchain里分割算法，觉得那个切法更泛用，虽然效率估计更低
-        :param str style: 提取风格。暂未实装，涉及到如何跟已有prompts配合。
         :param str model: 使用的模型
         :param soft_merge_prompt: 最后一轮合并后，如果已经满足要求，是否要加一段提示词，再优化下描述，避免暴力合并效果过于生硬
 
@@ -621,6 +775,9 @@ class CompressContent:
 
         expect_len = expect_len or segment_len // 2
         logger = logger or MagicMock()
+        if logger is True:
+            logger = loguru_logger
+
         calc_len = calc_len or len
 
         if text_spliter is None:
@@ -641,22 +798,21 @@ class CompressContent:
                 contents2.extend(text_spliter(content))
 
             # 3 单个提取的接口
-            def extract_info(content, prompt):
+            def extract_info(i, content, prompt):
                 chat = Chat(model=model)
                 chat.add_system_prompt(prompt)
                 summary = chat.query(content)
-                logger.info(f'>>> 原始内容：{content}\n\n>>> 提取信息：{summary}\n\n')
+                logger.debug(f'>>> 第{i}块原始内容：\n{content}\n\n>>> 提取信息：{summary}\n\n')
                 return summary
 
             # 4 (并发)提取信息
             prompt_idx = min(round_num, len(extra_prompts) - 1)
             backend = 'threading' if max_workers != 1 else 'sequential'
             parallel = Parallel(n_jobs=max_workers, backend=backend, return_as='generator')
-            tasks = [delayed(extract_info)(c, extra_prompts[prompt_idx]) for c in contents2]
-            disable = False if ((not isinstance(logger, MagicMock)) and logger.level <= logging.INFO) else True
-            # disable = False
+            logger.debug(f'>>> 提取信息轮次：{round_num}，使用提示词：\n{extra_prompts[prompt_idx]}')
+            tasks = [delayed(extract_info)(i, c, extra_prompts[prompt_idx]) for i, c in enumerate(contents2, start=1)]
             contents = list(tqdm(parallel(tasks), total=len(contents2),
-                                 desc=f'round {round_num} 提取信息', disable=disable))
+                                 desc=f'round {round_num} 提取信息', disable=isinstance(logger, MagicMock)))
 
             # 5 合并数据
             contents = ['\n\n'.join(contents)]
@@ -682,8 +838,13 @@ class CompressContent:
                          **kwargs)
 
     @classmethod
-    def with_query(cls, content, query, extra_prompts=None, **kwargs):
-        """ 通用的信息压缩，根据用户的问题，进行信息压缩 """
+    def with_query(cls, content, query=None, extra_prompts=None, **kwargs):
+        """ 通用的信息压缩，根据用户的问题，进行信息压缩
+        但如果没传入query参数，也会自动改回common机制处理
+        """
+        if not query:
+            return cls.common(content, extra_prompts, **kwargs)
+
         return cls.basic(content,
                          extra_prompts or xlprompts.compress_content_with_query.render(query=query),
                          **kwargs)
