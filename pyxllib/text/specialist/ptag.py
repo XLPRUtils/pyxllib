@@ -143,7 +143,7 @@ def brieftexstr(s):
 # BRACE3 = '{(' + grp_bracket(3)[1:-1] + ')}'
 # BRACE4 = '{(' + grp_bracket(4)[1:-1] + ')}'
 # BRACE5 = '{(' + grp_bracket(5)[1:-1] + ')}'
-"""使用示例
+r""" 使用示例
 >> m = re.search(r'\\multicolumn' + BRACE3*3, r'\multicolumn{2}{|c|}{$2^{12}$个数}')
 >> m.groups()
 ('2', '|c|', '$2^{12}$个数')
@@ -160,7 +160,7 @@ def grp_topic(*, type_value=None):
 
 
 def grp_figure(cnt_groups=0, parpic=False):
-    """生成跟图片匹配相关的表达式
+    r""" 生成跟图片匹配相关的表达式
 
     D:\2017LaTeX\D招培试卷\高中地理，用过  \captionfig{3-3.eps}{图~3}
     奕本从2018秋季教材开始使用多种图片格式

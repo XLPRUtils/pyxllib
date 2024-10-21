@@ -3,7 +3,7 @@ charset-normalizer
 requests
 qiniu
 pyyaml
-coloredlogs
+loguru
 humanfriendly
 tqdm
 ujson
@@ -13,10 +13,11 @@ envariable
 decorator
 more-itertools
 fire
-
+xlrd
 pympler
 lxml
 beautifulsoup4
 numpy
 Jinja2
 pandas>=0.23.4
+pillow

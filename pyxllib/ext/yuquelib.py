@@ -20,10 +20,10 @@ class Yuque:
     语雀请求限制：每小时最多 5000 次请求，每秒最多 100 次请求
     """
 
-    def __init__(self, token, user_id=None):
+    def __init__(self, token=None, user_id=None):
         self.base_url = "https://www.yuque.com/api/v2"
         self.headers = {
-            "X-Auth-Token": token,
+            "X-Auth-Token": token or os.environ.get('YUQUE_TOKEN'),
             "Content-Type": "application/json"
         }
         self._user_id = user_id
@@ -197,7 +197,7 @@ class Yuque:
         elif return_mode == 'md':
             return res['data']['body']
         elif return_mode == 'title_and_md':
-            return f'文章标题：{res["data"]["title"]}\n\n{res["data"]["body"]}'
+            return res["data"]["title"], res["data"]["body"]
 
     def export_markdown(self, url, output_dir=None, post_mode=1):
         """ 导出md格式文件

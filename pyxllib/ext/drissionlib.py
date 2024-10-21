@@ -74,7 +74,11 @@ def get_dp_tab(dp_page=None) -> 'XlPage':
     elif dp_page is True:
         return ChromiumPage().new_tab()
     elif isinstance(dp_page, str):
-        return ChromiumPage().new_tab(dp_page)
+        def dp_page2(tab):  # 默认开启页面复用。 todo 以后可以改进成可选参数
+            if tab.url.startswith(dp_page):
+                return tab
+
+        return get_dp_page(dp_page2)
     else:
         return ChromiumPage().latest_tab
 

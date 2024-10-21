@@ -53,8 +53,7 @@ def get_xllog(name='xllog', *, log_file=None):
             xllog = logging.getLogger('pyxllib.xllog')
             fmt = '%(asctime)s %(message)s'
             if log_file:
-                # TODO 这里的格式设置是否能统一、精简？
-                file_handler = logging.FileHandler(f'{log_file}', 'w')
+                file_handler = logging.FileHandler(f'{log_file}', 'a')
                 file_handler.setLevel(logging.DEBUG)
                 file_handler.setFormatter(logging.Formatter(fmt))
                 xllog.addHandler(file_handler)

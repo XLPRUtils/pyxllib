@@ -766,7 +766,7 @@ class XlCell(openpyxl.cell.cell.Cell):  # 适用于 openpyxl.cell.cell.MergedCel
         # openpyxl的机制，如果没有配置日期格式，读取到的是默认的'mm-dd-yy'，其实在中文场景，默认格式应该是后者
         if fmt == 'mm-dd-yy':
             return 'yyyy/m/d'  # 中文的默认日期格式
-        elif fmt == 'yyyy\-mm\-dd':  # 不知道为什么会有提取到这种\的情况，先暴力替换了
+        elif fmt == r'yyyy\-mm\-dd':  # 不知道为什么会有提取到这种\的情况，先暴力替换了
             fmt = 'yyyy-mm-dd'
         return fmt
 
@@ -3018,12 +3018,51 @@ def extract_workbook_summary3(file_path, summary_limit_len=4000, **kwargs):
     return data
 
 
+def summary2_add_enums(summary2, enum_values):
+    # 1 预备
+    if enum_values is True:
+        enum_values = (20, 10)
+    max_len, max_num = enum_values
+
+    # 2 枚举值
+    for sheet in summary2['sheets']:
+        # 2.1 遍历计数
+        cols = defaultdict(Counter)
+        for addr, val in sheet['cells'].items():
+            n = len(str(val))
+            if not n or n > max_len:
+                continue
+            col = re.match(r'[A-Z]+', addr).group()
+            cols[col][val] += 1
+
+        # 2.2 添加枚举值列
+        enums = {}
+        keys = sorted(cols.keys(), key=column_index_from_string)
+        for k in keys:
+            ct = cols[k]
+            if len(ct) > max_num:
+                continue
+            vals = ct.most_common()
+            if vals[0][1] == 1:  # 都只出现了一次，也不认为是枚举值，跳过。或者是小数据表，一般也能全量展示。
+                continue
+            enums[k] = [v for v, _ in vals]
+
+        # 2.3 保存
+        if enums:
+            sheet['enums'] = enums
+            # enums2 = json.dumps(enums, ensure_ascii=False, default=str)
+            # sheet['enums'] = json.loads(enums2)
+
+    return summary2
+
+
 def extract_workbook_summary3b(file_path,
                                summary_limit_len=4000,
                                timeout_seconds=10,
                                return_mode=0,
                                debug=False,
                                len_mode=0,
+                               enum_values=False,
                                **kwargs):
     """
 
@@ -3036,6 +3075,9 @@ def extract_workbook_summary3b(file_path,
     :param len_mode:
         0, 使用len作为token长度评估
         1, 使用模型评估实际token长度
+    :param enum_values: 是否展示每列枚举值
+        False, 默认不展示
+        True, 展示，并且默认参数 (20, 10) 表示长度超过20的丢弃，只保留枚举类型不超过10种值的列
     :param kwargs: 其他是summary2读取文件的时候的参数，其实都不太关键，一般不用特地设置
     """
     res = {}
@@ -3056,7 +3098,10 @@ def extract_workbook_summary3b(file_path,
             res, load_time = extract_workbook_summary2(file_path, mode=1, return_mode=1, **kwargs)
             # res = convert_to_json_compatible(res)
             summary2_res = copy.deepcopy(res)
+            if enum_values:
+                res = summary2_add_enums(res, enum_values)
             summary2_time = time.time() - start_time - load_time
+
             start_time = time.time()
             if len_mode == 1:
                 res = WorkbookSummary3plus.summary2_to_summary3b(res, summary_limit_len)
