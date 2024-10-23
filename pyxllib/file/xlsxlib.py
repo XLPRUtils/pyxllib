@@ -2870,7 +2870,7 @@ class WorkbookSummary3:
 
         # 4 否则每张表按照比例删单元格，只保留前面部分的单元格
         # todo 这里应该有更好的筛选机制，后续可以思考思考
-        left_rate = min((summary_limit_len + cur_summary_len) / 2 * cur_summary_len, 0.9)  # 首轮减小一点调整幅度
+        left_rate = min((summary_limit_len + cur_summary_len) / (2 * cur_summary_len), 0.9)  # 首轮减小一点调整幅度
         while True:
             for i, st in enumerate(y['sheets']):
                 if i == active_sheet_index:
