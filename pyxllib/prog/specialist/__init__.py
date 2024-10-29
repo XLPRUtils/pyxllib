@@ -343,3 +343,49 @@ class BitMaskTool:
         html_content.append(df2.to_html())
 
         return '\n'.join(html_content)
+
+
+def loguru_setup_jsonl_logfile(logger, log_dir, rotation_size="10 MB"):
+    """
+    给loguru的日志器添加导出文件的功能，使用jsonl格式
+
+    :param logger: 日志记录器，一般是from loguru import logger的logger
+    :param log_dir: 存储日志的目录，因为有多个文件，这里要输入的是所在的目录
+    :param rotation_size: 文件多大后分割
+    :return:
+    """
+    from datetime import datetime
+
+    os.makedirs(log_dir, exist_ok=True)  # 自动创建日志目录
+
+    # 日志文件名匹配的正则表达式，格式为 年月日_时分秒.log
+    log_filename_pattern = re.compile(r"(\d{8}_\d{6})\.jsonl")
+
+    # 找到最新的日志文件
+    def find_latest_log_file(log_dir):
+        log_files = []
+        for file in os.listdir(log_dir):
+            if log_filename_pattern.match(file):
+                log_files.append(file)
+
+        if log_files:
+            # 根据时间排序，选择最新的日志文件
+            log_files.sort(reverse=True)
+            return os.path.join(log_dir, log_files[0])
+        return None
+
+    # 检查是否有未写满的日志文件
+    latest_log_file = find_latest_log_file(log_dir)
+
+    if latest_log_file:
+        log_path = latest_log_file
+    else:
+        # 生成新的日志文件名
+        log_filename = datetime.now().strftime("%Y%m%d_%H%M%S") + ".jsonl"
+        log_path = os.path.join(log_dir, log_filename)
+
+    # 配置 logger，写入日志文件，设置旋转条件，使用 JSON 序列化
+    logger.add(log_path, rotation=rotation_size, serialize=True)
+
+    # 输出初始化成功信息
+    logger.info(f"日志系统已初始化，日志文件路径：{log_path}")

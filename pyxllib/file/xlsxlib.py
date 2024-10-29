@@ -14,7 +14,7 @@ import time
 from pyxllib.prog.pupil import check_install_package, run_once
 
 check_install_package('openpyxl')
-check_install_package('premailer')
+# check_install_package('premailer')
 # check_install_package('xlrd2')
 check_install_package('yattag')
 check_install_package('jsonpickle')

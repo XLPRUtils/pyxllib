@@ -261,7 +261,9 @@ def xlpivot(df, index=None, columns=None, values=None):
     def func(items):  # 输入匹配的多行数据
         x = items.iloc[0]
         return f'{x["precision"]:.0f}，{x["recall"]:.0f}，{x["hmean"]:.2f}，{x["fps"]}'  # 返回显示的值
-    >> df2 = xlpivot(df, ['model_type'], ['dataset', 'total_frame'], {'precision，recall，hmean，fps': func})
+
+    >> df2 = xlpivot(df, ['model_type'], ['dataset', 'total_frame'],
+                        {'precision，recall，hmean，fps': func})
 
     注意技巧：如果要在分组后约束特定顺序，可以使用特殊前缀进行编号对齐
     """

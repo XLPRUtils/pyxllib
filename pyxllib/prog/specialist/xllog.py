@@ -29,7 +29,8 @@ def get_xllog(name='xllog', *, log_file=None):
 
     TODO 增加输出到钉钉机器人、邮箱的Handler？
     """
-    import logging, coloredlogs
+    # import logging, coloredlogs
+    import logging
 
     # 1 判断是否已存在，直接返回
     if ('pyxllib.' + name) in logging.root.manager.loggerDict:
@@ -57,10 +58,10 @@ def get_xllog(name='xllog', *, log_file=None):
                 file_handler.setLevel(logging.DEBUG)
                 file_handler.setFormatter(logging.Formatter(fmt))
                 xllog.addHandler(file_handler)
-            coloredlogs.install(level='DEBUG', logger=xllog, fmt=fmt)
+            # coloredlogs.install(level='DEBUG', logger=xllog, fmt=fmt)
     elif name == 'location':  # 附带代码所处位置信息
         loclog = logging.getLogger('pyxllib.location')
-        coloredlogs.install(level='DEBUG', logger=loclog, fmt='%(filename)s/%(lineno)d: %(message)s')
+        # coloredlogs.install(level='DEBUG', logger=loclog, fmt='%(filename)s/%(lineno)d: %(message)s')
     return logging.getLogger('pyxllib.' + name)
 
 

@@ -3,17 +3,8 @@
 # @Author : 陈坤泽
 # @Email  : 877362867@qq.com
 # @Date   : 2020/06/06
+
 import sys
-
-from pyxllib.prog.pupil import check_install_package
-
-if sys.platform == 'win32':
-    check_install_package('pyautogui')
-
-check_install_package('keyboard')
-check_install_package('klembord')
-check_install_package('mss')  # 多屏幕截图
-
 from collections import defaultdict
 import json
 import os
@@ -26,6 +17,7 @@ from pandas.api.types import is_list_like
 
 if sys.platform == 'win32':
     import pyautogui
+    import win32gui
 
 try:
     import pyscreeze  # NOQA pyautogui安装的时候会自动安装依赖的pyscreeze
@@ -40,6 +32,10 @@ from pyxllib.algo.shapelylib import ShapelyPolygon
 from pyxllib.file.specialist import File, Dir, XlPath
 from pyxllib.cv.expert import xlcv, xlpil
 from pyxlpr.data.labelme import LabelmeDict
+
+
+def __20210531():
+    """ 以前设想的一个跟labelme结合的自动化操作类 """
 
 
 class AutoGuiLabelData:
@@ -773,6 +769,9 @@ def grab_monitor(order=0, to_cv2=True):
         1，截取第1个屏幕
         2，截取第2个屏幕
         ...
+    :param to_cv2:
+        True, 转成cv2格式的图片
+        False, 使用pil格式的图片
     """
     from PIL import Image
     from pyxllib.xlcv import PilImg
