@@ -8,8 +8,11 @@ import os
 import shutil
 from tarfile import TarFile
 # 这个包里的ZipFile是拷贝后修改过的，不影响标准库zipfile里的功能
-import pyxllib.file.packlib.zipfile as zipfile
-from pyxllib.file.packlib.zipfile import ZipFile
+# import pyxllib.file.packlib.zipfile as zipfile
+# from pyxllib.file.packlib.zipfile import ZipFile
+import zipfile
+from zipfile import ZipFile
+import tempfile
 
 from pyxllib.file.specialist import XlPath, reduce_dir_depth
 from pyxllib.prog.pupil import inject_members
@@ -126,6 +129,25 @@ def _unpack_base(packfile, namelist, format=None, extract_dir=None, wrap=0):
         shutil.unpack_archive(packfile, extract_dir, format)
 
 
+def zip_filter_rule(path):
+    p = XlPath(path)
+
+    # 排除特定目录或文件
+    if set(p.parts) & {'__pycache__', '.git', '.idea', 'dist', 'build', '.pytest_cache', '.venv'}:
+        return 0
+
+    # 排除特定文件扩展名
+    if p.suffix in {'.egg-info', '.lock'}:
+        return 0
+
+    # 精细检查内部文件
+    if p.is_dir():
+        return 1
+
+    # 全部包含其他情况
+    return 2
+
+
 class XlZipFile(ZipFile):
 
     def infolist2(self, prefix=None, zipinfo=True):
@@ -150,6 +172,94 @@ class XlZipFile(ZipFile):
 
     def unpack(self, extract_dir=None, format='zip', wrap=0):
         _unpack_base(self.filename, self.namelist(), format, extract_dir, wrap)
+
+    def write_dir(self, directory, arcname=None, filter_rule=None):
+        """
+        将指定目录（包含子目录）添加到 zip 文件中，并可自定义在 zip 中的存储路径。
+
+        :param directory: 要压缩的目录路径
+        :param arcname: 在 zip 文件中存储的根目录名，
+            None, 默认跟ZipFile.write的arcname一样，直接取输入的目录名
+        :param filter_rule: 过滤规则函数，用于排除不需要的文件。函数应接受文件路径作为参数，
+                           返回0, 1, 或 2，分别表示排除、递归检查、全部包括。
+        """
+        if arcname is None:
+            arcname = directory
+
+        if filter_rule is True:
+            filter_rule = zip_filter_rule
+
+        for root, dirs, files in os.walk(directory):
+            for file in files:
+                file_path = os.path.join(root, file)
+
+                # 调用过滤函数获取过滤状态
+                if filter_rule:
+                    result = filter_rule(file_path)
+                    if result == 0:  # 明确不要
+                        continue
+                    elif result == 1:  # 需要递归精细检查
+                        pass  # 继续执行文件写入逻辑
+                    elif result == 2:  # 全部包含
+                        # 计算文件在 zip 文件中的相对路径
+                        zip_path = os.path.join(arcname, os.path.relpath(file_path, directory))
+                        self.write(file_path, zip_path)
+                        continue
+
+                # 默认情况下，递归处理
+                zip_path = os.path.join(arcname, os.path.relpath(file_path, directory))
+                self.write(file_path, zip_path)
+
+            for dir in dirs[:]:
+                dir_path = os.path.join(root, dir)
+
+                if filter_rule:
+                    result = filter_rule(dir_path)
+                    if result == 0:  # 明确不要
+                        dirs.remove(dir)  # 排除整个目录
+                    elif result == 2:  # 全部包含
+                        # 添加整个目录
+                        for root2, _, files2 in os.walk(dir_path):
+                            for file2 in files2:
+                                file_path = os.path.join(root2, file2)
+                                zip_path = os.path.join(arcname, os.path.relpath(file_path, directory))
+                                self.write(file_path, zip_path)
+                        dirs.remove(dir)  # 递归中不再处理此目录
+
+    def write_path(self, path, arcname=None, filter_rule=None):
+        """ 封装的同时支持文件或目录的操作 """
+        if XlPath(path).is_dir():
+            self.write_dir(path, arcname, filter_rule)
+        elif XlPath(path).is_file():
+            self.write(path, arcname)
+        else:
+            raise ValueError
+
+    def xlwrite(self, path, arcname=None, filter_rule=True):
+        self.write_path(path, arcname, filter_rule)
+
+    @classmethod
+    def create(cls, name=None):
+        """ 在临时目录下新建一个目录，然后放一个压缩包文件 """
+        # 如果没有提供 name，则生成一个临时的文件名
+        if name is None:
+            name = tempfile.mktemp(suffix=".zip").split('/')[-1]  # 提取生成的文件名
+
+        # 创建临时目录（因为可能有并发操作，每个处理都建立一个目录更安全）
+        temp_dir = tempfile.mkdtemp()
+        temp_zip_path = f"{temp_dir}/{name}"
+
+        # 创建 ZipFile 对象
+        zipf = ZipFile(temp_zip_path, 'w')
+        return zipf
+
+    def fastapi_resp(self):
+        """ 返回供fastapi后端使用的文件接口 """
+        from fastapi.responses import FileResponse
+
+        self.close()
+        return FileResponse(self.filename, media_type='application/zip',
+                            filename=XlPath(self.filename).name)
 
 
 class XlTarFile(TarFile):
@@ -218,76 +328,3 @@ def compress_to_zip(source_path, target_zip_path=None, wrap=None,
             zipf.write(source_path, arcname)
 
     return target_zip_path
-
-
-def smart_compress_zip(root, paths, check_func=None):
-    """ 智能压缩，比compress_to_zip功能会更强些
-
-    :param root: 要有个根目录，才知道paths里添加到压缩包的时候存储到怎样的相对目录下
-    :param paths: 所有待添加到压缩包的文件或目录
-    :param check_func: 规则判断函数，输入文件或目录的路径
-        return
-            0，明确不要
-            1，要使用，但要递归内部文件精细检查
-            2，全部都要
-    """
-
-    if check_func is None:
-        def check_func(path):
-            p = XlPath(path)
-
-            if set(p.parts) & {'__pycache__', '.git', '.idea', 'dist', 'build', '.pytest_cache'}:
-                return 0
-
-            if p.parts[-1].endswith('.egg-info'):
-                return 0
-
-            return 1
-
-    def add_dir(dir):
-        for subroot, _, names in os.walk(dir):
-            for name in names:
-                file = XlPath(subroot) / name
-                zipf.write(file, file.relpath(root))
-
-    def add_path(path):
-        tag = check_func(path)
-
-        if path.is_file():
-            if tag:
-                zipf.write(path, path.relpath(root))
-        elif path.is_dir():
-            if tag == 2:
-                add_dir(path)
-            elif tag == 1:
-                for subroot, _, names in os.walk(path):
-                    tag2 = check_func(subroot)
-                    if tag2 == 2:
-                        add_dir(subroot)
-                    elif tag2 == 1:
-                        for name in names:
-                            file = XlPath(subroot) / name
-                            if check_func(file):
-                                zipf.write(file, file.relpath(root))
-
-    # 工作目录会自动切换的，这里取工作目录名即可
-    if not isinstance(paths, list):
-        paths = [paths]
-
-    root = XlPath(root)
-    num = len(paths)
-    outfile = None
-    if num > 1:
-        outfile = root / XlPath(root.name + '.zip')
-    elif num == 1:
-        outfile = root / (XlPath(paths[0]).name + '.zip')
-    else:
-        return
-    zipf = XlZipFile(outfile, 'w', zipfile.ZIP_DEFLATED)
-
-    for subroot in paths:
-        add_path(XlPath(subroot))
-
-    zipf.close()
-
-    return outfile
