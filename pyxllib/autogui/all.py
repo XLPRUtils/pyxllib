@@ -4,6 +4,6 @@
 # @Email  : 877362867@qq.com
 # @Date   : 2024/10/29
 
-from pyxllib.ext.autogui.autogui import *
-from pyxllib.ext.autogui.virtualkey import *
-from pyxllib.ext.autogui.activewin import *
+from pyxllib.autogui.autogui import *
+from pyxllib.autogui.virtualkey import *
+from pyxllib.autogui.activewin import *

@@ -11,14 +11,15 @@ import cv2
 import psutil
 import numpy as np
 
-from pyxllib.prog.cachetools import xlcache
-from pyxllib.cv.xlcvlib import CvImg
-
 if sys.platform == 'win32':
     import pyautogui
     import win32gui
     import win32process
     from pywinauto import Desktop
+
+from pyxllib.prog.cachetools import xlcache
+from pyxllib.cv.xlcvlib import CvImg
+from pyxlpr.ai.clientlib import XlAiClient
 
 # 根据平台扩展相应的类
 if platform.system().lower() == "darwin":
@@ -98,6 +99,10 @@ class ActiveWindowCapture(OriginalMSS):
         hwnd = self.window.handle
         thread_id, process_id = win32process.GetWindowThreadProcessId(hwnd)
         return psutil.Process(process_id)
+
+    @xlcache(property=True)
+    def xlapi(self):
+        return XlAiClient()
 
     def __2_截图数据(self):
         pass
