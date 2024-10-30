@@ -204,7 +204,7 @@ class XlAiClient:
         self._priu_header = None
         self._priu_host = None
 
-        # 2 如果环境变量预存了账号信息，自动加载使用
+        # 2 (旧)如果环境变量预存了账号信息，自动加载使用
         accounts = XlOsEnv.get('XlAiAccounts', decoding=True)
         if accounts and auto_login:
             if 'aipocr' in accounts:
@@ -213,6 +213,17 @@ class XlAiClient:
                 self.login_mathpix(**accounts['mathpix'])
             if 'priu' in accounts:
                 self.login_priu(**accounts['priu'], check=check)
+
+        # 3 (新)增设了更规范的环境变量名
+        if auto_login and os.environ.get("XL_API_AIP_ID"):
+            self.login_aipocr(os.environ.get("XL_API_AIP_ID"),
+                              os.environ.get("XL_API_AIP_KEY"),
+                              os.environ.get("XL_API_AIP_SKEY"))
+        if auto_login and os.environ.get("XL_API_MATHPIX_ID"):
+            self.login_mathpix(os.environ.get("XL_API_MATHPIX_ID"),
+                               os.environ.get("XL_API_MATHPIX_KEY"))
+        if auto_login and os.environ.get("XL_API_PRIU_TOKEN"):
+            self.login_priu(os.environ.get("XL_API_PRIU_TOKEN"))
 
     def __A1_登录账号(self):
         pass
@@ -268,7 +279,7 @@ class XlAiClient:
             connent = False
             for host in hosts:
                 try:
-                    if '欢迎来到 厦门理工' in requests.get(f'{host}/test_page', timeout=5).text:
+                    if requests.get(f'{host}/healthz', timeout=5).status_code == 200:
                         self._priu_host = host
                         connent = True
                         break
