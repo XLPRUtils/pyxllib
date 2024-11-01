@@ -12,8 +12,9 @@ check_install_package('DrissionPage')
 import re
 from urllib.parse import unquote
 
+from deprecated import deprecated
 import DrissionPage
-from DrissionPage import ChromiumPage
+from DrissionPage import ChromiumPage, Chromium
 from DrissionPage._pages.chromium_base import ChromiumBase
 from DrissionPage._pages.chromium_tab import ChromiumTab
 from DrissionPage._base.base import BasePage, BaseElement
@@ -23,6 +24,7 @@ from pyxllib.text.pupil import strfind
 from pyxllib.file.specialist import GetEtag
 
 
+@deprecated(reason='get_dp_page逻辑不太对，请换用get_dp_tab')
 def get_dp_page(dp_page=None) -> 'XlPage':
     """
 
@@ -33,54 +35,56 @@ def get_dp_page(dp_page=None) -> 'XlPage':
         func(tab), 通过规则筛选tab，返回符合条件的第1个tab，否则新建一个tab
     """
 
-    if isinstance(dp_page, ChromiumPage):
+    if isinstance(dp_page, Chromium):
         return dp_page
     elif isinstance(dp_page, ChromiumTab):
         return dp_page.page
     elif callable(dp_page):
-        page0 = ChromiumPage()
+        page0 = Chromium()
         for tab in page0.get_tabs():
             if dp_page(tab):
                 return tab.page
         return page0.new_tab().page
     elif dp_page is True:
-        return ChromiumPage().new_tab().page
+        return Chromium().new_tab().page
     elif isinstance(dp_page, str):
-        return ChromiumPage().new_tab(dp_page).page
+        return Chromium().new_tab(dp_page).page
     else:
-        return ChromiumPage()
+        return Chromium()
 
 
-def get_dp_tab(dp_page=None) -> 'XlPage':
+def get_dp_tab(dp_tab=None) -> 'XlTab':
     """ 智能获取一个标签页tab
 
-    :param dp_page:
-        默认None, 返回默认的page，一般就是当前页面
-        True, 新建一个page
-        str, 新建一个对应url的page
+    :param dp_tab:
+        默认None, 返回默认的tab，一般就是当前页面
+        True, 新建一个tab
+        str, 新建一个对应url的tab，如果发现已存在的tab中已经有该url，则直接复用
         func(tab), 通过规则筛选tab，返回符合条件的第1个tab，否则新建一个tab
     """
 
-    if isinstance(dp_page, ChromiumPage):
-        return dp_page.latest_tab
-    elif isinstance(dp_page, ChromiumTab):
-        return dp_page
-    elif callable(dp_page):
-        page0 = ChromiumPage()
+    if isinstance(dp_tab, Chromium):
+        return dp_tab.latest_tab
+    elif isinstance(dp_tab, ChromiumTab):
+        return dp_tab
+    elif callable(dp_tab):
+        page0 = Chromium()
         for tab in page0.get_tabs():
-            if dp_page(tab):
+            if dp_tab(tab):
                 return tab
         return page0.new_tab()
-    elif dp_page is True:
-        return ChromiumPage().new_tab()
-    elif isinstance(dp_page, str):
-        def dp_page2(tab):  # 默认开启页面复用。 todo 以后可以改进成可选参数
-            if tab.url.startswith(dp_page):
+    elif dp_tab is True:
+        return Chromium().new_tab()
+    elif isinstance(dp_tab, str):
+        def dp_page2(tab):  # 默认开启页面复用
+            if tab.url == dp_tab:
                 return tab
-
-        return get_dp_page(dp_page2)
+        tab = get_dp_tab(dp_page2)
+        if tab.url == 'about:blank':
+            tab.get(dp_tab)
+        return tab
     else:
-        return ChromiumPage().latest_tab
+        return Chromium().latest_tab
 
 
 def get_latest_not_dev_tab(page=None):
@@ -133,7 +137,7 @@ class XlChromiumBase(ChromiumBase):
         except DrissionPage.errors.ElementLostError:
             return self
 
-    def get_download_files(self: ChromiumPage):
+    def get_download_files(self: Chromium):
         """ 获取下载列表
 
         :param search_name: 搜索文件名，输入该参数时，只会从上往下找到第一个匹配的文件
@@ -143,7 +147,7 @@ class XlChromiumBase(ChromiumBase):
         todo 默认应该显示是不全的，有时间可以考虑往下滑动继续检索的功能
         """
         files = []
-        page2 = self.new_tab('chrome://downloads/')
+        page2 = Chromium().new_tab('chrome://downloads/')
         items = page2('tag:downloads-manager', timeout=1).sr('#mainContainer')('#downloadsList').eles(
             'tag:downloads-item')
         for item in items:
@@ -189,8 +193,12 @@ class XlChromiumBase(ChromiumBase):
 inject_members(XlChromiumBase, ChromiumBase)
 
 
-class XlPage(XlChromiumBase, ChromiumTab, ChromiumPage):
+class XlPage(XlChromiumBase, ChromiumTab, Chromium):
     """ 只作为一个类型标记，无实质功能。在猴子补丁背景下，让ide能正确跳转函数定义。 """
+    pass
+
+
+class XlTab(XlChromiumBase, ChromiumTab, Chromium):
     pass
 
 

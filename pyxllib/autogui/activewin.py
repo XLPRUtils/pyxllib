@@ -12,10 +12,10 @@ import psutil
 import numpy as np
 
 if sys.platform == 'win32':
-    import pyautogui
     import win32gui
     import win32process
-    from pywinauto import Desktop
+    # from pywinauto import Desktop
+    import uiautomation
 
 from pyxllib.prog.cachetools import xlcache
 from pyxllib.cv.xlcvlib import CvImg
@@ -90,13 +90,13 @@ class ActiveWindowCapture(OriginalMSS):
     @xlcache(property=True)
     def window(self):
         """ 当前激活窗口 """
-        hwnd = win32gui.GetForegroundWindow()
-        return Desktop(backend="win32").window(handle=hwnd)
+        win = uiautomation.GetForegroundControl()
+        return win
 
     @xlcache(property=True)
     def process(self):
         """ 当前激活窗口 """
-        hwnd = self.window.handle
+        hwnd = self.window.NativeWindowHandle
         thread_id, process_id = win32process.GetWindowThreadProcessId(hwnd)
         return psutil.Process(process_id)
 
@@ -141,12 +141,12 @@ class ActiveWindowCapture(OriginalMSS):
             if order == -1:
                 # 截取当前活动窗口的截图
                 active_window = self.window
-                rect = active_window.rectangle()  # 获取窗口的矩形区域
+                rect = active_window.BoundingRectangle
                 monitor = {
                     'left': int(rect.left),
                     'top': int(rect.top),
-                    'width': int(rect.width()),
-                    'height': int(rect.height()),
+                    'width': int(rect.right - rect.left),
+                    'height': int(rect.bottom - rect.top),
                 }
                 sct_img = self.grab(monitor)
             else:
@@ -230,7 +230,7 @@ class ActiveWindowCapture(OriginalMSS):
 
         # 若需要标记当前激活窗口
         if mark_active_window:
-            img = self._mark_window_on_screenshot(img, self.window.rectangle(), order,
+            img = self._mark_window_on_screenshot(img, self.window.BoundingRectangle, order,
                                                   mark_params=mark_active_window)
 
         if to_pil:
