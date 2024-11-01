@@ -851,6 +851,7 @@ class 网课考勤:
 
         # 3 匹配完后，还有目标金额的数据要列出来
         items = df[df['收支金额(元)'] == f'`{value:.2f}']
+        # todo 这个要识别到'交易单号'中间的日期，降序排序
         for idx, row in items.iterrows():
             last_row += 1
             ws.cell2(last_row, '交易单号').value = row['微信支付业务单号']
