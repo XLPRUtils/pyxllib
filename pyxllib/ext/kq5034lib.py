@@ -850,13 +850,44 @@ class 网课考勤:
             df = df.drop(items.index)
 
         # 3 匹配完后，还有目标金额的数据要列出来
+        
+        # items = df[df['收支金额(元)'] == f'`{value:.2f}']
+        # # todo 这个要识别到'交易单号'中间的日期，降序排序
+        # for idx, row in items.iterrows():
+        #     last_row += 1
+        #     ws.cell2(last_row, '交易单号').value = row['微信支付业务单号']
+        #     ws.cell2(last_row, '交易订单号').value = row['业务凭证号'][1:]
+        #     ws.cell2(last_row, '订单金额').value = row['收支金额(元)']
+
+        # todo：新增测试用：
+        # 初始化一个空的 DataFrame，用于存储遍历结果
+        result_df = pd.DataFrame(columns=['微信支付业务单号', '业务凭证号', '收支金额'])
+        # 遍历符合条件的数据并存储到 result_df 中
         items = df[df['收支金额(元)'] == f'`{value:.2f}']
-        # todo 这个要识别到'交易单号'中间的日期，降序排序
         for idx, row in items.iterrows():
+            # 将 row 中的数据添加到 result_df 中
+            result_df = pd.concat([
+                result_df,
+                pd.DataFrame({
+                    '微信支付业务单号': [row['微信支付业务单号']],
+                    '业务凭证号': [row['业务凭证号'][1:]],  # 去掉业务凭证号的第一个字符
+                    '收支金额': [row['收支金额(元)']]
+                })
+            ], ignore_index=True)
+
+        # 提取日期部分，并将其转为可排序的格式
+        result_df['日期'] = result_df['微信支付业务单号'].str[11:19]  # 提取日期部分，假设日期位于固定位置
+        result_df['日期'] = pd.to_datetime(result_df['日期'], format='%Y%m%d')
+
+        # 按日期降序排序
+        result_df = result_df.sort_values(by='日期', ascending=False).drop(columns=['日期'])
+
+        # 将排序后的 DataFrame 写入到工作表中
+        for idx, row in result_df.iterrows():
             last_row += 1
             ws.cell2(last_row, '交易单号').value = row['微信支付业务单号']
-            ws.cell2(last_row, '交易订单号').value = row['业务凭证号'][1:]
-            ws.cell2(last_row, '订单金额').value = row['收支金额(元)']
+            ws.cell2(last_row, '交易订单号').value = row['业务凭证号']
+            ws.cell2(last_row, '订单金额').value = row['收支金额']
 
         # 4 保存
         self.wb.save(self.表格路径)
