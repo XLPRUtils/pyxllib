@@ -13,12 +13,18 @@ from copy import deepcopy
 from typing import Iterable
 import os
 from typing import (Iterable, Callable, List)
+import json
+import re
 
 import ctypes
 from ctypes import wintypes
 import uiautomation as auto
+from anytree import NodeMixin, RenderTree
 
 import win32clipboard
+
+from pyxllib.autogui.wechat_msgbox import msg_parsers
+from pyxllib.autogui.uiautolib import UiCtrlNode
 
 
 def __1_config():
@@ -243,6 +249,61 @@ def is_window_visible(class_name, name):
     return False
 
 
+class WechatMsgNode(UiCtrlNode):
+    """ 微信消息的节点类型 """
+
+    def __init__(self, msg_box_ctrl, parent=None):
+        super().__init__(msg_box_ctrl, parent)
+        self.time = None  # 每条消息都建立一个最近出现的时间作为时间戳？
+        self.msg_type = None  # 消息类型：system, receive, send
+        self.content_type = None  # 内容类型：text、image、file
+
+        self.user = None  # 用户名
+        self.user2 = None  # 群聊时用户会多一个群聊昵称
+        self.cite_text = None  # 引用的内容，引用的不一定是文本，但是统一转成文本显示的
+
+    def parse_ctrl(self):
+        """ 解析出更精细的结构化信息 """
+        from pyxllib.autogui.wechat_msgbox import msg_parsers
+        tag = self.get_hash_tag()
+        if tag in msg_parsers:
+            msg_parsers[tag](self)
+
+    def _format_text(self, text):
+        """ 将换行替换为空格的小工具方法 """
+        return text.replace('\n', ' ')
+
+    def render_tree(self, node=None, prefix="", is_root=True):
+        """ 可视化输出树结构信息进行数据结构分析 """
+        if node is None:
+            node = self  # 从根节点开始渲染
+
+        # 检查当前节点是否有 msg_type 标记
+        if node.msg_type:
+            # 如果有 msg_type 标记，则输出该节点信息，跳过子节点
+            msg = [f"{prefix}{node.msg_type}"]
+            if node.user:
+                msg.append(f"{node.user}：")
+            msg.append(self._format_text(node.text))
+            if node.cite_text:
+                msg.append(f"【引用】{self._format_text(node.cite_text)}")
+            print(' '.join(msg))
+            return  # 不再递归渲染子节点
+
+        # 否则正常输出当前节点信息
+        print(f"{prefix}{node.ctrl_type} {node.get_hash_tag()} {self._format_text(node.text)}")
+
+        # 递归渲染子节点，非根节点开始增加缩进
+        for child in node.children:
+            self.render_tree(child, prefix + ("    " if not is_root else ""), is_root=False)
+
+    def check_parser(self):
+        """ 检查解析效果 """
+        for c in self.root.children:
+            c.parse_ctrl()
+        self.root.render_tree()
+
+
 def __4_wx():
     pass
 
@@ -260,7 +321,7 @@ class WxOperation:
 
     Methods:
     -------
-    __goto_chat_box(name):
+    goto_chat_box(name):
         跳转到 指定好友窗口
     __send_text(*msgs):
         发送文本。
@@ -293,14 +354,14 @@ class WxOperation:
         # 微信窗口置顶
         self.wx_window.SetTopmost(isTopmost=True)
 
-    def __match_nickname(self, name) -> bool:
+    def match_nickname(self, name):
         """获取当前面板的好友昵称"""
         self.input_edit = self.wx_window.EditControl(Name=name)
         if self.input_edit.Exists(Interval.MAX_SEARCH_SECOND, searchIntervalSeconds=Interval.MAX_SEARCH_INTERVAL):
-            return True
+            return self.input_edit
         return False
 
-    def __goto_chat_box(self, name: str) -> bool:
+    def goto_chat_box(self, name: str) -> bool:
         """
         跳转到指定 name好友的聊天窗口。
 
@@ -310,6 +371,10 @@ class WxOperation:
         Returns:
             None
         """
+        if ctrl := self.match_nickname(name):
+            ctrl.SetFocus()
+            return ctrl
+
         assert name, "无法跳转到名字为空的聊天窗口"
         self.wx_window.SendKeys(text='{Ctrl}F', waitTime=Interval.BASE_INTERVAL)
         self.wx_window.SendKeys(text='{Ctrl}A', waitTime=Interval.BASE_INTERVAL)
@@ -330,6 +395,14 @@ class WxOperation:
         # 无匹配用户, 取消搜索框
         self.wx_window.SendKeys(text='{Esc}', waitTime=Interval.BASE_INTERVAL)
         return False
+
+    def get_messages(self):
+        """ 获得当前会话窗口的结构化对话记录 """
+        msg_box = WechatMsgNode(self.wx_window.ListControl(Name='消息'))
+        # for c in msg_box.children:
+        #     c.parse_ctrl()
+        # msg_box.render_tree()
+        msg_box.check_parser()
 
     def at_at_everyone(self, group_chat_name: str):
         """
@@ -517,8 +590,8 @@ class WxOperation:
             raise TypeError("发送的文件路径必须是可迭代的")
 
         # 如果当前面板已经是需发送好友, 则无需再次搜索跳转
-        if not self.__match_nickname(name=name):
-            if not self.__goto_chat_box(name=name):
+        if not self.match_nickname(name=name):
+            if not self.goto_chat_box(name=name):
                 raise NameError('昵称不匹配')
 
         # 设置输入框为当前焦点
