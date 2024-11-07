@@ -33,6 +33,18 @@ def ltrb2xywh(p):
     return [p[0], p[1], p[2] - p[0], p[3] - p[1]]
 
 
+def ltrb2polygon(p):
+    """ ltrb坐标转多边形
+
+    :param list|tuple p: [left, top, right, bottom]
+    :rtype: list
+
+    >>> ltrb2polygon([100, 50, 200, 150])
+    [[100, 50], [200, 50], [200, 150], [100, 150]]
+    """
+    return [p[:2], [p[2], p[1]], p[2:], [p[0], p[3]]]
+
+
 def rect2polygon(src_pts):
     """ 矩形对角线两个点，转成四边形四个点的模式来表达
     （输入左上、右下两个顶点坐标）

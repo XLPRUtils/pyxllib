@@ -15,6 +15,7 @@ import os
 from typing import (Iterable, Callable, List)
 import json
 import re
+import textwrap
 
 import ctypes
 from ctypes import wintypes
@@ -23,6 +24,7 @@ from anytree import NodeMixin, RenderTree
 
 import win32clipboard
 
+from pyxllib.prog.pupil import print2string
 from pyxllib.autogui.wechat_msgbox import msg_parsers
 from pyxllib.autogui.uiautolib import UiCtrlNode
 
@@ -224,11 +226,14 @@ def wake_up_window(class_name, name):
     if hwnd := win32gui.FindWindow(class_name, name):
         # 恢复窗口
         win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
-        # 尝试将窗口置前
-        try:
-            win32gui.SetForegroundWindow(hwnd)
-        except Exception as e:
-            print(f"尝试将窗口置前时出错: {e}")
+        # 检查窗口是否已在前
+        if win32gui.GetForegroundWindow() != hwnd:
+            # 尝试将窗口置前
+            try:
+                win32gui.SetForegroundWindow(hwnd)
+            except Exception as e:
+                pass
+                # print(f"尝试将窗口置前时出错: {e}")
 
 
 def is_window_visible(class_name, name):
@@ -249,63 +254,183 @@ def is_window_visible(class_name, name):
     return False
 
 
-class WechatMsgNode(UiCtrlNode):
-    """ 微信消息的节点类型 """
+def __4_wx():
+    pass
 
-    def __init__(self, msg_box_ctrl, parent=None):
-        super().__init__(msg_box_ctrl, parent)
+
+class MsgNode(UiCtrlNode):
+    """ 一条消息的节点 """
+
+    def __init__(self, msg_ctrl, parent=None, *, build_depth=-1):
+        super().__init__(msg_ctrl, parent, build_depth=build_depth)
         self.time = None  # 每条消息都建立一个最近出现的时间作为时间戳？
         self.msg_type = None  # 消息类型：system, receive, send
-        self.content_type = None  # 内容类型：text、image、file
+        self.content_type = None  # 内容类型：text、image、file、time
 
         self.user = None  # 用户名
         self.user2 = None  # 群聊时用户会多一个群聊昵称
         self.cite_text = None  # 引用的内容，引用的不一定是文本，但是统一转成文本显示的
 
-    def parse_ctrl(self):
+        self.render_text = None  # 供人预览，和简化给ai查看的格式
+
+    def build_children(self, build_depth, child_node_class=None):
+        if build_depth == 0:
+            return
+        child_node_class = child_node_class or UiCtrlNode
+        for child_ctrl in self.ctrl.GetChildren():
+            child_node_class(child_ctrl, parent=self, build_depth=build_depth - 1)
+
+    def init(self):
         """ 解析出更精细的结构化信息 """
         from pyxllib.autogui.wechat_msgbox import msg_parsers
-        tag = self.get_hash_tag()
+
+        tag = self.get_ctrl_hash_tag()
         if tag in msg_parsers:
             msg_parsers[tag](self)
 
-    def _format_text(self, text):
-        """ 将换行替换为空格的小工具方法 """
-        return text.replace('\n', ' ')
+    def render_tree(self):
+        """ 展示以self为根节点的整体内容结构 """
+        # 1 未解析过的节点，原样输出树形结构供添加解析
+        if not self.msg_type:
+            return super().render_tree()
 
-    def render_tree(self, node=None, prefix="", is_root=True):
-        """ 可视化输出树结构信息进行数据结构分析 """
-        if node is None:
-            node = self  # 从根节点开始渲染
+        # 2 已设置好预览文本的直接输出
+        if self.render_text:
+            return self.render_text
 
-        # 检查当前节点是否有 msg_type 标记
-        if node.msg_type:
-            # 如果有 msg_type 标记，则输出该节点信息，跳过子节点
-            msg = [f"{prefix}{node.msg_type}"]
-            if node.user:
-                msg.append(f"{node.user}：")
-            msg.append(self._format_text(node.text))
-            if node.cite_text:
-                msg.append(f"【引用】{self._format_text(node.cite_text)}")
-            print(' '.join(msg))
-            return  # 不再递归渲染子节点
+        # 3 否则用一套通用的机制渲染输出
+        fmt = self._format_text
+        # 定义类型到符号的映射
+        type_to_symbol = {
+            'send': '↑',
+            'receive': '↓',
+            'system': '⚙️'  # 假设 'system' 类型对应的符号是 ⚙️
+        }
+        # 根据 msg_type 获取相应的符号
+        msg = [f"{type_to_symbol.get(self.msg_type, self.msg_type)}"]
 
-        # 否则正常输出当前节点信息
-        print(f"{prefix}{node.ctrl_type} {node.get_hash_tag()} {self._format_text(node.text)}")
+        if self.user:
+            msg.append(f"{self.user}: ")
+        msg.append(fmt(self.text))
 
-        # 递归渲染子节点，非根节点开始增加缩进
-        for child in node.children:
-            self.render_tree(child, prefix + ("    " if not is_root else ""), is_root=False)
+        if self.cite_text:
+            msg.append(f"【引用】{fmt(self.cite_text)}")
+        return ' '.join(msg)
 
-    def check_parser(self):
-        """ 检查解析效果 """
-        for c in self.root.children:
-            c.parse_ctrl()
-        self.root.render_tree()
+    def is_match(self, msg_node):
+        """ 两条msg_node是否对应的上 """
+        from datetime import datetime
+
+        # 1 比如内容一致
+        if self.render_tree() == msg_node.render_tree():
+            return 2  # 强一致
+
+        # 2 或者"撤回"格式对应的上
+        is_recall = (self.content_type == 'recall' or msg_node.content_type == 'recall')
+        user_matches = is_recall and (self.user == msg_node.user or self.user2 == msg_node.user2)
+        if is_recall and user_matches:
+            return 1  # 弱一致
+
+        # 3 判断是否为 'system'、'time' 类型
+        is_system_time_type = (self.msg_type == msg_node.msg_type == 'time')
+        if is_system_time_type:
+            # 检查时间匹配，确保都是 datetime 类型，并只比较年月日时分部分
+            same_time = (
+                    isinstance(self.time, datetime) and
+                    isinstance(msg_node.time, datetime) and
+                    self.time.strftime('%Y-%m-%d %H:%M') == msg_node.time.strftime('%Y-%m-%d %H:%M')
+            )
+            if same_time:
+                return 2
+
+            if self.text == '以下是新消息' or msg_node.text == '以下是新消息':
+                return 1
+
+        # 4 如果有一条.content_type=='button_more'，也直接弱匹配
+        if self.content_type == 'button_more' or msg_node.content_type == 'button_more':
+            return 1
 
 
-def __4_wx():
-    pass
+class ChatBoxNode(UiCtrlNode):
+    """ 当前会话消息窗的节点 """
+
+    def __init__(self, chat_box_ctrl, parent=None, *, build_depth=-1):
+        super().__init__(chat_box_ctrl, parent, build_depth=build_depth)
+
+    def build_children(self, build_depth, child_node_class=None):
+        # 1 遍历消息初始化
+        if build_depth == 0:
+            return
+        for child_ctrl in self.ctrl.GetChildren():
+            node = MsgNode(child_ctrl, parent=self, build_depth=build_depth - 1)
+            node.init()  # 节点扩展的初始化操作
+
+        # 2 设置每条消息的时间
+        last_time = None
+        for c in self.children:
+            if c.time:
+                last_time = c.time
+            else:
+                c.time = last_time
+
+    def findidx_system_time(self):
+        """ 最后条系统时间标记 """
+        for idx in range(len(self.children) - 1, -1, -1):
+            if self.children[idx].content_type == 'time':
+                return idx
+        return -1
+
+    def findidx_last_send(self):
+        """ 最后条发出去的消息 """
+        for idx in range(len(self.children) - 1, -1, -1):
+            if self.children[idx].content_type == 'receive':
+                return idx
+        return -1
+
+    def findidx_last_match(self, old_chat_box):
+        """
+        :param old_chat_box: 旧的消息队列
+        :return: 在当前 self.children 中首次匹配到的 old_chat_box 最后几条消息的起始下标
+        """
+        x, y = old_chat_box.children, self.children
+        n, m = len(x), len(y)
+
+        def check_bais(k):
+            """ 检查偏移量k是否能匹配 """
+            # i, j分别指向"最后一条"数据，然后开始匹配
+            i, j = n - 1, m - k - 1
+            while min(i, j) > 0:  # 不匹配第0条，第0条太特别
+                if y[j].is_match(x[i]):
+                    i, j = i - 1, j - 1
+                    continue
+                return False
+            return True
+
+        for k in range(m):
+            if check_bais(k):
+                return m - k - 1
+
+        return -1  # 如果没有匹配，返回 -1
+
+
+class WeChatMainWnd(UiCtrlNode):
+
+    def build_children(self, build_depth, child_node_class=None):
+        if build_depth == 0:
+            return
+        # 跳过两级
+        ctrl = self.ctrl.GetChildren()[0].GetChildren()[0]
+        for child_ctrl in ctrl.GetChildren():
+            UiCtrlNode(child_ctrl, parent=self, build_depth=build_depth - 1)
+
+    def wake_up_window(self):
+        wake_up_window('WeChatMainWndForPC', '微信')
+
+    @classmethod
+    def get_window(cls, class_name='WeChatMainWndForPC', name='微信', build_depth=-1):
+        wake_up_window(class_name, name=name)
+        ctrl = auto.WindowControl(ClassName=class_name, Name=name)
+        return cls(ctrl, build_depth=build_depth)
 
 
 class WxOperation:
@@ -398,11 +523,8 @@ class WxOperation:
 
     def get_messages(self):
         """ 获得当前会话窗口的结构化对话记录 """
-        msg_box = WechatMsgNode(self.wx_window.ListControl(Name='消息'))
-        # for c in msg_box.children:
-        #     c.parse_ctrl()
-        # msg_box.render_tree()
-        msg_box.check_parser()
+        msg_box = ChatBoxNode(self.wx_window.ListControl(Name='消息'))
+        print(msg_box.render_tree())
 
     def at_at_everyone(self, group_chat_name: str):
         """

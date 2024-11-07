@@ -25,17 +25,70 @@ def register_tool(key):
     return decorator
 
 
+def fmt_text(text):
+    return text.replace('\n', ' ')
+
+
+def parse_time_string(time_str):
+    """
+    解析不同格式的时间字符串为标准的 Python datetime 类型。
+
+    支持以下格式：
+    1. 完整的日期和时间，如 "2024年10月31日 22:03"，解析为对应的 datetime 对象。
+    2. 仅包含时间的字符串，如 "19:18"，会被解析为当天的时间点，日期部分设为当前日期。
+    3. 特殊字符串 "以下为新消息"，解析为当前时间的 datetime 对象。
+
+    示例输入：
+    - "2024年10月31日 22:03"
+    - "2024年11月1日 20:09"
+    - "2024年11月1日 21:08"
+    - "19:18"
+    - "20:16"
+    - "以下为新消息"
+    """
+    from datetime import datetime
+
+    # 定义当前日期
+    now = datetime.now()
+
+    # 定义不同的正则表达式模式
+    full_date_pattern = r"(\d{4})年(\d{1,2})月(\d{1,2})日\s+(\d{1,2}):(\d{2})"
+    partial_time_pattern = r"^(\d{1,2}):(\d{2})$"
+    new_message_pattern = r"^以下为新消息$"
+
+    # 解析完整的日期时间
+    match = re.match(full_date_pattern, time_str)
+    if match:
+        year, month, day, hour, minute = map(int, match.groups())
+        return datetime(year, month, day, hour, minute)
+
+    # 解析只有时间（小时:分钟），默认当天的日期
+    match = re.match(partial_time_pattern, time_str)
+    if match:
+        hour, minute = map(int, match.groups())
+        return datetime(now.year, now.month, now.day, hour, minute)
+
+    # 解析 "以下为新消息" 为当前时间
+    if re.match(new_message_pattern, time_str):
+        return now
+
+    # 如果未匹配到任何模式，返回 None 表示无法解析
+    return None
+
+
 @register_tool("1b2p3p3b3p")
 def 系统_查看更多消息(node):
     node.msg_type = 'system'
     node.content_type = 'button_more'
+    node.render_text = f'⚙️: 点击此处可 {node.text}'
 
 
 @register_tool("1l2t")
 def 系统_时间标签(node):
     node.msg_type = 'system'
     node.content_type = 'time'
-    node.time = node.text
+    node.time = parse_time_string(node.text)
+    node.render_text = f'⚙️: {node.text}'
 
 
 # 刚刚发送的特殊时间标签
@@ -43,13 +96,29 @@ def 系统_时间标签(node):
 def 系统_时间标签2(node):
     node.msg_type = 'system'
     node.content_type = 'time'
-    node.time = node.text
+    node.time = parse_time_string(node.text)
+    node.render_text = f'⚙️: {node.text}'
 
 
 @register_tool("1l2p3p3t3p")
 def 系统_撤回消息(node):
     node.msg_type = 'system'
-    node.content_type = 'recall'
+
+    if node.text.endswith('撤回了一条消息'):
+        node.content_type = 'recall'
+        if node.text == '你撤回了一条消息':
+            node.user = node.user2 = '你'
+        else:
+            node.user = re.search(r'"(.+)"', node.text).group(1)
+            node.user2 = node.user
+        node.render_text = f'⚙️: {node.text}'
+    elif node.text.endswith('现在可以开始聊天了。'):
+        node.content_type = 'add_friend'
+        node.user = re.search(r'你已添加了(.+?)，现在可以开始聊天了。', node.text).group(1)
+        node.user2 = node.user
+        node.render_text = f'⚙️: {node.text}'
+    else:
+        raise ValueError
 
 
 @register_tool("1l2p3p3p4p5p6p7t3b")
@@ -57,6 +126,7 @@ def 发送_文本(node):
     node.msg_type = 'send'
     node.content_type = 'text'
     node.user = node[0][2].text
+    node.render_text = f'↑{node.user}: {fmt_text(node.text)}'
 
 
 @register_tool("1l2p3p3p4p5p6p7p7p8p8b3b")
@@ -147,6 +217,7 @@ def 接收_文本(node):
     node.msg_type = 'receive'
     node.content_type = 'text'
     node.user = node[0][0].text
+    node.render_text = f'↓{node.user}: {fmt_text(node.text)}'
 
 
 @register_tool("1l2p3b3p4p5p6p7p7b3p")
@@ -154,6 +225,15 @@ def 接收_图片(node):
     node.msg_type = 'receive'
     node.content_type = 'image'
     node.user = node[0][0].text
+    node.render_text = f'↓{node.user}: [图片]'
+
+
+@register_tool("1l2p3b3p4p5p6p7p8p9p10t10p11t11t9p10p10p8p9t7b7b3p")
+def 接收_文件(node):
+    node.msg_type = 'receive'
+    node.content_type = 'file'
+    node.user = node[0][0].text
+    node.render_text = f'↓{node.user}: {fmt_text(node.text)}'
 
 
 @register_tool("1l2p3b3p4p5p6p7p8b8p8t7b3p")
