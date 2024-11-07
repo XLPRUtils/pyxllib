@@ -27,7 +27,7 @@ except ModuleNotFoundError:
 from pyxllib.prog.newbie import first_nonnone, round_int
 from pyxllib.prog.pupil import xlwait, DictTool, check_install_package
 from pyxllib.prog.specialist import TicToc
-from pyxllib.algo.geo import ComputeIou, ltrb2xywh, xywh2ltrb
+from pyxllib.algo.geo import ComputeIou, ltrb2xywh, xywh2ltrb, ltrb2polygon
 from pyxllib.algo.shapelylib import ShapelyPolygon
 from pyxllib.file.specialist import File, Dir, XlPath
 from pyxllib.cv.expert import xlcv, xlpil
@@ -814,6 +814,36 @@ def list_windows(mode=1):
 
     win32gui.EnumWindows(callback, None)
     return ls
+
+
+class UiTracePath:
+    """ 在window窗口上用鼠标勾画路径 """
+
+    @classmethod
+    def from_polygon(cls, points, duration_per_circle=3, num_circles=1):
+        """
+        让鼠标顺时针围绕任意多边形移动。
+
+        :param points: 多边形顶点的坐标列表，按顺时针或逆时针顺序排列
+        :param duration_per_circle: 每圈耗时
+        :param num_circles: 总圈数
+        """
+        num_points = len(points)
+        segment_duration = duration_per_circle / num_points  # 每条边的耗时
+
+        for _ in range(num_circles):
+            # 顺时针移动鼠标
+            for i in range(num_points):
+                start = points[i]
+                pyautogui.moveTo(start[0], start[1])
+                end = points[(i + 1) % num_points]
+                # 使用 moveTo 的 duration 参数控制每条边的移动时间
+                pyautogui.moveTo(end[0], end[1], duration=segment_duration)
+
+    @classmethod
+    def from_ltrb(cls, ltrb, **kwargs):
+        points = ltrb2polygon(ltrb)
+        return cls.from_polygon(points, **kwargs)
 
 
 if __name__ == '__main__':

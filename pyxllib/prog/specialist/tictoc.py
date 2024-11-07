@@ -8,6 +8,7 @@
 import time
 import timeit
 
+from loguru import logger
 from humanfriendly import format_timespan
 
 from pyxllib.algo.pupil import natural_sort, ValuesStat
@@ -91,24 +92,19 @@ class TicToc:
 
     def __enter__(self):
         """Start the timer when using TicToc in a context manager."""
-        from pyxllib.prog.specialist import get_xllog
-
         if self.title == '__main__' and not self.disable:
-            get_xllog().info(f'time.process_time(): {human_readable_number(time.process_time(), "秒")}.')
+            logger.info(f'time.process_time(): {human_readable_number(time.process_time(), "秒")}.')
         self.start = timeit.default_timer()
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         """On exit, print time elapsed since entering context manager."""
-        from pyxllib.prog.specialist import get_xllog
-
         elapsed = self.tocvalue()
-        xllog = get_xllog()
 
         if exc_tb is None:
             if not self.disable and (self.min_display_seconds is None or elapsed >= self.min_display_seconds):
-                xllog.info(f'{self.title} finished in {human_readable_number(elapsed, "秒")}.')
+                logger.info(f'{self.title} finished in {human_readable_number(elapsed, "秒")}.')
         else:
-            xllog.info(f'{self.title} interrupt in {human_readable_number(elapsed, "秒")},')
+            logger.info(f'{self.title} interrupt in {human_readable_number(elapsed, "秒")},')
 
 
 __timer = """
