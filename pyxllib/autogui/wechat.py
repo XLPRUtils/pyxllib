@@ -17,16 +17,15 @@ import json
 import re
 import textwrap
 
-import ctypes
-from ctypes import wintypes
 import uiautomation as auto
 from anytree import NodeMixin, RenderTree
 
-import win32clipboard
+import win32con
+import win32gui
 
 from pyxllib.prog.pupil import print2string
 from pyxllib.autogui.wechat_msgbox import msg_parsers
-from pyxllib.autogui.uiautolib import UiCtrlNode
+from pyxllib.autogui.uiautolib import find_ctrl, UiCtrlNode, copy_files_to_clipboard
 
 
 def __1_config():
@@ -56,144 +55,8 @@ class IntervalConfig:
 Interval = IntervalConfig
 
 
-def __2_clipboard_utils():
+def __2_window_utils():
     pass
-
-
-def retry_on_failure(max_retries: int = 5):
-    """
-    一个装饰器，用于在失败时重试执行被装饰的函数。
-
-    Args:
-        max_retries (int): 最大重试次数。
-
-    Returns:
-        Callable: 包装后的函数。
-    """
-
-    def decorator(func: Callable):
-        def wrapper(*args, **kwargs):
-            for attempt in range(max_retries):
-                try:
-                    if func(*args, **kwargs):
-                        return True
-                except Exception as e:
-                    time.sleep(.05)
-                    print(f"Attempt {attempt + 1} failed: {e}")
-            return False
-
-        return wrapper
-
-    return decorator
-
-
-def set_clipboard_data(fmt: int, buf: ctypes.Array) -> bool:
-    """
-    将数据设置到Windows剪切板中。
-
-    Args:
-        fmt (int): 数据格式，例如 win32clipboard.CF_HDROP。
-        buf (ctypes.Array): 要设置到剪切板的数据。
-
-    Returns:
-        bool: 操作成功返回 True，否则返回 False。
-    """
-    try:
-        win32clipboard.OpenClipboard()
-        win32clipboard.EmptyClipboard()
-        win32clipboard.SetClipboardData(fmt, buf)
-        return True
-    except Exception as e:
-        print(f"Error setting clipboard data: {e}")
-        return False
-    finally:
-        win32clipboard.CloseClipboard()
-
-
-def get_clipboard_files() -> List[str]:
-    """
-    获取剪切板中的文件路径列表。
-
-    Returns:
-        List[str]: 包含剪切板中文件路径的列表，如果没有文件路径或操作失败，返回空列表。
-    """
-    try:
-        win32clipboard.OpenClipboard()
-        if win32clipboard.IsClipboardFormatAvailable(win32clipboard.CF_HDROP):
-            return list(win32clipboard.GetClipboardData(win32clipboard.CF_HDROP))
-        else:
-            return list()
-    finally:
-        win32clipboard.CloseClipboard()
-
-
-@retry_on_failure(max_retries=5)
-def validate_clipboard_files(file_paths: Iterable[str], fmt: int, buf: ctypes.Array) -> bool:
-    """
-    验证剪切板中的文件路径是否与给定的文件路径一致。
-
-    Args:
-        file_paths (Iterable): 一个包含文件路径的可迭代对象，每个路径都是一个字符串。
-        fmt (int): 数据格式，例如 win32clipboard.CF_HDROP。
-        buf (ctypes.Array): 要验证的剪切板数据。
-
-    Returns:
-        bool: 如果剪切板中的文件路径与给定的文件路径一致，则返回 True
-
-    Raises:
-        ValueError: 如果剪切板文件路径与给定文件路径不一致。
-    """
-    # 设置文件到剪切板
-    set_clipboard_data(fmt, buf)
-    # 验证剪切板中的文件路径是否与给定的文件路径一致
-    if set(get_clipboard_files()) == set(file_paths):
-        return True
-    raise ValueError("剪切板文件路径不对哇！")
-
-
-def copy_files_to_clipboard(file_paths: Iterable[str]) -> bool:
-    """
-    将一系列文件路径复制到Windows剪切板。这允许用户在其他应用程序中，如文件资源管理器中粘贴这些文件。
-
-    Args:
-        file_paths (Iterable): 一个包含文件路径的可迭代对象，每个路径都是一个字符串。
-
-    Returns:
-        bool: 如果成功将文件路径复制到剪切板，则返回 True，否则返回 False
-    """
-    # 定义所需的 Windows 结构和函数
-    CF_HDROP = 15
-
-    class DROPFILES(ctypes.Structure):
-        _fields_ = [("pFiles", wintypes.DWORD),
-                    ("pt", wintypes.POINT),
-                    ("fNC", wintypes.BOOL),
-                    ("fWide", wintypes.BOOL)]
-
-    offset = ctypes.sizeof(DROPFILES)
-    length = sum(len(p) + 1 for p in file_paths) + 1
-    size = offset + length * ctypes.sizeof(wintypes.WCHAR)
-    buf = (ctypes.c_char * size)()
-    df = DROPFILES.from_buffer(buf)
-    df.pFiles, df.fWide = offset, True
-    for path in file_paths:
-        path = os.path.normpath(path)
-        array_t = ctypes.c_wchar * (len(path) + 1)
-        path_buf = array_t.from_buffer(buf, offset)
-        path_buf.value = path
-        offset += ctypes.sizeof(path_buf)
-    buf[offset:offset + ctypes.sizeof(wintypes.WCHAR)] = b'\0\0'
-
-    # 验证文件是否成功复制到剪切板
-    return validate_clipboard_files([os.path.normpath(file) for file in file_paths], CF_HDROP, buf=buf)
-
-
-def __3_window_utils():
-    pass
-
-
-import win32con
-import win32gui
 
 
 def minimize_wechat(class_name, name):
@@ -254,7 +117,7 @@ def is_window_visible(class_name, name):
     return False
 
 
-def __4_wx():
+def __3_wechat():
     pass
 
 
@@ -276,6 +139,7 @@ class MsgNode(UiCtrlNode):
     def build_children(self, build_depth, child_node_class=None):
         if build_depth == 0:
             return
+        self.children = []
         child_node_class = child_node_class or UiCtrlNode
         for child_ctrl in self.ctrl.GetChildren():
             child_node_class(child_ctrl, parent=self, build_depth=build_depth - 1)
@@ -351,16 +215,17 @@ class MsgNode(UiCtrlNode):
             return 1
 
 
-class ChatBoxNode(UiCtrlNode):
+class MsgBoxNode(UiCtrlNode):
     """ 当前会话消息窗的节点 """
 
     def __init__(self, chat_box_ctrl, parent=None, *, build_depth=-1):
         super().__init__(chat_box_ctrl, parent, build_depth=build_depth)
 
-    def build_children(self, build_depth, child_node_class=None):
+    def build_children(self, build_depth=-1, child_node_class=None):
         # 1 遍历消息初始化
         if build_depth == 0:
             return
+        self.children = []
         for child_ctrl in self.ctrl.GetChildren():
             node = MsgNode(child_ctrl, parent=self, build_depth=build_depth - 1)
             node.init()  # 节点扩展的初始化操作
@@ -387,19 +252,30 @@ class ChatBoxNode(UiCtrlNode):
                 return idx
         return -1
 
-    def findidx_last_match(self, old_chat_box):
+    def findidx_last_match(self, old_childrens):
         """
         :param old_chat_box: 旧的消息队列
         :return: 在当前 self.children 中首次匹配到的 old_chat_box 最后几条消息的起始下标
         """
-        x, y = old_chat_box.children, self.children
+        x, y = old_childrens, self.children
         n, m = len(x), len(y)
+
+        def is_system(a):
+            """ 非"撤回"的系统消息 """
+            if a.msg_type == 'system' and a.content_type != 'recall':
+                return True
 
         def check_bais(k):
             """ 检查偏移量k是否能匹配 """
             # i, j分别指向"最后一条"数据，然后开始匹配
             i, j = n - 1, m - k - 1
             while min(i, j) > 0:  # 不匹配第0条，第0条太特别
+                if is_system(x[i]):
+                    i -= 1
+                    continue
+                if is_system(y[j]):
+                    j -= 1
+                    continue
                 if y[j].is_match(x[i]):
                     i, j = i - 1, j - 1
                     continue
@@ -412,25 +288,175 @@ class ChatBoxNode(UiCtrlNode):
 
         return -1  # 如果没有匹配，返回 -1
 
+    def check_update(self):
+        """ 更新当前消息记录，并返回新收到的消息节点 """
+        import copy
+        old_childrens = copy.copy(self.children)
+        self.build_children()
+        idx = self.findidx_last_match(old_childrens)
+        return self.children[idx + 1:]
+
+
+class EditorNode(UiCtrlNode):
+    """ 编辑器节点 """
+
 
 class WeChatMainWnd(UiCtrlNode):
 
-    def build_children(self, build_depth, child_node_class=None):
+    def __1_结构建构(self):
+        pass
+
+    def __init__(self, ctrl=None, parent=None, *, build_depth=12):
+        """
+        :param ctrl: 当前节点
+        :param parent: 父结点
+        :param build_depth: 自动构建多少层树节点，默认-1表示构建全部节点
+            目前微信发现12层一般够大部分情况使用了
+        """
+        if ctrl is None:
+            ctrl = find_ctrl('WeChatMainWndForPC', '微信')
+        super().__init__(ctrl, parent=parent, build_depth=build_depth)
+
+    def build_children(self, build_depth=12, child_node_class=None):
+        # 1 构建树结构
         if build_depth == 0:
             return
+
         # 跳过两级
-        ctrl = self.ctrl.GetChildren()[0].GetChildren()[0]
+        self.children = []  # 删除现有的所有子结点
+        ctrl = self.ctrl.GetChildren()[-1].GetChildren()[0]
         for child_ctrl in ctrl.GetChildren():
             UiCtrlNode(child_ctrl, parent=self, build_depth=build_depth - 1)
 
-    def wake_up_window(self):
-        wake_up_window('WeChatMainWndForPC', '微信')
+        # 2 预先定义好一些常用的控件
+        self.nav = self[0]  # 导航
+        self.nav_avatar = self.nav[0]  # 导航_头像
+        self.nav_chat = self.nav[1]  # 导航_聊天
+        self.nav_contacts = self.nav[2]  # 导航_通讯录
+        self.nav_favorites = self.nav[3]  # 导航_收藏
+        self.nav_files = self.nav[4]  # 导航_聊天文件
+        self.nav_moments = self.nav[5]  # 导航_朋友圈
 
-    @classmethod
-    def get_window(cls, class_name='WeChatMainWndForPC', name='微信', build_depth=-1):
-        wake_up_window(class_name, name=name)
-        ctrl = auto.WindowControl(ClassName=class_name, Name=name)
-        return cls(ctrl, build_depth=build_depth)
+    def __2_常用控件(self):
+        pass
+
+    @property
+    def column3(self):
+        # 订阅号、聊天都共通
+        return self[2][0]
+
+    @property
+    def chat_window(self):
+        return self.column3[0][0][0]
+
+    @property
+    def msg_box(self):
+        parent = self.chat_window[1][0][0]
+        if not isinstance(parent[0], MsgBoxNode):  # 只初始化一次
+            parent.children = (MsgBoxNode(parent[0]), *parent.children[1:])
+        return parent[0]
+
+    @property
+    def edit_box(self):
+        parent = self.chat_window[1][1][1]
+        if not isinstance(parent, EditorNode):
+            parent.children = (EditorNode(parent[0]), *parent.children[1:])
+        return parent[0]
+
+    @property
+    def editor(self):
+        return self.edit_box[1][0]
+
+    @property
+    def subscription_window(self):
+        return self.column3[0][0]  # 订阅号窗口
+
+    @property
+    def subscription_window_title(self):
+        return self.subscription_window[0][0]  # 订阅号窗口标题
+
+    def __3_窗口切换功能(self):
+        pass
+
+    def get_chat_with(self):
+        """ 当前在跟谁聊天 """
+        try:
+            return self.editor.Name
+        except IndexError:
+            return
+
+    def set_chat_with(self, name):
+        """ 要跟谁聊天，确保聊天框切换过去 """
+        self.nav_chat.Click()
+
+        if self.get_chat_with() == name:
+            return
+
+        column2 = self[1]  # 订阅号、聊天都共通
+        search_box = column2[0][0][1][0]
+
+        search_box.Click()
+        search_box.SendKeys(name)
+        search_box.SendKeys('{Enter}')
+
+    def __4_编辑器(self):
+        pass
+
+    def get_editor_content(self):
+        """ 获得编辑器正在编辑的内容（涉及到换行数据的时候好像不太准确） """
+        return self.editor.GetValuePattern().Value
+
+    def clear_editor_content(self):
+        """ 删除编辑区中的所有内容 """
+        edit_box = self.edit_box
+        edit_box.SendKeys('{Ctrl}a')
+        edit_box.SendKeys('{Delete}')
+
+    def write_text(self, text, clear=False, send=False):
+        # 1 是否清空旧数据
+        if clear:
+            self.clear_editor_content()
+
+        # 2 写入新数据
+        def should_use_clipboard(text):
+            # 简单的策略：如果文本过长或包含特殊字符，则使用剪贴板
+            return len(text) > 30 or not text.isprintable() or '{' in text
+
+        edit_box = self.edit_box
+        edit_box.Click()
+        if should_use_clipboard(text):
+            auto.SetClipboardText(text)
+            time.sleep(1)
+            edit_box.SendKeys('{Ctrl}v')
+        else:
+            edit_box.SendKeys(text)
+
+        # 3 发送内容
+        if send:
+            time.sleep(1)
+            edit_box.SendKeys('{Enter}')
+
+    def send_text(self, text, clear=False):
+        self.write_text(text, clear=clear, send=True)
+
+    def send_files(self, file_paths):
+        """
+        发送多个文件
+
+        :param list[str] file_paths: 必选参数，为文件的路径
+        """
+        if copy_files_to_clipboard(file_paths=file_paths):
+            edit_box = self.edit_box
+            edit_box.Click()
+            time.sleep(1)
+            edit_box.SendKeys('{Ctrl}v')
+            time.sleep(1)
+            edit_box.SendKeys('{Enter}')
+            time.sleep(1)  # 等待发送动作完成
+
+
+def __4_wx():
+    """ 别人的原版实现 """
 
 
 class WxOperation:
@@ -520,11 +546,6 @@ class WxOperation:
         # 无匹配用户, 取消搜索框
         self.wx_window.SendKeys(text='{Esc}', waitTime=Interval.BASE_INTERVAL)
         return False
-
-    def get_messages(self):
-        """ 获得当前会话窗口的结构化对话记录 """
-        msg_box = ChatBoxNode(self.wx_window.ListControl(Name='消息'))
-        print(msg_box.render_tree())
 
     def at_at_everyone(self, group_chat_name: str):
         """
@@ -695,7 +716,6 @@ class WxOperation:
             ValueError: 如果用户名为空或发送的消息和文件同时为空时抛出异常
             TypeError: 如果发送的文本消息或文件路径类型不是列表或元组时抛出异常
         """
-
         # 定位到微信窗口
         self.locate_wechat_window()
 
@@ -726,8 +746,7 @@ class WxOperation:
             self.at_at_everyone(group_chat_name=name)
             auto.SetGlobalSearchTimeout(Interval.BASE_INTERVAL * 25)
 
-        # TODO
-        #  添加备注可以多做一个选项，添加到每条消息的前面，如xxx，早上好
+        # TODO 添加备注可以多做一个选项，添加到每条消息的前面，如xxx，早上好
         if msgs and add_remark_name:
             new_msgs = deepcopy(list(msgs))
             new_msgs.insert(0, name)
@@ -742,7 +761,8 @@ class WxOperation:
 
 
 if __name__ == '__main__':
-    wx = WxOperation()
-    data = wx.get_friend_list('无标签')
-    print(data)
-    print(len(data))
+    # wx = WxOperation()
+    # data = wx.get_friend_list('无标签')
+    # print(data)
+    # print(len(data))
+    pass
