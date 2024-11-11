@@ -24,7 +24,7 @@ import win32con
 import win32gui
 
 from pyxllib.prog.pupil import print2string
-from pyxllib.autogui.wechat_msgbox import msg_parsers
+from pyxllib.autogui.wechat_msg import msg_parsers
 from pyxllib.autogui.uiautolib import find_ctrl, UiCtrlNode, copy_files_to_clipboard
 
 
@@ -146,7 +146,7 @@ class MsgNode(UiCtrlNode):
 
     def init(self):
         """ 解析出更精细的结构化信息 """
-        from pyxllib.autogui.wechat_msgbox import msg_parsers
+        from pyxllib.autogui.wechat_msg import msg_parsers
 
         tag = self.get_ctrl_hash_tag()
         if tag in msg_parsers:
@@ -413,6 +413,7 @@ class WeChatMainWnd(UiCtrlNode):
         edit_box.SendKeys('{Delete}')
 
     def write_text(self, text, clear=False, send=False):
+        # todo 加at人的功能
         # 1 是否清空旧数据
         if clear:
             self.clear_editor_content()
