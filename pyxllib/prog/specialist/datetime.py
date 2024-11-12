@@ -29,6 +29,9 @@ def parse_datetime(*argv):
     >>> parse_datetime('w200301周日', 'w%y%m%d周日')  # 周日必须写全，有缺失会报ValueError
     datetime.datetime(2020, 3, 1, 0, 0)
 
+    >>> parse_datetime('2019.3.6 22:30:40')
+    datetime.datetime(2019, 3, 6, 22, 30, 40)
+
     >>> parse_datetime(180213)
     datetime.datetime(2018, 2, 13, 0, 0)
     >>> parse_datetime('180213')
