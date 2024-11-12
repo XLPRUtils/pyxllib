@@ -237,7 +237,10 @@ class UiCtrlNode(NodeMixin):
         return cls(ctrl, build_depth=build_depth)
 
     def activate(self):
-        """ 激活当前窗口 """
+        """ 激活当前窗口
+
+        todo 修改的更稳定些？多些判断，重复测试，等待？
+        """
         if hwnd := win32gui.FindWindow(self.ctrl.ClassName, self.text):
             # 恢复窗口
             win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
