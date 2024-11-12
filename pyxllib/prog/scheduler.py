@@ -37,7 +37,8 @@ class SchedulerUtils:
                 2: 表示小时，即凌晨 2 点。
                 第三个星号 *: 表示日，这里的星号意味着每天。
                 第四个星号 *: 表示月份，星号同样表示每个月。
-                1: 表示星期中的日子，这里的 1 代表星期一。
+                1: 表示星期中的日子，这里的 1 代表星期一
+        :param datetime base_time: 基于哪个时间点计算下次时间
         """
 
         # 如果没有提供基准时间，则使用当前时间
@@ -70,9 +71,13 @@ class SchedulerUtils:
         :param datetime start_time: 程序启动的时间
         :param datetime end_time: 程序结束的时间
         :param str|float|int wait_tag: 等待标记
-            如果是str，则按照crontab解析
-            如果是int，则表示等待的秒数
-            如果是float，则表示等待的秒数
+            str，按crontab解析
+                在end_time后满足条件的下次时间重启
+            int|float，表示等待的秒数
+                正值是end_time往后等待，负值是start_time开始计算下次时间。
+                比如1点开始的程序，等待半小时，但是首次运行到2点才结束
+                    那么正值就是2:30再下次运行
+                    但是负值表示1:30就要运行，已经错过了，马上2点结束就立即启动复跑
         """
         # 1 尝试把wait_tag转成数值
         try:
