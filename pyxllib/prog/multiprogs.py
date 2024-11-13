@@ -4,6 +4,7 @@
 # @Email  : 877362867@qq.com
 # @Date   : 2024/11/12
 
+from collections import defaultdict
 from types import SimpleNamespace
 from unittest.mock import Mock
 import ctypes
@@ -13,13 +14,14 @@ import socketserver
 import subprocess
 import sys
 import time
-import re
+import textwrap
 
 from deprecated import deprecated
 from loguru import logger
 from croniter import croniter
 
 from pyxllib.prog.specialist import parse_datetime
+from pyxllib.file.specialist import XlPath
 
 
 def __1_定时工具():
@@ -202,10 +204,18 @@ class ProgramWorker(SimpleNamespace):
             proc.pid = None
             proc.poll.return_value = 'tag'
             self.program = proc
-        elif sys.platform == 'win32':
-            self.program = subprocess.Popen(self.cmd, shell=self.shell)
+            return self.program
+
+        kwargs = {}
+        for name in ['stdin', 'stdout', 'stderr']:
+            if hasattr(self, name):
+                kwargs[name] = getattr(self, name)
+
+        if sys.platform == 'win32':
+            self.program = subprocess.Popen(self.cmd, shell=self.shell, **kwargs)
         else:
-            self.program = subprocess.Popen(self.cmd, shell=self.shell, preexec_fn=self._set_pdeathsig())
+            self.program = subprocess.Popen(self.cmd, shell=self.shell, **kwargs,
+                                            preexec_fn=self._set_pdeathsig())
 
         return self.program
 
@@ -320,9 +330,9 @@ class MultiProgramLauncher:
         elif isinstance(schedule, str):
             from apscheduler.triggers.cron import CronTrigger
             cron_parts = schedule.split()
-            # 如果是 5 个字段，则补齐 "秒" 字段为 '*'
+            # 如果是 5 个字段，则补齐 "秒" 字段为 '0'
             if len(cron_parts) == 5:
-                cron_parts.insert(0, '*')
+                cron_parts.insert(0, '0')
             # 检查是否为有效的 6 字段 cron 表达式
             if len(cron_parts) == 6:
                 # 统一处理为 6 字段格式
@@ -389,9 +399,6 @@ class MultiProgramLauncher:
 
         return worker
 
-    def __2_各种添加进程的机制(self):
-        pass
-
     def add_program_cmd2(self, cmd, ports=1, name=None, **kwargs):
         """
         增强版 add_program_cmd，支持 ports 的处理
@@ -452,6 +459,9 @@ class MultiProgramLauncher:
 
         return workers
 
+    def __2_各种添加进程的机制(self):
+        pass
+
     def add_program_python(self, py_file, args='',
                            ports=None, locations=None,
                            name=None, shell=False, executer=None,
@@ -489,7 +499,129 @@ class MultiProgramLauncher:
             cmd += list(args)
         return self.add_program_cmd3(cmd, ports=ports, name=name, locations=locations, shell=shell, **kwargs)
 
-    def __3_多程序管理(self):
+    def add_prog(self, prog, extcmds='',
+                 ports=None, locations=None, *,
+                 name=None, devices=None,
+                 executer=None,
+                 run=True,
+                 schedule=None,
+                 ):
+        """
+        :param int|list ports:
+        :param str|list extcmds:
+        """
+        if locations is None:
+            locations = f'/api/{prog.split('.')[-1]}'
+        self.add_program_python_module(prog,
+                                       extcmds,
+                                       ports=ports, locations=locations,
+                                       name=name, devices=devices,
+                                       executer=executer,
+                                       run=run,
+                                       schedule=schedule,
+                                       )
+
+    def add_server(self, prog, ports=None, locations=None, *args, **kwargs):
+        """ 我自己部署的服务，基本都有特定的start_server启动函数 """
+        self.add_prog(prog, extcmds='start_server', ports=ports, locations=locations, *args, **kwargs)
+
+    def add_os_command_task(self,
+                            script_content,
+                            extension=None,
+                            shell=False,
+                            run=True,
+                            name=None,
+                            schedule=None,
+                            **kwargs):
+        """
+        添加一个操作系统命令或脚本（如 .bat、.sh、.ps1 等）并启动。
+
+        :param script_content: 脚本的内容（字符串）
+        :param extension: 脚本文件的扩展名（如 .bat, .sh, .ps1）；如果为 None 则根据操作系统自动选择
+        :param shell: 是否使用 shell 执行
+        :param run: 是否立即启动
+        :param name: 程序名称
+        :param schedule: 定时任务配置
+        """
+        # 1 自动选择脚本文件扩展名
+        if extension is None:
+            if sys.platform == 'win32':
+                extension = '.ps1'  # Windows 默认使用 PowerShell
+            else:
+                extension = '.sh'  # Linux 和 macOS 默认使用 Bash
+
+        # 2 添加编码配置到脚本内容
+        if extension == '.bat':
+            # 为 .bat 文件添加 UTF-8 支持
+            script_content = f"chcp 65001 >nul\n{script_content}"
+        elif extension == '.ps1':
+            # 为 .ps1 文件添加 UTF-8 支持
+            script_content = f"[Console]::OutputEncoding = [System.Text.Encoding]::UTF8\n" \
+                             f"[Console]::InputEncoding = [System.Text.Encoding]::UTF8\n{script_content}"
+
+        # 3 创建临时脚本文件
+        script_file = XlPath.create_tempfile_path(extension)
+        script_file.write_text(script_content)
+
+        # 4 根据文件扩展名和操作系统选择执行命令
+        if extension == '.sh':
+            cmd = ['bash', str(script_file)]
+        elif extension == '.ps1':
+            if sys.platform == 'win32':
+                cmd = ['powershell', '-ExecutionPolicy', 'Bypass', '-File', str(script_file)]
+            else:
+                raise ValueError("PowerShell 脚本仅在 Windows 系统上受支持")
+        elif extension == '.bat':
+            cmd = [str(script_file)]  # 直接运行 .bat 文件
+        else:
+            raise ValueError(f"不支持的脚本类型: {extension}")
+
+        # 5 使用 add_program_cmd3 启动脚本
+        return self.add_program_cmd3(
+            cmd=cmd,
+            name=name or f"command_{script_file.stem}",
+            shell=shell,
+            run=run,
+            schedule=schedule,
+            **kwargs
+        )
+
+    def __3_nginx相关(self):
+        pass
+
+    def get_all_locations(self):
+        locations = defaultdict(list)
+        for worker in self.workers:
+            if not worker.locations:
+                continue
+            for x in worker.locations:
+                for dst, src in x.items():
+                    locations[dst].append(f'localhost:{worker.port}{src}')
+        return locations
+
+    def configure_nginx(self, nginx_template, locations=None):
+        if locations is None:
+            locations = self.get_all_locations()
+
+        upstreams = []  # 外部的配置
+        servers = [nginx_template.rstrip()]  # 内部的配置
+
+        for dst, srcs in locations.items():
+            if len(srcs) == 1:  # 只有1个不开负载
+                server = f'location {dst} {{\n\tproxy_pass http://{srcs[0]};\n}}\n'
+            else:  # 有多个端口功能则开负载
+                hosts = '\n'.join([f'\tserver {src.split("/")[0]};' for src in srcs])
+                upstream_name = 'upstream' + str(len(upstreams) + 1)
+                upstreams.append(f'upstream {upstream_name} {{\n{hosts}\n}}\n')
+                sub_urls = [src.split('/', maxsplit=1)[1] for src in srcs]
+                assert len(set(sub_urls)) == 1, f'负载均衡的子url必须一致 {sub_urls}'
+                server = f'location {dst} {{\n\tproxy_pass http://{upstream_name}/{sub_urls[0]};\n}}\n'
+            servers.append(server)
+
+        content = '\n'.join(upstreams) + '\nserver {\n' + textwrap.indent('\n'.join(servers), '\t') + '}'
+        return content
+
+    def __4_多程序管理(self):
         pass
 
     def cleanup_finished(self, exit_code=None):
@@ -560,7 +692,10 @@ class MultiProgramLauncher:
                 elif cmd == 'list':  # 列出所有程序（转df查看）
                     ls = []
                     for worker in self.workers:
-                        ls.append([worker.name, worker.program.pid, worker.program.poll(), worker.raw_cmd])
+                        ls.append([worker.name,
+                                   worker.program and worker.program.pid,
+                                   worker.program and worker.program.poll(),
+                                   worker.raw_cmd])
                     df = pd.DataFrame(ls, columns=['name', 'pid', 'poll', 'args'])
                     print_full_dataframe(df)
         except KeyboardInterrupt:
