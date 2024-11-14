@@ -14,6 +14,7 @@ import textwrap
 import time
 from typing import Iterable, Callable, List
 import subprocess
+import tempfile
 
 import psutil
 import pandas as pd

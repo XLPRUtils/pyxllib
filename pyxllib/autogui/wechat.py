@@ -10,21 +10,15 @@
 
 import time
 from copy import deepcopy
-from typing import Iterable
-import os
 from typing import (Iterable, Callable, List)
-import json
-import re
-import textwrap
+from typing import Optional
 
 import uiautomation as auto
-from anytree import NodeMixin, RenderTree
 
 import win32con
 import win32gui
 
-from pyxllib.prog.pupil import print2string
-from pyxllib.autogui.wechat_msg import msg_parsers
+from pyxllib.prog.filelock import get_autoui_lock
 from pyxllib.autogui.uiautolib import find_ctrl, UiCtrlNode, copy_files_to_clipboard
 
 
@@ -454,6 +448,35 @@ class WeChatMainWnd(UiCtrlNode):
             time.sleep(1)
             edit_box.SendKeys('{Enter}')
             time.sleep(1)  # 等待发送动作完成
+
+
+class WeChatSingletonLock:
+    """ 基于 get_autoui_lock 的微信全局唯一单例控制器，确保同一时间仅有一个微信自动化程序在操作 """
+
+    def __init__(self, lock_timeout: Optional[float] = -1):
+        # 初始化全局锁
+        self.lock = get_autoui_lock(timeout=lock_timeout)
+        self.wechat = WeChatMainWnd()
+
+    def __enter__(self):
+        # 获取锁并激活微信窗口
+        self.lock.acquire()
+        self.wechat.activate()
+        return self.wechat
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        # 释放锁
+        self.lock.release()
+
+
+def wechat_lock_send(user, text=None, files=None, *, timeout=-1):
+    """ 使用全局唯一单例锁，确保同一时间仅有一个微信自动化程序在操作 """
+    with WeChatSingletonLock(timeout) as we:
+        we.set_chat_with(user)
+        if text:
+            we.send_text(user, text)
+        if files:
+            we.send_files(files)
 
 
 def __4_wx():
