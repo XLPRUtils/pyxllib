@@ -9,13 +9,16 @@
 """
 
 import os
+import sys
 import textwrap
 import time
 from typing import Iterable, Callable, List
+import subprocess
 
 import psutil
 import pandas as pd
 
+from loguru import logger
 # ui组件大多是树形组织结构，auto库自带树形操作太弱。没有专业的树形结构库，能搞个毛线。
 from anytree import NodeMixin
 
@@ -236,22 +239,32 @@ class UiCtrlNode(NodeMixin):
         ctrl = find_ctrl(class_name=class_name, name=name, **kwargs)
         return cls(ctrl, build_depth=build_depth)
 
-    def activate(self):
+    def activate(self, check_seconds=2):
         """ 激活当前窗口
-
-        todo 修改的更稳定些？多些判断，重复测试，等待？
         """
-        if hwnd := win32gui.FindWindow(self.ctrl.ClassName, self.text):
-            # 恢复窗口
-            win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
-            # 检查窗口是否已在前
+        while True:
+            hwnd = win32gui.FindWindow(self.ctrl.ClassName, self.text)
+            # logger.info(hwnd)
+            if not hwnd:
+                return
+
             if win32gui.GetForegroundWindow() != hwnd:
-                # 尝试将窗口置前
+                win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
+
                 try:
-                    win32gui.SetForegroundWindow(hwnd)
+                    # 在这里执行SetForegroundWindow，只有程序的第1次运行有效，之后就会被很多全屏类的应用占用最前置，覆盖不了了
+                    # 为了解决这问题，就只能暴力每次都新开一个程序来执行这个SetForegroundWindow操作
+                    subprocess.run(
+                        [sys.executable, "-c", f"import win32gui; win32gui.SetForegroundWindow({hwnd})"],
+                        stdout=subprocess.PIPE,
+                    )
                 except Exception as e:
                     pass
-                    # print(f"尝试将窗口置前时出错: {e}")
+                # 理论上并不需要等待，但加个等待，有助于稳定性检测，如果当前窗口在check_seconds秒内频繁切换，
+                #   使用activate虽然激活了，但并不安全，只有check_seconds秒内维持稳定在这个窗口，再进行下游任务会更好
+                time.sleep(check_seconds)
+            else:
+                break
 
     def build_children(self, build_depth=-1, child_node_class=None):
         """ 创建并添加子节点到树中 """

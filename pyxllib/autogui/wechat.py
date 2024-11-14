@@ -41,7 +41,7 @@ class WeChatConfig:
     WINDOW_CLASSNAME = 'WeChatMainWndForPC'
 
 
-WeChat = WeChatConfig
+# WeChat = WeChatConfig
 
 
 class IntervalConfig:
@@ -496,8 +496,8 @@ class WxOperation:
 
     def locate_wechat_window(self):
         if not self.visible_flag:
-            wake_up_window(class_name=WeChat.WINDOW_CLASSNAME, name=WeChat.WINDOW_NAME)
-            self.wx_window = auto.WindowControl(Name=WeChat.WINDOW_NAME, ClassName=WeChat.WINDOW_CLASSNAME)
+            wake_up_window(class_name=WeChatConfig.WINDOW_CLASSNAME, name=WeChatConfig.WINDOW_NAME)
+            self.wx_window = auto.WindowControl(Name=WeChatConfig.WINDOW_NAME, ClassName=WeChatConfig.WINDOW_CLASSNAME)
             if not self.wx_window.Exists(Interval.MAX_SEARCH_SECOND,
                                          searchIntervalSeconds=Interval.MAX_SEARCH_INTERVAL):
                 raise Exception('微信似乎并没有登录!')
