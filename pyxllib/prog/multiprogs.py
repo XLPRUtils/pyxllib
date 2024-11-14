@@ -15,12 +15,18 @@ import subprocess
 import sys
 import time
 import textwrap
+import threading
 
 from deprecated import deprecated
 from loguru import logger
 from croniter import croniter
+import pandas as pd
+
+from fastapi import FastAPI
+from fastapi.responses import PlainTextResponse
 
 from pyxllib.prog.specialist import parse_datetime
+from pyxllib.algo.stat import print_full_dataframe
 from pyxllib.file.specialist import XlPath
 
 
@@ -259,6 +265,7 @@ class MultiProgramLauncher:
 
     def init_scheduler(self):
         from apscheduler.schedulers.background import BackgroundScheduler
+        # from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
         if self.scheduler is None:
             self.scheduler = BackgroundScheduler()
@@ -497,6 +504,8 @@ class MultiProgramLauncher:
             cmd.append(args)
         else:
             cmd += list(args)
+        if name is None:
+            name = module
         return self.add_program_cmd3(cmd, ports=ports, name=name, locations=locations, shell=shell, **kwargs)
 
     def add_prog(self, prog, extcmds='',
@@ -624,6 +633,23 @@ class MultiProgramLauncher:
     def __4_多程序管理(self):
         pass
 
+    def count_running(self):
+        return sum(1 for worker in self.workers if worker.is_running())
+
+    def list_workers(self):
+        """返回所有任务的状态 DataFrame"""
+        ls = []
+        for worker in self.workers:
+            ls.append({
+                'name': worker.name,
+                'pid': worker.program.pid if worker.program else None,
+                'poll': worker.program.poll() if worker.program else None,
+                'args': worker.raw_cmd,
+                'port': worker.port,
+                'locations': worker.locations,
+            })
+        return pd.DataFrame(ls)
+
     def cleanup_finished(self, exit_code=None):
         """
         清除已运行完的程序
@@ -654,50 +680,51 @@ class MultiProgramLauncher:
             worker.terminate()
         self.workers = []
 
-    def run_endless(self):
+    def proc_cmd(self, cmd):
+        if cmd == 'kill':
+            self.stop_all()
+            return False
+        elif cmd == 'count':
+            print(f'有{self.count_running()}个程序正在运行')
+        elif cmd.startswith('cleanup'):
+            args = cmd.split()
+            exit_code = int(args[1]) if len(args) > 1 else None
+            self.cleanup_finished(exit_code)
+            print("清理完成")
+        elif cmd == 'list':  # 列出所有程序（转df查看）
+            df = self.list_workers()
+            print_full_dataframe(df)
+        return True
+
+    def run_endless(self, cmd=True, wait_seconds=1, *, port=None):
         """
         一直运行，直到用户输入 kill 命令或 Ctrl+C
 
-		poll：
+        :param bool cmd: 是否支持命令行input输入指令监控状态的模式
+            默认支持，但在有scheduler调度的情况不建议开启，有input阻塞其他子程的风险
+        :param int|float wait_seconds: 每次循环之间停顿秒数，用来给其他子程等运行时间，避免阻塞
+        :param int port: 是否要开一个后端服务，支持查询程序运行状态
+
+    	poll：
             如果进程仍在运行，poll()方法返回None。
             如果进程已经结束，poll()方法返回进程的退出码（exit code）。
                 如果进程正常结束，退出码通常为0。
                 如果进程异常结束，退出码通常是一个非零值，表示异常的类型或错误码。
-		"""
-        import pandas as pd
-        from pyxllib.algo.stat import print_full_dataframe
-
+    	"""
         if self.scheduler:  # 如果有定时任务，启动调度器
             self.scheduler.start()
 
+        if port:
+            dashboard = LauncherDashboard(self)
+            threading.Thread(target=lambda: dashboard.run(port), daemon=True).start()
+
         try:
             while True:
-                cmd = input('>>>')
-                if cmd == 'kill':
-                    self.stop_all()
-                    break
-                elif cmd == 'count':
-                    # 需要实际检查现有程序
-                    m = sum([1 for worker in self.workers if worker.is_running()])
-                    print(f'有{m}个程序正在运行')
-                elif cmd.startswith('cleanup'):
-                    # 获取 exit_code 参数
-                    args = cmd.split()
-                    if len(args) > 1:  # 支持跟一个参数，删除制定状态的程序
-                        exit_code = int(args[1])
-                    else:
-                        exit_code = None
-                    self.cleanup_finished(exit_code)
-                    print("清理完成")
-                elif cmd == 'list':  # 列出所有程序（转df查看）
-                    ls = []
-                    for worker in self.workers:
-                        ls.append([worker.name,
-                                   worker.program and worker.program.pid,
-                                   worker.program and worker.program.poll(),
-                                   worker.raw_cmd])
-                    df = pd.DataFrame(ls, columns=['name', 'pid', 'poll', 'args'])
-                    print_full_dataframe(df)
+                if cmd:
+                    _cmd = input(">>> ")
+                    if not self.proc_cmd(_cmd):
+                        break
+                time.sleep(wait_seconds)
         except KeyboardInterrupt:
             print("\n检测到 Ctrl+C，正在终止所有程序...")
             self.stop_all()
@@ -712,6 +739,78 @@ class ProcessWorker(ProgramWorker):
 @deprecated(reason='已改名MultiProgramLauncher')
 class MultiProcessLauncher(MultiProgramLauncher):
     pass
+
+
+class LauncherDashboard:
+    def __init__(self, launcher):
+        self.launcher = launcher
+        self.app = FastAPI()
+        self.setup_routes()
+
+    def setup_routes(self):
+        @self.app.get("/", response_class=PlainTextResponse)
+        async def home():
+            """主页，展示所有任务状态"""
+            df = self.launcher.list_workers()
+            return self.render_text(df)
+
+        @self.app.get("/count", response_class=PlainTextResponse)
+        async def get_count():
+            """返回正在运行的任务数量"""
+            count = self.launcher.count_running()
+            return f"正在运行的任务数量: {count}\n"
+
+        @self.app.post("/stop", response_class=PlainTextResponse)
+        async def stop_all():
+            """停止所有任务"""
+            self.launcher.stop_all()
+            return "所有任务已停止。\n"
+
+        @self.app.post("/cleanup", response_class=PlainTextResponse)
+        async def cleanup(exit_code: int = None):
+            """清理已完成的任务"""
+            self.launcher.cleanup_finished(exit_code)
+            return "清理完成。\n"
+
+    def render_text(self, df):
+        """生成纯文本格式的任务状态"""
+        if df.empty:
+            return "没有任务正在运行。\n"
+
+        # 调整表头以显示新的属性：port 和 locations
+        output = ["当前任务状态:\n"]
+        output.append(f"{'编号':<5} {'名称':<15} {'PID':<10} {'状态':<10} {'端口':<10} {'位置':<20} {'命令'}")
+        output.append("-" * 120)
+
+        for idx, (_, row) in enumerate(df.iterrows(), start=1):
+            name = row['name']
+
+            # 更鲁棒地处理 pid，考虑 NaN 情况
+            pid = "N/A" if pd.isna(row['pid']) else int(row['pid'])
+
+            # 获取任务状态
+            status = "运行中" if row['poll'] is None else "已结束"
+
+            # 处理 args，确保路径展示更清晰
+            args = [a for a in row['args'] if a] if isinstance(row['args'], list) else []
+            args_str = "[" + ", ".join(
+                repr(arg).replace("\\\\", "\\") if '\\' in arg else repr(arg) for arg in args
+            ) + "]"
+
+            # 处理 port 和 locations
+            port = row['port'] if not pd.isna(row['port']) else "N/A"
+            locations = ", ".join(row['locations']) if isinstance(row['locations'], list) else "N/A"
+
+            # 格式化输出
+            output.append(f"{idx:<5} {name:<15} {pid:<10} {status:<10} {port:<10} {locations:<20} {args_str}")
+
+        output.append("\n")
+        return "\n".join(output)
+
+    def run(self, port=8080):
+        """启动 FastAPI 服务"""
+        import uvicorn
+        uvicorn.run(self.app, host="0.0.0.0", port=port, log_level="warning")
 
 
 def __3_装饰器工具():
