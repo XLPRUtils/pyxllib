@@ -799,7 +799,7 @@ class LauncherDashboard:
 
             # 处理 port 和 locations
             port = row['port'] if not pd.isna(row['port']) else "N/A"
-            locations = ", ".join(row['locations']) if isinstance(row['locations'], list) else "N/A"
+            locations = str(row['locations'])
 
             # 格式化输出
             output.append(f"{idx:<5} {name:<15} {pid:<10} {status:<10} {port:<10} {locations:<20} {args_str}")
