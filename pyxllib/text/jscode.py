@@ -7,11 +7,19 @@
 from collections import Counter
 import re
 import textwrap
+import os
+
+from jinja2 import Template
 
 try:
     import jsbeautifier
 except ModuleNotFoundError:
     pass
+
+import esprima
+
+from pyxllib.file.specialist import XlPath
+from pyxllib.prog.cachetools import xlcache
 
 
 def __1_删注释功能():
@@ -90,7 +98,7 @@ def 回溯区分正则除号(c):
     return True  # 正则
 
 
-class JSParser():
+class JSParser:
     def 普通引号(self, 号='"'):  # 号：开始结束定界符，下同
         while self.indexPointer < self.jsCodeLength:  # 正常会提前 return 见下
             self.indexPointer += 1
@@ -436,6 +444,20 @@ function isNextMonth(date) {
 """.strip()
 
 
+@xlcache()
+def get_airscript_head2(definitions=False):
+    s = (XlPath(__file__).parent / 'airscript.js').read_text().strip()
+    vars = {
+        'JSA_POST_HOST_URL': os.getenv('JSA_POST_HOST_URL', 'https://xmutpriu.com'),
+        'JSA_POST_TOKEN': os.getenv('JSA_POST_TOKEN', ''),
+        'JSA_POST_DEFAULT_HOST': os.getenv('JSA_POST_DEFAULT_HOST', 'senseserver3'),
+    }
+    content = Template(s).render(vars)
+    if not definitions:
+        return content
+    return extract_definitions_with_comments(content)
+
+
 class AirScriptCodeFixer:
     @classmethod
     def fix_colors(cls, code_text):
@@ -558,7 +580,8 @@ class AirScriptCodeFixer:
         包括代码美化，默认缩进是4，但在训练阶段，建议默认缩进是2，
         """
         # 1 代码精简
-        code_text = re.sub(r'Application\.(WorksheetFunction|ActiveWorkbook|ActiveSheet|Sheets|Range|Workbook)', r'\1', code_text)
+        code_text = re.sub(r'Application\.(WorksheetFunction|ActiveWorkbook|ActiveSheet|Sheets|Range|Workbook)', r'\1',
+                           code_text)
         code_text = re.sub(r'Workbook\.(Sheets)', r'\1', code_text)
         code_text = re.sub(r'ActiveSheet\.(Range|Rows|Columns|Cells)', r'\1', code_text)
         code_text = re.sub(r'(\w+)\.(Row|Column)\s*\+\s*\1\.\2s\.Count\s*-\s*1', r'\1.\2End', code_text)
@@ -646,7 +669,8 @@ class AirScriptCodeFixer:
     def remove_stdcode(cls, code_text):
         """ 删除开头固定的组件头代码 """
         code_text = re.sub(r'(.*?)(//\s*1[\.\s]+定位)', r'\2', code_text, flags=re.DOTALL)
-        code_text = re.sub(r'// 0 基础组件代码（可以放在功能代码之前，也能放在最后面）.+?$', '', code_text, flags=re.DOTALL)
+        code_text = re.sub(r'// 0 基础组件代码（可以放在功能代码之前，也能放在最后面）.+?$', '', code_text,
+                           flags=re.DOTALL)
         return 1, code_text
 
     @classmethod
@@ -761,6 +785,151 @@ class AirScriptCodeFixer:
         except BaseException as e:
             js_code2 = cls.remove_comments_regex(js_code)
         return 1, js_code2
+
+
+def __3_js代码结构解析():
+    pass
+
+
+def extract_definitions_with_comments(js_code):
+    """
+    提取 JavaScript 代码中的函数和对象定义，生成 key: value 的字典。
+    key 是标识符名称，value 是包括注释的代码片段。
+    """
+    parsed = esprima.parseScript(js_code, {'comment': True, 'range': True})
+    comments = parsed.comments
+    definitions = {}
+
+    def get_preceding_comment(node_start):
+        """
+        获取紧靠在节点之前的注释
+        """
+        preceding_comments = []
+        for comment in comments:
+            if comment.range[1] < node_start:
+                preceding_comments.append(comment)
+
+        if preceding_comments:
+            # 选择最近的注释
+            last_comment = preceding_comments[-1]
+            return js_code[last_comment.range[0]:last_comment.range[1]].strip()
+        return ""
+
+    # 遍历 AST 的 body 部分
+    for node in parsed.body:
+        # 提取函数定义
+        if node.type == 'FunctionDeclaration':
+            func_name = node.id.name
+            start, end = node.range
+            # 获取函数前的注释
+            comment = get_preceding_comment(start)
+            definitions[func_name] = f"{comment}\n{js_code[start:end].strip()}"
+
+        # 提取变量定义（对象）
+        elif node.type == 'VariableDeclaration':
+            for declaration in node.declarations:
+                if declaration.init and declaration.init.type == 'ObjectExpression':
+                    var_name = declaration.id.name
+                    start, end = node.range
+                    comment = get_preceding_comment(start)
+                    definitions[var_name] = f"{comment}\n{js_code[start:end].strip()}"
+
+                # 处理 Object.assign 的情况
+                elif declaration.init and declaration.init.type == 'CallExpression':
+                    if (declaration.init.callee.object and
+                            declaration.init.callee.object.name == 'Object' and
+                            declaration.init.callee.property.name == 'assign'):
+                        var_name = declaration.id.name
+                        start, end = node.range
+                        comment = get_preceding_comment(start)
+                        definitions[var_name] = f"{comment}\n{js_code[start:end].strip()}"
+
+    return definitions
+
+
+def extract_identifiers(node, identifiers):
+    """
+    递归提取 AST 节点中的所有标识符
+    """
+    if isinstance(node, list):
+        for item in node:
+            extract_identifiers(item, identifiers)
+    elif hasattr(node, 'type'):
+        # 处理 Identifier 节点
+        if node.type == 'Identifier':
+            identifiers.add(node.name)
+        # 递归处理所有子节点
+        for key in dir(node):
+            if not key.startswith('_'):
+                value = getattr(node, key)
+                if isinstance(value, (list, esprima.nodes.Node)):
+                    extract_identifiers(value, identifiers)
+
+
+def find_identifiers_in_code(code):
+    """
+    使用 esprima 提取给定代码片段中的所有标识符
+    """
+    identifiers = set()
+    parsed = esprima.parseScript(code, {'range': True})
+    extract_identifiers(parsed.body, identifiers)
+    return identifiers
+
+
+def find_direct_dependencies(definitions):
+    """
+    查找每个定义中的直接依赖关系。
+    使用 esprima 提取代码中的标识符，并与定义列表求交集。
+
+    :param definitions: 要输入一组数据是因为只检查这一组内的命名空间的东西
+    """
+    keys = set(definitions.keys())
+    dependencies = {key: [] for key in definitions}
+
+    for key, code in definitions.items():
+        identifiers = find_identifiers_in_code(code)
+        direct_deps = identifiers.intersection(keys)
+        dependencies[key] = list(direct_deps - {key})  # 排除自身
+
+    return dependencies
+
+
+def assemble_dependencies_from_jstools(cur_code, jstools=None):
+    """
+    根据输入的 cur_code ，从预设的jstools工具代码库中自动提取所有相关依赖定义
+
+    :param str cur_node: 当前代码
+    :param str jstools: 依赖的工具代码
+
+    """
+    # wps场景支持全局return处理
+    _cur_code = re.sub(r'^return\s+', '', cur_code, flags=re.MULTILINE)
+    identifiers_in_input = find_identifiers_in_code(_cur_code)
+
+    if jstools is None:
+        definitions = get_airscript_head2(True)
+    else:
+        definitions = extract_definitions_with_comments(jstools)
+
+    # 初始化结果列表，并按照 definitions 的顺序存储
+    visited = set()
+    dependencies = find_direct_dependencies(definitions)
+
+    def resolve_dependencies(identifier):
+        """递归解决依赖，确保按照 definitions 的顺序添加"""
+        if identifier in visited:
+            return
+        visited.add(identifier)
+        for dep in dependencies[identifier]:
+            resolve_dependencies(dep)
+
+    # 从输入代码的标识符开始，递归查找依赖
+    for identifier in set(definitions.keys()).intersection(identifiers_in_input):
+        resolve_dependencies(identifier)
+
+    required_code = [definitions[identifier] for identifier in definitions if identifier in visited]
+    required_code.append(cur_code)
+    return "\n\n".join(required_code)
 
 
 if __name__ == '__main__':

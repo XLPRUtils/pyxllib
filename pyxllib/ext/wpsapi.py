@@ -24,7 +24,7 @@ class WpsApi:
     以及对高并发稳定性的考虑等
     """
 
-    def __init__(self, token, *, name=None, base_url=None, logger=None,
+    def __init__(self, token=None, *, name=None, base_url=None, logger=None,
                  folder_id=None):
         """
         :param str token: 登录的token
@@ -35,7 +35,7 @@ class WpsApi:
         """
         # 这里登录获得的是自己账号的token
         # Get the token from https://solution.wps.cn/weboffice-go-sdk/api/script/token
-        self.token = token
+        self.token = token or os.getenv('WPS_API_TOKEN')
         self.name = name or self.token[-6:]
         self.base_url = base_url or 'https://solution.wps.cn/weboffice-go-sdk/api'
         self.default_template = 'https://kdocs.cn/l/cjVHm9Zy9jU1'  # 空白表格，默认的一个表格模板文件，用于创建新文件、测试等
@@ -208,6 +208,8 @@ class WpsApi:
         :param return_mode: 返回格式
             None，提取到的结果
             json: 返回json格式
+
+        注意这个接口使用的都是wpsapi 1.0版本
         """
         reply = self.post('script/evaluate', {
             'file_id': str(file_id),
@@ -223,11 +225,73 @@ class WpsApi:
         return reply['return']
 
 
+class WpsOnlineWorkbook:
+    def __init__(self, file_id=None, token=None):
+        """
+        初始化WpsOnlineWorkbook实例。
+
+        :param file_id: 可选参数，指定要操作的文件ID。如果未提供，将创建一个新文件。
+        :param token: 可选参数，用于与WPS API交互的令牌。如果未提供，将从环境变量中获取。
+        """
+        self.wpsapi = WpsApi(token=token)
+        self.file_id = file_id or self.create()
+
+    def create(self, src_file_id=None):
+        """
+        创建一个新的在线工作簿，并返回文件ID。
+
+        :return: 新创建的文件ID
+        """
+        new_file_id = self.wpsapi.save_as_file(src_file_id)  # 使用默认模板创建新文件
+        self.file_id = new_file_id
+        return new_file_id
+
+    def save_as_file(self, dst_folder_id=None):
+        """
+        将当前工作簿另存为新文件。
+
+        :param dst_folder_id: 可选参数，指定保存文件的目标文件夹ID
+        :return: 新文件的ID
+        """
+        new_file_id = self.wpsapi.save_as_file(self.file_id, dst_folder_id)
+        return new_file_id
+
+    def delete(self):
+        """
+        删除当前工作簿。
+        """
+        self.wpsapi.delete_file(self.file_id)
+
+    def download(self, target_file_path):
+        """
+        下载当前工作簿到本地。
+
+        :param target_file_path: 本地保存文件的路径
+        """
+        self.wpsapi.download(self.file_id, target_file_path)
+
+    def run_airscript(self, code, return_mode=None):
+        """
+        在当前工作簿上运行AirScript代码。
+
+        :param code: 要执行的AirScript代码
+        :param return_mode: 返回格式，None表示提取结果，'json'表示返回json格式
+        :return: 执行结果
+        """
+        from pyxllib.text.jscode import assemble_dependencies_from_jstools, remove_js_comments
+
+        # 这里的版本默认支持扩展的js工具
+        code = assemble_dependencies_from_jstools(code)
+        code = remove_js_comments(code)
+        print(code)
+        return self.wpsapi.run_airscript(self.file_id, code, return_mode)
+
+
 class WpsGroupApi(WpsApi):
     """ 团队版的api
     """
 
-    def __init__(self, token, *, group_id=None, group_folder_id=None, **kwargs):
+    def __init__(self, token=None, *, group_id=None, group_folder_id=None, **kwargs):
         super().__init__(token, **kwargs)
         self.group_id = group_id
         self.group_folder_id = group_folder_id  # 团队版的默认存储目录

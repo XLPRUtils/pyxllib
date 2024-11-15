@@ -6,6 +6,7 @@
 
 import platform
 import sys
+import time
 
 import cv2
 import psutil
@@ -90,8 +91,14 @@ class ActiveWindowCapture(OriginalMSS):
     @xlcache(property=True)
     def window(self):
         """ 当前激活窗口 """
-        win = uiautomation.GetForegroundControl()
-        return win
+        # 可以小等一会等到有效窗口
+        for i in range(4):
+            win = uiautomation.GetForegroundControl()
+            if win:
+                return
+            else:
+                time.sleep(0.5)
+        return
 
     @xlcache(property=True)
     def process(self):
