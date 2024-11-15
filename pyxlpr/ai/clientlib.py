@@ -215,15 +215,15 @@ class XlAiClient:
                 self.login_priu(**accounts['priu'], check=check)
 
         # 3 (新)增设了更规范的环境变量名
-        if auto_login and os.environ.get("XL_API_AIP_ID"):
-            self.login_aipocr(os.environ.get("XL_API_AIP_ID"),
-                              os.environ.get("XL_API_AIP_KEY"),
-                              os.environ.get("XL_API_AIP_SKEY"))
-        if auto_login and os.environ.get("XL_API_MATHPIX_ID"):
-            self.login_mathpix(os.environ.get("XL_API_MATHPIX_ID"),
-                               os.environ.get("XL_API_MATHPIX_KEY"))
-        if auto_login and os.environ.get("XL_API_PRIU_TOKEN"):
-            self.login_priu(os.environ.get("XL_API_PRIU_TOKEN"))
+        if auto_login and os.getenv("XL_API_AIP_ID"):
+            self.login_aipocr(os.getenv("XL_API_AIP_ID"),
+                              os.getenv("XL_API_AIP_KEY"),
+                              os.getenv("XL_API_AIP_SKEY"))
+        if auto_login and os.getenv("XL_API_MATHPIX_ID"):
+            self.login_mathpix(os.getenv("XL_API_MATHPIX_ID"),
+                               os.getenv("XL_API_MATHPIX_KEY"))
+        if auto_login and os.getenv("XL_API_PRIU_TOKEN"):
+            self.login_priu(os.getenv("XL_API_PRIU_TOKEN"))
 
     def __A1_登录账号(self):
         pass

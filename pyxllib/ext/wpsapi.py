@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 # @Author : 陈坤泽
 # @Date   : 2024/07/31
-
+import os
 import time
 import json
 from pathlib import Path
@@ -13,50 +13,8 @@ import tempfile
 
 import requests
 
-from DrissionPage import ChromiumPage
-from DrissionPage._pages.chromium_tab import ChromiumTab
-
-
-def format_exception(e, mode=3):
-    if mode == 1:
-        # 仅获取异常类型的名称
-        text = ''.join(traceback.format_exception_only(type(e), e)).strip()
-    elif mode == 2:
-        # 获取异常类型的名称和附加的错误信息
-        text = f"{type(e).__name__}: {e}"
-    elif mode == 3:
-        text = ''.join(traceback.format_exception(type(e), e, e.__traceback__))
-    else:
-        raise ValueError
-    return text
-
-
-def get_dp_tab(dp_page=None):
-    """ 智能获取一个标签页tab
-
-    :param dp_page:
-        默认None, 返回默认的page，一般就是当前页面
-        True, 新建一个page
-        str, 新建一个对应url的page
-        func(tab), 通过规则筛选tab，返回符合条件的第1个tab，否则新建一个tab
-    """
-
-    if isinstance(dp_page, ChromiumPage):
-        return dp_page.latest_tab
-    elif isinstance(dp_page, ChromiumTab):
-        return dp_page
-    elif callable(dp_page):
-        page0 = ChromiumPage()
-        for tab in page0.get_tabs():
-            if dp_page(tab):
-                return tab
-        return page0.new_tab()
-    elif dp_page is True:
-        return ChromiumPage().new_tab()
-    elif isinstance(dp_page, str):
-        return ChromiumPage().new_tab(dp_page)
-    else:
-        return ChromiumPage().latest_tab
+from pyxllib.prog.pupil import format_exception
+from pyxllib.ext.drissionlib import get_dp_tab
 
 
 class WpsApi:
@@ -390,8 +348,47 @@ class WpsWeb:
                         break
 
 
-class WpsScriptApi:
+class WpsOnlineScriptApi:
     """ wps的"脚本令牌"调用模式 """
+
+    def __init__(self, token=None):
+        self.headers = {
+            'Content-Type': "application/json",
+            'AirScript-Token': token or os.getenv('WPS_SCRIPT_TOKEN', ''),
+        }
+        self.default_file_id = None
+
+    def post_request(self, url, payload):
+        """
+        发送 POST 请求到指定的 URL 并返回响应结果
+        """
+        try:
+            response = requests.post(url, json=payload, headers=self.headers)
+            response.raise_for_status()  # 如果请求失败会抛出异常
+            return response.json()
+        except requests.exceptions.RequestException as e:
+            print(f"请求失败: {e}")
+            return None
+
+    def run_script(self, script_id, file_id=None, args=None):
+        """
+        执行 WPS 脚本并返回执行结果
+
+        :param file_id: 文件 ID
+        :param script_id: 脚本 ID
+        :param args: 脚本参数 (可选)
+
+        todo 官方除了同步接口，还有异步接口。https://airsheet.wps.cn/docs/apitoken/api.html
+        """
+        file_id = file_id or self.default_file_id
+        url = f"https://www.kdocs.cn/api/v3/ide/file/{file_id}/script/{script_id}/sync_task"
+        payload = {
+            "Context": {
+                "argv": args if args else {}
+            }
+        }
+        res = self.post_request(url, payload)
+        return res['data']['result']
 
 
 if __name__ == '__main__':

@@ -474,7 +474,7 @@ def wechat_lock_send(user, text=None, files=None, *, timeout=-1):
     with WeChatSingletonLock(timeout) as we:
         we.set_chat_with(user)
         if text:
-            we.send_text(user, text)
+            we.send_text(text)
         if files:
             we.send_files(files)
 

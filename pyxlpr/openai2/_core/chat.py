@@ -157,10 +157,10 @@ class Chat:
         :param kwargs: 主要是供OpenAI初始化时使用的参数
 
         """
-        api_key = api_key or self.default_api_key or os.environ.get("OPENAI_API_KEY")
+        api_key = api_key or self.default_api_key or os.getenv("OPENAI_API_KEY")
 
         api_base = kwargs.pop('api_base', None)
-        base_url = base_url or api_base or self.default_base_url or os.environ.get("OPENAI_BASE_URL")
+        base_url = base_url or api_base or self.default_base_url or os.getenv("OPENAI_BASE_URL")
         MsgMaxCount = kwargs.pop('MsgMaxCount', None)
         msg_max_count = msg_max_count or MsgMaxCount
 

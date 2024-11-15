@@ -31,7 +31,7 @@ class SyncFileClient:
         """
         :param host: 可以只写主机名
         """
-        token = token or os.environ.get("XL_COMMON_SERVER_TOKEN")
+        token = token or os.getenv("XL_COMMON_SERVER_TOKEN")
         self.headers = {
             'Authorization': f'Bearer {token}',
         }
