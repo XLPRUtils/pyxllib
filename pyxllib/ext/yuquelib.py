@@ -23,7 +23,7 @@ class Yuque:
     def __init__(self, token=None, user_id=None):
         self.base_url = "https://www.yuque.com/api/v2"
         self.headers = {
-            "X-Auth-Token": token or os.environ.get('YUQUE_TOKEN'),
+            "X-Auth-Token": token or os.getenv('YUQUE_TOKEN'),
             "Content-Type": "application/json"
         }
         self._user_id = user_id

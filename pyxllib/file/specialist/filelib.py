@@ -806,7 +806,7 @@ class XlPath(type(pathlib.Path())):
 
     @classmethod
     def desktop(cls):
-        if os.environ.get('Desktop', None):  # 如果修改了win10默认的桌面路径，需要在环境变量添加一个正确的Desktop路径值
+        if os.getenv('Desktop', None):  # 如果修改了win10默认的桌面路径，需要在环境变量添加一个正确的Desktop路径值
             desktop = os.environ['Desktop']
         else:
             desktop = os.path.join(pathlib.Path.home(), 'Desktop')  # 这个不一定准，桌面是有可能被移到D盘等的

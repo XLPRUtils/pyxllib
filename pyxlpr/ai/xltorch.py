@@ -642,7 +642,7 @@ class ZcPredictor:
 
         # 1 配置参数
         if isinstance(config_file, str) and config_file[-5:].lower() == '.yaml':
-            deploy_path = os.environ.get('OCRWORK_DEPLOY', '.')  # 支持在环境变量自定义：部署所用的配置、模型所在目录
+            deploy_path = os.getenv('OCRWORK_DEPLOY', '.')  # 支持在环境变量自定义：部署所用的配置、模型所在目录
             config_file = os.path.join(deploy_path, config_file)
             f = open(config_file, "r")
         elif isinstance(config_file, str):
