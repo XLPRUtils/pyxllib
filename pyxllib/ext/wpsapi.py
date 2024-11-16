@@ -51,50 +51,27 @@ class WpsApi:
             'Authorization': self.token,
             'Content-Type': 'application/json',
         }
-        # 重试机制
-        for i in range(5):
-            try:
-                # 根据 method 动态选择请求方式
-                resp = requests.request(method, f"{self.base_url}/{endpoint}", headers=headers,
-                                        data=json.dumps(data), timeout=5, **kwargs)
-                return resp.json()
-            except Exception as e:
-                self.logger.warning(f'wps api {self.name} 请求失败，重试第{i + 1}次，{endpoint}，{format_exception(e)}')
-                time.sleep(5)  # 等待5秒后再重试
-        return {'error': 'requests.exceptions.Timeout', 'stack': ''}
+        resp = requests.request(method, f"{self.base_url}/{endpoint}", headers=headers,
+                                data=json.dumps(data), **kwargs)
+        return resp.json()
 
     def post(self, endpoint, data=None, **kwargs):
         headers = {
             'Authorization': self.token,
             'Content-Type': 'application/json',
         }
-        # 重试机制
-        for i in range(5):
-            try:
-                resp = requests.post(f"{self.base_url}/{endpoint}", headers=headers,
-                                     data=json.dumps(data), timeout=5, **kwargs)
-                return resp.json()
-            except Exception as e:
-                self.logger.warning(f'wps api {self.name} 请求失败，重试第{i + 1}次，{endpoint}，{format_exception(e)}')
-                time.sleep(5)  # 等待5秒后再重试
-        return {'error': 'requests.exceptions.Timeout', 'stack': ''}
+        resp = requests.post(f"{self.base_url}/{endpoint}", headers=headers,
+                             data=json.dumps(data), **kwargs)
+        return resp.json()
 
     def put(self, endpoint, data=None, **kwargs):
         """ 主要是上传文件用的 """
         headers = {  # 注意这个相比post删掉了'Content-Type'
             'Authorization': self.token,
         }
-        # 重试机制
-        for i in range(5):
-            try:
-                # 注意put版本相比post，不仅改了requests.put，还改了data的传输形式
-                resp = requests.put(f"{self.base_url}/{endpoint}", headers=headers,
-                                    data=data, timeout=5, **kwargs)
-                return resp.json()
-            except Exception as e:
-                self.logger.warning(f'wps api {self.name} 请求失败，重试第{i + 1}次，{endpoint}，{format_exception(e)}')
-                time.sleep(5)  # 等待5秒后再重试
-        return {'error': 'requests.exceptions.Timeout', 'stack': ''}
+        resp = requests.put(f"{self.base_url}/{endpoint}", headers=headers,
+                            data=data, **kwargs)
+        return resp.json()
 
     def __2_目录操作(self):
         pass
@@ -225,6 +202,60 @@ class WpsApi:
         return reply['return']
 
 
+class WpsApiTimeoutVersion(WpsApi):
+    """ 特供版 """
+
+    def request(self, method, endpoint, data=None, **kwargs):
+        headers = {
+            'Authorization': self.token,
+            'Content-Type': 'application/json',
+        }
+        # 重试机制
+        for i in range(5):
+            try:
+                # 根据 method 动态选择请求方式
+                resp = requests.request(method, f"{self.base_url}/{endpoint}", headers=headers,
+                                        data=json.dumps(data), timeout=5, **kwargs)
+                return resp.json()
+            except Exception as e:
+                self.logger.warning(f'wps api {self.name} 请求失败，重试第{i + 1}次，{endpoint}，{format_exception(e)}')
+                time.sleep(5)  # 等待5秒后再重试
+        return {'error': 'requests.exceptions.Timeout', 'stack': ''}
+
+    def post(self, endpoint, data=None, **kwargs):
+        headers = {
+            'Authorization': self.token,
+            'Content-Type': 'application/json',
+        }
+        # 重试机制
+        for i in range(5):
+            try:
+                resp = requests.post(f"{self.base_url}/{endpoint}", headers=headers,
+                                     data=json.dumps(data), timeout=5, **kwargs)
+                return resp.json()
+            except Exception as e:
+                self.logger.warning(f'wps api {self.name} 请求失败，重试第{i + 1}次，{endpoint}，{format_exception(e)}')
+                time.sleep(5)  # 等待5秒后再重试
+        return {'error': 'requests.exceptions.Timeout', 'stack': ''}
+
+    def put(self, endpoint, data=None, **kwargs):
+        """ 主要是上传文件用的 """
+        headers = {  # 注意这个相比post删掉了'Content-Type'
+            'Authorization': self.token,
+        }
+        # 重试机制
+        for i in range(5):
+            try:
+                # 注意put版本相比post，不仅改了requests.put，还改了data的传输形式
+                resp = requests.put(f"{self.base_url}/{endpoint}", headers=headers,
+                                    data=data, timeout=5, **kwargs)
+                return resp.json()
+            except Exception as e:
+                self.logger.warning(f'wps api {self.name} 请求失败，重试第{i + 1}次，{endpoint}，{format_exception(e)}')
+                time.sleep(5)  # 等待5秒后再重试
+        return {'error': 'requests.exceptions.Timeout', 'stack': ''}
+
+
 class WpsOnlineWorkbook:
     def __init__(self, file_id=None, token=None):
         """
@@ -283,8 +314,23 @@ class WpsOnlineWorkbook:
         # 这里的版本默认支持扩展的js工具
         code = assemble_dependencies_from_jstools(code)
         code = remove_js_comments(code)
-        print(code)
         return self.wpsapi.run_airscript(self.file_id, code, return_mode)
+
+    def write_arr(self, rows, sheet_name, start_cell):
+        """
+        把一个矩阵写入表格
+
+        :param rows: 一个n*m的数据
+        :param sheet_name: 目标表格名
+        :param start_cell: 写入的起始位置
+        :return:
+        """
+        json_data = json.dumps(rows, ensure_ascii=False)
+        jscode = f"""
+const jsonData = {json_data};
+writeArrToSheet(jsonData, Sheets('{sheet_name}').Range('{start_cell}'));
+""".strip()
+        self.run_airscript(jscode)
 
 
 class WpsGroupApi(WpsApi):
