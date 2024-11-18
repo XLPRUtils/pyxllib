@@ -185,16 +185,90 @@ function __2_json数据导入导出() {
 
 }
 
-function clearSheetData(header = 1, dataStartRow = 2, sheet = ActiveSheet) {
+// 打包sheet下多个字段fields的数据
+// 使用示例：packTableDataFields('料理', ['名称', '标签'], 4)
+//  fields的参数支持字段名称或整数，明确指定某列的位置
+// 返回格式：{'名称': [x1, x2, ...], '标签': [y1, y2, ...]}
+function packTableDataFields(sheet, fields, dataStartRow, dataEndRow, filterEmptyRows = true) {
+    // 1 数据范围
+    let st = sheet;
+    if (typeof sheet === 'string') {
+        st = Sheets(sheet);
+    }
+    const urg = getUsedRange(st);
+
+    // 2 初始化字段列映射表
+    const fieldColMap = fields.reduce((map, field) => {
+        if (typeof field === 'string') {
+            map[field] = findColumn(field, urg);
+            if (dataStartRow === undefined) {
+                // 默认按找到的第1个字段名的下一行为数据起始行
+                dataStartRow = findRow(field) + 1;
+            }
+        } else if (typeof field === 'number') {
+            // 注意，整数作为键会自动转为str，但使用的时候整数索引也会自动转str索引能对上。
+            //  主要是了解这原理注意重名覆盖问题。
+            map[field] = field;
+        }
+        return map;
+    }, {});
+    if (dataStartRow === undefined) {
+        dataStartRow = 2;  // 数据默认从第2行开始
+    }
+
+    // 3 构建字段格式数据
+    // 先建好空数组
+    const fieldsData = fields.reduce((dataMap, field) => {
+        dataMap[field] = [];
+        return dataMap;
+    }, {});
+
+    // 遍历数据行
+    dataEndRow = dataEndRow || (urg.Row + urg.Rows.Count - 1);
+    for (let row = dataStartRow; row <= dataEndRow; row++) {
+        // 如果需要过滤空行
+        if (filterEmptyRows) {
+            const isEmptyRow = Object.values(fieldColMap).every(col => st.Cells(row, col).Value2 === undefined);
+            if (isEmptyRow) continue; // 跳过空行
+        }
+
+        // 填充字段数据
+        Object.entries(fieldColMap).forEach(([field, col]) => {
+            fieldsData[field].push(st.Cells(row, col).Value2);
+        });
+    }
+
+    return fieldsData;
+}
+
+// 和packTableDataFields仅差在返回的数据格式上，这个版本的返回值是通常使用更多的jsonl格式
+// 返回格式：list[dict]， [{'名称': x1, '标签': y1}, {'名称': x2, '标签': y2}, ...]
+function packTableDataList(sheet, fields, dataStartRow, dataEndRow) {
+    const fieldsData = packTableDataFields(sheet, fields, dataStartRow, dataEndRow);
+    const rowCount = fieldsData[fields[0]].length;
+    const listData = [];
+
+    // 将紧凑格式转换为列表字典格式
+    for (let i = 0; i < rowCount; i++) {
+        const rowDict = {};
+        fields.forEach(field => {
+            rowDict[field] = fieldsData[field][i];
+        });
+        listData.push(rowDict);
+    }
+    return listData;
+}
+
+function clearSheetData(sheet = ActiveSheet, headerRow = 1, dataStartRow = 2) {
     let headerStartRow, headerEndRow, dataEndRow;
 
-    // 检查 header 参数，-1 表示不处理表头
-    if (header === -1) {
+    // 检查 headerRow 参数，-1 表示不处理表头
+    if (headerRow === -1) {
         headerStartRow = headerEndRow = null;
     } else if (typeof header === 'number') {
-        headerStartRow = headerEndRow = header;
+        headerStartRow = headerEndRow = headerRow;
     } else if (Array.isArray(header)) {
-        [headerStartRow, headerEndRow] = header;
+        [headerStartRow, headerEndRow] = headerRow;
     }
 
     // 检查 dataStartRow 参数，-1 表示不处理数据区域
@@ -218,7 +292,10 @@ function clearSheetData(header = 1, dataStartRow = 2, sheet = ActiveSheet) {
     }
 }
 
-function writeJsonToSheet(jsonData, headerRow = 1, dataStartRow = 2, sheet = ActiveSheet) {
+// 将py里df.to_dict(orient='split')的数据格式写入sheet
+// 这个数据一般有3个属性：index, columns, data
+// todo 如果已经有一个表，不是全量添加，而是要按照对应字段名来更新，这个需要实现
+function writeDfSplitDictToSheet(sheet, jsonData, headerRow = 1, dataStartRow = 2) {
     let columns = jsonData.columns || [];
     let data = jsonData.data || [];
 
@@ -244,79 +321,18 @@ function writeJsonToSheet(jsonData, headerRow = 1, dataStartRow = 2, sheet = Act
 }
 
 
-function writeArrToSheet(arr, cel) {
+function writeArrToSheet(arr, startCel) {
     // 遍历数组，将每行的数据写入 Excel
     for (let i = 0; i < arr.length; i++) {
         const row = arr[i];
         // 如果当前行存在，则遍历该行的元素
         if (Array.isArray(row)) {
             for (let j = 0; j < row.length; j++) {
-                cel.Offset(i, j).Value2 = row[j];
+                startCel.Offset(i, j).Value2 = row[j];
             }
         }
     }
 }
-
-
-// 将选中sheetName，及指定字段fields的数据，打包成list[dict]格式
-// 使用示例：tableDataToCompactJSON('酒水', ['名称', '标签'], 4)
-function tableDataToJSON(sheetName, fields, startRow = null, endRow = null) {
-    const sheet = Sheets(sheetName);
-    const urg = getUsedRange(sheet);
-
-    // 获取起始和结束行，支持默认算法
-    const dataStartRow = startRow || (urg.Find(fields[0]).Row + 1); // 默认为字段列的下一行
-    const dataEndRow = endRow || (urg.Row + urg.Rows.Count - 1); // 默认为表格的最后一行
-
-    // 查找各字段对应的列位置
-    const fieldColumns = fields.reduce((acc, field) => {
-        acc[field] = findColumn(field, urg);
-        return acc;
-    }, {});
-
-    // 遍历每一行数据并提取指定字段
-    const jsonData = [];
-    for (let i = dataStartRow; i <= dataEndRow; i++) {
-        const rowData = {};
-        fields.forEach(field => {
-            // 注意：提取单元格的文本内容。注意如果单元格是undefined，好像这个field是自动过滤掉不保存的，下游要注意特殊处理
-            rowData[field] = sheet.Cells(i, fieldColumns[field]).Value2;
-        });
-        jsonData.push(rowData); // 将行数据加入 JSON 数组
-    }
-    return jsonData;
-}
-
-// 返回格式{field1: [x1, x2, ...], field2: [y1, y2, ...]}
-function tableDataToCompactJSON(sheetName, fields, startRow = null, endRow = null) {
-    const sheet = Sheets(sheetName);
-    const urg = getUsedRange(sheet);
-
-    // 获取起始和结束行，默认使用字段列下一行至数据区域最后一行
-    const dataStartRow = startRow || (urg.Find(fields[0]).Row + 1);
-    const dataEndRow = endRow || (urg.Row + urg.Rows.Count - 1);
-
-    // 查找各字段对应的列位置
-    const fieldColumns = fields.reduce((acc, field) => {
-        acc[field] = findColumn(field, urg);
-        return acc;
-    }, {});
-
-    // 创建紧凑的JSON结构
-    const compactJSON = fields.reduce((acc, field) => {
-        acc[field] = []; // 初始化每个字段的列表
-        return acc;
-    }, {});
-
-    // 遍历每一行数据并填充到紧凑结构中
-    for (let i = dataStartRow; i <= dataEndRow; i++) {
-        fields.forEach(field => {
-            compactJSON[field].push(sheet.Cells(i, fieldColumns[field]).Value2);
-        });
-    }
-    return compactJSON;
-}
-
 
 function __3_py服务工具箱() {
 
