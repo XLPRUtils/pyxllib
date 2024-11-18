@@ -894,15 +894,20 @@ def find_direct_dependencies(definitions):
     return dependencies
 
 
-def assemble_dependencies_from_jstools(cur_code, jstools=None):
+def assemble_dependencies_from_jstools(cur_code, jstools=None, place_tail=False):
     """
     根据输入的 cur_code ，从预设的jstools工具代码库中自动提取所有相关依赖定义
 
     :param str cur_node: 当前代码
     :param str jstools: 依赖的工具代码
+    :param bool place_tail: 把工具代码放在末尾
+        放在末尾的目的，是类似jsa那样的场景能在开头直接看到关键的业务代码逻辑
 
+        一般大部分工具函数都是可以放在末尾的
+        但是要注意也有个别特殊的实现，是以定义变量的模式来使用的，则不能放倒末尾
     """
-    # wps场景支持全局return处理
+    # 1 获得工具代码
+    # wps场景支持全局return处理，但这个在编译器里会报错，可以先暴力删掉，不影响我这里的相关处理逻辑
     _cur_code = re.sub(r'^return\s+', '', cur_code, flags=re.MULTILINE)
     identifiers_in_input = find_identifiers_in_code(_cur_code)
 
@@ -911,6 +916,7 @@ def assemble_dependencies_from_jstools(cur_code, jstools=None):
     else:
         definitions = extract_definitions_with_comments(jstools)
 
+    # 2 找到所有使用到的符号
     # 初始化结果列表，并按照 definitions 的顺序存储
     visited = set()
     dependencies = find_direct_dependencies(definitions)
@@ -927,8 +933,14 @@ def assemble_dependencies_from_jstools(cur_code, jstools=None):
     for identifier in set(definitions.keys()).intersection(identifiers_in_input):
         resolve_dependencies(identifier)
 
+    # 3 拼接代码
     required_code = [definitions[identifier] for identifier in definitions if identifier in visited]
-    required_code.append(cur_code)
+    if place_tail:
+        required_code.insert(0, '// 以下是工具代码')
+        required_code.insert(0, cur_code)
+    else:
+        required_code.append(cur_code)
+
     return "\n\n".join(required_code)
 
 

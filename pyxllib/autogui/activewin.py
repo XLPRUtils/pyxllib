@@ -95,7 +95,7 @@ class ActiveWindowCapture(OriginalMSS):
         for i in range(4):
             win = uiautomation.GetForegroundControl()
             if win:
-                return
+                return win
             else:
                 time.sleep(0.5)
         return
