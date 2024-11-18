@@ -807,7 +807,10 @@ def extract_definitions_with_comments(js_code):
         preceding_comments = []
         for comment in comments:
             if comment.range[1] < node_start:
-                preceding_comments.append(comment)
+                # 检查注释之后和节点之前的内容是否只包含空白
+                intermediate_content = js_code[comment.range[1]:node_start]
+                if intermediate_content.strip() == "":
+                    preceding_comments.append(comment)
 
         if preceding_comments:
             # 选择最近的注释
@@ -905,6 +908,8 @@ def assemble_dependencies_from_jstools(cur_code, jstools=None, place_tail=False)
 
         一般大部分工具函数都是可以放在末尾的
         但是要注意也有个别特殊的实现，是以定义变量的模式来使用的，则不能放倒末尾
+
+    todo 其实这个版本我觉得也不是很完美，这个太强求语法的准确性才能解析了~ 我其实核心就是找标识符名称而已，我觉得正则做法也没啥问题~
     """
     # 1 获得工具代码
     # wps场景支持全局return处理，但这个在编译器里会报错，可以先暴力删掉，不影响我这里的相关处理逻辑
@@ -945,4 +950,5 @@ def assemble_dependencies_from_jstools(cur_code, jstools=None, place_tail=False)
 
 
 if __name__ == '__main__':
-    pass
+    definitions = get_airscript_head2(True)
+    print()

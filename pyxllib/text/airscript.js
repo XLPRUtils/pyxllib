@@ -5,8 +5,7 @@ function __1_定位工具() {
 // 根据提供的 pattern 在 range 中寻找 cell
 // 如果没有提供 range，默认在 ActiveSheet.UsedRange 中寻找
 function findCell(pattern, range = ActiveSheet.UsedRange) {
-    const cell = range.Find(pattern, range, xlValues, xlWhole)
-    return cell
+    return range.Find(pattern, range, xlValues, xlWhole);
 }
 
 function levenshteinDistance(a, b) {
@@ -119,9 +118,9 @@ function isEmpty(cells) {
 // 根据提供的 pattern 在 range 中寻找 row
 // 如果没有提供 range，默认在 ActiveSheet.UsedRange 中寻找
 function findRow(pattern, range = ActiveSheet.UsedRange) {
-    const cell = findCell(pattern, range)
+    const cell = findCell(pattern, range);
     if (cell) {
-        return cell.Row
+        return cell.Row;
     }
 }
 
@@ -338,78 +337,50 @@ function __3_py服务工具箱() {
 
 }
 
-// 调用python后端服务
 function runPyScript(script, query = '', host = '{{JSA_POST_DEFAULT_HOST}}') {
     const url = `{{JSA_POST_HOST_URL}}/${host}/common/run_py`;
-
-    try {
-        // 使用 HTTP 模块发送 POST 请求
-        const response = HTTP.post(url, {query, script}, {
-            headers: {
-                'Authorization': 'Bearer {{JSA_POST_TOKEN}}',
-                'Content-Type': 'application/json'
-            }
-        });
-
-        // 获取并解析响应
-        const output = response.json().output;
-        return output;
-    } catch (error) {
-        return {result: `\n执行报错：\n${error.message}`};
-    }
+    const resp = HTTP.post(url, {query, script}, {
+        headers: {
+            'Authorization': 'Bearer {{JSA_POST_TOKEN}}',
+            'Content-Type': 'application/json'
+        }
+    });
+    return resp.json().output;
 }
 
 function runIsolatedPyScript(script, host = '{{JSA_POST_DEFAULT_HOST}}') {
     const url = `{{JSA_POST_HOST_URL}}/${host}/common/run_isolated_py`;
-    try {
-        // 判断 script 的类型: script可以只输入py代码，也可以输入配置好的整个字典数据
-        const payload = typeof script === 'string' ? {script} : script;
-        const response = HTTP.post(url, payload, {
-            headers: {
-                'Authorization': 'Bearer {{JSA_POST_TOKEN}}',
-                'Content-Type': 'application/json'
-            }
-        });
-        return response.json();
-    } catch (error) {
-        return {result: `\n执行报错：\n${error.message}`};
-    }
+    // 判断 script 的类型: script可以只输入py代码，也可以输入配置好的整个字典数据
+    const payload = typeof script === 'string' ? {script} : script;
+    const resp = HTTP.post(url, payload, {
+        headers: {
+            'Authorization': 'Bearer {{JSA_POST_TOKEN}}',
+            'Content-Type': 'application/json'
+        }
+    });
+    return resp.json();
 }
 
 
 function getPyTaskResult(taskId, retries = 1, host = '{{JSA_POST_DEFAULT_HOST}}', delay = 5000) {
     const url = `{{JSA_POST_HOST_URL}}/${host}/common/get_task_result/${taskId}`;
-
     for (let attempt = 0; attempt < retries; attempt++) {
-        try {
-            // 发送 GET 请求获取任务结果
-            const response = HTTP.get(url, {
-                headers: {
-                    'Authorization': 'Bearer {{JSA_POST_TOKEN}}',
-                    'Content-Type': 'application/json'
-                }
-            });
-
-            const result = response.json();
-
-            // 如果任务完成，则返回结果
-            if (!result.error) {
-                return result;
+        const resp = HTTP.get(url, {
+            headers: {
+                'Authorization': 'Bearer {{JSA_POST_TOKEN}}',
+                'Content-Type': 'application/json'
             }
-
-            console.log(`任务尚未完成，重试第 ${attempt + 1} 次...`);
-        } catch (error) {
-            console.error(`获取任务结果时出错: ${error.message}`);
-        }
-
-        // 如果需要重试，则等待一段时间
-        if (attempt < retries - 1) {
-            Sleep(delay);
+        });
+        const jsonResp = resp.json();
+        if ('__get_task_result_error__' in jsonResp) {
+            console.log(`第 ${attempt + 1} 次获取任务结果失败，请稍后再试...`);
+            if (attempt < retries - 1) {
+                timeSleep(delay);
+            }
+        } else {
+            return jsonResp;
         }
     }
-
-    // 超过重试次数仍未成功
-    return {error: "任务超时未完成"};
 }
 
 
@@ -454,4 +425,13 @@ function isNextMonth(date) {
     const nextMonth = new Date(today.getFullYear(), today.getMonth() + 1, 1);
     const endDateOfNextMonth = new Date(today.getFullYear(), today.getMonth() + 2, 0);
     return date >= nextMonth && date <= endDateOfNextMonth;
+}
+
+
+// 正常应该下面这样写就行了。但是jsa1.0运行这个会报错，jsa2.0可以运行但没效果。就用了笨办法来做。
+// setTimeout(function () {}, milliseconds);
+function timeSleep(milliseconds) {
+    const startTime = new Date();
+    while (new Date() - startTime < milliseconds) {
+    }
 }
