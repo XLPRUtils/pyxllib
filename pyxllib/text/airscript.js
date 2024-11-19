@@ -258,13 +258,13 @@ function packTableDataList(sheet, fields, dataStartRow, dataEndRow) {
     return listData;
 }
 
-function clearSheetData(sheet = ActiveSheet, headerRow = 1, dataStartRow = 2) {
+function clearSheetData(headerRow = 1, dataStartRow = 2, sheet = ActiveSheet) {
     let headerStartRow, headerEndRow, dataEndRow;
 
     // 检查 headerRow 参数，-1 表示不处理表头
     if (headerRow === -1) {
         headerStartRow = headerEndRow = null;
-    } else if (typeof header === 'number') {
+    } else if (typeof headerRow === 'number') {
         headerStartRow = headerEndRow = headerRow;
     } else if (Array.isArray(header)) {
         [headerStartRow, headerEndRow] = headerRow;
@@ -293,8 +293,7 @@ function clearSheetData(sheet = ActiveSheet, headerRow = 1, dataStartRow = 2) {
 
 // 将py里df.to_dict(orient='split')的数据格式写入sheet
 // 这个数据一般有3个属性：index, columns, data
-// todo 如果已经有一个表，不是全量添加，而是要按照对应字段名来更新，这个需要实现
-function writeDfSplitDictToSheet(sheet, jsonData, headerRow = 1, dataStartRow = 2) {
+function writeDfSplitDictToSheet(jsonData, headerRow = 1, dataStartRow = 2, sheet = ActiveSheet) {
     let columns = jsonData.columns || [];
     let data = jsonData.data || [];
 
@@ -307,8 +306,10 @@ function writeDfSplitDictToSheet(sheet, jsonData, headerRow = 1, dataStartRow = 
     const startCol = sheet.UsedRange.Column;
 
     // 写入表头
-    for (let j = 0; j < columns.length; j++) {
-        sheet.Cells(headerRow, startCol + j).Value2 = columns[j];
+    if (headerRow > 0) {
+        for (let j = 0; j < columns.length; j++) {
+            sheet.Cells(headerRow, startCol + j).Value2 = columns[j];
+        }
     }
 
     // 写入数据内容
@@ -332,6 +333,56 @@ function writeArrToSheet(arr, startCel) {
         }
     }
 }
+
+function insertNewDataWithHeaders(jsonData, headerRow = 1, dataStartRow = 2, sheet = ActiveSheet) {
+    // 1 预处理 index，将其合并到 columns 和 data
+    let columns = jsonData.columns || [];
+    let data = jsonData.data || [];
+    if (jsonData.index) {
+        columns = ['index', ...columns];
+        data = jsonData.index.map((idx, i) => [idx, ...data[i]]);
+    }
+
+    // 2 处理可能出现的新字段
+    // 获取现有的表头
+    let existingHeaders = [];
+    const usedRange = sheet.UsedRange;
+    for (let col = usedRange.Column; col <= usedRange.Column + usedRange.Columns.Count - 1; col++) {
+        existingHeaders.push(sheet.Cells(headerRow, col).Value2);
+    }
+
+    // 计算新增的字段
+    const newHeaders = columns.filter(column => !existingHeaders.includes(column));
+    const allHeaders = [...existingHeaders, ...newHeaders];
+
+    // 如果有新字段，扩展表头
+    if (newHeaders.length > 0) {
+        for (let j = 0; j < allHeaders.length; j++) {
+            sheet.Cells(headerRow, usedRange.Column + j).Value2 = allHeaders[j];
+        }
+    }
+
+    // 构建插入数据的映射关系
+    const headerIndexMap = {};
+    for (let j = 0; j < allHeaders.length; j++) {
+        headerIndexMap[allHeaders[j]] = usedRange.Column + j;
+    }
+
+    // 3 插入新行
+    const newDataRows = data.length;
+    const insertEndRow = dataStartRow + newDataRows - 1;
+    Rows(`${dataStartRow}:${insertEndRow}`).Insert(xlUp);
+
+    for (let i = 0; i < data.length; i++) {
+        const rowData = data[i];
+        for (let j = 0; j < columns.length; j++) {
+            const columnName = columns[j];
+            const columnIndex = headerIndexMap[columnName];
+            sheet.Cells(dataStartRow + i, columnIndex).Value2 = rowData[j];
+        }
+    }
+}
+
 
 function __3_py服务工具箱() {
 
