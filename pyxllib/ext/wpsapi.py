@@ -11,6 +11,7 @@ import traceback
 import datetime
 import tempfile
 
+from loguru import logger
 import requests
 
 from pyxllib.prog.pupil import format_exception
@@ -198,6 +199,9 @@ class WpsApi:
 
         if 'error' in reply:
             raise Exception('evaluate script failed: {}\nstack: {}'.format(reply['error'], reply['stack']))
+
+        if 'return' not in reply:
+            logger.error(reply)
 
         return reply['return']
 
