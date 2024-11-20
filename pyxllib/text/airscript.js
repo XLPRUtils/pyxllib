@@ -5,7 +5,8 @@ function __1_定位工具() {
 // 根据提供的 pattern 在 range 中寻找 cell
 // 如果没有提供 range，默认在 ActiveSheet.UsedRange 中寻找
 function findCell(pattern, range = ActiveSheet.UsedRange) {
-    return range.Find(pattern, range, xlValues, xlWhole);
+    // return range.Find(pattern, range, xlValues, xlWhole);  // 241119周二21:43，1.0突然就不兼容这么用了
+    return range.Find(pattern);
 }
 
 function levenshteinDistance(a, b) {
@@ -371,7 +372,9 @@ function insertNewDataWithHeaders(jsonData, headerRow = 1, dataStartRow = 2, she
     // 3 插入新行
     const newDataRows = data.length;
     const insertEndRow = dataStartRow + newDataRows - 1;
-    Rows(`${dataStartRow}:${insertEndRow}`).Insert(xlUp);
+    if (insertEndRow >= dataStartRow) {
+        sheet.Rows(`${dataStartRow}:${insertEndRow}`).Insert(xlUp);
+    }
 
     for (let i = 0; i < data.length; i++) {
         const rowData = data[i];

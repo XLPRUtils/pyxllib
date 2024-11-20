@@ -391,6 +391,7 @@ class WeChatMainWnd(UiCtrlNode):
 
         search_box.Click()
         search_box.SendKeys(name)
+        time.sleep(2)
         search_box.SendKeys('{Enter}')
 
     def __4_编辑器(self):
