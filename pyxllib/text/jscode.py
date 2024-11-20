@@ -16,8 +16,6 @@ try:
 except ModuleNotFoundError:
     pass
 
-import esprima
-
 from pyxllib.file.specialist import XlPath
 from pyxllib.prog.cachetools import xlcache
 
@@ -792,91 +790,39 @@ def __3_js代码结构解析():
 
 
 def extract_definitions_with_comments(js_code):
+    """ 找出、切分每段函数的定义(函数开头的注释)
+
+    这里是用正则实现的版本，强制要求函数结束的时候用的是单行}结尾
+        如果实现中间内容也会出现这种单行}结尾，可以想写特殊手段规避开
     """
-    提取 JavaScript 代码中的函数和对象定义，生成 key: value 的字典。
-    key 是标识符名称，value 是包括注释的代码片段。
+    pattern = r"""
+    (                                  # 开始捕获注释部分
+        (?:(?:/\*[^*]*\*+(?:[^/*][^*]*\*+)*/)|(?://[^\n]*))\s*  # 匹配注释
+    )*
+    (                                  # 开始捕获声明部分
+        \b(?:var|let|const|function)\b\s+    # 匹配声明关键字
+    )
+    (\w+)                               # 捕获变量名或函数名
+    \s*(?:\(.*?\))?\s*\{                # 匹配函数参数列表后跟'{'
+    [\s\S]+?                            # 非贪婪匹配所有字符
+    (?<=\n\}\n)                         # 确认'}'出现在单独一行
     """
-    parsed = esprima.parseScript(js_code, {'comment': True, 'range': True})
-    comments = parsed.comments
+    matches = re.finditer(pattern, js_code, re.VERBOSE)
     definitions = {}
-
-    def get_preceding_comment(node_start):
-        """
-        获取紧靠在节点之前的注释
-        """
-        preceding_comments = []
-        for comment in comments:
-            if comment.range[1] < node_start:
-                # 检查注释之后和节点之前的内容是否只包含空白
-                intermediate_content = js_code[comment.range[1]:node_start]
-                if intermediate_content.strip() == "":
-                    preceding_comments.append(comment)
-
-        if preceding_comments:
-            # 选择最近的注释
-            last_comment = preceding_comments[-1]
-            return js_code[last_comment.range[0]:last_comment.range[1]].strip()
-        return ""
-
-    # 遍历 AST 的 body 部分
-    for node in parsed.body:
-        # 提取函数定义
-        if node.type == 'FunctionDeclaration':
-            func_name = node.id.name
-            start, end = node.range
-            # 获取函数前的注释
-            comment = get_preceding_comment(start)
-            definitions[func_name] = f"{comment}\n{js_code[start:end].strip()}"
-
-        # 提取变量定义（对象）
-        elif node.type == 'VariableDeclaration':
-            for declaration in node.declarations:
-                if declaration.init and declaration.init.type == 'ObjectExpression':
-                    var_name = declaration.id.name
-                    start, end = node.range
-                    comment = get_preceding_comment(start)
-                    definitions[var_name] = f"{comment}\n{js_code[start:end].strip()}"
-
-                # 处理 Object.assign 的情况
-                elif declaration.init and declaration.init.type == 'CallExpression':
-                    if (declaration.init.callee.object and
-                            declaration.init.callee.object.name == 'Object' and
-                            declaration.init.callee.property.name == 'assign'):
-                        var_name = declaration.id.name
-                        start, end = node.range
-                        comment = get_preceding_comment(start)
-                        definitions[var_name] = f"{comment}\n{js_code[start:end].strip()}"
-
+    for match in matches:
+        identifier = match.group(3).strip()  # 根据正则表达式的修改，更新捕获组的索引
+        full_definition = match.group(0).strip()
+        definitions[identifier] = full_definition
     return definitions
 
 
-def extract_identifiers(node, identifiers):
-    """
-    递归提取 AST 节点中的所有标识符
-    """
-    if isinstance(node, list):
-        for item in node:
-            extract_identifiers(item, identifiers)
-    elif hasattr(node, 'type'):
-        # 处理 Identifier 节点
-        if node.type == 'Identifier':
-            identifiers.add(node.name)
-        # 递归处理所有子节点
-        for key in dir(node):
-            if not key.startswith('_'):
-                value = getattr(node, key)
-                if isinstance(value, (list, esprima.nodes.Node)):
-                    extract_identifiers(value, identifiers)
-
-
 def find_identifiers_in_code(code):
+    """ 正则实现的找标识符的版本
+
+    用基于esprima的语法树实现的方式，遇到不是那么标准的代码的时候，太多问题和局限了
+    还会多此一举过滤掉注释部分等
     """
-    使用 esprima 提取给定代码片段中的所有标识符
-    """
-    identifiers = set()
-    parsed = esprima.parseScript(code, {'range': True})
-    extract_identifiers(parsed.body, identifiers)
-    return identifiers
+    return set(re.findall(r'\b(\w+)\b', code))
 
 
 def find_direct_dependencies(definitions):
@@ -913,8 +859,7 @@ def assemble_dependencies_from_jstools(cur_code, jstools=None, place_tail=False)
     """
     # 1 获得工具代码
     # wps场景支持全局return处理，但这个在编译器里会报错，可以先暴力删掉，不影响我这里的相关处理逻辑
-    _cur_code = re.sub(r'^return\s+', '', cur_code, flags=re.MULTILINE)
-    identifiers_in_input = find_identifiers_in_code(_cur_code)
+    identifiers_in_input = find_identifiers_in_code(cur_code)
 
     if jstools is None:
         definitions = get_airscript_head2(True)
@@ -950,5 +895,4 @@ def assemble_dependencies_from_jstools(cur_code, jstools=None, place_tail=False)
 
 
 if __name__ == '__main__':
-    definitions = get_airscript_head2(True)
-    print()
+    pass

@@ -13,6 +13,7 @@ import tempfile
 
 from loguru import logger
 import requests
+import pandas as pd
 
 from pyxllib.prog.pupil import format_exception
 from pyxllib.ext.drissionlib import get_dp_tab
@@ -335,6 +336,21 @@ const jsonData = {json_data};
 writeArrToSheet(jsonData, Sheets('{sheet_name}').Range('{start_cell}'));
 """.strip()
         self.run_airscript(jscode)
+
+    def get_df(self, sheet_name, fields, data_start_row=None, data_end_row=None):
+        """ 获得表格数据
+
+        :param sheet_name: 表格名
+        :param fields: 要提取的字段名
+        :param int data_start_row: 起始行，默认会根据fields位置自动定位
+        :param int data_end_row: 结束行，默认取所有数据
+        :return: DataFrame
+        """
+        data_start_row = data_start_row or 'undefined'
+        data_end_row = data_end_row or 'undefined'
+        jscode = f"return packTableDataFields('{sheet_name}', {fields}, {data_start_row}, {data_end_row})"
+        data = self.run_airscript(jscode)
+        return pd.DataFrame(data)
 
 
 class WpsGroupApi(WpsApi):
