@@ -439,14 +439,62 @@ function getPyTaskResult(taskId, retries = 1, host = '{{JSA_POST_DEFAULT_HOST}}'
 
 
 function __4_日期处理() {
+    /*
+    为了理解js相关的日期处理原理，有时区和时间戳两个关键点要明白：
+    1、js中的Date存储的不是"年/月/日"这样简单的数值，而是有带"时区"标记的，是一个时间点的"精确指定"，而不是"数值描述"。
+        说人话，意思就是我们输入的任何时间，都是要精确转换对应到utc0时区的时间上的。
+            console.log看到的就是utc版的时间。
+        但是我们使用.getHours()等方法的时候，又会自动转换到本地时间的数值。
+        理解这套逻辑，就好理解核心的存储、转换逻辑，不容易混乱和出错了。
 
+        Date的初始化还很智能，使用'2024-11'等标准的ISO格式时，默认输入的就是utc时间。
+        而使用'2024/11'等斜杠模式的时候，默认输入的就是本地时间。
+    2、js的时间戳(timestamp)是1970-01-01到当前的毫秒数，excel的时间戳是1900-01-01到当前的天数(小数部分表示时分秒)
+        二者是不一样的，差25569天，所以需要一套转换操作逻辑
+        但如果是要把excel的日期转成js，如果没有太高的精度要求，
+            且恰好用'2024/11'的斜杠格式表示本地时间的话，有简单的初始化方法 new Date(cell.Text)
+
+    也有人整理的资料：https://bbs.wps.cn/topic/17094
+
+    具体的excelDateToJSDate、jsDateToExcelDate是gpt给我实现的，我也搞不太懂，但测试正确就行了~
+    */
+
+    // 输入utc时间点
+    console.log(new Date("2024-11-20"))
+    const d = new Date();  // 当前时间
+    console.log(d)
+
+    // 输入本地时间
+    console.log(new Date("2024/11/20"))
+
+    // 看到的是本地时间的"小时"
+    console.log(d.getHours())
 }
 
 
-// 将 Excel 日期转换为 JavaScript 日期
-function xlDateToJSDate(xlDate) {
-    return new Date((xlDate - 25569) * 24 * 3600 * 1000);
+// 将Excel日期时间戳转为JS日期, adjustTimezone是是否默认按照本地时间处理
+function excelDateToJSDate(excelDate, adjustTimezone = true) {
+    const excelEpochStart = new Date(Date.UTC(1899, 11, 30));
+    const jsDate = new Date(excelEpochStart.getTime() + excelDate * 86400000);
+    if (adjustTimezone) {
+        const timezoneOffset = jsDate.getTimezoneOffset() * 60000;
+        return new Date(jsDate.getTime() + timezoneOffset);
+    }
+    return jsDate;
 }
+
+// 将JS日期转为excel时间戳
+function jsDateToExcelDate(jsDate = new Date(), adjustTimezone = true) {
+    let adjustedDate = jsDate;
+    if (adjustTimezone) {
+        const timezoneOffset = jsDate.getTimezoneOffset() * 60000;
+        adjustedDate = new Date(jsDate.getTime() - timezoneOffset);
+    }
+    const excelEpochStart = new Date(Date.UTC(1899, 11, 30));
+    const diffInMs = adjustedDate.getTime() - excelEpochStart.getTime();
+    return diffInMs / 86400000;
+}
+
 
 // 判断日期是否在本周
 function isCurrentWeek(date) {
