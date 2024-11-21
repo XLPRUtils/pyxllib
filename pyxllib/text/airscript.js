@@ -1,12 +1,5 @@
-function __1_定位工具() {
+function __0_算法工具() {
 
-}
-
-// 根据提供的 pattern 在 range 中寻找 cell
-// 如果没有提供 range，默认在 ActiveSheet.UsedRange 中寻找
-function findCell(pattern, range = ActiveSheet.UsedRange) {
-    // return range.Find(pattern, range, xlValues, xlWhole)  // 241119周二21:43，1.0突然就不兼容这么用了
-    return range.Find(pattern)
 }
 
 function levenshteinDistance(a, b) {
@@ -31,64 +24,115 @@ function levenshteinDistance(a, b) {
     return matrix[b.length][a.length]
 }
 
+function levenshteinSimilarity(a, b) {
+    return (1 - levenshteinDistance(a, b) / Math.max(a.length, b.length)).toFixed(4)
+}
+
+/**
+ * @description 找到与目标字符串匹配度最高的前K个结果。
+ * @param {string} target - 目标字符串。
+ * @param {Array|Function} candidates - 候选集合，有以下三种格式：
+ *     1. 字符串数组，例如 ["abc", "def"]。
+ *     2. Excel范围对象，例如 Range("A1:A10")，会提取范围中的文本内容。
+ *     3. 格式化数组，例如 [ [obj1, str1], [obj2, str2], ... ]，
+ *        其中 obj 为原始对象，str 为用于匹配的字符串。
+ * @param {number} k - 返回的匹配结果数量。
+ * @returns {Array} - 包含 [obj, text, sim] 的数组，表示对象、文本及匹配度。
+ */
+function findTopKMatches(target, candidates, k) {
+    let stdCands
+    if (Array.isArray(candidates)) {
+        stdCands = typeof candidates[0] === "string"
+            ? candidates.map((s, i) => [i, s])
+            : candidates
+    } else if (typeof candidates === "function") {
+        stdCands = []
+        for (let i = 1; i <= candidates.Rows.Count; i++) {
+            const cel = candidates.Cells(i, 1)
+            stdCands.push([cel, cel.Text])
+        }
+    } else {
+        throw new Error("Unsupported format.")
+    }
+
+    const results = stdCands
+        .map(([obj, str]) => [obj, str, parseFloat(levenshteinSimilarity(target, str))])
+        .sort((a, b) => b[2] - a[2])
+    return k ? results.slice(0, k) : results
+}
+
+function __1_定位工具() {
+
+}
+
+function findCel(pattern, rng = ActiveSheet.UsedRange) {
+    // return range.Find(pattern, range, xlValues, xlWhole)  // 241119周二21:43，1.0突然就不兼容这么用了
+    return rng.Find(pattern)
+}
+
+function findRow(pattern, rng = ActiveSheet.UsedRange) {
+    const cel = findCel(pattern, rng)
+    if (cel) return cel.Row;
+}
+
 // 兼容1.0版本的常规使用方式
-function findColumn(pattern, range = ActiveSheet.UsedRange) {
-    let cell = findCell(pattern, range)
-    let columnIndex
-    if (!cell) {
+function findCol(pattern, rng = ActiveSheet.UsedRange) {
+    let cel = findCel(pattern, rng)
+    let col
+    if (!cel) {  // 支持模糊匹配
         let minDistance = Infinity
-        for (let i = 1; i <= range.Columns.Count; i++) {
-            const columnName = range.Cells(1, i).Value
-            const distance = levenshteinDistance(pattern, columnName)
+        for (let i = 1; i <= rng.Columns.Count; i++) {
+            const colName = rng.Cells(1, i).Value
+            // 这里是故意使用编辑距离而不是相似度的
+            const distance = levenshteinDistance(pattern, colName)
             if (distance < minDistance) {
                 minDistance = distance
-                columnIndex = i
+                col = i
             }
         }
     } else {
-        columnIndex = cell.Column
+        col = cel.Column
     }
-    return columnIndex
+    return col
 }
 
-
 // 2.0版本里支持缓存模式的查询
-const findColumn2 = Object.assign(
-    function (pattern, range = ActiveSheet.UsedRange, cache = true) {
+const findCol2 = Object.assign(
+    function (pattern, rng = ActiveSheet.UsedRange, cache = true) {
         // 定义内部缓存
-        const sheetName = range.Parent.Name
-        const rangeAddress = range.Address
-        const cacheKey = `${sheetName}-${rangeAddress}-${pattern}`
+        const sheetName = rng.Parent.Name
+        const rngAddress = rng.Address
+        const cacheKey = `${sheetName}-${rngAddress}-${pattern}`
 
         // 检查缓存命中
-        if (cache && findColumn2._cache[cacheKey] !== undefined) {
-            return findColumn2._cache[cacheKey]
+        if (cache && findCol2._cache[cacheKey] !== undefined) {
+            return findCol2._cache[cacheKey]
         }
 
         // 查找列逻辑
-        let cell = findCell(pattern, range)  // 精确匹配
-        let columnIndex
+        let cel = findCel(pattern, rng)  // 精确匹配
+        let col
 
-        if (!cell) {  // 模糊匹配
+        if (!cel) {  // 模糊匹配
             let minDistance = Infinity
-            for (let i = 1; i <= range.Columns.Count; i++) {
-                const columnName = range.Cells(1, i).Value
-                const distance = levenshteinDistance(pattern, columnName)
+            for (let i = 1; i <= rng.Columns.Count; i++) {
+                const colName = rng.Cells(1, i).Value
+                const distance = levenshteinDistance(pattern, colName)
                 if (distance < minDistance) {
                     minDistance = distance
-                    columnIndex = i
+                    col = i
                 }
             }
         } else {
-            columnIndex = cell.Column
+            col = cel.Column
         }
 
         // 若启用缓存，存入缓存
         if (cache) {
-            findColumn2._cache[cacheKey] = columnIndex
+            findCol2._cache[cacheKey] = col
         }
 
-        return columnIndex
+        return col
     },
     {
         // 缓存对象
@@ -101,24 +145,16 @@ const findColumn2 = Object.assign(
     }
 );
 
-
 // 判断一个 cells 集合是否为空
-function isEmpty(cells) {
-    for (let i = 1; i <= cells.Count; i++) {
-        if (cells.Item(i).Text) return false;
+function isEmpty(cels) {
+    for (let i = 1; i <= cels.Count; i++) {
+        if (cels.Item(i).Text) return false;
     }
     return true
 }
 
-// 根据提供的 pattern 在 range 中寻找 row
-// 如果没有提供 range，默认在 ActiveSheet.UsedRange 中寻找
-function findRow(pattern, range = ActiveSheet.UsedRange) {
-    const cell = findCell(pattern, range)
-    if (cell) return cell.Row;
-}
-
 // 获取实际使用的区域
-function getUsedRange(sheet = ActiveSheet, maxRows = 500, maxColumns = 100, startFromA1 = true) {
+function getUsedRange(sheet = ActiveSheet, maxRows = 500, maxCols = 100, startFromA1 = true) {
     /* 允许通过"表格上下文"信息，调整这里数据行的上限500行，或者列上限100列
         注意，如果分析预设的表格数据在这个限定参数内可以不改
         只有表格未知，或者明确数据量超过设置时，需要重新调整这里的参数
@@ -127,24 +163,28 @@ function getUsedRange(sheet = ActiveSheet, maxRows = 500, maxColumns = 100, star
     */
 
     // 默认获得的区间，有可能是有冗余的空行，所以还要进一步优化
-    let usedRange = sheet.UsedRange
+    if (typeof sheet === 'string') {
+        sheet = Sheets(sheet)
+    }
+    let ur = sheet.UsedRange
 
-    let lastRow = Math.min(usedRange.Rows.Count, maxRows)
-    let lastColumn = Math.min(usedRange.Columns.Count, maxColumns)
+    let lastRow = Math.min(ur.Rows.Count, maxRows)
+    let lastColumn = Math.min(ur.Columns.Count, maxCols)
 
     let firstRow = 1
     let firstColumn = 1
 
+    // todo 可以用二分化提高检索效率
     // 找到最后一个非空行
     for (; lastRow >= firstRow; lastRow--) {
-        if (!isEmpty(usedRange.Rows(lastRow).Cells)) {
+        if (!isEmpty(ur.Rows(lastRow).Cells)) {
             break
         }
     }
 
     // 找到最后一个非空列
     for (; lastColumn >= firstColumn; lastColumn--) {
-        if (!isEmpty(usedRange.Columns(lastColumn).Cells)) {
+        if (!isEmpty(ur.Columns(lastColumn).Cells)) {
             break
         }
     }
@@ -152,91 +192,96 @@ function getUsedRange(sheet = ActiveSheet, maxRows = 500, maxColumns = 100, star
     // 如果表格不是从"A1"开始，找到第一个非空行和非空列
     if (!startFromA1) {
         for (; firstRow <= lastRow; firstRow++) {
-            if (!isEmpty(usedRange.Rows(firstRow).Cells)) {
+            if (!isEmpty(ur.Rows(firstRow).Cells)) {
                 break
             }
         }
 
         for (; firstColumn <= lastColumn; firstColumn++) {
-            if (!isEmpty(usedRange.Columns(firstColumn).Cells)) {
+            if (!isEmpty(ur.Columns(firstColumn).Cells)) {
                 break
             }
         }
     }
 
     // 创建一个新的 Range 对象，它只包含非空的行和列
-    let newUsedRange = sheet.Range(
-        usedRange.Cells(firstRow, firstColumn),
-        usedRange.Cells(lastRow, lastColumn)
+    let ur2 = sheet.Range(
+        ur.Cells(firstRow, firstColumn),
+        ur.Cells(lastRow, lastColumn)
     )
 
-    return newUsedRange  // 返回新的实际数据区域
+    return ur2  // 返回新的实际数据区域
 }
+
+function locateTableRange(sheetName, colNames = [], dataRow = [-1, -1]) {
+    // 1 初步确定数据区域行范围
+    const ur = getUsedRange(sheetName)
+    // dataRow可以输入单个数值
+    if (typeof dataRow === 'number') dataRow = [dataRow, -1];
+    let rows = {
+        start: dataRow[0],
+        end: dataRow[1] === -1 ? ur.Row + ur.Rows.Count - 1 : dataRow[1]
+    }
+
+    // 2 获取列名对应的列号
+    let cols = {}
+    colNames.forEach(colName => {
+        const col = findCol(colName, ur)
+        if (col) {
+            cols[colName] = col
+            // 如果此时rows.start还未确定，则以该单元格的下一行作为数据起始行
+            if (rows.start === -1) {
+                rows.start = findRow(colName, ur) + 1
+            }
+        }
+    })
+
+    // 3 返回结果
+    if (rows.start === -1) rows.start = ur.Row + 1;
+
+    return [ur, rows, cols]
+}
+
 
 function __2_json数据导入导出() {
 
 }
 
 // 打包sheet下多个字段fields的数据
-// 使用示例：packTableDataFields('料理', ['名称', '标签'], 4)
+// 使用示例：packTableDataFields('料理', ['名称', '标签']
 //  fields的参数支持字段名称或整数，明确指定某列的位置
 // 返回格式：{'名称': [x1, x2, ...], '标签': [y1, y2, ...]}
-function packTableDataFields(sheet, fields, dataStartRow, dataEndRow, filterEmptyRows = true) {
-    // 1 数据范围
-    let st = sheet
-    if (typeof sheet === 'string') {
-        st = Sheets(sheet)
-    }
-    const urg = getUsedRange(st)
+function packTableDataFields(sheetName, fields, dataRow = [-1, -1], filterEmptyRows = true) {
+    // 1 确定数据范围和字段列号映射
+    const [ur, rows, cols] = locateTableRange(sheetName, fields, dataRow)
 
-    // 2 初始化字段列映射表
-    const fieldColMap = fields.reduce((map, field) => {
-        if (typeof field === 'string') {
-            map[field] = findColumn(field, urg)
-            if (dataStartRow === undefined) {
-                // 默认按找到的第1个字段名的下一行为数据起始行
-                dataStartRow = findRow(field) + 1
-            }
-        } else if (typeof field === 'number') {
-            // 注意，整数作为键会自动转为str，但使用的时候整数索引也会自动转str索引能对上。
-            //  主要是了解这原理注意重名覆盖问题。
-            map[field] = field
-        }
-        return map
-    }, {})
-    if (dataStartRow === undefined) {
-        dataStartRow = 2  // 数据默认从第2行开始
-    }
-
-    // 3 构建字段格式数据
-    // 先建好空数组
+    // 2 初始化字段格式数据
     const fieldsData = fields.reduce((dataMap, field) => {
         dataMap[field] = []
         return dataMap
-    }, {})
+    }, {});
 
-    // 遍历数据行
-    dataEndRow = dataEndRow || (urg.Row + urg.Rows.Count - 1)
-    for (let row = dataStartRow; row <= dataEndRow; row++) {
-        // 如果需要过滤空行
+    // 3 遍历数据行填充字段数据
+    for (let row = rows.start; row <= rows.end; row++) {
         if (filterEmptyRows) {
-            const isEmptyRow = Object.values(fieldColMap).every(col => st.Cells(row, col).Value2 === undefined)
+            const isEmptyRow = Object.values(cols).every(col => Cells(row, col).Value2 === undefined)
             if (isEmptyRow) continue; // 跳过空行
         }
 
-        // 填充字段数据
-        Object.entries(fieldColMap).forEach(([field, col]) => {
-            fieldsData[field].push(st.Cells(row, col).Value2)
+        // 填充每个字段的数据
+        Object.entries(cols).forEach(([field, col]) => {
+            fieldsData[field].push(Cells(row, col).Value2)
         })
     }
 
+    // 4 返回结果
     return fieldsData
 }
 
-// 和packTableDataFields仅差在返回的数据格式上，这个版本的返回值是通常使用更多的jsonl格式
+// 和packTableDataFields仅差在返回的数据格式上，这个版本的返回值是主流的jsonl格式
 // 返回格式：list[dict]， [{'名称': x1, '标签': y1}, {'名称': x2, '标签': y2}, ...]
-function packTableDataList(sheet, fields, dataStartRow, dataEndRow) {
-    const fieldsData = packTableDataFields(sheet, fields, dataStartRow, dataEndRow)
+function packTableDataList(sheet, fields, dataRow, filterEmptyRows = true) {
+    const fieldsData = packTableDataFields(sheet, fields, dataRow, filterEmptyRows)
     const rowCount = fieldsData[fields[0]].length
     const listData = []
 
@@ -378,7 +423,6 @@ function insertNewDataWithHeaders(jsonData, headerRow = 1, dataStartRow = 2, she
     }
 }
 
-
 function __3_py服务工具箱() {
 
 }
@@ -407,7 +451,6 @@ function runIsolatedPyScript(script, host = '{{JSA_POST_DEFAULT_HOST}}') {
     return resp.json()
 }
 
-
 function getPyTaskResult(taskId, retries = 1, host = '{{JSA_POST_DEFAULT_HOST}}', delay = 5000) {
     const url = `{{JSA_POST_HOST_URL}}/${host}/common/get_task_result/${taskId}`
     for (let attempt = 0; attempt < retries; attempt++) {
@@ -428,7 +471,6 @@ function getPyTaskResult(taskId, retries = 1, host = '{{JSA_POST_DEFAULT_HOST}}'
         }
     }
 }
-
 
 function __4_日期处理() {
     /*
@@ -463,7 +505,6 @@ function __4_日期处理() {
     console.log(d.getHours())
 }
 
-
 // 将Excel日期时间戳转为JS日期, adjustTimezone是是否默认按照本地时间处理
 function excelDateToJSDate(excelDate, adjustTimezone = true) {
     const excelEpochStart = new Date(Date.UTC(1899, 11, 30))
@@ -486,7 +527,6 @@ function jsDateToExcelDate(jsDate = new Date(), adjustTimezone = true) {
     const diffInMs = adjustedDate.getTime() - excelEpochStart.getTime()
     return diffInMs / 86400000
 }
-
 
 // 判断日期是否在本周
 function isCurrentWeek(date) {
@@ -521,11 +561,47 @@ function isNextMonth(date) {
     return date >= nextMonth && date <= endDateOfNextMonth
 }
 
-
 // 正常应该下面这样写就行了。但是jsa1.0运行这个会报错，jsa2.0可以运行但没效果。就用了笨办法来做。
 // setTimeout(function () {}, milliseconds);
 function timeSleep(milliseconds) {
     const startTime = new Date()
     while (new Date() - startTime < milliseconds) {
+    }
+}
+
+// 格式化输出本地时间
+function formatLocalDatetime(date = new Date()) {
+    const formatter = new Intl.DateTimeFormat('zh-CN', {  // 使用中文时间风格
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        hour12: false
+    })
+    return formatter.format(date).replace(/\//g, '-').replace(/,/g, '')
+}
+
+function __5_其他() {
+
+}
+
+/**
+ * 为单元格添加或删除超链接
+ * @param {Object} cel - 单元格对象
+ * @param {string} [link] - 超链接地址（可选）。如果不提供，则删除超链接。
+ * @param {string} [text] - 显示文本（可选）。默认使用单元格当前内容，如果为空则显示链接地址。
+ */
+function setHyperlink(cel, link, text, screenTip) {
+    // 必须清空，否则如果在旧的url基础上操作，实测会有bug
+    cel.Hyperlinks.Delete()
+    if (link) {
+        // 如果文本参数未提供，则默认使用单元格当前内容
+        // 如果单元格内容为空，则设置为 undefined，这样会默认显示链接地址
+        const displayText = text !== undefined ? text : (cel.Value2 || undefined)
+        // 各位置参数意思：目标单元格，主链接(文件内引用可能会用到)，次链接，悬浮提示文本，展示文本
+        // 不过我在wps表格上没测出screenTip效果
+        cel.Hyperlinks.Add(cel, link, undefined, screenTip, displayText)
     }
 }

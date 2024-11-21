@@ -453,7 +453,7 @@ def get_airscript_head2(definitions=False):
     content = Template(s).render(vars)
     if not definitions:
         return content
-    return extract_definitions_with_comments(content)
+    return extract_definitions_with_comments(content + '\n')
 
 
 class AirScriptCodeFixer:
@@ -855,7 +855,6 @@ def assemble_dependencies_from_jstools(cur_code, jstools=None, place_tail=False)
         一般大部分工具函数都是可以放在末尾的
         但是要注意也有个别特殊的实现，是以定义变量的模式来使用的，则不能放倒末尾
 
-    todo 其实这个版本我觉得也不是很完美，这个太强求语法的准确性才能解析了~ 我其实核心就是找标识符名称而已，我觉得正则做法也没啥问题~
     """
     # 1 获得工具代码
     # wps场景支持全局return处理，但这个在编译器里会报错，可以先暴力删掉，不影响我这里的相关处理逻辑
@@ -886,7 +885,7 @@ def assemble_dependencies_from_jstools(cur_code, jstools=None, place_tail=False)
     # 3 拼接代码
     required_code = [definitions[identifier] for identifier in definitions if identifier in visited]
     if place_tail:
-        required_code.insert(0, '// 以下是工具代码')
+        required_code.insert(0, '\n\n// 以下是工具代码')
         required_code.insert(0, cur_code)
     else:
         required_code.append(cur_code)
