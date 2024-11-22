@@ -316,8 +316,8 @@ class WpsOnlineWorkbook:
         """
         from pyxllib.text.jscode import assemble_dependencies_from_jstools, remove_js_comments
 
-        # 这里的版本默认支持扩展的js工具
-        code = assemble_dependencies_from_jstools(code)
+        # 这里的版本默认支持扩展的js工具, 并且这套api只支持旧版的jsa1.0
+        code = assemble_dependencies_from_jstools(code, old_jsa=True)
         code = remove_js_comments(code)
         return self.wpsapi.run_airscript(self.file_id, code, return_mode)
 
@@ -337,7 +337,7 @@ writeArrToSheet(jsonData, Sheets('{sheet_name}').Range('{start_cell}'));
 """.strip()
         self.run_airscript(jscode)
 
-    def get_df(self, sheet_name, fields, data_start_row=None, data_end_row=None):
+    def get_df(self, sheet_name, fields, data_row=None):
         """ 获得表格数据
 
         :param sheet_name: 表格名
@@ -346,9 +346,8 @@ writeArrToSheet(jsonData, Sheets('{sheet_name}').Range('{start_cell}'));
         :param int data_end_row: 结束行，默认取所有数据
         :return: DataFrame
         """
-        data_start_row = data_start_row or 'undefined'
-        data_end_row = data_end_row or 'undefined'
-        jscode = f"return packTableDataFields('{sheet_name}', {fields}, {data_start_row}, {data_end_row})"
+        data_row = data_row or [-1, -1]
+        jscode = f"return packTableDataFields('{sheet_name}', {fields}, {data_row})"
         data = self.run_airscript(jscode)
         return pd.DataFrame(data)
 

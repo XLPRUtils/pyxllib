@@ -1,4 +1,4 @@
-function __0_算法工具() {
+function __1_算法工具() {
 
 }
 
@@ -61,48 +61,32 @@ function findTopKMatches(target, candidates, k) {
     return k ? results.slice(0, k) : results
 }
 
-function __1_定位工具() {
+function __2_定位工具() {
 
 }
 
-function findCel(pattern, rng = ActiveSheet.UsedRange) {
-    // return range.Find(pattern, range, xlValues, xlWhole)  // 241119周二21:43，1.0突然就不兼容这么用了
-    return rng.Find(pattern)
+
+function findCel(pattern, ur = ActiveSheet.UsedRange) {
+    return ur.Find(pattern, ur, xlValues, xlWhole)
 }
 
-function findRow(pattern, rng = ActiveSheet.UsedRange) {
-    const cel = findCel(pattern, rng)
+function findRow(pattern, ur = ActiveSheet.UsedRange) {
+    const cel = findCel(pattern, ur)
     if (cel) return cel.Row;
 }
 
-// 兼容1.0版本的常规使用方式
-function findCol(pattern, rng = ActiveSheet.UsedRange) {
-    let cel = findCel(pattern, rng)
-    let col
-    if (!cel) {  // 支持模糊匹配
-        let minDistance = Infinity
-        for (let i = 1; i <= rng.Columns.Count; i++) {
-            const colName = rng.Cells(1, i).Value
-            // 这里是故意使用编辑距离而不是相似度的
-            const distance = levenshteinDistance(pattern, colName)
-            if (distance < minDistance) {
-                minDistance = distance
-                col = i
-            }
-        }
-    } else {
-        col = cel.Column
-    }
-    return col
+function findCol(pattern, ur = ActiveSheet.UsedRange) {
+    let cel = findCel(pattern, ur)
+    if (cel) return cel.Column;
 }
 
 // 2.0版本里支持缓存模式的查询
 const findCol2 = Object.assign(
-    function (pattern, rng = ActiveSheet.UsedRange, cache = true) {
+    function (pattern, ur = ActiveSheet.UsedRange, cache = true) {
         // 定义内部缓存
-        const sheetName = rng.Parent.Name
-        const rngAddress = rng.Address
-        const cacheKey = `${sheetName}-${rngAddress}-${pattern}`
+        const sheetName = ur.Parent.Name
+        const urAddress = ur.Address
+        const cacheKey = `${sheetName}-${urAddress}-${pattern}`
 
         // 检查缓存命中
         if (cache && findCol2._cache[cacheKey] !== undefined) {
@@ -110,22 +94,8 @@ const findCol2 = Object.assign(
         }
 
         // 查找列逻辑
-        let cel = findCel(pattern, rng)  // 精确匹配
-        let col
-
-        if (!cel) {  // 模糊匹配
-            let minDistance = Infinity
-            for (let i = 1; i <= rng.Columns.Count; i++) {
-                const colName = rng.Cells(1, i).Value
-                const distance = levenshteinDistance(pattern, colName)
-                if (distance < minDistance) {
-                    minDistance = distance
-                    col = i
-                }
-            }
-        } else {
-            col = cel.Column
-        }
+        let cel = findCel(pattern, ur)  // 精确匹配
+        let col = !cel ? undefined : cel.Column
 
         // 若启用缓存，存入缓存
         if (cache) {
@@ -213,7 +183,8 @@ function getUsedRange(sheet = ActiveSheet, maxRows = 500, maxCols = 100, startFr
     return ur2  // 返回新的实际数据区域
 }
 
-function locateTableRange(sheetName, colNames = [], dataRow = [-1, -1]) {
+// 兼容jsa1.0版本的定位，这个版本返回的cols不支持动态自增字段
+function v1_locateTableRange(sheetName, dataRow = [-1, -1], colNames = []) {
     // 1 初步确定数据区域行范围
     const ur = getUsedRange(sheetName)
     // dataRow可以输入单个数值
@@ -231,7 +202,7 @@ function locateTableRange(sheetName, colNames = [], dataRow = [-1, -1]) {
             cols[colName] = col
             // 如果此时rows.start还未确定，则以该单元格的下一行作为数据起始行
             if (rows.start === -1) {
-                rows.start = findRow(colName, ur) + 1
+                rows.start = findRow(colName, ur) + 1 || -1  // 有可能会找不到，则保持-1
             }
         }
     })
@@ -239,11 +210,73 @@ function locateTableRange(sheetName, colNames = [], dataRow = [-1, -1]) {
     // 3 返回结果
     if (rows.start === -1) rows.start = ur.Row + 1;
 
+    // 4 修正如果ur不是从第1行、第1列开始的行列偏差
+    rows.start -= ur.Row - 1
+    rows.end -= ur.Row - 1
+    for (const colName in cols) {
+        cols[colName] -= ur.Column - 1
+    }
+
+    return [ur, rows, cols]
+}
+
+// 输入表格名，数据在表格的起止行号，准备使用到的字段名(可选，可以自动增量检索)
+// dataRow也可以写成一个数字，比如dataRow=4，等价于dataRow=[4,-1]，表示数据从第4行开始，结束位置则根据usedRange自动判断
+function locateTableRange(sheetName, dataRow = [-1, -1], colNames = []) {
+    // 1 初步确定数据区域行范围
+    const ur = getUsedRange(sheetName)
+    if (typeof dataRow === 'number') dataRow = [dataRow, -1];
+    let rows = {
+        start: dataRow[0],
+        end: dataRow[1] === -1 ? ur.Row + ur.Rows.Count - 1 : dataRow[1]
+    }
+
+    // 2 初始化列名映射
+    let cols = {}
+    colNames.forEach(colName => {
+        const col = findCol(colName, ur);
+        if (col) {
+            cols[colName] = col
+            if (rows.start === -1) {
+                rows.start = findRow(colName, ur) + 1 || -1
+            }
+        }
+    })
+
+    // 3 使用 Proxy 实现动态查找未配置的字段
+    cols = new Proxy(cols, {
+        get(target, prop) {
+            if (prop in target) {
+                return target[prop] // 已配置字段，直接返回
+            } else {
+                const dynamicCol = findCol(prop, ur) // 动态查找
+                if (dynamicCol) {
+                    target[prop] = dynamicCol // 缓存动态找到的列
+                    return dynamicCol
+                } else {
+                    console.warn(`字段 "${prop}" 未找到`)
+                    return undefined // 未找到字段返回 undefined
+                }
+            }
+        }
+    })
+
+    // 4 修正行列偏移
+    if (rows.start === -1) rows.start = ur.Row + 1
+    rows.start -= ur.Row - 1
+    rows.end -= ur.Row - 1
+    for (const colName in cols) {
+        cols[colName] -= ur.Column - 1
+    }
+
+    // 返回的行、列，都是相对ur的位置，所以可以类似这样 ur.Cells(rows.start, cols[x]) 取到第1条数据在x字段的值
+    // rows、cols都是字典，rows.start、rows.end分别存储了数据的起止行
+    // cols存储了各字段名对应的所在列编号，并且支持在使用中动态自增字段
     return [ur, rows, cols]
 }
 
 
-function __2_json数据导入导出() {
+function __3_json数据导入导出() {
 
 }
 
@@ -253,7 +286,7 @@ function __2_json数据导入导出() {
 // 返回格式：{'名称': [x1, x2, ...], '标签': [y1, y2, ...]}
 function packTableDataFields(sheetName, fields, dataRow = [-1, -1], filterEmptyRows = true) {
     // 1 确定数据范围和字段列号映射
-    const [ur, rows, cols] = locateTableRange(sheetName, fields, dataRow)
+    const [ur, rows, cols] = locateTableRange(sheetName, dataRow, fields)
 
     // 2 初始化字段格式数据
     const fieldsData = fields.reduce((dataMap, field) => {
@@ -423,7 +456,7 @@ function insertNewDataWithHeaders(jsonData, headerRow = 1, dataStartRow = 2, she
     }
 }
 
-function __3_py服务工具箱() {
+function __4_py服务工具箱() {
 
 }
 
@@ -472,7 +505,7 @@ function getPyTaskResult(taskId, retries = 1, host = '{{JSA_POST_DEFAULT_HOST}}'
     }
 }
 
-function __4_日期处理() {
+function __5_日期处理() {
     /*
     为了理解js相关的日期处理原理，有时区和时间戳两个关键点要明白：
     1、js中的Date存储的不是"年/月/日"这样简单的数值，而是有带"时区"标记的，是一个时间点的"精确指定"，而不是"数值描述"。
@@ -583,7 +616,7 @@ function formatLocalDatetime(date = new Date()) {
     return formatter.format(date).replace(/\//g, '-').replace(/,/g, '')
 }
 
-function __5_其他() {
+function __6_其他() {
 
 }
 
