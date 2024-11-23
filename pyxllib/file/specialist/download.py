@@ -13,7 +13,7 @@ from urllib import request
 import requests
 from bs4 import BeautifulSoup
 
-from pyxllib.file.specialist import File, Dir
+from pyxllib.file.specialist import File, Dir, refinepath
 
 
 def download_file(url, fn=None, *, encoding=None, if_exists=None, ext=None, temp=False):
@@ -32,7 +32,7 @@ def download_file(url, fn=None, *, encoding=None, if_exists=None, ext=None, temp
     >> download_file(image_url, fn=r"D:/home/chenkunze/slns/xlproject/xlsln/ckz2024")  # 暂不支持目录
     ValueError: 不能用目录初始化一个File对象 D:\home\chenkunze\slns\xlproject\xlsln\ckz2023
     """
-    if not fn: fn = url.split('/')[-1]
+    if not fn: fn = refinepath(url.split('/')[-1])[-80:]  # 这里故意截断文件名最长80个字符
     root = Dir.TEMP if temp else None
     fn = File(fn, root, suffix=ext).write(requests.get(url).content,
                                           encoding=encoding, if_exists=if_exists, etag=(not fn))
