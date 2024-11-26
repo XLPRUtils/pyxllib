@@ -863,12 +863,12 @@ def assemble_dependencies_from_jstools(cur_code, jstools=None, place_tail=False,
     if jstools is None:
         definitions = get_airscript_head2(True)
         if old_jsa:  # 如果使用的是旧版的jsa1.0，需要做个转换处理
-            # definitions字典里会有类似 v1_func 这样的key，还会有对应的 func 这样的key
-            # 将原本func的删掉，然后把v1_func替换成func的定义
+            # definitions字典里会有类似 as1_func 这样的key，还会有对应的 func 这样的key
+            # 将原本func的删掉，然后把as1_func替换成func的定义
             # 注意字典替换后，value里的代码函数名等也要改掉
             for key in list(definitions.keys()):
-                if key.startswith('v1_'):
-                    definitions[key[3:]] = re.sub(r'(function\s+)v1_', r'\1', definitions[key])
+                if key.startswith('as1_'):
+                    definitions[key[3:]] = re.sub(r'(function\s+)as1_', r'\1', definitions[key])
     else:
         definitions = extract_definitions_with_comments(jstools)
 

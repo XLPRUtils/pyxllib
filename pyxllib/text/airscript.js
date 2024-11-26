@@ -30,14 +30,14 @@ function levenshteinSimilarity(a, b) {
 
 /**
  * @description 找到与目标字符串匹配度最高的前K个结果。
- * @param {string} target - 目标字符串。
- * @param {Array|Function} candidates - 候选集合，有以下三种格式：
+ * @param {string} target 目标字符串。
+ * @param {Array|Function} candidates 候选集合，有以下三种格式：
  *     1. 字符串数组，例如 ["abc", "def"]。
  *     2. Excel范围对象，例如 Range("A1:A10")，会提取范围中的文本内容。
  *     3. 格式化数组，例如 [ [obj1, str1], [obj2, str2], ... ]，
  *        其中 obj 为原始对象，str 为用于匹配的字符串。
- * @param {number} k - 返回的匹配结果数量。
- * @returns {Array} - 包含 [obj, text, sim] 的数组，表示对象、文本及匹配度。
+ * @param {number} k 返回的匹配结果数量。
+ * @returns {Array} 包含 [obj, text, sim] 的数组，表示对象、文本及匹配度。
  */
 function findTopKMatches(target, candidates, k) {
     let stdCands
@@ -65,133 +65,100 @@ function __2_定位工具() {
 
 }
 
-
-function findCel(pattern, ur = ActiveSheet.UsedRange) {
-    return ur.Find(pattern, ur, xlValues, xlWhole)
+/**
+ * Find的参数很多：https://airsheet.wps.cn/docs/apiV2/excel/workbook/Range/%E6%96%B9%E6%B3%95/Find%20%E6%96%B9%E6%B3%95.html
+ * 但个人感觉比较可能需要配置到的就lookAt，如果有其他特殊定位需求，可以自己使用类似原理.Find找到行列就好
+ * @param what 要查找的内容
+ * @param ur 查找区域，默认当前表格UsedRange
+ * @param lookAt 可以选xlWhole（单元格内容=what）或xlPart（单元格内容包含了what）
+ * @return 找到的单元格
+ * todo 还没思考如果匹配情况不唯一怎么处理，目前都是返回第1个匹配项。因为这我自己重名场景不多，真遇到也可以手动约束ur范围后适当解决该问题。
+ * todo 支持多行表头的嵌套定位？比如料理一级标题下的二级标题合计定位方式：['料理', '合计']，可以区别于另一个"合计": ['酒水', '合计']
+ */
+function findCel(what, ur = ActiveSheet.UsedRange, lookAt = xlWhole) {
+    return ur.Find(what, undefined, undefined, lookAt)
 }
 
-function findRow(pattern, ur = ActiveSheet.UsedRange) {
-    const cel = findCel(pattern, ur)
-    if (cel) return cel.Row;
+function findRow(what, ur = ActiveSheet.UsedRange, lookAt = xlWhole) {
+    const cel = findCel(what, ur, lookAt)
+    if (cel) return cel.Row
 }
 
-function findCol(pattern, ur = ActiveSheet.UsedRange) {
-    let cel = findCel(pattern, ur)
-    if (cel) return cel.Column;
+function findCol(what, ur = ActiveSheet.UsedRange, lookAt = xlWhole) {
+    let cel = findCel(what, ur, lookAt)
+    if (cel) return cel.Column
 }
 
-// 2.0版本里支持缓存模式的查询
-const findCol2 = Object.assign(
-    function (pattern, ur = ActiveSheet.UsedRange, cache = true) {
-        // 定义内部缓存
-        const sheetName = ur.Parent.Name
-        const urAddress = ur.Address
-        const cacheKey = `${sheetName}-${urAddress}-${pattern}`
-
-        // 检查缓存命中
-        if (cache && findCol2._cache[cacheKey] !== undefined) {
-            return findCol2._cache[cacheKey]
-        }
-
-        // 查找列逻辑
-        let cel = findCel(pattern, ur)  // 精确匹配
-        let col = !cel ? undefined : cel.Column
-
-        // 若启用缓存，存入缓存
-        if (cache) {
-            findCol2._cache[cacheKey] = col
-        }
-
-        return col
-    },
-    {
-        // 缓存对象
-        _cache: {},
-
-        // 清除缓存方法
-        clearCache() {
-            this._cache = {}
-        }
-    }
-);
-
-// 判断一个 cells 集合是否为空
+// 判断 cells 集合是否全空
 function isEmpty(cels) {
-    for (let i = 1; i <= cels.Count; i++) {
-        if (cels.Item(i).Text) return false;
-    }
+    for (let i = 1; i <= cels.Count; i++)
+        if (cels.Item(i).Text)
+            return false
     return true
 }
 
-// 获取实际使用的区域
-function getUsedRange(sheet = ActiveSheet, maxRows = 500, maxCols = 100, startFromA1 = true) {
-    /* 允许通过"表格上下文"信息，调整这里数据行的上限500行，或者列上限100列
-        注意，如果分析预设的表格数据在这个限定参数内可以不改
-        只有表格未知，或者明确数据量超过设置时，需要重新调整这里的参数
-        调整的时候千万不要故意凑的刚刚好，可以设置一定的冗余区间
-        比如数据说有4101条，那么这里阈值设置为5000也是可以的，比较保险。
-    */
+// 获取ws实际使用的区域：会裁剪掉四周没有数据的空白区域（之前被使用过的区域或设置过格式等操作，默认ur会得到空白区域干扰数据范围定位）
+function getUsedRange(ws = ActiveSheet) {
+    // 1 定位默认的UsedRange
+    if (typeof ws === 'string') ws = Sheets(ws)
+    let ur = ws.UsedRange
+    let firstRow = 1, firstCol = 1, lastRow = ur.Rows.Count, lastCol = ur.Columns.Count
 
-    // 默认获得的区间，有可能是有冗余的空行，所以还要进一步优化
-    if (typeof sheet === 'string') {
-        sheet = Sheets(sheet)
-    }
-    let ur = sheet.UsedRange
+    // 2 裁剪四周
+    // todo 待官方支持TRIMRANGE后可能有更简洁的解决方案。期望官方底层不是这样暴力检索，应该有更高效的解决方式
 
-    let lastRow = Math.min(ur.Rows.Count, maxRows)
-    let lastColumn = Math.min(ur.Columns.Count, maxCols)
-
-    let firstRow = 1
-    let firstColumn = 1
-
-    // todo 可以用二分化提高检索效率
     // 找到最后一个非空行
-    for (; lastRow >= firstRow; lastRow--) {
-        if (!isEmpty(ur.Rows(lastRow).Cells)) {
+    for (; lastRow >= firstRow; lastRow--)
+        if (!isEmpty(ur.Rows(lastRow).Cells))
             break
-        }
-    }
-
-    // 找到最后一个非空列
-    for (; lastColumn >= firstColumn; lastColumn--) {
-        if (!isEmpty(ur.Columns(lastColumn).Cells)) {
+    // 最后一个非空列
+    for (; lastCol >= firstCol; lastCol--)
+        if (!isEmpty(ur.Columns(lastCol).Cells))
             break
-        }
-    }
+    // 第一个非空行
+    for (; firstRow <= lastRow; firstRow++)
+        if (!isEmpty(ur.Rows(firstRow).Cells))
+            break
+    // 第一个非空列
+    for (; firstCol <= lastCol; firstCol++)
+        if (!isEmpty(ur.Columns(firstCol).Cells))
+            break
 
-    // 如果表格不是从"A1"开始，找到第一个非空行和非空列
-    if (!startFromA1) {
-        for (; firstRow <= lastRow; firstRow++) {
-            if (!isEmpty(ur.Rows(firstRow).Cells)) {
-                break
-            }
-        }
-
-        for (; firstColumn <= lastColumn; firstColumn++) {
-            if (!isEmpty(ur.Columns(firstColumn).Cells)) {
-                break
-            }
-        }
-    }
-
-    // 创建一个新的 Range 对象，它只包含非空的行和列
-    let ur2 = sheet.Range(
-        ur.Cells(firstRow, firstColumn),
-        ur.Cells(lastRow, lastColumn)
-    )
-
-    return ur2  // 返回新的实际数据区域
+    // 3 创建一个新的 Range 对象，它只包含非空的行和列
+    return ws.Range(ur.Cells(firstRow, firstCol), ur.Cells(lastRow, lastCol))
 }
 
-// 兼容jsa1.0版本的定位，这个版本返回的cols不支持动态自增字段
-function v1_locateTableRange(sheetName, dataRow = [-1, -1], colNames = []) {
-    // 1 初步确定数据区域行范围
-    const ur = getUsedRange(sheetName)
+/**
+ * 表格结构化定位工具
+ * @param sheet 输入表格名，或表格对象
+ * @param dataRow 输入两个值的数组，第1个值标记(不含表头的)数据起始行，第2个值标记数据结束行。
+ *  只输入单数值，未传入第2个参数时，默认以0填充，例如：4 -> [4, 0]
+ *  起始行标记：
+ *      0，智能检测。如果cols有给入字段名，以找到的第1个字段的下一行作为起始行。否则默认设置为ur的第2行。
+ *      正整数，人工精确指定数据起始行（输入的是整张表格的绝对行号）
+ *      '料理'等精确的字段名标记，以找到的单元格下一行作为数据起始行
+ *      负数，比如-2，表示基于第2列（B列），使用.End(xlDown)机制找到第1条有数据的行的下一行作为数据起始行
+ *  结束行标记：
+ *      0，智能检测。以getUsedRange的最后一行为准。
+ *      正整数，人工精确指定数据结束行（有时候数据实际可能有100行，可以只写10，实现少量部分样本的功能测试）
+ *      '料理'等精确的字段名标记，同负数模式，以找到的所在列，配合.End(xlUp)确定最后一行有数据的位置
+ *      负数，比如-3，表示基于第3列（C列），使用.End(xlUp)对这列的最后一行数据位置做判定，作为数据最后一行的标记
+ * @param colNames 后续要使用到的相关字段数据，使用as2.0版本的时候，该参数可以不输入，会在使用中动态检索
+ * @return [ur, rows, cols]
+ *      ur，表格实际的UsedRange
+ *      rows是字典，rows.start、rows.end分别存储了数据的起止行
+ *      cols也是字典，存储了个字段名对应的所在列编号，比如cols['料理']
+ *      注：返回的行、列，都是相对ur的位置，所以可以类似这样 ur.Cells(rows.start, cols[x]) 取到第1条数据在x字段的值
+ */
+function as1_locateTableRange(sheet, dataRow = [0, 0], colNames = []) {
+    // 1 初步确定数据区域范围
+    const ur = getUsedRange(sheet)
+    const ws = ur.Parent
     // dataRow可以输入单个数值
-    if (typeof dataRow === 'number') dataRow = [dataRow, -1];
+    if (typeof dataRow === 'number') dataRow = [dataRow, 0]
     let rows = {
-        start: dataRow[0],
-        end: dataRow[1] === -1 ? ur.Row + ur.Rows.Count - 1 : dataRow[1]
+        start: dataRow[0] === 0 ? ur.Row + 1 : dataRow[0],
+        end: dataRow[1] === 0 ? ur.Row + ur.Rows.Count - 1 : dataRow[1]
     }
 
     // 2 获取列名对应的列号
@@ -201,49 +168,39 @@ function v1_locateTableRange(sheetName, dataRow = [-1, -1], colNames = []) {
         if (col) {
             cols[colName] = col
             // 如果此时rows.start还未确定，则以该单元格的下一行作为数据起始行
-            if (rows.start === -1) {
-                rows.start = findRow(colName, ur) + 1 || -1  // 有可能会找不到，则保持-1
-            }
+            if (rows.start === 0) rows.start = findRow(colName, ur) + 1 || 0  // 有可能会找不到，则保持0
         }
     })
 
-    // 3 返回结果
-    if (rows.start === -1) rows.start = ur.Row + 1;
+    // 3 定位行号
+    if (typeof rows.start === 'string') rows.start = findRow(rows.start, ur) + 1
+    if (rows.start < 0) {
+        const col = -rows.start
+        rows.start = 2
+        if (isEmpty(ws.Cells(1, col))) rows.start = ws.Cells(1, col).End(xlDown).Row + 1
+    }
 
-    // 4 修正如果ur不是从第1行、第1列开始的行列偏差
+    if (typeof rows.end === 'string') rows.end = -findCol(rows.end, ur)
+    if (rows.end < 0) {
+        const cel = ws.Cells(ws.Rows.Count, -rows.end)
+        rows.end = cel.Row
+        if (isEmpty(cel)) rows.end = cel.End(xlUp).Row
+    }
+
+    // 4 转成ur里的相对行号
     rows.start -= ur.Row - 1
     rows.end -= ur.Row - 1
-    for (const colName in cols) {
-        cols[colName] -= ur.Column - 1
-    }
+    for (const colName in cols) cols[colName] -= ur.Column - 1
 
     return [ur, rows, cols]
 }
 
-// 输入表格名，数据在表格的起止行号，准备使用到的字段名(可选，可以自动增量检索)
-// dataRow也可以写成一个数字，比如dataRow=4，等价于dataRow=[4,-1]，表示数据从第4行开始，结束位置则根据usedRange自动判断
-function locateTableRange(sheetName, dataRow = [-1, -1], colNames = []) {
-    // 1 初步确定数据区域行范围
-    const ur = getUsedRange(sheetName)
-    if (typeof dataRow === 'number') dataRow = [dataRow, -1];
-    let rows = {
-        start: dataRow[0],
-        end: dataRow[1] === -1 ? ur.Row + ur.Rows.Count - 1 : dataRow[1]
-    }
 
-    // 2 初始化列名映射
-    let cols = {}
-    colNames.forEach(colName => {
-        const col = findCol(colName, ur);
-        if (col) {
-            cols[colName] = col
-            if (rows.start === -1) {
-                rows.start = findRow(colName, ur) + 1 || -1
-            }
-        }
-    })
+function locateTableRange(sheetName, dataRow = [0, 0], colNames = []) {
+    // 1 先获得基础版本的结果
+    let [ur, rows, cols] = as1_locateTableRange(sheetName, dataRow, colNames)
 
-    // 3 使用 Proxy 实现动态查找未配置的字段
+    // 2 使用 Proxy 实现动态查找未配置的字段（该功能仅AirScript2.0可用，1.0请使用as1_locateTableRange接口）
     cols = new Proxy(cols, {
         get(target, prop) {
             if (prop in target) {
@@ -253,25 +210,12 @@ function locateTableRange(sheetName, dataRow = [-1, -1], colNames = []) {
                 if (dynamicCol) {
                     target[prop] = dynamicCol // 缓存动态找到的列
                     return dynamicCol
-                } else {
-                    console.warn(`字段 "${prop}" 未找到`)
-                    return undefined // 未找到字段返回 undefined
                 }
             }
         }
     })
 
-    // 4 修正行列偏移
-    if (rows.start === -1) rows.start = ur.Row + 1
-    rows.start -= ur.Row - 1
-    rows.end -= ur.Row - 1
-    for (const colName in cols) {
-        cols[colName] -= ur.Column - 1
-    }
-
-    // 返回的行、列，都是相对ur的位置，所以可以类似这样 ur.Cells(rows.start, cols[x]) 取到第1条数据在x字段的值
-    // rows、cols都是字典，rows.start、rows.end分别存储了数据的起止行
-    // cols存储了各字段名对应的所在列编号，并且支持在使用中动态自增字段
+    // cols支持在使用中动态自增字段
     return [ur, rows, cols]
 }
 
@@ -292,7 +236,7 @@ function packTableDataFields(sheetName, fields, dataRow = [-1, -1], filterEmptyR
     const fieldsData = fields.reduce((dataMap, field) => {
         dataMap[field] = []
         return dataMap
-    }, {});
+    }, {})
 
     // 3 遍历数据行填充字段数据
     for (let row = rows.start; row <= rows.end; row++) {
@@ -637,4 +581,62 @@ function setHyperlink(cel, link, text, screenTip) {
         // 不过我在wps表格上没测出screenTip效果
         cel.Hyperlinks.Add(cel, link, undefined, screenTip, displayText)
     }
+}
+
+
+function __7_考勤() {
+    // 个人考勤业务定制化功能
+}
+
+function highlightCourseProgress(refundDict, cell) {
+    let color, refundAmount;
+
+    // 1.1 当堂完成
+    let cellValue = cell.Value2 + '';
+    if (cellValue.includes('当堂')) {
+        color = [0, 255, 0];    // 绿色
+        refundAmount = refundDict['当堂'];
+    }
+
+    // 1.2 有返款的回放完成
+    if (refundAmount === undefined) {
+        // 遍历refundDict中的关键词
+        for (const keyword in refundDict) {
+            if (cellValue.includes(keyword)) {
+                color = [255, 255, 0];    // 黄色
+                refundAmount = refundDict[keyword];
+                break;
+            }
+        }
+    }
+
+    // 1.3 无返款的回放完成
+    if (refundAmount === undefined && cellValue.includes('回放')) {
+        color = [128, 128, 128];    // 灰色
+        refundAmount = 0;
+    }
+
+    // 1.4 未完成
+    if (refundAmount === undefined) {
+        color = [255, 255, 255];    // 白色
+        refundAmount = 0;
+    }
+
+    // 2 返回结果
+
+    // 提取百分比
+    let percentageRegex = /\d*%/g;  // 全局标志 'g'
+    let matches = Array.isArray(cellValue.match(percentageRegex)) ? cellValue.match(percentageRegex) : [];
+    let weight = parseFloat(matches.pop()) || 0; // 最后一个匹配结果
+
+    // 颜色淡化
+    for (let i = 0; i < 3; i++) {
+        color[i] = (color[i] * weight + 255 * 100) / (weight + 100);
+    }
+
+    // 设置颜色
+    cell.Interior.Color = RGB(color[0], color[1], color[2]);
+
+    // 返回返款金额
+    return refundAmount;
 }
