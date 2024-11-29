@@ -10,6 +10,8 @@ from unittest.mock import MagicMock
 import traceback
 import datetime
 import tempfile
+import textwrap
+import re
 
 from loguru import logger
 import requests
@@ -204,6 +206,8 @@ class WpsApi:
         if 'return' not in reply:
             logger.error(reply)
 
+        # 有运行30秒的限制，超时可能返回：{'result': 'Unavailable'}
+
         return reply['return']
 
 
@@ -317,36 +321,50 @@ class WpsOnlineWorkbook:
         from pyxllib.text.jscode import assemble_dependencies_from_jstools, remove_js_comments
 
         # 这里的版本默认支持扩展的js工具, 并且这套api只支持旧版的jsa1.0
+        _code = code
         code = assemble_dependencies_from_jstools(code, old_jsa=True)
         code = remove_js_comments(code)
         return self.wpsapi.run_airscript(self.file_id, code, return_mode)
 
-    def write_arr(self, rows, sheet_name, start_cell):
+    def write_arr(self, rows, sheet_name, start_cell, batch_size=None):
         """
         把一个矩阵写入表格
 
         :param rows: 一个n*m的数据
         :param sheet_name: 目标表格名
         :param start_cell: 写入的起始位置
+        :param batch_size: 为了避免一次写入内容过多，超时写入失败，可以分成多批运行
+            这里写每批的数据行数
+            默认表示一次性全部提交
         :return:
         """
-        json_data = json.dumps(rows, ensure_ascii=False)
-        jscode = f"""
-const jsonData = {json_data};
-writeArrToSheet(jsonData, Sheets('{sheet_name}').Range('{start_cell}'));
+        if batch_size is None:
+            batch_size = len(rows)  # 如果未指定批次大小，一次性写入所有行
+
+        def func(m):
+            return str(int(m.group()) + batch_size)
+
+        current_cell = start_cell
+        for start in range(0, len(rows), batch_size):
+            end = start + batch_size
+            batch_rows = rows[start:end]
+            json_data = json.dumps(batch_rows, ensure_ascii=False)
+            jscode = f"""
+const jsonData = {json_data}
+writeArrToSheet(jsonData, Sheets('{sheet_name}').Range('{current_cell}'))
 """.strip()
-        self.run_airscript(jscode)
+            current_cell = re.sub(r'\d+', func, current_cell)
+            self.run_airscript(jscode)
 
     def get_df(self, sheet_name, fields, data_row=None):
         """ 获得表格数据
 
         :param sheet_name: 表格名
         :param fields: 要提取的字段名
-        :param int data_start_row: 起始行，默认会根据fields位置自动定位
-        :param int data_end_row: 结束行，默认取所有数据
+        :param data_row: 行标记，一般是两个整数，具体用法见jsa里的接口解释
         :return: DataFrame
         """
-        data_row = data_row or [-1, -1]
+        data_row = data_row or [0, 0]
         jscode = f"return packTableDataFields('{sheet_name}', {fields}, {data_row})"
         data = self.run_airscript(jscode)
         return pd.DataFrame(data)

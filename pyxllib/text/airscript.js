@@ -228,7 +228,7 @@ function __3_json数据导入导出() {
 // 使用示例：packTableDataFields('料理', ['名称', '标签']
 //  fields的参数支持字段名称或整数，明确指定某列的位置
 // 返回格式：{'名称': [x1, x2, ...], '标签': [y1, y2, ...]}
-function packTableDataFields(sheetName, fields, dataRow = [-1, -1], filterEmptyRows = true) {
+function packTableDataFields(sheetName, fields, dataRow = [0, 0], filterEmptyRows = true) {
     // 1 确定数据范围和字段列号映射
     const [ur, rows, cols] = locateTableRange(sheetName, dataRow, fields)
 
@@ -548,16 +548,18 @@ function timeSleep(milliseconds) {
 
 // 格式化输出本地时间
 function formatLocalDatetime(date = new Date()) {
-    const formatter = new Intl.DateTimeFormat('zh-CN', {  // 使用中文时间风格
-        year: 'numeric',
-        month: '2-digit',
-        day: '2-digit',
-        hour: '2-digit',
-        minute: '2-digit',
-        second: '2-digit',
-        hour12: false
-    })
-    return formatter.format(date).replace(/\//g, '-').replace(/,/g, '')
+    function pad(num) {  // 补齐两位数
+        return num < 10 ? '0' + num : num
+    }
+
+    let year = date.getFullYear()
+    let month = pad(date.getMonth() + 1)  // getMonth() 返回的月份是从0开始的
+    let day = pad(date.getDate())
+    let hour = pad(date.getHours())
+    let minute = pad(date.getMinutes())
+    let second = pad(date.getSeconds())
+    // 我自己的日期风格，/格式一定是本地时间，-格式则本地和utc0时间都有可能
+    return `${year}/${month}/${day} ${hour}:${minute}:${second}`
 }
 
 function __6_其他() {
@@ -589,13 +591,13 @@ function __7_考勤() {
 }
 
 function highlightCourseProgress(refundDict, cell) {
-    let color, refundAmount;
+    let color, refundAmount
 
     // 1.1 当堂完成
-    let cellValue = cell.Value2 + '';
+    let cellValue = cell.Value2 + ''
     if (cellValue.includes('当堂')) {
-        color = [0, 255, 0];    // 绿色
-        refundAmount = refundDict['当堂'];
+        color = [0, 255, 0]    // 绿色
+        refundAmount = refundDict['当堂']
     }
 
     // 1.2 有返款的回放完成
@@ -603,40 +605,55 @@ function highlightCourseProgress(refundDict, cell) {
         // 遍历refundDict中的关键词
         for (const keyword in refundDict) {
             if (cellValue.includes(keyword)) {
-                color = [255, 255, 0];    // 黄色
-                refundAmount = refundDict[keyword];
-                break;
+                color = [255, 255, 0]    // 黄色
+                refundAmount = refundDict[keyword]
+                break
             }
         }
     }
 
     // 1.3 无返款的回放完成
     if (refundAmount === undefined && cellValue.includes('回放')) {
-        color = [128, 128, 128];    // 灰色
-        refundAmount = 0;
+        color = [128, 128, 128]    // 灰色
+        refundAmount = 0
     }
 
     // 1.4 未完成
     if (refundAmount === undefined) {
-        color = [255, 255, 255];    // 白色
-        refundAmount = 0;
+        color = [255, 255, 255]    // 白色
+        refundAmount = 0
     }
 
     // 2 返回结果
 
     // 提取百分比
-    let percentageRegex = /\d*%/g;  // 全局标志 'g'
-    let matches = Array.isArray(cellValue.match(percentageRegex)) ? cellValue.match(percentageRegex) : [];
-    let weight = parseFloat(matches.pop()) || 0; // 最后一个匹配结果
+    let percentageRegex = /\d*%/g  // 全局标志 'g'
+    let matches = Array.isArray(cellValue.match(percentageRegex)) ? cellValue.match(percentageRegex) : []
+    let weight = parseFloat(matches.pop()) || 0 // 最后一个匹配结果
 
     // 颜色淡化
-    for (let i = 0; i < 3; i++) {
-        color[i] = (color[i] * weight + 255 * 100) / (weight + 100);
-    }
+    for (let i = 0; i < 3; i++)
+        color[i] = (color[i] * weight + 255 * 100) / (weight + 100)
 
     // 设置颜色
-    cell.Interior.Color = RGB(color[0], color[1], color[2]);
+    cell.Interior.Color = RGB(color[0], color[1], color[2])
 
     // 返回返款金额
-    return refundAmount;
+    return refundAmount
+}
+
+function parseRefundRules(text) {
+    const match = text.match(/"\d+(\/\d+)*"/)
+    const refundDict = {}
+
+    if (match) {
+        const values = match[0].slice(1, -1).split('/') // 去掉引号，然后分割
+        // 遍历数字并构建键名
+        values.forEach((value, index) => {
+            if (parseInt(value) === 0) return // 如果数字是0，终止添加
+            const key = index === 0 ? "当堂" : `第${index}天`
+            refundDict[key] = parseInt(value)
+        })
+    }
+    return refundDict
 }
