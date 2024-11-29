@@ -13,6 +13,7 @@ from copy import deepcopy
 from typing import (Iterable, Callable, List)
 from typing import Optional
 
+from loguru import logger
 import uiautomation as auto
 
 import win32con
@@ -478,6 +479,30 @@ def wechat_lock_send(user, text=None, files=None, *, timeout=-1):
             we.send_text(text)
         if files:
             we.send_files(files)
+
+
+def wechat_handler(message):
+    # 获取群名，如果没有指定，默认为"文件传输助手"
+    title = message.record["extra"].get("user", "文件传输助手")
+    wechat_lock_send(title, message)
+
+
+# 创建专用的微信日志记录器，不绑定默认群名
+wechat_logger = logger.bind()
+
+# 添加专用的微信处理器
+wechat_logger.add(wechat_handler,
+                  format="{time:YYYY-MM-DD HH:mm:ss} | {level} | {name}:{function}:{line} - {message}")
+
+""" 往微信发送特殊的日志格式报告
+用法：wechat_logger.bind(user='文件传输助手').info(message)
+
+或者：
+# 先做好默认群名绑定
+wechat_logger = wechat_logger.bind(user='考勤管理')
+# 然后就能普通logger用法发送了
+wechat_logger.info('测试')
+"""
 
 
 def __4_wx():
