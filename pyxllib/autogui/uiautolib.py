@@ -25,12 +25,14 @@ from anytree import NodeMixin
 
 import ctypes
 from ctypes import wintypes
-import win32con
-import win32gui
-import win32process
-import win32clipboard
 
-import uiautomation as auto
+if sys.platform == 'win32':
+    import win32con
+    import win32gui
+    import win32process
+    import win32clipboard
+
+    import uiautomation as auto
 
 
 def __1_clipboard_utils():

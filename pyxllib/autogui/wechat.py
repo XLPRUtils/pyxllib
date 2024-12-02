@@ -8,18 +8,22 @@
 代码参考(抄自)：https://github.com/Frica01/WeChatMassTool
 """
 
+import sys
 import time
 from copy import deepcopy
 from typing import (Iterable, Callable, List)
 from typing import Optional
+from unittest.mock import MagicMock
 
 from loguru import logger
-import uiautomation as auto
 
-import win32con
-import win32gui
+if sys.platform == 'win32':
+    import uiautomation as auto
+    import win32con
+    import win32gui
 
 from pyxllib.prog.filelock import get_autoui_lock
+
 from pyxllib.autogui.uiautolib import find_ctrl, UiCtrlNode, copy_files_to_clipboard
 
 
@@ -482,27 +486,32 @@ def wechat_lock_send(user, text=None, files=None, *, timeout=-1):
 
 
 def wechat_handler(message):
-    # 获取群名，如果没有指定，默认为"文件传输助手"
-    title = message.record["extra"].get("user", "文件传输助手")
-    wechat_lock_send(title, message)
+    # 获取群名，如果没有指定，不使用此微信发送功能
+    user = message.record["extra"].get("wechat_user")
+    if user:
+        wechat_lock_send(user, message)
 
 
-# 创建专用的微信日志记录器，不绑定默认群名
-wechat_logger = logger.bind()
+if sys.platform == 'win32':
+    # 创建专用的微信日志记录器，不绑定默认群名
+    wechat_logger = logger.bind(wechat_user='文件传输助手')
 
-# 添加专用的微信处理器
-wechat_logger.add(wechat_handler,
-                  format="{time:YYYY-MM-DD HH:mm:ss} | {level} | {name}:{function}:{line} - {message}")
+    # 添加专用的微信处理器
+    wechat_logger.add(wechat_handler,
+                      format="{time:YYYY-MM-DD HH:mm:ss} | {level} | {name}:{function}:{line} - {message}")
 
-""" 往微信发送特殊的日志格式报告
-用法：wechat_logger.bind(user='文件传输助手').info(message)
-
-或者：
-# 先做好默认群名绑定
-wechat_logger = wechat_logger.bind(user='考勤管理')
-# 然后就能普通logger用法发送了
-wechat_logger.info('测试')
-"""
+    """ 往微信发送特殊的日志格式报告
+    用法：wechat_logger.bind(wechat_user='文件传输助手').info(message)
+    
+    或者：
+    # 先做好默认群名绑定
+    wechat_logger = wechat_logger.bind(wechat_user='考勤管理')
+    # 然后就能普通logger用法发送了
+    wechat_logger.info('测试')
+    """
+else:
+    # 降级为普通logger
+    wechat_logger = logger
 
 
 def __4_wx():

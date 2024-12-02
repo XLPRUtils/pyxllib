@@ -87,11 +87,11 @@ def get_dp_tab(dp_tab=None) -> 'XlTab':
         return Chromium().latest_tab
 
 
-def get_latest_not_dev_tab(page=None):
+def get_latest_not_dev_tab(browser=None):
     """ 开发工具本身也会算一个tab，这个函数返回最新的一个不是开发工具的tab """
-    if page is None:
-        page = ChromiumPage()
-    tabs = page.get_tabs()
+    if browser is None:
+        browser = Chromium()
+    tabs = browser.get_tabs()
     for tab in tabs:
         if strfind(tab.url, ['devtools://', 'chrome-extension://']) != -1:
             continue

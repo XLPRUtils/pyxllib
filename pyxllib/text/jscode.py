@@ -448,7 +448,7 @@ def get_airscript_head2(definitions=False):
     vars = {
         'JSA_POST_HOST_URL': os.getenv('JSA_POST_HOST_URL', 'https://xmutpriu.com'),
         'JSA_POST_TOKEN': os.getenv('JSA_POST_TOKEN', ''),
-        'JSA_POST_DEFAULT_HOST': os.getenv('JSA_POST_DEFAULT_HOST', 'senseserver3'),
+        'JSA_POST_DEFAULT_HOST': os.getenv('JSA_POST_DEFAULT_HOST', 'titan2'),
     }
     content = Template(s).render(vars)
     if not definitions:
