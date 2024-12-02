@@ -309,8 +309,10 @@ class 网课考勤:
                     if str(x['手机号']) in text:
                         用户ID = ls[i]['用户ID']
                         break
+
             ws.cell2(row, '用户ID', 用户ID)
             ws.cell2(row, '参考信息', '\n'.join(摘要ls))
+
             row += 1
         self.wb.save(self.表格路径)
 

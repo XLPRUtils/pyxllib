@@ -131,7 +131,19 @@ WHERE {table_name}.{item_id_name} = cte.{item_id_name}"""
 
         # 找到目前最大的id值
         max_id = self.exec2one(f'SELECT MAX({item_id_name}) FROM {table_name}')
-        self.execute(f'ALTER SEQUENCE {counter_name} RESTART WITH {max_id + 1}')
+        # self.execute(f'ALTER SEQUENCE {counter_name} RESTART WITH {max_id + 1}')
+        # 检查序列是否存在，如果不存在则创建序列，然后重置序列
+        # 检查序列是否存在，如果不存在则创建序列，并将其关联到指定的表和字段
+        self.execute(f"""
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT FROM pg_class WHERE relkind = 'S' AND relname = '{counter_name}') THEN
+        EXECUTE format('CREATE SEQUENCE %I', '{counter_name}');
+        EXECUTE format('ALTER TABLE %I ALTER COLUMN %I SET DEFAULT nextval(''%I'')', '{table_name}', '{item_id_name}', '{counter_name}');
+    END IF;
+    EXECUTE format('ALTER SEQUENCE %I RESTART WITH %s', '{counter_name}', {max_id + 1});
+END $$;
+""")
         self.commit()
 
     def __3_execute(self):
