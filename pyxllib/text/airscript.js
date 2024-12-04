@@ -404,6 +404,7 @@ function __4_py服务工具箱() {
 
 }
 
+// 保留环境状态，运行短小任务，返回代码中print输出的内容
 function runPyScript(script, query = '', host = '{{JSA_POST_DEFAULT_HOST}}') {
     const url = `{{JSA_POST_HOST_URL}}/${host}/common/run_py`
     const resp = HTTP.post(url, {query, script}, {
@@ -415,6 +416,7 @@ function runPyScript(script, query = '', host = '{{JSA_POST_DEFAULT_HOST}}') {
     return resp.json().output
 }
 
+// 每次都是独立环境状态，运行较长时间任务，返回代码中return的字典数据
 function runIsolatedPyScript(script, host = '{{JSA_POST_DEFAULT_HOST}}') {
     const url = `{{JSA_POST_HOST_URL}}/${host}/common/run_isolated_py`
     // 判断 script 的类型: script可以只输入py代码，也可以输入配置好的整个字典数据
