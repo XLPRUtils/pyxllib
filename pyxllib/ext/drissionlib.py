@@ -3,21 +3,18 @@
 # @Author : 陈坤泽
 # @Email  : 877362867@qq.com
 # @Date   : 2024/04/12
-import time
-
-from pyxllib.prog.pupil import check_install_package
-
-check_install_package('DrissionPage')
 
 import re
 from urllib.parse import unquote
+import tempfile
+import time
+from urllib.parse import urlparse
 
 from deprecated import deprecated
 import DrissionPage
 from DrissionPage import ChromiumPage, Chromium
 from DrissionPage._pages.chromium_base import ChromiumBase
 from DrissionPage._pages.chromium_tab import ChromiumTab
-from DrissionPage._base.base import BasePage, BaseElement
 
 from pyxllib.prog.pupil import inject_members
 from pyxllib.text.pupil import strfind
@@ -79,6 +76,7 @@ def get_dp_tab(dp_tab=None) -> 'XlTab':
         def dp_page2(tab):  # 默认开启页面复用
             if tab.url == dp_tab:
                 return tab
+
         tab = get_dp_tab(dp_page2)
         if tab.url == 'about:blank':
             tab.get(dp_tab)
@@ -96,26 +94,6 @@ def get_latest_not_dev_tab(browser=None):
         if strfind(tab.url, ['devtools://', 'chrome-extension://']) != -1:
             continue
         return tab
-
-
-def set_input_text(input_ele, text):
-    """ 因为input输入框可能原本就自带了内容，为了不重复输入，先清空再输入 """
-    input_ele.clear()
-    input_ele.input(text)
-
-
-def search_download_file(file_name):
-    file_name = file_name.replace(':', '_')
-    files = ChromiumPage().get_download_files()
-    for file in files:
-        if file_name in file['file']:  # 正常情况下的匹配
-            return file
-    for file in files:
-        file2 = file['file'].replace('+', ' ')
-        if file_name in file2:  # 但有时候'+'好像有点特别
-            return file
-        if file_name in re.sub(r'\s+', ' ', file2):
-            return file
 
 
 class XlChromiumBase(ChromiumBase):
@@ -139,6 +117,10 @@ class XlChromiumBase(ChromiumBase):
 
     def get_download_files(self: Chromium):
         """ 获取下载列表
+
+         (241205周四21:02，这个功能原本是用来做页面文件下载的，
+        但后来知道dp有更简洁的解决方案后，其实原本功能意义已不大，
+        只是作为一个结构化解析下载页面的功能，可以保留参考)
 
         :param search_name: 搜索文件名，输入该参数时，只会从上往下找到第一个匹配的文件
             否则返回一个list结构，存储下载清单里的文件
@@ -204,3 +186,25 @@ class XlTab(XlChromiumBase, ChromiumTab, Chromium):
 
 def wait_page_not_change(page, interval=3):
     page.wait_page_not_change(interval)
+
+
+class DpWebBase:
+    """ 基于dp开发的爬虫工具的一个基础类 """
+
+    def __init__(self, url=None, *, base_url=None):
+        self.browser = Chromium()
+        self.browser.set.download_path(tempfile.gettempdir())
+
+        parsed_url = urlparse(url)
+        root_url = f"{parsed_url.scheme}://{parsed_url.netloc}"  # 构建基础 URL
+        self.tab: XlTab = self.browser.new_tab(url)
+        self.base_url = base_url or root_url  # 使用基础 URL 作为 base_url，后续同域名网站去重用
+
+    def close_if_exceeds_min_tabs(self, min_tabs_to_keep=1):
+        """ 检查同网站的tab数量，如果超过最小保留数量则关闭当前页面 """
+        if self.base_url and len(Chromium().get_tabs(url=self.base_url)) > min_tabs_to_keep:
+            self.tab.close()
+
+    # def __del__(self):
+    #     """ 我习惯每次新任务建立新的tab处理，并在结束后自动检查同网页打开的标签是否不唯一则删掉 """
+    #     self.close_if_exceeds_min_tabs()
