@@ -14,12 +14,14 @@ from loguru import logger
 from DrissionPage import Chromium
 import pandas as pd
 
+from pyxllib.ext.drissionlib import DpWebBase
 
-class WjxWeb:
+
+class WjxWeb(DpWebBase):
     """ 问卷星网页的爬虫 """
 
-    def __init__(self, url):
-        self.tab = Chromium().new_tab(url)
+    def __init__(self, url=None):
+        super().__init__(url or 'https://www.wjx.cn')
         self.login()
 
     def login(self):
@@ -34,11 +36,6 @@ class WjxWeb:
             tab('tag:input@@name=UserName').input(os.getenv('WJX_USERNAME'), clear=True)
             tab('tag:input@@name=Password').input(os.getenv('WJX_PASSWORD'), clear=True)
             tab('tag:input@@type=submit').click()
-
-    def close_if_not_unique(self):
-        """ 检查同网站的tab数量，如果不唯一则关闭当前页面 """
-        if len(Chromium().get_tabs(url='www.wjx.cn')) > 1:
-            self.tab.close()
 
     def get_page_num(self):
         """
