@@ -11,6 +11,7 @@ import time
 from urllib.parse import urlparse
 
 from deprecated import deprecated
+from loguru import logger
 import DrissionPage
 from DrissionPage import ChromiumPage, Chromium
 from DrissionPage._pages.chromium_base import ChromiumBase
@@ -202,9 +203,13 @@ class DpWebBase:
 
     def close_if_exceeds_min_tabs(self, min_tabs_to_keep=1):
         """ 检查同网站的tab数量，如果超过最小保留数量则关闭当前页面 """
-        if self.base_url and len(Chromium().get_tabs(url=self.base_url)) > min_tabs_to_keep:
-            self.tab.close()
+        try:  # 靠Py结束触发的可能报错：ImportError: sys.meta_path is None, Python is likely shutting down
+            if self.tab and self.base_url and len(self.browser.get_tabs(url=self.base_url)) > min_tabs_to_keep:
+                self.tab.close()
+        except Exception as e:
+            pass
 
+    # 实测效果不稳定，感觉还不如手动触发吧~
     # def __del__(self):
     #     """ 我习惯每次新任务建立新的tab处理，并在结束后自动检查同网页打开的标签是否不唯一则删掉 """
     #     self.close_if_exceeds_min_tabs()
