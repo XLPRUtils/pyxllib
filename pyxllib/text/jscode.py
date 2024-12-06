@@ -800,7 +800,7 @@ def extract_definitions_with_comments(js_code):
         (?:(?:/\*[^*]*\*+(?:[^/*][^*]*\*+)*/)|(?://[^\n]*))\s*  # 匹配注释
     )*
     (                                  # 开始捕获声明部分
-        \b(?:var|let|const|function)\b\s+    # 匹配声明关键字
+        \b(?:var|let|const|function|class)\b\s+    # 匹配声明关键字
     )
     (\w+)                               # 捕获变量名或函数名
     \s*(?:\(.*?\))?\s*\{                # 匹配函数参数列表后跟'{'

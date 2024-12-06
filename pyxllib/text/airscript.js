@@ -130,7 +130,7 @@ function getUsedRange(ws = ActiveSheet) {
 
 /**
  * 表格结构化定位工具
- * @param sheet 输入表格名，或表格对象
+ * @param ws 输入表格名，或表格对象
  * @param dataRow 输入两个值的数组，第1个值标记(不含表头的)数据起始行，第2个值标记数据结束行。
  *  只输入单数值，未传入第2个参数时，默认以0填充，例如：4 -> [4, 0]
  *  起始行标记：
@@ -150,10 +150,10 @@ function getUsedRange(ws = ActiveSheet) {
  *      cols也是字典，存储了个字段名对应的所在列编号，比如cols['料理']
  *      注：返回的行、列，都是相对ur的位置，所以可以类似这样 ur.Cells(rows.start, cols[x]) 取到第1条数据在x字段的值
  */
-function as1_locateTableRange(sheet, dataRow = [0, 0], colNames = []) {
+function as1_locateTableRange(ws, dataRow = [0, 0], colNames = []) {
     // 1 初步确定数据区域范围
-    const ur = getUsedRange(sheet)
-    const ws = ur.Parent
+    const ur = getUsedRange(ws)
+    ws = ur.Parent
     // dataRow可以输入单个数值
     if (typeof dataRow === 'number') dataRow = [dataRow, 0]
     let rows = {
@@ -219,6 +219,60 @@ function locateTableRange(sheetName, dataRow = [0, 0], colNames = []) {
     return [ur, rows, cols]
 }
 
+function locateTableRange2(sheetName, dataRow = [0, 0], colNames = []) {
+    let [ur, rows, cols] = locateTableRange(sheetName, dataRow, colNames)
+
+    class TableTools {
+        constructor(ur, rows, cols) {
+            this.ur = ur
+            this.rows = rows
+            this.cols = cols
+        }
+
+        /**
+         * 获取指定行和列名的单元格值
+         * @param {number} row 行号
+         * @param {string} colName 列名
+         * @return {any} 单元格的值
+         */
+        getval(row, colName) {
+            return this.ur.Cells(row, this.cols[colName]).Value2
+        }
+
+        /**
+         * 查找参数名对应的单元格
+         * @param {string} argName 参数名
+         * @param {string} direction 查找方向，'down' 表示下方，'right' 表示右侧，默认为 'down'
+         * @return {any} 单元格对象
+         */
+        findargcel(argName, direction = 'down') {
+            const cel = findCel(argName, this.ur)
+            if (!cel) {
+                // 如果未找到参数名，返回 undefined
+                return undefined
+            }
+
+            let targetCell
+            if (direction === 'down') {
+                // 查找下方单元格
+                targetCell = cel.Offset(1, 0)
+            } else if (direction === 'right') {
+                // 查找右侧单元格
+                targetCell = cel.Offset(0, 1)
+            } else {
+                // 如果方向不正确，抛出错误
+                throw new Error(`未知的方向参数: ${direction}`)
+            }
+
+            // 返回目标单元格的值
+            return targetCell
+        }
+    }
+
+    let tools = new TableTools(ur, rows, cols)
+    return [ur, rows, cols, tools]
+}
+
 
 function __3_json数据导入导出() {
 
@@ -257,8 +311,8 @@ function packTableDataFields(sheetName, fields, dataRow = [0, 0], filterEmptyRow
 
 // 和packTableDataFields仅差在返回的数据格式上，这个版本的返回值是主流的jsonl格式
 // 返回格式：list[dict]， [{'名称': x1, '标签': y1}, {'名称': x2, '标签': y2}, ...]
-function packTableDataList(sheet, fields, dataRow, filterEmptyRows = true) {
-    const fieldsData = packTableDataFields(sheet, fields, dataRow, filterEmptyRows)
+function packTableDataList(ws, fields, dataRow, filterEmptyRows = true) {
+    const fieldsData = packTableDataFields(ws, fields, dataRow, filterEmptyRows)
     const rowCount = fieldsData[fields[0]].length
     const listData = []
 
@@ -273,7 +327,7 @@ function packTableDataList(sheet, fields, dataRow, filterEmptyRows = true) {
     return listData
 }
 
-function clearSheetData(headerRow = 1, dataStartRow = 2, sheet = ActiveSheet) {
+function clearSheetData(headerRow = 1, dataStartRow = 2, ws = ActiveSheet) {
     let headerStartRow, headerEndRow, dataEndRow
 
     // 检查 headerRow 参数，-1 表示不处理表头
@@ -289,7 +343,7 @@ function clearSheetData(headerRow = 1, dataStartRow = 2, sheet = ActiveSheet) {
     if (dataStartRow === -1) {
         dataStartRow = dataEndRow = null
     } else if (typeof dataStartRow === 'number') {
-        let usedRange = sheet.UsedRange
+        let usedRange = ws.UsedRange
         dataEndRow = usedRange.Row + usedRange.Rows.Count - 1
     } else if (Array.isArray(dataStartRow)) {
         [dataStartRow, dataEndRow] = dataStartRow
@@ -297,18 +351,18 @@ function clearSheetData(headerRow = 1, dataStartRow = 2, sheet = ActiveSheet) {
 
     // 清空表头区域（保留格式），若未设置为 -1
     if (headerStartRow !== null && headerEndRow !== null) {
-        sheet.Rows(headerStartRow + ':' + headerEndRow).ClearContents()
+        ws.Rows(headerStartRow + ':' + headerEndRow).ClearContents()
     }
 
     // 删除数据区域（不保留格式），若未设置为 -1
     if (dataStartRow !== null && dataEndRow !== null) {
-        sheet.Rows(dataStartRow + ':' + dataEndRow).Clear()
+        ws.Rows(dataStartRow + ':' + dataEndRow).Clear()
     }
 }
 
-// 将py里df.to_dict(orient='split')的数据格式写入sheet
+// 将py里df.to_dict(orient='split')的数据格式写入ws
 // 这个数据一般有3个属性：index, columns, data
-function writeDfSplitDictToSheet(jsonData, headerRow = 1, dataStartRow = 2, sheet = ActiveSheet) {
+function writeDfSplitDictToSheet(jsonData, headerRow = 1, dataStartRow = 2, ws = ActiveSheet) {
     let columns = jsonData.columns || []
     let data = jsonData.data || []
 
@@ -318,19 +372,19 @@ function writeDfSplitDictToSheet(jsonData, headerRow = 1, dataStartRow = 2, shee
         data = jsonData.index.map((idx, i) => [idx, ...data[i]])
     }
 
-    const startCol = sheet.UsedRange.Column
+    const startCol = ws.UsedRange.Column
 
     // 写入表头
     if (headerRow > 0) {
         for (let j = 0; j < columns.length; j++) {
-            sheet.Cells(headerRow, startCol + j).Value2 = columns[j]
+            ws.Cells(headerRow, startCol + j).Value2 = columns[j]
         }
     }
 
     // 写入数据内容
     for (let i = 0; i < data.length; i++) {
         for (let j = 0; j < data[i].length; j++) {
-            sheet.Cells(dataStartRow + i, startCol + j).Value2 = data[i][j]
+            ws.Cells(dataStartRow + i, startCol + j).Value2 = data[i][j]
         }
     }
 }
@@ -349,7 +403,33 @@ function writeArrToSheet(arr, startCel) {
     }
 }
 
-function insertNewDataWithHeaders(jsonData, headerRow = 1, dataStartRow = 2, sheet = ActiveSheet) {
+
+/**
+ * 插入新行并复制格式，兼容jsa1.0和2.0，并可选择格式复制方向
+ * @param {number} dataStartRow - 数据起始行
+ * @param {number} insertCount - 需要插入的行数
+ * @param {string} direction - 复制格式的方向，支持 'xlUp' 或 'xlDown'
+ * @param {object} ws - 工作表对象，默认为ActiveSheet
+ */
+function insertRowsWithFormat(dataStartRow, insertCount, ws = ActiveSheet, direction = 'xlUp') {
+    if (insertCount <= 0) return
+    const insertRange = `${dataStartRow}:${dataStartRow + insertCount - 1}`
+
+    if (ws.Rows.RowEnd) {  // jsa1.0
+        ws.Rows(insertRange).Insert()
+        ws.Rows(insertRange).ClearContents()  // 1.0有可能会出现插入的不是空行，还顺带拷贝了数据~
+        if (direction === 'xlUp') {
+            ws.Rows(dataStartRow + insertCount).Copy()
+            ws.Rows(insertRange).PasteSpecial(xlPasteFormats)
+        }
+    } else {
+        // 2.0的insert才能传参。1.0或默认不传参相当于是xlDown的效果，指新插入的行是拷贝的上面一行的格式。
+        ws.Rows(insertRange).Insert(direction)
+    }
+}
+
+
+function insertNewDataWithHeaders(jsonData, headerRow = 1, dataStartRow = 2, ws = ActiveSheet) {
     // 1 预处理 index，将其合并到 columns 和 data
     let columns = jsonData.columns || []
     let data = jsonData.data || []
@@ -361,9 +441,9 @@ function insertNewDataWithHeaders(jsonData, headerRow = 1, dataStartRow = 2, she
     // 2 处理可能出现的新字段
     // 获取现有的表头
     let existingHeaders = []
-    const usedRange = sheet.UsedRange;
+    const usedRange = ws.UsedRange;
     for (let col = usedRange.Column; col <= usedRange.Column + usedRange.Columns.Count - 1; col++) {
-        existingHeaders.push(sheet.Cells(headerRow, col).Value2)
+        existingHeaders.push(ws.Cells(headerRow, col).Value2)
     }
 
     // 计算新增的字段
@@ -373,7 +453,7 @@ function insertNewDataWithHeaders(jsonData, headerRow = 1, dataStartRow = 2, she
     // 如果有新字段，扩展表头
     if (newHeaders.length > 0) {
         for (let j = 0; j < allHeaders.length; j++) {
-            sheet.Cells(headerRow, usedRange.Column + j).Value2 = allHeaders[j]
+            ws.Cells(headerRow, usedRange.Column + j).Value2 = allHeaders[j]
         }
     }
 
@@ -384,18 +464,13 @@ function insertNewDataWithHeaders(jsonData, headerRow = 1, dataStartRow = 2, she
     }
 
     // 3 插入新行
-    const newDataRows = data.length
-    const insertEndRow = dataStartRow + newDataRows - 1
-    if (insertEndRow >= dataStartRow) {
-        sheet.Rows(`${dataStartRow}:${insertEndRow}`).Insert(xlUp)
-    }
-
+    insertRowsWithFormat(dataStartRow, data.length, ws)
     for (let i = 0; i < data.length; i++) {
         const rowData = data[i]
         for (let j = 0; j < columns.length; j++) {
-            const columnName = columns[j]
-            const columnIndex = headerIndexMap[columnName]
-            sheet.Cells(dataStartRow + i, columnIndex).Value2 = rowData[j]
+            const colName = columns[j]
+            const colIdx = headerIndexMap[colName]
+            ws.Cells(dataStartRow + i, colIdx).Value2 = rowData[j]
         }
     }
 }

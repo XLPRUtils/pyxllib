@@ -28,11 +28,9 @@ class WjxWeb(DpWebBase):
         tab = self.tab
 
         if tab.url.startswith('https://www.wjx.cn/wjx/activitystat/resultlimit.aspx'):
-            logger.info(1)
             tab('tag:a@@text():登录').click()
 
         if tab.url.lower().startswith('https://www.wjx.cn/login.aspx'):
-            logger.info(2)
             tab('tag:input@@name=UserName').input(os.getenv('WJX_USERNAME'), clear=True)
             tab('tag:input@@name=Password').input(os.getenv('WJX_PASSWORD'), clear=True)
             tab('tag:input@@type=submit').click()
