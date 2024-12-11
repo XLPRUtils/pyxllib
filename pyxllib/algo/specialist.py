@@ -11,7 +11,8 @@ import numpy as np
 import pandas as pd
 
 from pyxllib.prog.pupil import DictTool
-from pyxllib.prog.deprecatedlib import deprecated
+# from pyxllib.prog.deprecatedlib import deprecated
+from deprecated import deprecated
 
 
 @deprecated(reason='这个实现方式不佳，请参考 make_index_function')
