@@ -615,7 +615,7 @@ function isNextMonth(date) {
     return date >= nextMonth && date <= endDateOfNextMonth
 }
 
-// 正常应该下面这样写就行了。但是jsa1.0运行这个会报错，jsa2.0可以运行但没效果。就用了笨办法来做。
+// 正常应该下面这样写就行了。但是AirScript1.0运行这个会报错，AirScript2.0可以运行但没效果。就用了笨办法来做。
 // setTimeout(function () {}, milliseconds);
 function timeSleep(milliseconds) {
     const startTime = new Date()
@@ -734,3 +734,11 @@ function parseRefundRules(text) {
     }
     return refundDict
 }
+
+
+const pyScript = `
+from xlsln.kq5034.courses.d241201第29届觉观 import 更新修订
+更新修订()
+return {'res': '更新完成'}
+`
+runIsolatedPyScript({script: pyScript, long_task: true}, 'codepc_mi15')

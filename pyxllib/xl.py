@@ -19,7 +19,8 @@ from pyxllib.file.packlib import *
 from pyxllib.prog.newbie import *
 from pyxllib.prog.pupil import *
 from pyxllib.prog.specialist import *
-from pyxllib.prog.deprecatedlib import deprecated
+# from pyxllib.prog.deprecatedlib import deprecated
+from deprecated import deprecated
 
 from pyxllib.algo.newbie import *
 from pyxllib.algo.pupil import *

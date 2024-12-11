@@ -272,7 +272,7 @@ class MultiProgramLauncher:
 
         return self.scheduler
 
-    def worker_add_schedule(self, worker, schedule=None):
+    def worker_add_schedule(self, worker, schedule=None, misfire_grace_time=None):
         """ 将程序添加为定时任务
 
         :param int|float|str|list schedule: 定时任务配置，如果提供则添加到 APScheduler 调度器
@@ -352,7 +352,9 @@ class MultiProgramLauncher:
                         day=cron_parts[3],
                         month=cron_parts[4],
                         day_of_week=cron_parts[5]
-                    )
+                    ),
+                    # 检测的时候有概率错过了精确时间点。但一般不论延迟了多久，都要补运行上。
+                    misfire_grace_time=misfire_grace_time,
                 )
                 logger.info(f"已添加定时任务：{name}，触发器: cron，表达式: {schedule}")
             else:
@@ -400,7 +402,7 @@ class MultiProgramLauncher:
 
         # 3 如果有 schedule 配置，添加调度任务；否则就是正常的启动任务
         if schedule:
-            self.worker_add_schedule(worker, schedule=schedule)
+            self.worker_add_schedule(worker, schedule=schedule, misfire_grace_time=attrs.get('misfire_grace_time'))
         else:
             worker.lanuch()
 
