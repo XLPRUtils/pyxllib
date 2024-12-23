@@ -5,15 +5,15 @@
 
 # 2 JSA简介
 
-1. wps办公模仿vba，在Javascript语言基础上，设计了一个叫jsa的编程语言，语法接口跟vba类似。
+1. wps办公在Javascript语言基础上，设计了一个叫jsa的编程语言，语法接口跟vba类似。
 2. 其实比较适合、需要用到编程的，也就Excel等表格场景，USER大部分问题都是跟表格相关的。
 3. wps的在线表格里，也称jsa为"AirScript"，或者简称as。
-4. 近期官网从jsa1.0更新到了jsa2.0版本，它们有些细微的区别。我现在主要用2.0，但是在py调用jsa中现在只能用1.0。
+4. 近期官网从jsa1.0更新到了jsa2.0版本，它们有些细微的区别。
 5. 你在涉及到提供jsa代码时，注意变量命名默认用尽量简洁的英文名，注释用中文，具体命名可以参考后文会给到的一些代码示例，写法风格。默认不写每句末尾的分号。
 
 # 3 常用工具介绍
 
-1. jsa本身那套vba功能，用来处理表格的一些复杂问题时，不够方便，所以我在平时使用中，封装积累了一些工具，这些工具函数都是你可以直接使用的。
+1. jsa本身那套vba风格功能，用来处理表格的一些复杂问题时，不够方便，所以我在平时使用中，封装积累了一些工具，这些工具函数都是你可以直接使用的。
 2. 为了篇幅简洁，部分函数给到的实现内容是空的，不是代表没有实现或没有功能，而是我这里省略掉了细节。
 3. 部分更细节的东西，或其他函数工具，USER会在具体聊天中再根据需要给到你，这里列出的都是我认为相对比较重要，常用的功能，以及你也可以通过这里的实现看出跟vba的相似性，更好掌握jsa的用法。
 
@@ -66,10 +66,22 @@ function getUsedRange(ws = ActiveSheet) {}
  *      注：返回的行、列，都是相对ur的位置，所以可以类似这样 ur.Cells(rows.start, cols[x]) 取到第1条数据在x字段的值
  */
 function locateTableRange(sheet, dataRow = [0, 0], colNames = []) {}
+
+/**
+ * 表格结构化定位工具的增强版本，在locateTableRange基础上增加了tools简化一些常用操作
+ * @returns {Array} [ur, rows, cols, tools]
+ *   tools提供了如下便捷接口：
+ *     getval(row, colName): 获取指定行列的单元格值
+ *     findargcel(argName, direction): 查找参数单元格及其关联值
+ *       direction可选'down'(下方)或'right'(右侧)，默认为'down'
+ */
+function locateTableRange2(sheetName, dataRow = [0, 0], colNames = []) {}
 ```
 
 这里最关键的是locateTableRange函数，这个函数的实现用到了前面的那些函数。
 用这个函数可以方便地进行各种表格定位操作。
+
+注意这里locateTableRange2仅能在jsa2.0中使用。
 
 ## 3.2 数据批量导入导出
 
@@ -92,12 +104,14 @@ function writeArrToSheet(arr, startCel) {}
 function insertNewDataWithHeaders(jsonData, headerRow = 1, dataStartRow = 2, sheet = ActiveSheet) {}
 ```
 
-## 3.3 调用后端pythono服务
+## 3.3 调用后端python服务
 
 我的服务器是有很多电脑的，比如codepc_mi15专门用来处理"考勤"相关任务。
 还有codepc_aw、titan2机器等。
 
-jsa里是可以联网去调用我这里的python后端服务的。
+jsa里是可以联网去调用我这里的python后端服务的，我一般简称jsa-py。
+也可以反过来，py-jsa就是指在py去调用jsa，但py-jsa只能使用jsa1.0版本，不支持高级的jsa2.0。
+所以py-jsa，jsa1.0的场景无法使用locateTableRange2、tools相关功能。
 
 ```js
 // 保留环境状态，运行短小任务，返回代码中print输出的内容
@@ -108,12 +122,15 @@ function runIsolatedPyScript(script, host = '{{JSA_POST_DEFAULT_HOST}}') {}
 function getPyTaskResult(taskId, retries = 1, host = '{{JSA_POST_DEFAULT_HOST}}', delay = 5000) {}
 ```
 
-
 # 4 一些常见问题的示例代码
 
+（这里的示例想了下还是尽量写完善些好，但后续需要机制进行分流处理，都交一个节点操作有些麻烦）
+
 示例1：
+（1）根据选中的单元格的内容，来触发对应函数名功能
+（2）jsa调用py，在每一行匹配用户id
 ```js
-// 遍历表格，每一行运行runPyScript来从后端取到结果的使用示例
+// 遍历表格，每一行运行runPyScript来从后端取到结果
 function 更新匹配() {
     const [ur, rows, cols] = locateTableRange('报名表', 4)
 
@@ -141,13 +158,43 @@ print(res)
 
 function 更新参考信息() { }
 
-// 这里演示了如何根据选中的单元格的内容，来触发对应函数名功能
 const functionsMap = { 更新匹配, 更新参考信息 }
-opt = Selection.Cells(1, 1).Value2 || ''
+const opt = Selection.Cells(1, 1).Value2 || ''
 if (functionsMap[opt]) functionsMap[opt]()
 ```
 
-示例2：
+生成代码的时候注意，我大部分表格数据都是从第4行开始，第1行写合并单元格大标题，第2行写具体字段名，第3行写字段的注释。
+或者前3行用来放配置选项，功能数据等从第4行开始展示。
+
+示例2：更定制化化的触发模式
+（1）一般示例1中的名称触发够大部分使用场景了
+（2）但是比如在我的总工作薄的"百宝"中，使用的是下述机制，增加了"3"的模式
+```js
+// 1 获取基本参数
+const celx = Selection.Cells(1, 1)
+const opt = celx.Value2 || ''
+
+// 2 根据选中单元格中名称跟函数名一致进行触发
+const functionsMap = { 新建脚本文件并打开, 打开网络服务相关文件 }
+if (functionsMap[opt]) {
+    functionsMap[opt]()
+    return
+}
+
+// 3 行首名称的特殊匹配触发
+const cel1 = Cells(celx.Row, 1)
+if (cel1.Value2 === '新建脚本文件并打开：') {
+    新建脚本文件并打开(opt)
+    return
+} else if (cel1.Value2 === '网络服务') {
+    打开网络服务相关文件(cel)
+    return
+}
+```
+
+示例3：
+（1）jsa调用py，获得问卷星增量数据
+（2）将py中的df数据增量写入表格
 ```js
 const maxValue = Math.max(
     0, // 默认值
@@ -171,11 +218,10 @@ Range('B3').Value2 = '最近运行更新时间：\n' + formatLocalDatetime()
 insertNewDataWithHeaders(jsonData, 2, 4)
 ```
 
-示例3：
-对一些需要运行很长时间的任务，一般需要一个配置单元格，比如这里是'E3'。
+示例4：
+（1）对一些需要运行很长时间的任务，一般需要一个配置单元格，比如这里是'E3'。
 如果E3为空，则启动程序，并且注意runIsolatedPyScript传参要给出long_task: true。
-然后在E3记录task_id，还可以在F3做备注。
-如果E3不为空，则去检查程序是否运行完了。
+（2）然后在E3记录task_id，还可以在F3做备注。 如果E3不为空，则去检查程序是否运行完了。
 
 ```js
 if (isEmpty(Range('E3'))) {
@@ -197,5 +243,41 @@ return {'res': '更新完成'}
 }
 ```
 
-另外生成代码的时候注意，我一般喜欢数据从第4行开始，第1行写合并单元格大标题，第2行写具体字段名，第3行写字段的注释。
-或者前3行用来放配置选项，功能数据等从第4行开始展示。
+示例5：tools.getval用途
+
+1. 表格布局
+A1: '商品名'    B1: '价格'
+A2: '苹果'     B2: 5
+A3: '香蕉'     B3: 3
+
+2. 代码对比
+```js
+// jsa1.0 传统写法
+const [ur, rows, cols] = locateTableRange('商品表', 4)
+ur.Cells(2, cols['价格']).Value2  // 5
+ur.Cells(3, cols['价格']).Value2  // 3
+
+// jsa2.0 tools.findargcel自动处理了相邻单元格的定位，让配置项读取更加优雅
+const [ur, rows, cols, tools] = locateTableRange2('商品表', 4)
+tools.getval(2, '价格')
+tools.getval(3, '价格')
+```
+
+示例6：tools.findargcel用途
+
+1. 表格布局
+A1: '用户名：'    A2: '张三'
+B1: '密码：'      B2: '123456'
+
+2. 代码对比
+```js
+// 传统写法
+const [ur, rows, cols] = locateTableRange('配置表', 4)
+findCel('用户名：', ur).Offset(1, 0).Text
+findCel('密码：', ur).Offset(1, 0).Text
+
+// tools写法
+const [ur, rows, cols, tools] = locateTableRange2('配置表', 4)
+tools.findargcel('用户名：').Text
+tools.findargcel('密码：').Text
+```

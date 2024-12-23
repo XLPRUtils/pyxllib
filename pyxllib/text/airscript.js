@@ -219,6 +219,10 @@ function locateTableRange(sheetName, dataRow = [0, 0], colNames = []) {
     return [ur, rows, cols]
 }
 
+/**
+ * 表格结构化定位工具的增强版本，在locateTableRange基础上增加了tools简化一些常用操作
+ * tools增加的工具详见内部实现的子函数注释
+ */
 function locateTableRange2(sheetName, dataRow = [0, 0], colNames = []) {
     let [ur, rows, cols] = locateTableRange(sheetName, dataRow, colNames)
 
@@ -233,7 +237,7 @@ function locateTableRange2(sheetName, dataRow = [0, 0], colNames = []) {
          * 获取指定行和列名的单元格值
          * @param {number} row 行号
          * @param {string} colName 列名
-         * @return {any} 单元格的值
+         * @return {any} 单元格的Value2值
          */
         getval(row, colName) {
             return this.ur.Cells(row, this.cols[colName]).Value2
