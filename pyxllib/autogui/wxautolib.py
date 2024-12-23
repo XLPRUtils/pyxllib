@@ -41,6 +41,7 @@ class WeChatSingletonLock:
 def wechat_lock_send(user, text=None, files=None, *, timeout=-1):
     """ 使用全局唯一单例锁，确保同一时间仅有一个微信自动化程序在操作 """
     with WeChatSingletonLock(timeout) as we:
+        we.ChatWith(user, timeout=5)  # 241223周一12:27，今天可被这个默认2秒坑惨了，往错误群一直发骚扰消息
         if text:
             we.SendMsg(text, user)
         if files:

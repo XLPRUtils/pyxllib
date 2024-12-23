@@ -369,6 +369,22 @@ writeArrToSheet(jsonData, Sheets('{sheet_name}').Range('{current_cell}'))
         data = self.run_airscript(jscode)
         return pd.DataFrame(data)
 
+    def insert_jsonl(self, rows, sheet_name, header_row=1, data_start_row=2):
+        """ 往sheet_name插入jsonl、list[dict]风格的数据
+
+        :param list[dict] rows:
+        :param sheet_name: 表格名
+        :param header_row: 表头所在行
+        :param data_start_row: 数据起始行
+        :return:
+        """
+        df = pd.DataFrame(rows)  # 将当前行转为DataFrame再转dict更方便通用处理
+        data = df.to_dict(orient='split')
+        del data['index']
+        data_json = json.dumps(data, ensure_ascii=False)
+        self.run_airscript(f"insertNewDataWithHeaders(JSON.parse(`{data_json}`), "
+                           f"{header_row}, {data_start_row}, Sheets('{sheet_name}'))")
+
 
 class WpsGroupApi(WpsApi):
     """ 团队版的api
