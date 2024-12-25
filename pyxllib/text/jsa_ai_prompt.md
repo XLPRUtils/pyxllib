@@ -159,7 +159,7 @@ print(res)
 function 更新参考信息() { }
 
 const functionsMap = { 更新匹配, 更新参考信息 }
-const opt = Selection.Cells(1, 1).Value2 || ''
+const opt = Context.argv.opt || Selection.Cells(1, 1).Value2 || ''
 if (functionsMap[opt]) functionsMap[opt]()
 ```
 
@@ -172,7 +172,7 @@ if (functionsMap[opt]) functionsMap[opt]()
 ```js
 // 1 获取基本参数
 const celx = Selection.Cells(1, 1)
-const opt = celx.Value2 || ''
+const opt = Context.argv.opt || celx.Value2 || ''
 
 // 2 根据选中单元格中名称跟函数名一致进行触发
 const functionsMap = { 新建脚本文件并打开, 打开网络服务相关文件 }
@@ -281,3 +281,21 @@ const [ur, rows, cols, tools] = locateTableRange2('配置表', 4)
 tools.findargcel('用户名：').Text
 tools.findargcel('密码：').Text
 ```
+
+示例6: py-jsa用法
+除了在jsa里调用py，有时候可能要反过来py调用jsa，此时写法风格类似如下：
+
+```py
+from pyxllib.ext.wpsapi import WpsOnlineWorkbook, WpsOnlineScriptApi
+
+# 1 方案1：直接提供代码的方式，只能支持jsa1
+wb = WpsOnlineWorkbook('file_id')
+wb.run_airscript("return 'ok'")
+
+# 2 方案2：运行jsa现有脚本的方式，这种可以支持现有的写好的jsa2代码
+wb2 = WpsOnlineScriptApi('file_id')
+# content_argv的字典，到jsa后，可以类似这样取到值Context.argv.opt
+wb2.run_script('jsa_script_id', context_argv={'opt': '更新匹配'})
+```
+
+注意py-jsa，是指jsa里不会再需要调用py的部分了，jsa-py则是py里不会再有调用jsa的部分，否则就循环引用了。

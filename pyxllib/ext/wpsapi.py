@@ -314,6 +314,8 @@ class WpsOnlineWorkbook:
         """
         在当前工作簿上运行AirScript代码。
 
+        官方有运行30秒的限制，超时可能返回：{'result': 'Unavailable'}
+
         :param code: 要执行的AirScript代码
         :param return_mode: 返回格式，None表示提取结果，'json'表示返回json格式
         :return: 执行结果
@@ -512,46 +514,62 @@ class WpsWeb:
 
 
 class WpsOnlineScriptApi:
-    """ wps的"脚本令牌"调用模式 """
+    """ wps的"脚本令牌"调用模式
 
-    def __init__(self, token=None):
+    官方文档：https://airsheet.wps.cn/docs/apitoken/api.html
+    """
+
+    def __init__(self, file_id=None, token=None):
         self.headers = {
             'Content-Type': "application/json",
             'AirScript-Token': token or os.getenv('WPS_SCRIPT_TOKEN', ''),
         }
-        self.default_file_id = None
+        self.default_file_id = file_id
 
     def post_request(self, url, payload):
         """
         发送 POST 请求到指定的 URL 并返回响应结果
         """
         try:
-            response = requests.post(url, json=payload, headers=self.headers)
-            response.raise_for_status()  # 如果请求失败会抛出异常
-            return response.json()
+            resp = requests.post(url, json=payload, headers=self.headers)
+            resp.raise_for_status()  # 如果请求失败会抛出异常
+            return resp.json()
         except requests.exceptions.RequestException as e:
             print(f"请求失败: {e}")
             return None
 
-    def run_script(self, script_id, file_id=None, args=None):
+    def run_script(self, script_id, file_id=None, context_argv=None, sync=True):
         """
         执行 WPS 脚本并返回执行结果
 
         :param file_id: 文件 ID
+            虽然提供了file_id，但并不支持跨文件调用as脚本
         :param script_id: 脚本 ID
-        :param args: 脚本参数 (可选)
+        :param context: 脚本参数 (可选)
+            dict argv: 传入的上下文参数对象，比如传入{name: 'xiaomeng', age: 18}， 在 AS 代码中可通过Context.argv.name获取到传入的值
+            str sheet_name: et,ksheet 运行时所在表名
+            str range: et,ksheet 运行时所在区域，例如$B$156
+            str link_from: et,ksheet 点击超链接所在单元格
+            str db_active_view: db 运行时所在 view 名
+            str db_selection: db 运行时所在选区
 
-        todo 官方除了同步接口，还有异步接口。https://airsheet.wps.cn/docs/apitoken/api.html
+            因为除了argv之外的参数实测有问题，建议就不用了，有什么参数统一通过argv传递
+        :param sync:
+            True, 同步运行
+            False, 异步运行
+
+        这个接口跟普通jsa一样，运行有30秒时限
         """
         file_id = file_id or self.default_file_id
-        url = f"https://www.kdocs.cn/api/v3/ide/file/{file_id}/script/{script_id}/sync_task"
+        url = f"https://www.kdocs.cn/api/v3/ide/file/{file_id}/script/{script_id}/{'sync_task' if sync else 'task'}"
         payload = {
-            "Context": {
-                "argv": args if args else {}
-            }
+            "Context": {'argv': context_argv or {}}
         }
         res = self.post_request(url, payload)
-        return res['data']['result']
+        if sync:
+            return res['data']['result']
+        else:
+            return res
 
 
 if __name__ == '__main__':
