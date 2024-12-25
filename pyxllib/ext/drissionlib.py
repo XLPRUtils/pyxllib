@@ -213,3 +213,34 @@ class DpWebBase:
     # def __del__(self):
     #     """ 我习惯每次新任务建立新的tab处理，并在结束后自动检查同网页打开的标签是否不唯一则删掉 """
     #     self.close_if_exceeds_min_tabs()
+
+
+def close_duplicate_tabs(browser=None):
+    """ 关闭浏览器重复标签页
+
+    遍历所有标签页（从前往后，dp的get_tabs拿到的tab就是从新到旧的），对每个域名仅保留第一个出现的标签页，其余同域名标签页关闭；
+    如果最后还剩多个标签页，则把'chrome://newtab/'也关掉。
+    """
+    # 1 初始化
+    if browser is None:
+        browser = Chromium()
+    all_tabs = browser.get_tabs()
+    seen_domains = set()
+
+    # 2 第一次遍历：保留首个出现的域名，其余重复则关闭
+    for t in all_tabs:
+        parsed_url = urlparse(t.url)
+        domain = parsed_url.netloc  # netloc 通常可拿到域名部分
+        # logger.info(f'{t.url}, {domain}')
+
+        if domain in seen_domains:
+            t.close()
+        else:
+            seen_domains.add(domain)
+
+    # 3 第二次遍历：如果剩余标签页 > 1，则关掉chrome://newtab/
+    remaining_tabs = browser.get_tabs()
+    if len(remaining_tabs) > 1:
+        for t in remaining_tabs:
+            if t.url.startswith('chrome://newtab'):
+                t.close()
