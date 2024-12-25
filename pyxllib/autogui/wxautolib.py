@@ -41,7 +41,13 @@ class WeChatSingletonLock:
 def wechat_lock_send(user, text=None, files=None, *, timeout=-1):
     """ 使用全局唯一单例锁，确保同一时间仅有一个微信自动化程序在操作 """
     with WeChatSingletonLock(timeout) as we:
-        we.ChatWith(user, timeout=5)  # 241223周一12:27，今天可被这个默认2秒坑惨了，往错误群一直发骚扰消息
+        # 241223周一12:27，今天可被这个默认2秒坑惨了，往错误群一直发骚扰消息
+        # 22:07，但我复测，感觉不可能找不到啊，为什么会找到禅宗考勤管理群呢，太离谱了
+        status = we.ChatWith(user, timeout=5)
+
+        if status != user:
+            raise ValueError(f'无法找到用户：{user}')
+
         if text:
             we.SendMsg(text, user)
         if files:
