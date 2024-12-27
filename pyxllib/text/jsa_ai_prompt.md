@@ -126,9 +126,7 @@ function getPyTaskResult(taskId, retries = 1, host = '{{JSA_POST_DEFAULT_HOST}}'
 
 （这里的示例想了下还是尽量写完善些好，但后续需要机制进行分流处理，都交一个节点操作有些麻烦）
 
-示例1：
-（1）根据选中的单元格的内容，来触发对应函数名功能
-（2）jsa调用py，在每一行匹配用户id
+示例1：jsa调用py，在每一行匹配用户id
 ```js
 // 遍历表格，每一行运行runPyScript来从后端取到结果
 function 更新匹配() {
@@ -155,44 +153,14 @@ print(res)
         }
     }
 }
-
-function 更新参考信息() { }
-
-const functionsMap = { 更新匹配, 更新参考信息 }
-const opt = Context.argv.opt || Selection.Cells(1, 1).Value2 || ''
-if (functionsMap[opt]) functionsMap[opt]()
 ```
 
 生成代码的时候注意，我大部分表格数据都是从第4行开始，第1行写合并单元格大标题，第2行写具体字段名，第3行写字段的注释。
 或者前3行用来放配置选项，功能数据等从第4行开始展示。
 
-示例2：更定制化化的触发模式
-（1）一般示例1中的名称触发够大部分使用场景了
-（2）但是比如在我的总工作薄的"百宝"中，使用的是下述机制，增加了"3"的模式
-```js
-// 1 获取基本参数
-const celx = Selection.Cells(1, 1)
-const opt = Context.argv.opt || celx.Value2 || ''
+以及大部分功能，都是要封装成函数来供应的，工具性的函数写英文命名，业务性的函数可以写中文名。
 
-// 2 根据选中单元格中名称跟函数名一致进行触发
-const functionsMap = { 新建脚本文件并打开, 打开网络服务相关文件 }
-if (functionsMap[opt]) {
-    functionsMap[opt]()
-    return
-}
-
-// 3 行首名称的特殊匹配触发
-const cel1 = Cells(celx.Row, 1)
-if (cel1.Value2 === '新建脚本文件并打开：') {
-    新建脚本文件并打开(opt)
-    return
-} else if (cel1.Value2 === '网络服务') {
-    打开网络服务相关文件(cel)
-    return
-}
-```
-
-示例3：
+示例2：
 （1）jsa调用py，获得问卷星增量数据
 （2）将py中的df数据增量写入表格
 ```js
@@ -218,7 +186,7 @@ Range('B3').Value2 = '最近运行更新时间：\n' + formatLocalDatetime()
 insertNewDataWithHeaders(jsonData, 2, 4)
 ```
 
-示例4：
+示例3：
 （1）对一些需要运行很长时间的任务，一般需要一个配置单元格，比如这里是'E3'。
 如果E3为空，则启动程序，并且注意runIsolatedPyScript传参要给出long_task: true。
 （2）然后在E3记录task_id，还可以在F3做备注。 如果E3不为空，则去检查程序是否运行完了。
@@ -243,7 +211,7 @@ return {'res': '更新完成'}
 }
 ```
 
-示例5：tools.getval用途
+示例4：tools.getval用途
 
 1. 表格布局
 A1: '商品名'    B1: '价格'
@@ -263,7 +231,7 @@ tools.getval(2, '价格')
 tools.getval(3, '价格')
 ```
 
-示例6：tools.findargcel用途
+示例5：tools.findargcel用途
 
 1. 表格布局
 A1: '用户名：'    A2: '张三'
@@ -288,14 +256,14 @@ tools.findargcel('密码：').Text
 ```py
 from pyxllib.ext.wpsapi import WpsOnlineWorkbook, WpsOnlineScriptApi
 
-# 1 方案1：直接提供代码的方式，只能支持jsa1
+# 1 方案1：运行jsa现有脚本的方式，这种可以支持现有的写好的jsa2代码
+wb2 = WpsOnlineScriptApi('file_id', 'script_id')
+# content_argv的字典，到jsa后，可以类似这样取到值Context.argv.funcName
+wb2.run_script2('sum', 1, 2, 3)  # 第1个参数是要调用的jsa函数名，后面则是*args各位置参数值
+
+# 2 方案2：直接提供代码的方式，只能支持jsa1
 wb = WpsOnlineWorkbook('file_id')
 wb.run_airscript("return 'ok'")
-
-# 2 方案2：运行jsa现有脚本的方式，这种可以支持现有的写好的jsa2代码
-wb2 = WpsOnlineScriptApi('file_id')
-# content_argv的字典，到jsa后，可以类似这样取到值Context.argv.opt
-wb2.run_script('jsa_script_id', context_argv={'opt': '更新匹配'})
 ```
 
 注意py-jsa，是指jsa里不会再需要调用py的部分了，jsa-py则是py里不会再有调用jsa的部分，否则就循环引用了。

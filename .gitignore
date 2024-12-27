@@ -12,3 +12,5 @@ dist/
 *.so
 *.pkl
 *.lock
+
+/pyxllib/ext/wpsapi2.py

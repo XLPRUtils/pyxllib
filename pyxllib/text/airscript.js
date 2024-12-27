@@ -143,14 +143,14 @@ function getUsedRange(ws = ActiveSheet) {
  *      正整数，人工精确指定数据结束行（有时候数据实际可能有100行，可以只写10，实现少量部分样本的功能测试）
  *      '料理'等精确的字段名标记，同负数模式，以找到的所在列，配合.End(xlUp)确定最后一行有数据的位置
  *      负数，比如-3，表示基于第3列（C列），使用.End(xlUp)对这列的最后一行数据位置做判定，作为数据最后一行的标记
- * @param colNames 后续要使用到的相关字段数据，使用as2.0版本的时候，该参数可以不输入，会在使用中动态检索
+ * @param fields 后续要使用到的相关字段数据，使用as2.0版本的时候，该参数可以不输入，会在使用中动态检索
  * @return [ur, rows, cols]
  *      ur，表格实际的UsedRange
  *      rows是字典，rows.start、rows.end分别存储了数据的起止行
  *      cols也是字典，存储了个字段名对应的所在列编号，比如cols['料理']
  *      注：返回的行、列，都是相对ur的位置，所以可以类似这样 ur.Cells(rows.start, cols[x]) 取到第1条数据在x字段的值
  */
-function as1_locateTableRange(ws, dataRow = [0, 0], colNames = []) {
+function as1_locateTableRange(ws, dataRow = [0, 0], fields = []) {
     // 1 初步确定数据区域范围
     const ur = getUsedRange(ws)
     ws = ur.Parent
@@ -163,7 +163,7 @@ function as1_locateTableRange(ws, dataRow = [0, 0], colNames = []) {
 
     // 2 获取列名对应的列号
     let cols = {}
-    colNames.forEach(colName => {
+    fields.forEach(colName => {
         const col = findCol(colName, ur)
         if (col) {
             cols[colName] = col
@@ -196,9 +196,9 @@ function as1_locateTableRange(ws, dataRow = [0, 0], colNames = []) {
 }
 
 
-function locateTableRange(sheetName, dataRow = [0, 0], colNames = []) {
+function locateTableRange(ws, dataRow = [0, 0], fields = []) {
     // 1 先获得基础版本的结果
-    let [ur, rows, cols] = as1_locateTableRange(sheetName, dataRow, colNames)
+    let [ur, rows, cols] = as1_locateTableRange(ws, dataRow, fields)
 
     // 2 使用 Proxy 实现动态查找未配置的字段（该功能仅AirScript2.0可用，1.0请使用as1_locateTableRange接口）
     cols = new Proxy(cols, {
@@ -223,8 +223,8 @@ function locateTableRange(sheetName, dataRow = [0, 0], colNames = []) {
  * 表格结构化定位工具的增强版本，在locateTableRange基础上增加了tools简化一些常用操作
  * tools增加的工具详见内部实现的子函数注释
  */
-function locateTableRange2(sheetName, dataRow = [0, 0], colNames = []) {
-    let [ur, rows, cols] = locateTableRange(sheetName, dataRow, colNames)
+function locateTableRange2(ws, dataRow = [0, 0], fields = []) {
+    let [ur, rows, cols] = locateTableRange(ws, dataRow, fields)
 
     class TableTools {
         constructor(ur, rows, cols) {
@@ -286,9 +286,11 @@ function __3_json数据导入导出() {
 // 使用示例：packTableDataFields('料理', ['名称', '标签']
 //  fields的参数支持字段名称或整数，明确指定某列的位置
 // 返回格式：{'名称': [x1, x2, ...], '标签': [y1, y2, ...]}
-function packTableDataFields(sheetName, fields, dataRow = [0, 0], filterEmptyRows = true) {
+// todo fields能否不输入，默认获取所有字段数据（此时需要给出表头所在行）
+// todo 多级表头类的数据怎么处理？
+function packTableDataFields(ws, fields, dataRow = [0, 0], filterEmptyRows = true) {
     // 1 确定数据范围和字段列号映射
-    const [ur, rows, cols] = locateTableRange(sheetName, dataRow, fields)
+    const [ur, rows, cols] = locateTableRange(ws, dataRow, fields)
 
     // 2 初始化字段格式数据
     const fieldsData = fields.reduce((dataMap, field) => {
@@ -668,7 +670,7 @@ function setHyperlink(cel, link, text, screenTip) {
 
 
 function __7_考勤() {
-    // 个人考勤业务定制化功能
+    // 个人的考勤业务定制化功能
 }
 
 function highlightCourseProgress(refundDict, cell) {
@@ -723,6 +725,7 @@ function highlightCourseProgress(refundDict, cell) {
     return refundAmount
 }
 
+// 分析回放规则文本，从中提取结构化的字典解释
 function parseRefundRules(text) {
     const match = text.match(/"\d+(\/\d+)*"/)
     const refundDict = {}
@@ -739,10 +742,15 @@ function parseRefundRules(text) {
     return refundDict
 }
 
+function __x_main() {
+    // 我常用的jsa脚本触发运行的模式
+}
 
-const pyScript = `
-from xlsln.kq5034.courses.d241201第29届觉观 import 更新修订
-更新修订()
-return {'res': '更新完成'}
-`
-runIsolatedPyScript({script: pyScript, long_task: true}, 'codepc_mi15')
+// 1 这里填上要支持的函数接口清单
+const funcsMap = {packTableDataFields}
+// 2 支持三种触发方式，及优先级：py-jsa调用 > 选中单元格指定函数名 > 选中单元格所在第1列是触发函数名
+let funcName = Context.argv.funcName || Selection.Cells(1, 1).Value2 || ''
+if (!funcsMap[funcName]) funcName = ActiveSheet.Cells(Selection.Row, 1)
+// 3 如果找得到函数则运行
+if (funcsMap[funcName]) return funcsMap[funcName](...Context.argv.args)
+// 4 也可以注释掉3，下面写自己手动调试要运行的代码
