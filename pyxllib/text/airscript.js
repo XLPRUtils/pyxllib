@@ -151,9 +151,9 @@ function getUsedRange(ws = ActiveSheet) {
  *      注：返回的行、列，都是相对ur的位置，所以可以类似这样 ur.Cells(rows.start, cols[x]) 取到第1条数据在x字段的值
  */
 function as1_locateTableRange(ws, dataRow = [0, 0], fields = []) {
-    // 1 初步确定数据区域范围
+    // 1 初步确定数据区域getUsedRange范围
     const ur = getUsedRange(ws)
-    ws = ur.Parent
+    ws = ur.Worksheet
     // dataRow可以输入单个数值
     if (typeof dataRow === 'number') dataRow = [dataRow, 0]
     let rows = {
@@ -301,13 +301,13 @@ function packTableDataFields(ws, fields, dataRow = [0, 0], filterEmptyRows = tru
     // 3 遍历数据行填充字段数据
     for (let row = rows.start; row <= rows.end; row++) {
         if (filterEmptyRows) {
-            const isEmptyRow = Object.values(cols).every(col => Cells(row, col).Value2 === undefined)
+            const isEmptyRow = Object.values(cols).every(col => ur.Cells(row, col).Value2 === undefined)
             if (isEmptyRow) continue; // 跳过空行
         }
 
         // 填充每个字段的数据
         Object.entries(cols).forEach(([field, col]) => {
-            fieldsData[field].push(Cells(row, col).Value2)
+            fieldsData[field].push(ur.Cells(row, col).Value2)
         })
     }
 

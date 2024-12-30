@@ -6,12 +6,17 @@
 import os
 import requests
 
+import pandas as pd
+
 
 class WpsOnlineBook:
     """ wps的"脚本令牌"调用模式
 
     官方文档：https://airsheet.wps.cn/docs/apitoken/api.html
     """
+
+    def __1_基础功能(self):
+        pass
 
     def __init__(self, file_id=None, script_id=None, *, token=None):
         self.headers = {
@@ -67,6 +72,9 @@ class WpsOnlineBook:
         else:
             return res
 
+    def __2_封装的更高级的接口(self):
+        pass
+
     def run_script2(self, func_name, *args):
         """ 我自己常用的jsa框架，jsa那边已经简化了对接模式，所以一般都只用这个高级的接口即可
 
@@ -74,8 +82,21 @@ class WpsOnlineBook:
         """
         return self.run_script(self.default_script_id, context_argv={'funcName': func_name, 'args': args})
 
+    def get_sheet_data(self, sheet_name, fields, data_row=0, filter_empty_rows=True, *,
+                       return_mode='pd') -> pd.DataFrame:
+        """ 获取某张sheet表格数据
 
-WpsOnlineScriptApi = WpsOnlineBook
+        :param sheet_name: sheet表名
+        :param list[str] fields: 字段名列表
+        :param int data_row: 数据起始行，详细用法见packTableDataFields
+        :param return_mode: 'pd' or 'json'
+        """
+        data = self.run_script2('packTableDataFields', sheet_name, fields, data_row, filter_empty_rows)
+        if return_mode == 'json':
+            return data
+        elif return_mode == 'pd':
+            return pd.DataFrame(data)
+
 
 if __name__ == '__main__':
     pass
