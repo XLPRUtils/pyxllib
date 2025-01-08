@@ -288,6 +288,7 @@ function __3_json数据导入导出() {
 // 返回格式：{'名称': [x1, x2, ...], '标签': [y1, y2, ...]}
 // todo fields能否不输入，默认获取所有字段数据（此时需要给出表头所在行）
 // todo 多级表头类的数据怎么处理？
+// todo 支持一定的筛选功能？避免表格太大时要传输的数据过多。
 function packTableDataFields(ws, fields, dataRow = [0, 0], filterEmptyRows = true) {
     // 1 确定数据范围和字段列号映射
     const [ur, rows, cols] = locateTableRange(ws, dataRow, fields)
