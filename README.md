@@ -10,9 +10,3 @@ more details: https://www.yuque.com/xlpr/pyxllib/install
 
 document: https://www.yuque.com/xlpr/pyxllib.
 Work hard to improve, welcome more assistant partners.
-
-# 3 Acknowledge
-
-This project uses PyCharm to develop.
-Thanks to [JetBrains'](https://www.jetbrains.com/?from=pyxllib) support
-of [free license for open sourse project development](https://pycharm.iswbm.com/c01/c01_05.html).

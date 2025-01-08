@@ -8,12 +8,13 @@ import sys
 
 from loguru import logger
 
-try:  # 尝试加载VIP版
-    from wxautox import WeChat
-    from wxautox.elements import WxParam  # WxParam.DEFALUT_SAVEPATH 可以用来配置数据自动保存位置
-except ModuleNotFoundError:  # 否则用贫民版
-    from wxauto import WeChat
-    from wxauto.elements import WxParam
+if sys.platform == 'win32':
+    try:  # 尝试加载VIP版
+        from wxautox import WeChat
+        from wxautox.elements import WxParam  # WxParam.DEFALUT_SAVEPATH 可以用来配置数据自动保存位置
+    except ModuleNotFoundError:  # 否则用贫民版
+        from wxauto import WeChat
+        from wxauto.elements import WxParam
 
 from pyxllib.prog.filelock import get_autoui_lock
 
