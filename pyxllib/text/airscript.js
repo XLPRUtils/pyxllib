@@ -222,6 +222,7 @@ function locateTableRange(ws, dataRow = [0, 0], fields = []) {
 /**
  * 表格结构化定位工具的增强版本，在locateTableRange基础上增加了tools简化一些常用操作
  * tools增加的工具详见内部实现的子函数注释
+ * todo 250109周四14:07 这套时间并不太好，过渡封装了，后续还是研究下怎么做出ur.Cells我感觉更好。
  */
 function locateTableRange2(ws, dataRow = [0, 0], fields = []) {
     let [ur, rows, cols] = locateTableRange(ws, dataRow, fields)
@@ -233,6 +234,10 @@ function locateTableRange2(ws, dataRow = [0, 0], fields = []) {
             this.cols = cols
         }
 
+        getcel(row, colName) {
+            return this.ur.Cells(row, this.cols[colName])
+        }
+
         /**
          * 获取指定行和列名的单元格值
          * @param {number} row 行号
@@ -241,6 +246,10 @@ function locateTableRange2(ws, dataRow = [0, 0], fields = []) {
          */
         getval(row, colName) {
             return this.ur.Cells(row, this.cols[colName]).Value2
+        }
+
+        gettext(row, colName) {
+            return this.ur.Cells(row, this.cols[colName]).Text
         }
 
         /**
@@ -282,22 +291,37 @@ function __3_json数据导入导出() {
 
 }
 
-// 打包sheet下多个字段fields的数据
+/**
+ * 打包sheet下多个字段fields的数据
+ * @param ws 表格名或表格对象
+ * @param fields 要打包的字段名或列号，支持字段名称或整数，明确指定某列的位置
+ * @param dataRow 数据起始行，默认[0, 0]
+ * @param filterEmptyRows 是否过滤空行，默认true
+ * @param useTextFormat 是否根据单元格格式返回Text格式，默认true
+ * @return {'名称': [x1, x2, ...], '标签': [y1, y2, ...]}
+ */
 // 使用示例：packTableDataFields('料理', ['名称', '标签']
-//  fields的参数支持字段名称或整数，明确指定某列的位置
-// 返回格式：{'名称': [x1, x2, ...], '标签': [y1, y2, ...]}
 // todo fields能否不输入，默认获取所有字段数据（此时需要给出表头所在行）
 // todo 多级表头类的数据怎么处理？
 // todo 支持一定的筛选功能？避免表格太大时要传输的数据过多。
-function packTableDataFields(ws, fields, dataRow = [0, 0], filterEmptyRows = true) {
+function packTableDataFields(ws, fields, dataRow = [0, 0], filterEmptyRows = true, useTextFormat = true) {
     // 1 确定数据范围和字段列号映射
     const [ur, rows, cols] = locateTableRange(ws, dataRow, fields)
 
-    // 2 初始化字段格式数据
+    // 2 初始化字段数据和格式映射
     const fieldsData = fields.reduce((dataMap, field) => {
         dataMap[field] = []
         return dataMap
     }, {})
+
+    const formatMap = {}
+    if (useTextFormat) {
+        Object.entries(cols).forEach(([field, col]) => {
+            let firstCell = ur.Cells(rows.start, col)
+            let format = firstCell.NumberFormat
+            formatMap[field] = format !== 'G/通用格式' ? 'Text' : 'Value2'
+        })
+    }
 
     // 3 遍历数据行填充字段数据
     for (let row = rows.start; row <= rows.end; row++) {
@@ -308,7 +332,12 @@ function packTableDataFields(ws, fields, dataRow = [0, 0], filterEmptyRows = tru
 
         // 填充每个字段的数据
         Object.entries(cols).forEach(([field, col]) => {
-            fieldsData[field].push(ur.Cells(row, col).Value2)
+            let cell = ur.Cells(row, col)
+            if (useTextFormat) {
+                fieldsData[field].push(formatMap[field] === 'Text' ? cell.Text : cell.Value2)
+            } else {
+                fieldsData[field].push(cell.Value2)
+            }
         })
     }
 
@@ -753,5 +782,6 @@ const funcsMap = {packTableDataFields}
 let funcName = Context.argv.funcName || Selection.Cells(1, 1).Value2 || ''
 if (!funcsMap[funcName]) funcName = ActiveSheet.Cells(Selection.Row, 1)
 // 3 如果找得到函数则运行
+Context.argv.args = Context.argv.args || []
 if (funcsMap[funcName]) return funcsMap[funcName](...Context.argv.args)
 // 4 也可以注释掉3，下面写自己手动调试要运行的代码

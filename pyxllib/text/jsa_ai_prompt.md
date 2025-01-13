@@ -71,7 +71,9 @@ function locateTableRange(sheet, dataRow = [0, 0], colNames = []) {}
  * 表格结构化定位工具的增强版本，在locateTableRange基础上增加了tools简化一些常用操作
  * @returns {Array} [ur, rows, cols, tools]
  *   tools提供了如下便捷接口：
- *     getval(row, colName): 获取指定行列的单元格值
+ *     getcel(row, colName): 获取指定行列的单元格
+ *     getval(row, colName): 获取指定行列的单元格.Value2值
+ *     getval(row, colName): 获取指定行列的单元格.Text值
  *     findargcel(argName, direction): 查找参数单元格及其关联值
  *       direction可选'down'(下方)或'right'(右侧)，默认为'down'
  */
