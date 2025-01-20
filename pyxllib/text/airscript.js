@@ -703,58 +703,6 @@ function __7_考勤() {
     // 个人的考勤业务定制化功能
 }
 
-function highlightCourseProgress(refundDict, cell) {
-    let color, refundAmount
-
-    // 1.1 当堂完成
-    let cellValue = cell.Value2 + ''
-    if (cellValue.includes('当堂')) {
-        color = [0, 255, 0]    // 绿色
-        refundAmount = refundDict['当堂']
-    }
-
-    // 1.2 有返款的回放完成
-    if (refundAmount === undefined) {
-        // 遍历refundDict中的关键词
-        for (const keyword in refundDict) {
-            if (cellValue.includes(keyword)) {
-                color = [255, 255, 0]    // 黄色
-                refundAmount = refundDict[keyword]
-                break
-            }
-        }
-    }
-
-    // 1.3 无返款的回放完成
-    if (refundAmount === undefined && cellValue.includes('回放')) {
-        color = [128, 128, 128]    // 灰色
-        refundAmount = 0
-    }
-
-    // 1.4 未完成
-    if (refundAmount === undefined) {
-        color = [255, 255, 255]    // 白色
-        refundAmount = 0
-    }
-
-    // 2 返回结果
-
-    // 提取百分比
-    let percentageRegex = /\d*%/g  // 全局标志 'g'
-    let matches = Array.isArray(cellValue.match(percentageRegex)) ? cellValue.match(percentageRegex) : []
-    let weight = parseFloat(matches.pop()) || 0 // 最后一个匹配结果
-
-    // 颜色淡化
-    for (let i = 0; i < 3; i++)
-        color[i] = (color[i] * weight + 255 * 100) / (weight + 100)
-
-    // 设置颜色
-    cell.Interior.Color = RGB(color[0], color[1], color[2])
-
-    // 返回返款金额
-    return refundAmount
-}
-
 // 分析回放规则文本，从中提取结构化的字典解释
 function parseRefundRules(text) {
     const match = text.match(/"\d+(\/\d+)*"/)
@@ -769,7 +717,56 @@ function parseRefundRules(text) {
             refundDict[key] = parseInt(value)
         })
     }
+    refundDict['回放'] = 0  // 其他未明确标记的带'回放'字眼的一律返款金额为0
     return refundDict
+}
+
+function highlightCourseProgress(refundDict, cell) {
+    let color, refundAmount, text
+    text = cell.Text
+
+    // 1 找到redundDict字典中最大值
+    const sortedEntries = Object.entries(refundDict).sort((a, b) => b[1] - a[1])  // 确保按照值从大到小排序
+    const maxRefund = sortedEntries[0][1] || 0
+    const secondRefund = sortedEntries[1][1] || maxRefund
+
+    // 2 遍历refundDict中的所有key，判断cell的文本值是否包含了对应key，存储对应的refundAmount值
+    for (const [key, value] of sortedEntries) {
+        if (text.includes(key)) {
+            refundAmount = value
+            break
+        }
+    }
+
+    // 3 根据refundAmout设置基础颜色：与maxRefund相等设置绿色，正值设为黄色，0值设为灰色，undefined设为白色
+    if (refundAmount === maxRefund) {
+        color = [0, 255, 0]  // 绿色
+    } else if (refundAmount > 0) {
+        color = [255, 255, 0]  // 黄色
+        // 黄色情况下，要根据refundAmount权重，淡化颜色
+        color[2] = (1 - refundAmount / secondRefund) * 255
+    } else if (refundAmount === 0) {
+        color = [128, 128, 128]  // 灰色
+    } else {
+        color = [255, 255, 255]  // 白色
+    }
+
+    // 4 根据完成进度再进行一轮颜色渲染
+
+    // 提取百分比
+    let percentageRegex = /\d*%/g  // 全局标志 'g'
+    let matches = Array.isArray(text.match(percentageRegex)) ? text.match(percentageRegex) : []
+    let weight = parseFloat(matches.pop()) || 0 // 最后一个匹配结果
+
+    // 颜色淡化
+    for (let i = 0; i < 3; i++)
+        color[i] = (color[i] * weight + 255 * 100) / (weight + 100)
+
+    // 设置颜色
+    cell.Interior.Color = RGB(color[0], color[1], color[2])
+
+    // 5 返回返款金额
+    return refundAmount || 0
 }
 
 function __x_main() {

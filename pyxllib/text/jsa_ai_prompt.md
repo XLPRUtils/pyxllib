@@ -256,7 +256,7 @@ tools.findargcel('密码：').Text
 除了在jsa里调用py，有时候可能要反过来py调用jsa，此时写法风格类似如下：
 
 ```py
-from pyxllib.ext.wpsapi import WpsOnlineWorkbook, WpsOnlineScriptApi
+from pyxllib.ext.wpsapi2 import WpsOnlineWorkbook, WpsOnlineScriptApi
 
 # 1 方案1：运行jsa现有脚本的方式，这种可以支持现有的写好的jsa2代码
 wb2 = WpsOnlineScriptApi('file_id', 'script_id')
