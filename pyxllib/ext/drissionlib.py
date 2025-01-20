@@ -224,7 +224,10 @@ def close_duplicate_tabs(browser=None):
     # 1 初始化
     if browser is None:
         browser = Chromium()
+
+    # 250115周三21:12 这步不稳定，会报错，不知道为啥。导致dp最后经常没有清理tabs
     all_tabs = browser.get_tabs()
+
     seen_domains = set()
 
     # 2 第一次遍历：保留首个出现的域名，其余重复则关闭
