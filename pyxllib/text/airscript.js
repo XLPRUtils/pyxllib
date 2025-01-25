@@ -728,7 +728,7 @@ function highlightCourseProgress(refundDict, cell) {
     // 1 找到redundDict字典中最大值
     const sortedEntries = Object.entries(refundDict).sort((a, b) => b[1] - a[1])  // 确保按照值从大到小排序
     const maxRefund = sortedEntries[0][1] || 0
-    const secondRefund = sortedEntries[1][1] || maxRefund
+    const secondRefund = sortedEntries.length > 1 ? sortedEntries[1][1] : maxRefund
 
     // 2 遍历refundDict中的所有key，判断cell的文本值是否包含了对应key，存储对应的refundAmount值
     for (const [key, value] of sortedEntries) {
@@ -744,7 +744,7 @@ function highlightCourseProgress(refundDict, cell) {
     } else if (refundAmount > 0) {
         color = [255, 255, 0]  // 黄色
         // 黄色情况下，要根据refundAmount权重，淡化颜色
-        color[2] = (1 - refundAmount / secondRefund) * 255
+        color[2] = (1 - refundAmount / secondRefund) * 128
     } else if (refundAmount === 0) {
         color = [128, 128, 128]  // 灰色
     } else {
