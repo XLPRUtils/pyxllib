@@ -1173,3 +1173,25 @@ def percentage_and_value(numbers, precision=2, *, total=None, sep='.'):
         percent = safe_div(num, total) * 10 ** precision
         result.append(f"{percent:.0f}{sep}{num:0{width}d}")
     return result
+
+
+def get_local_ip():
+    """ 获得本地ip，代码由deepseek提供 """
+    try:
+        # 使用UDP协议连接到外部服务器
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(("8.8.8.8", 80))  # Google的DNS服务器和常用端口
+        local_ip = s.getsockname()[0]  # 获取套接字的本地地址
+        s.close()
+        return local_ip
+    except Exception as e:
+        # 如果失败，尝试通过主机名获取IP列表
+        try:
+            hostname = socket.gethostname()
+            ips = socket.gethostbyname_ex(hostname)[2]  # 获取所有IPv4地址
+            for ip in ips:
+                if ip != "127.0.0.1":  # 排除回环地址
+                    return ip
+            return "127.0.0.1"  # 默认返回回环地址
+        except:
+            raise ValueError("无法获取IP地址")
