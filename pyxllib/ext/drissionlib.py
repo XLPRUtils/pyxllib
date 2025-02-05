@@ -16,6 +16,7 @@ import DrissionPage
 from DrissionPage import ChromiumPage, Chromium
 from DrissionPage._pages.chromium_base import ChromiumBase
 from DrissionPage._pages.chromium_tab import ChromiumTab
+import DrissionPage.errors
 
 from pyxllib.prog.pupil import inject_members
 from pyxllib.text.pupil import strfind
@@ -226,7 +227,12 @@ def close_duplicate_tabs(browser=None):
         browser = Chromium()
 
     # 250115周三21:12 这步不稳定，会报错，不知道为啥。导致dp最后经常没有清理tabs
-    all_tabs = browser.get_tabs()
+    # 250204周二09:21，好像是浏览器重启更新到最新版本就行了~ 这里也要加个try
+    try:
+        all_tabs = browser.get_tabs()
+    except TimeoutError:
+        logger.warning('browser.get_tabs()运行报错，请清查浏览器是否已更新但没有重启')
+        return
 
     seen_domains = set()
 
