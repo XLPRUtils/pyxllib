@@ -231,7 +231,9 @@ def close_duplicate_tabs(browser=None):
     try:
         all_tabs = browser.get_tabs()
     except TimeoutError:
-        logger.warning('browser.get_tabs()运行报错，请清查浏览器是否已更新但没有重启')
+        logger.warning('browser.get_tabs()运行报错，请清查浏览器是否已更新但没有重启。本次将browser.quit()退出整个浏览器。')
+        # 你不让我关tabs是吧，那我就把整个浏览器关了
+        browser.quit()
         return
 
     seen_domains = set()
