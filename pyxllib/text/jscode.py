@@ -444,6 +444,13 @@ function isNextMonth(date) {
 
 @xlcache()
 def get_airscript_head2(definitions=False):
+    """ 原始airscript.js并不是能直接全部运行的代码，里面有些占位变量要替换掉
+
+    :param bool definitions:
+        False: 正常填充变量后，返回全部代码
+        True: 填充后，拆分成一个个函数定义的字典返回
+    :return:
+    """
     s = (XlPath(__file__).parent / 'airscript.js').read_text().strip()
     vars = {
         'JSA_POST_HOST_URL': os.getenv('JSA_POST_HOST_URL', 'https://xmutpriu.com'),
