@@ -9,7 +9,9 @@
 """
 
 import os
+import time
 
+from loguru import logger
 from tqdm import tqdm
 import requests
 
@@ -48,9 +50,9 @@ class SyncFileClient:
 
         if ip:
             try:
-                resp = requests.get(f'{ip}/{hostname}/healthy', timeout=5)
-                if resp.status_code == 200 and resp.json() == 'OK':
-                    host = f'{ip}/{hostname}'
+                resp = requests.get(f'{ip}/healthz', timeout=5)
+                if resp.status_code == 200 and resp.json()['status'] == 'ok':
+                    host = ip
             except Timeout:
                 pass
             except Exception as e:
@@ -173,6 +175,8 @@ class SyncFileClient:
         if relpath:
             local_file = self.get_abs_local_path(local_file, remote_file)
             remote_file = self.get_abs_remote_path(remote_file, local_file)
+        if not local_file.is_file():
+            return {'match': False}
         local_etag = GetEtag.from_file(local_file)
         json_data = {'file': remote_file.as_posix(), 'etag': local_etag}
         resp = requests.post(f'{self.host}/common/check_file_etag',
@@ -269,19 +273,36 @@ class SyncFileClient:
                 local_subdir.mkdir(parents=True)
 
             # 递归下载子目录中的文件
-            self.download_dir(remote_dir / subdir, local_dir / subdir, verify_etag=verify_etag)
+            for i in range(100):  # 开发机senseserver3好像不稳定，加了重试机制
+                try:
+                    self.download_dir(remote_dir / subdir, local_dir / subdir, verify_etag=verify_etag)
+                    break
+                except requests.exceptions.RequestException:
+                    time.sleep(i * 10)
+                    continue
+            else:
+                raise requests.exceptions.RequestException
 
         # 5. 下载文件
         for file in tqdm(dir_structure.get('files', []), desc=f'下载目录：{remote_dir}'):
             remote_file = remote_dir / file
             local_file = local_dir / file
 
-            # 校验etag，如果verify_etag为True并且校验成功，则跳过下载
-            if verify_etag and self.verify_etag(local_file, remote_file, relpath=False):
-                continue
+            for i in range(100):
+                try:
+                    # 校验etag，如果verify_etag为True并且校验成功，则跳过下载
+                    if verify_etag and self.verify_etag(local_file, remote_file, relpath=False)['match']:
+                        break
 
-            # 下载文件
-            self.download_file(remote_file, local_file, relpath=False)
+                    # 下载文件
+                    logger.info(f'下载文件中：{local_file}')
+                    self.download_file(remote_file, local_file, relpath=False)
+                    break
+                except requests.exceptions.RequestException:
+                    time.sleep(i * 10)
+                    continue
+            else:
+                raise requests.exceptions.RequestException
 
     def download_path(self, remote_path=None, local_path=None, *, verify_etag=False, relpath=True):
         """
