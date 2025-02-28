@@ -55,6 +55,9 @@ class Connection(psycopg.Connection, SqlBase):
         psycopg.Connection.__init__(self, *args, **kwargs)
         SqlBase.__init__(self, *args, **kwargs)
 
+    def __del__(self):
+        self.close()
+
     def __1_库(self):
         pass
 
@@ -899,7 +902,7 @@ class XlprDb(Connection):
         chart.options['grid'] = [{'top': 55 + len(all_database_usaged) * 4, 'containLabel': True}]
         chart.options['tooltip'].opts.update({'axisPointer': {'type': 'cross'}, 'trigger': 'item'})
 
-        #chart.add_series(f'total {pretty_val(ls[0][2] / 1024 / 1024 / 1024):g}',
+        # chart.add_series(f'total {pretty_val(ls[0][2] / 1024 / 1024 / 1024):g}',
         #                 to_list([x[2] / 1024 / 1024 / 1024 for x in ls]), areaStyle={})
         for database, usaged in all_database_usaged.most_common():
             usaged = usaged / ((ls[-1][0] - ls[0][0]).total_seconds() / 3600 + 1e-9)
