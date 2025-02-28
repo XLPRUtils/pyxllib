@@ -16,6 +16,7 @@ from tqdm import tqdm
 import requests
 
 from pyxllib.file.specialist import XlPath, GetEtag
+from pyxllib.prog.pupil import format_exception
 
 
 class SyncFileClient:
@@ -277,8 +278,9 @@ class SyncFileClient:
                 try:
                     self.download_dir(remote_dir / subdir, local_dir / subdir, verify_etag=verify_etag)
                     break
-                except requests.exceptions.RequestException:
-                    time.sleep(i * 10)
+                except requests.exceptions.RequestException as e:
+                    logger.warning(format_exception(e, 3))
+                    time.sleep(60)
                     continue
             else:
                 raise requests.exceptions.RequestException
@@ -299,7 +301,7 @@ class SyncFileClient:
                     self.download_file(remote_file, local_file, relpath=False)
                     break
                 except requests.exceptions.RequestException:
-                    time.sleep(i * 10)
+                    time.sleep(60)
                     continue
             else:
                 raise requests.exceptions.RequestException
