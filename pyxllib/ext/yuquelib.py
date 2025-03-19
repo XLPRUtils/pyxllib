@@ -11,6 +11,7 @@ from pyxllib.xl import *
 from pyxllib.algo.stat import *
 from pprint import pprint
 
+from pyxllib.text.pupil import UrlQueryBuilder
 from pyxllib.text.nestenv import NestEnv
 
 
@@ -51,8 +52,8 @@ class Yuque:
               'work_id': ''}}
         """
         url = f"{self.base_url}/user"
-        response = requests.get(url, headers=self.headers)
-        return response.json()
+        resp = requests.get(url, headers=self.headers)
+        return resp.json()
 
     @property
     def user_id(self):
@@ -75,8 +76,8 @@ class Yuque:
         """
         if return_mode == 0:
             url = f"{self.base_url}/users/{self.user_id}/repos"
-            response = requests.get(url, headers=self.headers)
-            return response.json()
+            resp = requests.get(url, headers=self.headers)
+            return resp.json()
         elif return_mode == 'df':
             data = self.get_repos()
             columns = ['id', 'name', 'items_count', 'namespace']
@@ -104,22 +105,77 @@ class Yuque:
             repo_id = self.get_repos('nickname2id')[repo_id]
         return repo_id
 
-    def get_repo_docs(self, repo_id, *, return_mode=0):
+    def get_repo_toc(self, repo_id):
+        """ 获取知识库目录 """
+        repo_id = self.get_repo_id(repo_id)
+        url = f"{self.base_url}/repos/{repo_id}/toc"
+        resp = requests.get(url, headers=self.headers)
+        d = resp.json()
+        # logger.info(d)
+        return d['data']
+
+    def repo_toc_move(self, repo_id,
+                      cur_doc=None, dst_doc=None,
+                      *,
+                      insert_ahead=False,
+                      to_child=False):
+        """ 知识库/目录/移动 模式
+
+        :param dst|dict cur_doc: 移动哪个当前节点
+            注意把cur移动到dst的时候，cur的子节点默认都会跟着移动
+
+            这里输入的类型，一般是根据get_repo_toc，获得字典类型
+            但如果输入是str，则默认使用的是url模式，需要这个函数里再主动做一次get_repo_toc
+        :param dst|dict dst_doc: 移动到哪个目标节点
+        :param insert_ahead: 默认插入在目标后面
+            如果要插入到前面，可以启动这个参数
+        :param to_child: 作为目标节点的子节点插入
+        :return: 好像是返回新的整个目录
+        """
+        repo_id = self.get_repo_id(f'{repo_id}')
+
+        # 输入为字符串时，默认使用的url进行定位。url只要包括'/'末尾最后的文档id即可，前缀可以省略
+        if isinstance(cur_doc, str) or isinstance(dst_doc, str):
+            toc = self.get_repo_toc(repo_id)
+            if isinstance(cur_doc, str):
+                cur_doc = next((d for d in toc if d['url']==cur_doc.split('/')[-1]))
+            if isinstance(dst_doc, str):
+                dst_doc = next((d for d in toc if d['url']==dst_doc.split('/')[-1]))
+
+        url = f"{self.base_url}/repos/{repo_id}/toc"
+        cfg = {
+            'node_uuid': cur_doc['uuid'],
+            'target_uuid': dst_doc['uuid'],
+            'action': 'prependNode' if insert_ahead else 'appendNode',
+            'action_mode': 'child' if to_child else 'sibling',
+        }
+        resp = requests.put(url, json=cfg, headers=self.headers)
+        return resp.json()
+
+    def get_repo_docs(self, repo_id, *, offset=0, limit=100, return_mode=0):
         """ 获取知识库的文档列表
 
         :param repo_id: 知识库的ID或Namespace（如"日志"是我改成的"journal"）
+        :param int offset: 偏移多少篇文章后再取
+        :param int limit: 展示多少篇文章，默认100篇
         :param int|str return_mode: 返回模式
+            私人文档：https://www.yuque.com/code4101/journal/ztvg5qh5m3ga7gh7?inner=ubc5753c5
             0（默认），返回原始json结构
             -1（df），df结构
-        :return: 文档列表，只能获得最近的100篇文档
+        :return: 文档列表
+            底层接口获得的数据默认是按照创建时间排序的，但是我这里会重新按照更新时间重排序
         """
         repo_id = self.get_repo_id(repo_id)
         if return_mode == 0:
-            url = f"{self.base_url}/repos/{repo_id}/docs"
-            response = requests.get(url, headers=self.headers)
-            return response.json()
+            uqb = UrlQueryBuilder()
+            uqb.add_param('offset', offset)
+            uqb.add_param('limit', limit)
+            url = uqb.build_url(f"{self.base_url}/repos/{repo_id}/docs")
+            logger.info(url)
+            d = requests.get(url, headers=self.headers).json()
+            return d
         elif return_mode in (-1, 'df'):
-            data = self.get_repo_docs(repo_id)
+            data = self.get_repo_docs(repo_id, offset=offset, limit=limit)
             # 按照updated_at降序
             data['data'].sort(key=lambda x: x['updated_at'], reverse=True)
             columns = ['id', 'title', 'word_count', 'description', 'updated_at']
@@ -141,8 +197,21 @@ class Yuque:
     def __2_文档操作(self):
         pass
 
-    def create_doc(self, repo_id, title, md_content):
+    def create_doc(self, repo_id, title, md_content,
+                   *,
+                   slug=None, public=0, format=None,  # 该篇文档的属性
+                   dst_doc=None, insert_ahead=False, to_child=False,  # 设置文档所在位置
+                   ):
         """ 创建单篇文档，并放到目录开头
+
+        :param slug: 可以自定义url路径名称
+        :param public: 0:私密, 1:公开, 2:企业内公开
+        :param format: markdown:Markdown 格式, html:HTML 标准格式, lake:语雀 Lake 格式
+            默认markdown
+
+        示例用法：
+        yuque.create_doc('周刊摘录', '标题', '内容', slug='custom_slug/url',
+                 dst_doc='目标文档的slug/url', to_child=True)
         """
         # 1 创建文档
         repo_id = self.get_repo_id(repo_id)
@@ -151,6 +220,15 @@ class Yuque:
             "title": title,
             "body": md_content,
         }
+        opt_params = {
+            'slug': slug,
+            'public': public,
+            'format': format
+        }
+        for k, v in opt_params.items():
+            if v:
+                in_data[k] = v
+
         resp = requests.post(url, json=in_data, headers=self.headers)
         out_data = resp.json()
         doc_id = out_data['data']['id']
@@ -162,10 +240,15 @@ class Yuque:
             "action_mode": "child",
             "doc_id": doc_id,
         }
-        resp2 = requests.put(url2, json=in_data2, headers=self.headers)
-        out_data2 = resp2.json()
+        # 返回的是知识库新的目录
+        toc = requests.put(url2, json=in_data2, headers=self.headers).json()['data']
 
-        return out_data2
+        # 3 如果有设置目录具体位置的需求
+        if dst_doc:
+            self.repo_toc_move(repo_id, toc[0], dst_doc, insert_ahead=insert_ahead, to_child=to_child)
+
+        # 即使有dst_doc移动了目录位置，但这个新建文档本来就不带位置信息的，所以不用根据dst_doc再重新获得
+        return out_data
 
     def get_doc(self, repo_id, doc_id):
         """ 获取单篇文档的详细信息
@@ -176,13 +259,14 @@ class Yuque:
         """
         repo_id = self.get_repo_id(repo_id)
         url = f"{self.base_url}/repos/{repo_id}/docs/{doc_id}"
-        response = requests.get(url, headers=self.headers)
-        return response.json()
+        resp = requests.get(url, headers=self.headers)
+        return resp.json()
 
     def get_doc_from_url(self, url, return_mode='md'):
         """ 从文档的URL中获取文档的详细信息
 
         :param url: 文档的URL
+            可以只输入最后知识库、文档部分的url标记
         :param return_mode: 返回模式，
             json, 为原始json结构
             md, 返回文档的主体md内容
@@ -237,16 +321,22 @@ class Yuque:
         """
         repo_id = self.get_repo_id(repo_id)
         url = f"{self.base_url}/repos/{repo_id}/docs/{doc_id}"
-        response = requests.put(url, json=doc_data, headers=self.headers)
-        return response.json()
+        resp = requests.put(url, json=doc_data, headers=self.headers)
+        return resp.json()
 
     def update_doc_from_url(self, url, doc_data, *, md_cvt=True, return_mode='json'):
         """ 从文档的URL中更新文档的详细信息
 
         :param url: 文档的URL
         :param str|json doc_data: 包含文档更新内容的字典
-            可以直接传入要更新的新的md内容
+            可以直接传入要更新的新的md内容，会自动转为 {'body': doc_data}
             注意无论原始是body_html、body_lake，都是要上传到body字段
+
+            其他具体参数参考create_doc：
+                slug可以调整url路径名
+                title调整标题
+                public参数调整公开性
+                format设置导入的内容格式
         :param str return_mode: 返回的是更新后文档的内容，不过好像有bug，这里返回的body存储的并不是md格式
             'md', 返回更新后文档的主体md内容
             'json', 为原始json结构

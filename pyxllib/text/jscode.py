@@ -270,6 +270,13 @@ def remove_js_comments(jsSourceCode):  # 对外接口，将本来用得两行代
 
 
 def __2_类js的as处理功能():
+    """
+
+    250306周四15:23，airscript_head应该是旧版的jsa工具代码。
+    而get_airscript_head2应该是获得新版jsa工具代码的函数接口。
+
+    :return:
+    """
     pass
 
 
@@ -797,7 +804,7 @@ def __3_js代码结构解析():
 
 
 def extract_definitions_with_comments(js_code):
-    """ 找出、切分每段函数的定义(函数开头的注释)
+    """ 找出、切分每段函数的定义(包含函数开头的注释)
 
     这里是用正则实现的版本，强制要求函数结束的时候用的是单行}结尾
         如果实现中间内容也会出现这种单行}结尾，可以想写特殊手段规避开

@@ -142,6 +142,8 @@ class SyncFileClient:
         :param str remote_file: 要下载的远程文件路径，相对get_wkdir下的路径
         :param str local_file: 下载到本地的文件路径，默认可以不指定，自动通过remote_file存储到对称位置
 
+        todo 加进度条？方便超大文件下载查看进度。
+
         使用示例：
         sfc = SyncFileClient('http://yourserver.com', headers={"Authorization": "Bearer your_token"})
         sfc.download_file('.vscode/launch.json', 'launch.json')
