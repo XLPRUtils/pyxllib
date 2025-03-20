@@ -138,9 +138,9 @@ class Yuque:
         if isinstance(cur_doc, str) or isinstance(dst_doc, str):
             toc = self.get_repo_toc(repo_id)
             if isinstance(cur_doc, str):
-                cur_doc = next((d for d in toc if d['url']==cur_doc.split('/')[-1]))
+                cur_doc = next((d for d in toc if d['url'] == cur_doc.split('/')[-1]))
             if isinstance(dst_doc, str):
-                dst_doc = next((d for d in toc if d['url']==dst_doc.split('/')[-1]))
+                dst_doc = next((d for d in toc if d['url'] == dst_doc.split('/')[-1]))
 
         url = f"{self.base_url}/repos/{repo_id}/toc"
         cfg = {
@@ -350,6 +350,15 @@ class Yuque:
         repo_slug, doc_slug = url.split('/')[-2:]
         if isinstance(doc_data, str):
             doc_data = {'body': doc_data}
+        # 有一套自动识别导入内容类型的机制
+        if 'format' not in doc_data:
+            if doc_data['body'].startswith('<!doctype html>'):
+                doc_data['format'] = 'html'
+                md_cvt = False
+            elif doc_data['body'].startswith('<!doctype lake>'):
+                doc_data['format'] = 'lake'
+                md_cvt = False
+            # 否则就是默认的markdown格式
 
         # 2 格式转换
         if md_cvt:
