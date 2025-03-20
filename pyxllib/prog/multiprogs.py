@@ -293,7 +293,7 @@ class MultiProgramLauncher:
             """ 启动任务并更新状态 """
             # todo schedule不一定都是单实例阻塞情景的需求，以后有需要可以扩展支持多实例同时存在的非阻塞模式
             if worker.is_running():
-                logger.warning(f'由于程序{name}在上一次周期还没运行完，新周期不重复启动')
+                logger.warning(f'由于程序"{name}"在上一次周期还没运行完，新周期不重复启动')
             else:
                 worker.lanuch()
 
