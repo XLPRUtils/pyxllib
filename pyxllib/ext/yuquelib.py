@@ -6,13 +6,17 @@
 
 
 import requests
+import urllib.parse
+
+from fastcore.basics import GetAttr
+from pprint import pprint
 
 from pyxllib.xl import *
 from pyxllib.algo.stat import *
-from pprint import pprint
-
 from pyxllib.text.pupil import UrlQueryBuilder
 from pyxllib.text.nestenv import NestEnv
+from pyxllib.text.xmllib import BeautifulSoup, XlBs4Tag
+from pyxllib.cv.xlcvlib import xlcv
 
 
 class Yuque:
@@ -387,6 +391,145 @@ class Yuque:
         res = self.get_doc_from_url(url, return_mode=0)
         tables = pd.read_html(res['body_html'], header=header)
         return tables
+
+
+class LakeImage(GetAttr, XlBs4Tag):
+    """ 语雀文档中的图片类型
+
+    这个内容结构一般是 <p><card type="inline" name="image" value="data:..."></card></p>
+    其中value是可以解析出一个字典，有详细数据信息的
+    """
+    _default = 'tag'
+
+    def __init__(self, tag):  # noqa
+        self.tag = tag
+        self._value_dict = None
+
+    def __初始化(self):
+        pass
+
+    @classmethod
+    def _encode_value(cls, value_dict):
+        """ 把当前value_dict的字典值转为html标签结构 """
+        json_str = json.dumps(value_dict)
+        url_encoded = urllib.parse.quote(json_str)
+        final_str = "data:" + url_encoded
+        return final_str
+
+    @classmethod
+    def _init_from_src(cls, src):
+        """ 传入一个图片url或base64的值，转为语雀图片节点 """
+        soup = BeautifulSoup('<p><card type="inline" name="image" value=""></card></p>', 'lxml')
+        soup.card.attrs['value'] = cls._encode_value({'src': src})
+        return cls(soup)
+
+    @classmethod
+    def from_url(cls, url):
+        """ 通过一个url图片位置来初始化一张图片 """
+        return cls._init_from_src(url)
+
+    @classmethod
+    def from_local_image(cls, img, *, limit_size=0.6 * 1024 * 1024, suffix='.png'):
+        """ 传入一个本地图片。本地图片必须转换为base64格式
+
+        :param limit_size: 整个文档有1MB的限制，所以单张图片一般最大也只能给0.5MB的尺寸
+        """
+        im = xlcv.read(img)
+        im = xlcv.reduce_filesize(im, limit_size, suffix)
+        buffer = xlcv.to_buffer(im, suffix, b64encode=True).decode('utf-8')
+        return cls._init_from_src(f'data:image/{suffix[1:]};base64,{buffer}')
+
+    def to_url(self):
+        """ 确认当前图片是以url的模式存储 """
+
+
+    def to_base64(self):
+        """ 确认当前图片是以base64的模式存储 """
+
+    def __功能(self):
+        pass
+
+    @property
+    def value_dict(self):
+        if self._value_dict is None:
+            encoded_str = self.tag.card.attrs['value']
+            # 去掉 "data:" 前缀
+            encoded_data = encoded_str.replace("data:", "")
+            # URL 解码
+            decoded_str = urllib.parse.unquote(encoded_data)
+            self._value_dict = json.loads(decoded_str)
+        return self._value_dict
+
+    def update_value_dict(self):
+        """ 把当前value_dict的字典值更新回html标签 """
+        self.tag.card.attrs['value'] = self._encode_value(self.value_dict)
+
+
+# GetAttr似乎必须放在前面，这样找不到的属性似乎是会优先使用GetAttr机制的，但后者又可以为IDE提供提示
+class LakeDoc(GetAttr, XlBs4Tag):
+    """ 语雀文档类型 """
+    _default = 'soup'
+
+    def __init__(self, soup):  # noqa，这个类初始化就是跟父类不同的
+        # 原始完整的html文档内容
+        self.soup: XlBs4Tag = soup
+
+    @classmethod
+    def from_lake_str(cls, lake_html_str):
+        soup = BeautifulSoup(lake_html_str, 'lxml')
+        return cls(soup)
+
+    def to_lake_str(self):
+        """ 转换成语雀html格式的字符串 """
+        content = self.soup.prettify().replace('\n', '')
+        content = re.sub('^<!DOCTYPE lake>', '<!doctype lake>', content)
+        content = re.sub(r'\s{2,}', '', content)
+        return content
+
+    def get_raw_paragraphs(self):
+        """ 获得最原始的段落数组 """
+        return list(self.soup.body.children)
+
+    def print_raw_paragraphs(self):
+        for i, c in enumerate(self.get_raw_paragraphs(), start=1):
+            tp = self.check_type(c)
+            if tp == 'image':
+                # img = LakeImage(c)
+                print(f'{i}、{c.tag_name} {shorten(c.prettify(), 200)}')
+            elif tp == 'str':
+                print(f'{i}、{c.tag_name} {shorten(c.text, 200)}')
+            else:
+                print(f'{i}、{c.tag_name} {shorten(c.prettify(), 200)}')
+            print()
+
+    def delete_lake_id(self):
+        """ 删除文档中所有语雀标签的id标记 """
+        for tag in self.soup.find_all(True):
+            for name in ['data-lake-id', 'id']:
+                if name in tag.attrs:
+                    del tag[name]
+
+    @classmethod
+    def check_type(cls, tag):
+        """ 这个分类会根据对语雀文档结构了解的逐渐深入和逐步细化 """
+        tag_name = tag.tag_name
+        if tag_name == 'p':
+            if tag.find('card'):
+                return 'image'
+            else:
+                return 'p'  # 就用p表示最普通的段落类型
+        elif tag_name == 'card':
+            return 'codeblock'
+        elif tag_name == 'ol':
+            return 'ol'
+        elif re.match(r'h\d+$', tag_name):
+            return 'heading'
+        elif tag_name == 'details':
+            return 'lake-collapse'
+        elif tag_name == 'NavigableString':
+            return 'str'
+        else:
+            raise TypeError('未识别类型')
 
 
 if __name__ == '__main__':

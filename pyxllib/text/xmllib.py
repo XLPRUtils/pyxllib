@@ -8,10 +8,10 @@
 xml等网页结构方面的处理
 """
 
-from pyxllib.prog.pupil import check_install_package
+# from pyxllib.prog.pupil import check_install_package
 
 # 一个xpath解析库
-check_install_package('xpath_parser', 'xpath-parser')
+# check_install_package('xpath_parser', 'xpath-parser')
 
 import collections
 from collections import Counter, defaultdict
@@ -23,7 +23,7 @@ import pandas as pd
 import bs4
 from bs4 import BeautifulSoup
 from humanfriendly import format_size
-from xpath_parser import XpathExpression
+# from xpath_parser import XpathExpression
 
 from pyxllib.prog.newbie import round_int
 from pyxllib.prog.pupil import dprint, run_once, inject_members
@@ -401,6 +401,8 @@ class XlBs4Tag(bs4.element.Tag):
         bs4官方没有自带，网上找到的很多也不中意。就自己根据需求简单定制一下。非完整版实现，但希望能支持常用的几个操作。
         好在还是有现成的xpath解析库的，自己扩展实现也不会太难。
         """
+        from xpath_parser import XpathExpression
+
         xp = XpathExpression(xpath)
 
         cur_tag = self
@@ -434,8 +436,32 @@ class XlBs4Tag(bs4.element.Tag):
 
         return cur_tag
 
+    def __修改功能(self):
+        pass
+
+    def _to_node(self, html):
+        """ 输入可以是字符串、文档、结点 """
+        if isinstance(html, str):
+            new_node = next(BeautifulSoup(html, 'lxml').body.children)
+        elif html.find('body'):
+            new_node = next(html.body.children)
+        else:
+            new_node = html
+        return new_node
+
+    def replace_html_with(self, html):
+        self.replace_with(self._to_node(html))
+
+    def insert_html_before(self, html):
+        self.insert_before(self._to_node(html))
+
+    def insert_html_after(self, html):
+        self.insert_after(self._to_node(html))
+
 
 inject_members(XlBs4Tag, bs4.element.Tag)
+# 这样虽然不优雅，但主要是让特殊的String类型也支持兼容tag_name属性
+inject_members(XlBs4Tag, bs4.element.NavigableString)
 
 
 def mathjax_html_head(s):
