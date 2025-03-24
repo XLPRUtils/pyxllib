@@ -343,6 +343,10 @@ class MultiProgramLauncher:
             # 检查是否为有效的 6 字段 cron 表达式
             if len(cron_parts) == 6:
                 # 统一处理为 6 字段格式
+                # 把cron的星期标记转换为aps的星期标记。前者用1234560，后者用0123456表示星期一到星期日
+                x = cron_parts[5]
+                if x != '*':
+                    x = 6 if x == '0' else (int(x) + 1)
                 self.scheduler.add_job(
                     task,
                     CronTrigger(
@@ -351,7 +355,7 @@ class MultiProgramLauncher:
                         hour=cron_parts[2],
                         day=cron_parts[3],
                         month=cron_parts[4],
-                        day_of_week=cron_parts[5]
+                        day_of_week=x,
                     ),
                     # 检测的时候有概率错过了精确时间点。但一般不论延迟了多久，都要补运行上。
                     misfire_grace_time=misfire_grace_time,
