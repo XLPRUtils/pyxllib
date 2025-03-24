@@ -4,6 +4,8 @@
 # @Email  : 877362867@qq.com
 # @Date   : 2024/01/01
 
+import re
+import time
 
 import requests
 import urllib.parse
@@ -13,13 +15,45 @@ from pprint import pprint
 
 from pyxllib.xl import *
 from pyxllib.algo.stat import *
+from pyxllib.prog.newbie import SingletonForEveryInitArgs
 from pyxllib.text.pupil import UrlQueryBuilder
 from pyxllib.text.nestenv import NestEnv
 from pyxllib.text.xmllib import BeautifulSoup, XlBs4Tag
 from pyxllib.cv.xlcvlib import xlcv
 
 
-class Yuque:
+def update_yuque_doc_by_dp(doc_url):
+    from DrissionPage import Chromium, ChromiumOptions
+    from pyxllib.ext.drissionlib import dp_check_quit
+
+    # 1 打开浏览器
+    co = ChromiumOptions()
+    # co.headless()  # 无头模式效果不一定稳，一般还是不能开
+    # co.set_argument('--window-size', '100,100')  # 修改窗口尺寸也不行
+    # 就只有最正常的模式才能马上触发更新
+    browser = Chromium(co)
+
+    # 2 确认url
+    if not doc_url.startswith('https://www.yuque.com/'):
+        doc_url = 'https://www.yuque.com/' + doc_url
+    tab = browser.new_tab(f'{doc_url}/edit')
+
+    # 3 操作更新文档
+    tab('t:button@@data-ne-type=clearFormat')  # 通过查找一个元素确定文档已经加载成功
+    time.sleep(1)
+    tab.actions.type(' ')
+    time.sleep(1)
+    tab.actions.key_down('BACKSPACE')
+    time.sleep(0.5)
+    tab.actions.key_up('BACKSPACE')
+    tab('t:button@@text():更新').click(by_js=True)
+    tab.close()
+
+    # 4 退出
+    dp_check_quit()
+
+
+class Yuque(metaclass=SingletonForEveryInitArgs):
     """
     https://www.yuque.com/yuque/developer/openapi
     语雀请求限制：每小时最多 5000 次请求，每秒最多 100 次请求
@@ -109,53 +143,6 @@ class Yuque:
             repo_id = self.get_repos('nickname2id')[repo_id]
         return repo_id
 
-    def get_repo_toc(self, repo_id):
-        """ 获取知识库目录 """
-        repo_id = self.get_repo_id(repo_id)
-        url = f"{self.base_url}/repos/{repo_id}/toc"
-        resp = requests.get(url, headers=self.headers)
-        d = resp.json()
-        # logger.info(d)
-        return d['data']
-
-    def repo_toc_move(self, repo_id,
-                      cur_doc=None, dst_doc=None,
-                      *,
-                      insert_ahead=False,
-                      to_child=False):
-        """ 知识库/目录/移动 模式
-
-        :param dst|dict cur_doc: 移动哪个当前节点
-            注意把cur移动到dst的时候，cur的子节点默认都会跟着移动
-
-            这里输入的类型，一般是根据get_repo_toc，获得字典类型
-            但如果输入是str，则默认使用的是url模式，需要这个函数里再主动做一次get_repo_toc
-        :param dst|dict dst_doc: 移动到哪个目标节点
-        :param insert_ahead: 默认插入在目标后面
-            如果要插入到前面，可以启动这个参数
-        :param to_child: 作为目标节点的子节点插入
-        :return: 好像是返回新的整个目录
-        """
-        repo_id = self.get_repo_id(f'{repo_id}')
-
-        # 输入为字符串时，默认使用的url进行定位。url只要包括'/'末尾最后的文档id即可，前缀可以省略
-        if isinstance(cur_doc, str) or isinstance(dst_doc, str):
-            toc = self.get_repo_toc(repo_id)
-            if isinstance(cur_doc, str):
-                cur_doc = next((d for d in toc if d['url'] == cur_doc.split('/')[-1]))
-            if isinstance(dst_doc, str):
-                dst_doc = next((d for d in toc if d['url'] == dst_doc.split('/')[-1]))
-
-        url = f"{self.base_url}/repos/{repo_id}/toc"
-        cfg = {
-            'node_uuid': cur_doc['uuid'],
-            'target_uuid': dst_doc['uuid'],
-            'action': 'prependNode' if insert_ahead else 'appendNode',
-            'action_mode': 'child' if to_child else 'sibling',
-        }
-        resp = requests.put(url, json=cfg, headers=self.headers)
-        return resp.json()
-
     def get_repo_docs(self, repo_id, *, offset=0, limit=100, return_mode=0):
         """ 获取知识库的文档列表
 
@@ -198,44 +185,178 @@ class Yuque:
         else:
             raise ValueError(f'不支持的return_mode={return_mode}')
 
-    def __2_文档操作(self):
+    def __2_目录操作(self):
         pass
 
-    def create_doc(self, repo_id, title, md_content,
+    def get_repo_toc(self, repo_id):
+        """ 获取知识库目录 """
+        repo_id = self.get_repo_id(repo_id)
+        url = f"{self.base_url}/repos/{repo_id}/toc"
+        resp = requests.get(url, headers=self.headers)
+        d = resp.json()
+        # logger.info(d)
+        return d['data']
+
+    def repo_toc_move(self, repo_id,
+                      cur_doc=None, dst_doc=None,
+                      *,
+                      insert_ahead=False,
+                      to_child=False):
+        """ 知识库/目录/移动 模式
+
+        :param dst|dict cur_doc: 移动哪个当前节点
+            注意把cur移动到dst的时候，cur的子节点默认都会跟着移动
+
+            这里输入的类型，一般是根据get_repo_toc，获得字典类型
+            但如果输入是str，则默认使用的是url模式，需要这个函数里再主动做一次get_repo_toc
+        :param dst|dict dst_doc: 移动到哪个目标节点
+        :param insert_ahead: 默认插入在目标后面
+            如果要插入到前面，可以启动这个参数
+        :param to_child: 作为目标节点的子节点插入
+        :return: 好像是返回新的整个目录
+        """
+        repo_id = self.get_repo_id(f'{repo_id}')
+
+        # 输入为字符串时，默认使用的url进行定位。url只要包括'/'末尾最后的文档id即可，前缀可以省略
+        if isinstance(cur_doc, str) or isinstance(dst_doc, str):
+            toc = self.get_repo_toc(repo_id)  # 知识库的整个目录
+            if isinstance(cur_doc, str):
+                cur_doc = next((d for d in toc if d['url'] == cur_doc.split('/')[-1]))
+            if isinstance(dst_doc, str):
+                dst_doc = next((d for d in toc if d['url'] == dst_doc.split('/')[-1]))
+
+        url = f"{self.base_url}/repos/{repo_id}/toc"
+        cfg = {
+            'node_uuid': cur_doc['uuid'],
+            'target_uuid': dst_doc['uuid'],
+            'action': 'prependNode' if insert_ahead else 'appendNode',
+            'action_mode': 'child' if to_child else 'sibling',
+        }
+        resp = requests.put(url, json=cfg, headers=self.headers)
+        return resp.json()
+
+    def __3_文档操作(self):
+        pass
+
+    def ____1_获取文档(self):
+        pass
+
+    def _get_doc(self, repo_id, doc_id):
+        """ 获取单篇文档的详细信息
+
+        :param repo_id: 知识库的ID或Namespace
+        :param doc_id: 文档的ID
+        :return: 文档的详细信息
+        """
+        repo_id = self.get_repo_id(repo_id)
+        url = f"{self.base_url}/repos/{repo_id}/docs/{doc_id}"
+        resp = requests.get(url, headers=self.headers)
+        return resp.json()
+
+    def get_doc(self, doc_url, return_mode='md'):
+        """ 从文档的URL中获取文档的详细信息
+
+        :param doc_url: 文档的URL
+            可以只输入最后知识库、文档部分的url标记
+        :param return_mode: 返回模式，
+            json, 为原始json结构
+            md, 返回文档的主体md内容
+            title_and_md, 返回文档的标题和md内容
+        :return: 文档的详细信息
+        """
+        repo_slug, doc_slug = doc_url.split('/')[-2:]
+        data = self._get_doc(repo_slug, doc_slug)['data']
+
+        if return_mode == 'json':
+            return data
+        elif return_mode == 'md':
+            return data['body']
+        elif return_mode == 'title_and_md':
+            return data["title"], data["body"]
+
+    def export_markdown(self, url, output_dir=None, post_mode=1):
+        """ 导出md格式文件
+
+        :param str|list[str] url: 文档的URL
+            可以导出单篇文档，也可以打包批量导出多篇文档的md文件
+        :param output_dir: 导出目录
+            单篇的文件名是按照文章标题自动生成的
+            多篇的可以自己指定具体文件名
+        :param post_mode: 后处理模式
+            0，不做处理
+            1，做适当的精简
+        """
+        # 1 获得内容
+        data = self.get_doc(url, return_mode='json')
+        body = data['body']
+        if post_mode == 0:
+            pass
+        elif post_mode == 1:
+            body = re.sub(r'<a\sname=".*?"></a>\n', '', body)
+
+        # 2 写入文件
+        if output_dir is not None:
+            title2 = refinepath(data['title'])
+            f = XlPath(output_dir) / f'{title2}.md'
+            f.write_text(body)
+
+        return body
+
+    def ____2_新建文档(self):
+        pass
+
+    def _to_doc_data(self, doc_data, md_cvt=True):
+        """ 将非规范文档内容统一转为标准字典格式
+
+        :param str|dict doc_data: 文本内容（md，html，lake）或字典表达的数据
+            可以直接传入要更新的新的（md | html | lake）内容，会自动转为 {'body': content}
+                注意无论原始是body_html、body_lake，都是要上传到body字段的
+
+            其他具体参数功能：
+                slug可以调整url路径名
+                title调整标题
+                public参数调整公开性，0:私密, 1:公开, 2:企业内公开
+                format设置导入的内容格式，markdown:Markdown 格式, html:HTML 标准格式, lake:语雀 Lake 格式
+
+        :param bool md_cvt: 是否需要转换md格式
+            默认的md文档格式直接放回语雀，是会丢失换行的，需要对代码块外的内容，执行\n替换
+        """
+        # 1 字符串转字典
+        if isinstance(doc_data, str):
+            doc_data = {'body': doc_data}
+
+        # 2 判断文本内容格式
+        if 'format' not in doc_data:
+            m = re.match(r'<!doctype\s(\w+?)>', doc_data['body'], flags=re.IGNORECASE)
+            if m:
+                doc_data['format'] = m.group(1).lower()
+
+        # 3 如果是md格式还要特殊处理
+        if doc_data.get('format', 'markdown') == 'markdown' and md_cvt:
+            ne = NestEnv(doc_data['body']).search(r'^```[^\n]*\n(.+?)\n^```',
+                                                  flags=re.MULTILINE | re.DOTALL).invert()
+            doc_data['body'] = ne.replace('\n', '\n\n')
+
+        return doc_data
+
+    def create_doc(self, repo_id, doc_data,
                    *,
-                   slug=None, public=0, format=None,  # 该篇文档的属性
                    dst_doc=None, insert_ahead=False, to_child=False,  # 设置文档所在位置
                    ):
-        """ 创建单篇文档，并放到目录开头
-
-        :param slug: 可以自定义url路径名称
-        :param public: 0:私密, 1:公开, 2:企业内公开
-        :param format: markdown:Markdown 格式, html:HTML 标准格式, lake:语雀 Lake 格式
-            默认markdown
+        """ 创建单篇文档，并放到知识库下某指定为止
 
         示例用法：
-        yuque.create_doc('周刊摘录', '标题', '内容', slug='custom_slug/url',
-                 dst_doc='目标文档的slug/url', to_child=True)
+        yuque.create_doc('周刊摘录',
+                    {'title': '标题', 'body': '内容', 'slug': 'custom_slug/url'},
+                    dst_doc='目标文档的slug/url', to_child=True)
         """
         # 1 创建文档
         repo_id = self.get_repo_id(repo_id)
         url = f"{self.base_url}/repos/{repo_id}/docs"
-        in_data = {
-            "title": title,
-            "body": md_content,
-        }
-        opt_params = {
-            'slug': slug,
-            'public': public,
-            'format': format
-        }
-        for k, v in opt_params.items():
-            if v:
-                in_data[k] = v
 
-        resp = requests.post(url, json=in_data, headers=self.headers)
-        out_data = resp.json()
-        doc_id = out_data['data']['id']
+        doc_data = self._to_doc_data(doc_data)
+        out_data = requests.post(url, json=doc_data, headers=self.headers).json()['data']
+        doc_id = out_data['id']
 
         # 2 将文档添加到目录中
         url2 = f"{self.base_url}/repos/{repo_id}/toc"
@@ -254,73 +375,15 @@ class Yuque:
         # 即使有dst_doc移动了目录位置，但这个新建文档本来就不带位置信息的，所以不用根据dst_doc再重新获得
         return out_data
 
-    def get_doc(self, repo_id, doc_id):
-        """ 获取单篇文档的详细信息
+    def ____3_更新文档(self):
+        pass
 
-        :param repo_id: 知识库的ID或Namespace
-        :param doc_id: 文档的ID
-        :return: 文档的详细信息
-        """
-        repo_id = self.get_repo_id(repo_id)
-        url = f"{self.base_url}/repos/{repo_id}/docs/{doc_id}"
-        resp = requests.get(url, headers=self.headers)
-        return resp.json()
-
-    def get_doc_from_url(self, url, return_mode='md'):
-        """ 从文档的URL中获取文档的详细信息
-
-        :param url: 文档的URL
-            可以只输入最后知识库、文档部分的url标记
-        :param return_mode: 返回模式，
-            json, 为原始json结构
-            md, 返回文档的主体md内容
-            title_and_md, 返回文档的标题和md内容
-        :return: 文档的详细信息
-        """
-        repo_slug, doc_slug = url.split('/')[-2:]
-        res = self.get_doc(repo_slug, doc_slug)
-
-        if return_mode == 'json':
-            return res['data']
-        elif return_mode == 'md':
-            return res['data']['body']
-        elif return_mode == 'title_and_md':
-            return res["data"]["title"], res["data"]["body"]
-
-    def export_markdown(self, url, output_dir=None, post_mode=1):
-        """ 导出md格式文件
-
-        :param str|list[str] url: 文档的URL
-            可以导出单篇文档，也可以打包批量导出多篇文档的md文件
-        :param output_dir: 导出目录
-            单篇的文件名是按照文章标题自动生成的
-            多篇的可以自己指定具体文件名
-        :param post_mode: 后处理模式
-            0，不做处理
-            1，做适当的精简
-        """
-        # 1 获得内容
-        data = self.get_doc_from_url(url, return_mode='json')
-        body = data['body']
-        if post_mode == 0:
-            pass
-        elif post_mode == 1:
-            body = re.sub(r'<a\sname=".*?"></a>\n', '', body)
-
-        # 2 写入文件
-        if output_dir is not None:
-            title2 = refinepath(data['title'])
-            f = XlPath(output_dir) / f'{title2}.md'
-            f.write_text(body)
-
-        return body
-
-    def update_doc(self, repo_id, doc_id, doc_data):
+    def _update_doc(self, repo_id, doc_id, doc_data):
         """ 更新单篇文档的详细信息
 
         :param repo_id: 知识库的ID或Namespace
         :param doc_id: 文档的ID
-        :param doc_data: 包含文档更新内容的字典
+        :param dict doc_data: 包含文档更新内容的字典
         :return: 更新后的文档的详细信息
         """
         repo_id = self.get_repo_id(repo_id)
@@ -328,58 +391,60 @@ class Yuque:
         resp = requests.put(url, json=doc_data, headers=self.headers)
         return resp.json()
 
-    def update_doc_from_url(self, url, doc_data, *, md_cvt=True, return_mode='json'):
+    def update_doc(self, doc_url, doc_data, *, return_mode='json', use_dp=False):
         """ 从文档的URL中更新文档的详细信息
 
-        :param url: 文档的URL
-        :param str|json doc_data: 包含文档更新内容的字典
-            可以直接传入要更新的新的md内容，会自动转为 {'body': doc_data}
-            注意无论原始是body_html、body_lake，都是要上传到body字段
-
-            其他具体参数参考create_doc：
-                slug可以调整url路径名
-                title调整标题
-                public参数调整公开性
-                format设置导入的内容格式
+        :param doc_url: 文档的URL
+        :param str|json doc_data: 包含文档更新内容的字典，详见_to_doc_data接口
+        :param use_dp: 语雀的这个更新接口，虽然网页端可以实时刷新，但在PC端的软件并不会实时加载渲染。
+            所以有需要的话，要开启这个参数，使用爬虫暴力更新下文档内容。
+            使用此模式的时候，doc_url还需要至少有用户名的url地址，即类似'用户id/知识库id/文档id'
         :param str return_mode: 返回的是更新后文档的内容，不过好像有bug，这里返回的body存储的并不是md格式
             'md', 返回更新后文档的主体md内容
             'json', 为原始json结构
 
             不建议拿这个返回值，完全可以另外再重新取返回值，就是正常的md格式了
-        :param bool md_cvt: 是否需要转换md格式
-            默认的md文档格式直接放回语雀，是会丢失换行的，需要对代码块外的内容，执行\n替换
         :return: 更新后的文档的详细信息
         """
         # 1 基础配置
-        repo_slug, doc_slug = url.split('/')[-2:]
-        if isinstance(doc_data, str):
-            doc_data = {'body': doc_data}
-        # 有一套自动识别导入内容类型的机制
-        if 'format' not in doc_data:
-            if doc_data['body'].startswith('<!doctype html>'):
-                doc_data['format'] = 'html'
-                md_cvt = False
-            elif doc_data['body'].startswith('<!doctype lake>'):
-                doc_data['format'] = 'lake'
-                md_cvt = False
-            # 否则就是默认的markdown格式
+        repo_slug, doc_slug = doc_url.split('/')[-2:]
+        doc_data = self._to_doc_data(doc_data)
 
-        # 2 格式转换
-        if md_cvt:
-            ne = NestEnv(doc_data['body']).search(r'^```[^\n]*\n(.+?)\n^```',
-                                                  flags=re.MULTILINE | re.DOTALL).invert()
-            doc_data['body'] = ne.replace('\n', '\n\n')
+        # 2 提交更新文档
+        data = self._update_doc(repo_slug, doc_slug, doc_data)['data']
 
-        # 3 提交更新文档
-        res = self.update_doc(repo_slug, doc_slug, doc_data)
+        # 3 使用爬虫在浏览器模拟编辑，触发客户端更新通知
+        if use_dp:
+            update_yuque_doc_by_dp(doc_url)
 
         # 4 拿到返回值
         if return_mode == 'md':
-            return res['data']
+            return data['body']
         elif return_mode == 'json':
-            return res['data']['body']
+            return data
 
-    def __3_内容操作(self):
+    def ____4_删除文档(self):
+        pass
+
+    def _delete_doc(self, repo_id, doc_id):
+        """ 删除文档
+
+        这个是真删除，不是从目录中移除的意思哦。
+        虽然可以短期内从回收站找回来。
+
+        :param repo_id: 知识库的ID或Namespace
+        :param doc_id: 文档的ID
+        """
+        repo_id = self.get_repo_id(repo_id)
+        url = f"{self.base_url}/repos/{repo_id}/docs/{doc_id}"
+        resp = requests.delete(url, headers=self.headers)
+        return resp.json()
+
+    def delete_doc(self, doc_url):
+        repo_slug, doc_slug = doc_url.split('/')[-2:]
+        print(self._delete_doc(repo_slug, doc_slug))
+
+    def __4_内容操作(self):
         pass
 
     def read_tables_from_doc(self, url, header=0):
@@ -388,7 +453,7 @@ class Yuque:
         :param url: 文档的URL
         :return: 表格列表
         """
-        res = self.get_doc_from_url(url, return_mode=0)
+        res = self.get_doc(url, return_mode='json')
         tables = pd.read_html(res['body_html'], header=header)
         return tables
 
@@ -442,7 +507,6 @@ class LakeImage(GetAttr, XlBs4Tag):
     def to_url(self):
         """ 确认当前图片是以url的模式存储 """
 
-
     def to_base64(self):
         """ 确认当前图片是以base64的模式存储 """
 
@@ -474,8 +538,28 @@ class LakeDoc(GetAttr, XlBs4Tag):
         # 原始完整的html文档内容
         self.soup: XlBs4Tag = soup
 
+    def __文档导入导出(self):
+        pass
+
     @classmethod
-    def from_lake_str(cls, lake_html_str):
+    def from_url(cls, url, *, yuque=None):
+        """ 输入语雀笔记的url
+        """
+        yuque = yuque or Yuque()
+        data = yuque.get_doc(url, return_mode='json')
+        doc = LakeDoc.from_html(data['body_lake'])
+        return doc
+
+    @classmethod
+    def from_html(cls, lake_html_str='<body></body>'):
+        """
+
+        :param lake_html_str: 至少要有一个<body></body>结构。
+            不过好在bs本身有很多兼容处理，基本只要输入任意正常内容，就会自动补上body结构的，我不需要手动做太多特判处理
+        :return:
+        """
+        if not lake_html_str.startswith('<!doctype lake>'):
+            lake_html_str = '<!doctype lake>' + lake_html_str
         soup = BeautifulSoup(lake_html_str, 'lxml')
         return cls(soup)
 
@@ -485,6 +569,15 @@ class LakeDoc(GetAttr, XlBs4Tag):
         content = re.sub('^<!DOCTYPE lake>', '<!doctype lake>', content)
         content = re.sub(r'\s{2,}', '', content)
         return content
+
+    def to_url(self, url, *, yuque=None):
+        """ 把文章内容更新到指定url位置
+        """
+        yuque = yuque or Yuque()
+        yuque.update_doc_from_url(url, self.to_lake_str())
+
+    def __其他功能(self):
+        pass
 
     def get_raw_paragraphs(self):
         """ 获得最原始的段落数组 """
@@ -530,6 +623,13 @@ class LakeDoc(GetAttr, XlBs4Tag):
             return 'str'
         else:
             raise TypeError('未识别类型')
+
+    def body_add(self, node):
+        """ 在正文末尾添加一个新节点内容
+
+        :param node: 要添加的节点内容，或者html文本
+        """
+        self.soup.body.append_html(node)
 
 
 if __name__ == '__main__':

@@ -231,7 +231,8 @@ def close_duplicate_tabs(browser=None):
     try:
         all_tabs = browser.get_tabs()
     except TimeoutError:
-        logger.warning('browser.get_tabs()运行报错，请清查浏览器是否已更新但没有重启。本次将browser.quit()退出整个浏览器。')
+        logger.warning(
+            'browser.get_tabs()运行报错，请清查浏览器是否已更新但没有重启。本次将browser.quit()退出整个浏览器。')
         # 你不让我关tabs是吧，那我就把整个浏览器关了
         browser.quit()
         return
@@ -255,3 +256,22 @@ def close_duplicate_tabs(browser=None):
         for t in remaining_tabs:
             if t.url.startswith('chrome://newtab'):
                 t.close()
+
+
+def dp_check_quit():
+    """ 检查当前页面是否只剩空标签页，则浏览器可以自动退出 """
+    browser = Chromium()
+    try:
+        tabs = browser.get_tabs()
+    except TimeoutError:
+        logger.warning('browser.get_tabs()运行报错，浏览器可能已更新但没有重启。将退出浏览器。')
+        browser.quit()
+        return
+
+    # 检查是否只剩下空标签页
+    if len(tabs) == 1 and tabs[0].url.startswith('chrome://newtab'):
+        # 如果只剩下一个空标签页，则退出浏览器
+        browser.quit()
+    elif len(tabs) == 0:
+        # 如果没有标签页，也退出浏览器
+        browser.quit()

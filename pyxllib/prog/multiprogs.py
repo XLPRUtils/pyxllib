@@ -345,8 +345,8 @@ class MultiProgramLauncher:
                 # 统一处理为 6 字段格式
                 # 把cron的星期标记转换为aps的星期标记。前者用1234560，后者用0123456表示星期一到星期日
                 x = cron_parts[5]
-                if x != '*':
-                    x = 6 if x == '0' else (int(x) + 1)
+                if x != '*':  # 写0或7都表示周日
+                    x = 6 if x in '07' else (int(x) + 1)
                 self.scheduler.add_job(
                     task,
                     CronTrigger(
