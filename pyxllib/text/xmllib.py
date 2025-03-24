@@ -439,7 +439,8 @@ class XlBs4Tag(bs4.element.Tag):
     def __修改功能(self):
         pass
 
-    def _to_node(self, html):
+    @classmethod
+    def _to_node(cls, html):
         """ 输入可以是字符串、文档、结点 """
         if isinstance(html, str):
             new_node = next(BeautifulSoup(html, 'lxml').body.children)
@@ -449,14 +450,54 @@ class XlBs4Tag(bs4.element.Tag):
             new_node = html
         return new_node
 
+    @classmethod
+    def _to_nodes(cls, html):
+        """ 输入可以是字符串、文档、结点 """
+        if isinstance(html, str):
+            new_nodes = list(BeautifulSoup(html, 'lxml').body.children)
+        elif html.find('body'):
+            new_nodes = list(html.body.children)
+        else:
+            new_nodes = [html]
+        return new_nodes
+
     def replace_html_with(self, html):
-        self.replace_with(self._to_node(html))
+        nodes = self._to_nodes(html)  # 支持替换成多个节点
+        if not nodes:
+            return
+        self.replace_with(nodes[0])
+
+        cur = nodes[0]
+        for node in nodes[1:]:
+            cur.insert_after(node)
+            cur = node
 
     def insert_html_before(self, html):
-        self.insert_before(self._to_node(html))
+        nodes = self._to_nodes(html)
+        if not nodes:
+            return
+        self.insert_before(nodes[0])
+
+        cur = nodes[0]
+        for node in nodes[1:]:
+            cur.insert_after(node)
+            cur = node
 
     def insert_html_after(self, html):
-        self.insert_after(self._to_node(html))
+        nodes = self._to_nodes(html)
+        if not nodes:
+            return
+
+        cur = self
+        for node in nodes:
+            cur.insert_after(node)
+            cur = node
+
+    def append_html(self, html):
+        """ 原append的扩展 """
+        nodes = self._to_nodes(html)
+        for node in nodes:
+            self.append(node)
 
 
 inject_members(XlBs4Tag, bs4.element.Tag)
