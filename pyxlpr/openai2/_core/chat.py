@@ -132,8 +132,8 @@ class Chat:
     """
 
     recently_request_data: dict  # 最近一次请求所用的参数
-    default_api_key = None
-    default_base_url = "https://platform.llmprovider.ai/v1"
+    default_base_url = os.getenv('OPENAI_BASE_URL')
+    default_api_key = os.getenv('OPENAI_API_KEY')
 
     def __init__(self,
                  # kwargs
