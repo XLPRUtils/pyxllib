@@ -6,6 +6,7 @@
 
 import re
 import time
+from enum import Enum
 
 import requests
 import urllib.parse
@@ -20,6 +21,10 @@ from pyxllib.text.pupil import UrlQueryBuilder
 from pyxllib.text.nestenv import NestEnv
 from pyxllib.text.xmllib import BeautifulSoup, XlBs4Tag
 from pyxllib.cv.xlcvlib import xlcv
+
+
+def __1_语雀主api():
+    pass
 
 
 def update_yuque_doc_by_dp(doc_url):
@@ -458,6 +463,206 @@ class Yuque(metaclass=SingletonForEveryInitArgs):
         return tables
 
 
+def __2_语雀lake格式结构化解析基础工具():
+    pass
+
+
+# 语雀代码块支持的语言类型
+class LakeCodeModes(Enum):
+    PLAIN = 'plain'
+    ABAP = 'abap'
+    AGDA = 'agda'
+    ARKTS = 'arkts'
+    ASM = 'z80'
+    BASH = 'bash'
+    BASIC = 'basic'
+    C = 'c'
+    CSHARP = 'csharp'
+    CPP = 'cpp'
+    CLOJURE = 'clojure'
+    CMAKE = 'cmake'
+    CSS = 'css'
+    CYPHER = 'cypher'
+    DART = 'dart'
+    DIFF = 'diff'
+    DOCKFILE = 'dockerfile'
+    ERLANG = 'erlang'
+    FSHARP = 'fsharp'
+    FORTRAN = 'fortran'
+    GIT = 'git'
+    GLSL = 'glsl'
+    GO = 'go'
+    GRAPHQL = 'graphql'
+    GROOVY = 'groovy'
+    HASKELL = 'haskell'
+    HTML = 'html'
+    HTTP = 'http'
+    JAVA = 'java'
+    JAVASCRIPT = 'javascript'
+    JSON = 'json'
+    JSX = 'jsx'
+    JULIA = 'julia'
+    KATEX = 'katex'
+    KOTLIN = 'kotlin'
+    LATEX = 'latex'
+    LESS = 'less'
+    LISP = 'lisp'
+    LUA = 'lua'
+    MAKEFILE = 'makefile'
+    MARKDOWN = 'markdown'
+    MATLAB = 'matlab'
+    NGINX = 'nginx'
+    OBJECTIVEC = 'objectivec'
+    OCAML = 'ocaml'
+    PASCAL = 'pascal'
+    PERL = 'perl'
+    PHP = 'php'
+    PLSQL = 'plsql'
+    POWERSHELL = 'powershell'
+    PROPERTIES = 'properties'
+    PROTOBUF = 'protobuf'
+    PYTHON = 'python'
+    R = 'r'
+    RUBY = 'ruby'
+    RUST = 'rust'
+    SASS = 'sass'
+    SCALA = 'scala'
+    SCHEME = 'scheme'
+    SHELL = 'shell'
+    SOLIDITY = 'solidity'
+    SQL = 'sql'
+    STEX = 'stex'
+    SWIFT = 'swift'
+    SYSTEMVERILOG = 'systemverilog'
+    TCL = 'tcl'
+    TOML = 'toml'
+    TSX = 'tsx'
+    TYPESCRIPT = 'typescript'
+    VBNET = 'vbnet'
+    VELOCITY = 'velocity'
+    VERILOG = 'verilog'
+    VUE = 'vue'
+    XML = 'xml'
+    YAML = 'yaml'
+
+    def __str__(self):
+        return self.value
+
+
+def encode_block_value(value_dict):
+    """ 把当前value_dict的字典值转为html标签结构 """
+    json_str = json.dumps(value_dict)
+    url_encoded = urllib.parse.quote(json_str)
+    final_str = "data:" + url_encoded
+    return final_str
+
+
+def decode_block_value(encoded_str):
+    """ 解析value字段的值 """
+    encoded_data = encoded_str[5:]
+    decoded_str = urllib.parse.unquote(encoded_data)
+    return json.loads(decoded_str)
+
+
+def check_block_type(tag):
+    """ 这个分类会根据对语雀文档结构了解的逐渐深入和逐步细化 """
+    tag_name = tag.tag_name
+    if tag_name == 'p':
+        if tag.find('card'):
+            return 'image'  # 图片
+        else:
+            return 'p'  # 就用p表示最普通的段落类型
+    elif tag_name == 'card':
+        return 'codeblock'  # 代码块
+    elif tag_name == 'ol':
+        return 'ol'  # 列表
+    elif re.match(r'h\d+$', tag_name):
+        return 'heading'  # 标题
+    elif tag_name == 'details':
+        return 'lake-collapse'  # 折叠块
+    elif tag_name == 'summary':
+        return 'summary'
+    elif tag_name == 'NavigableString':
+        return 'str'  # 文本。这个语雀本身没这个类型，是用bs解析才引出的。
+    else:
+        raise TypeError('未识别类型')
+
+
+def parse_blocks(childrens):
+    """ 获得最原始的段落数组 """
+    contents = []
+    for c in childrens:
+        tp = check_block_type(c)
+        if tp == 'image':
+            c = LakeImage(c)
+        elif tp == 'codeblock':
+            c = LakeCodeBlock(c)
+        elif tp == 'lake-collapse':
+            c = LakeCollapse(c)
+        elif tp == 'str':
+            # c = LakeP(c)
+            pass
+        else:
+            pass
+        contents.append(c)
+    return contents
+
+
+def print_blocks(contents, indent=0):
+    """ 检查文档基本内容 """
+
+    def myprint(t):
+        print(indent * '\t' + t)
+
+    for i, c in enumerate(contents):
+        tp = check_block_type(c)
+        if tp == 'str':
+            myprint(f'{i}、{shorten(c.text, 200)}')
+        elif tp in ['codeblock', 'image']:
+            myprint(f'{i}、{shorten(c.prettify(), 100)}\n')
+            myprint(shorten(pprint.pformat(c.value_dict), 400))
+        elif tp == 'lake-collapse':
+            myprint(f'{i}、{shorten(c.prettify(), 100)}')
+            print_blocks(c.get_blocks(), indent=indent + 1)
+        else:
+            myprint(f'{i}、{shorten(c.prettify(), 200)}')
+        print()
+    return contents
+
+
+def __3_语雀结构化模组():
+    pass
+
+
+class LakeP(GetAttr, XlBs4Tag):
+    """ 语雀代码块 """
+    _default = 'tag'
+    type = 'p'
+
+    def __init__(self, tag):  # noqa
+        self.tag = tag
+
+
+class LakeCodeBlock(GetAttr, XlBs4Tag):
+    """ 语雀代码块 """
+    _default = 'tag'
+    type = 'codeblock'
+
+    def __init__(self, tag):  # noqa
+        self.tag = tag
+        self._value_dict = None
+
+    @property
+    def value_dict(self):
+        if self._value_dict is None:
+            self._value_dict = decode_block_value(self.tag.attrs['value'])
+        return self._value_dict
+
+    def update_value_dict(self):
+        """ 把当前value_dict的字典值更新回html标签 """
+        self.tag.attrs['value'] = encode_block_value(self.value_dict)
+
+
 class LakeImage(GetAttr, XlBs4Tag):
     """ 语雀文档中的图片类型
 
@@ -465,27 +670,30 @@ class LakeImage(GetAttr, XlBs4Tag):
     其中value是可以解析出一个字典，有详细数据信息的
     """
     _default = 'tag'
+    type = 'image'
 
     def __init__(self, tag):  # noqa
         self.tag = tag
         self._value_dict = None
 
+    @property
+    def value_dict(self):
+        if self._value_dict is None:
+            self._value_dict = decode_block_value(self.tag.card.attrs['value'])
+        return self._value_dict
+
+    def update_value_dict(self):
+        """ 把当前value_dict的字典值更新回html标签 """
+        self.tag.card.attrs['value'] = encode_block_value(self.value_dict)
+
     def __初始化(self):
         pass
-
-    @classmethod
-    def _encode_value(cls, value_dict):
-        """ 把当前value_dict的字典值转为html标签结构 """
-        json_str = json.dumps(value_dict)
-        url_encoded = urllib.parse.quote(json_str)
-        final_str = "data:" + url_encoded
-        return final_str
 
     @classmethod
     def _init_from_src(cls, src):
         """ 传入一个图片url或base64的值，转为语雀图片节点 """
         soup = BeautifulSoup('<p><card type="inline" name="image" value=""></card></p>', 'lxml')
-        soup.card.attrs['value'] = cls._encode_value({'src': src})
+        soup.card.attrs['value'] = encode_block_value({'src': src})
         return cls(soup)
 
     @classmethod
@@ -518,29 +726,30 @@ class LakeImage(GetAttr, XlBs4Tag):
         buffer = xlcv.to_buffer(im, suffix, b64encode=True).decode('utf-8')
         return cls._init_from_src(f'data:image/{suffix[1:]};base64,{buffer}')
 
-    def to_url(self):
-        """ 确认当前图片是以url的模式存储 """
 
-    def to_base64(self):
-        """ 确认当前图片是以base64的模式存储 """
+class LakeCollapse(GetAttr, XlBs4Tag):
+    """ 语雀折叠块 """
+    _default = 'tag'
+    type = 'lake-collapse'
 
-    def __功能(self):
-        pass
+    def __init__(self, tag):  # noqa
+        self.tag = tag
 
-    @property
-    def value_dict(self):
-        if self._value_dict is None:
-            encoded_str = self.tag.card.attrs['value']
-            # 去掉 "data:" 前缀
-            encoded_data = encoded_str.replace("data:", "")
-            # URL 解码
-            decoded_str = urllib.parse.unquote(encoded_data)
-            self._value_dict = json.loads(decoded_str)
-        return self._value_dict
+    def get_blocks(self):
+        """ 获得最原始的段落数组 """
+        return parse_blocks(self.tag.children)
 
-    def update_value_dict(self):
-        """ 把当前value_dict的字典值更新回html标签 """
-        self.tag.card.attrs['value'] = self._encode_value(self.value_dict)
+    def print_blocks(self, indent=1):
+        """ 检查文档基本内容 """
+        contents = self.get_blocks()
+        print_blocks(contents, indent=indent)
+
+    def add_block(self, node):
+        """ 在折叠块末尾添加一个新节点内容
+
+        :param node: 要添加的节点内容，或者html文本
+        """
+        self.tag.append_html(node)
 
 
 # GetAttr似乎必须放在前面，这样找不到的属性似乎是会优先使用GetAttr机制的，但后者又可以为IDE提供提示
@@ -593,21 +802,14 @@ class LakeDoc(GetAttr, XlBs4Tag):
     def __其他功能(self):
         pass
 
-    def get_raw_paragraphs(self):
+    def get_blocks(self):
         """ 获得最原始的段落数组 """
-        return list(self.soup.body.children)
+        return parse_blocks(self.soup.body.children)
 
-    def print_raw_paragraphs(self):
-        for i, c in enumerate(self.get_raw_paragraphs(), start=1):
-            tp = self.check_type(c)
-            if tp == 'image':
-                # img = LakeImage(c)
-                print(f'{i}、{c.tag_name} {shorten(c.prettify(), 200)}')
-            elif tp == 'str':
-                print(f'{i}、{c.tag_name} {shorten(c.text, 200)}')
-            else:
-                print(f'{i}、{c.tag_name} {shorten(c.prettify(), 200)}')
-            print()
+    def print_blocks(self):
+        """ 检查文档基本内容 """
+        contents = self.get_blocks()
+        print_blocks(contents)
 
     def delete_lake_id(self):
         """ 删除文档中所有语雀标签的id标记 """
@@ -616,29 +818,7 @@ class LakeDoc(GetAttr, XlBs4Tag):
                 if name in tag.attrs:
                     del tag[name]
 
-    @classmethod
-    def check_type(cls, tag):
-        """ 这个分类会根据对语雀文档结构了解的逐渐深入和逐步细化 """
-        tag_name = tag.tag_name
-        if tag_name == 'p':
-            if tag.find('card'):
-                return 'image'
-            else:
-                return 'p'  # 就用p表示最普通的段落类型
-        elif tag_name == 'card':
-            return 'codeblock'
-        elif tag_name == 'ol':
-            return 'ol'
-        elif re.match(r'h\d+$', tag_name):
-            return 'heading'
-        elif tag_name == 'details':
-            return 'lake-collapse'
-        elif tag_name == 'NavigableString':
-            return 'str'
-        else:
-            raise TypeError('未识别类型')
-
-    def body_add(self, node):
+    def add_block(self, node):
         """ 在正文末尾添加一个新节点内容
 
         :param node: 要添加的节点内容，或者html文本
