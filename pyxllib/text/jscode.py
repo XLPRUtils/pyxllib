@@ -460,9 +460,9 @@ def get_airscript_head2(definitions=False):
     """
     s = (XlPath(__file__).parent / 'airscript.js').read_text().strip()
     vars = {
-        'JSA_POST_HOST_URL': os.getenv('JSA_POST_HOST_URL', 'https://xmutpriu.com'),
-        'JSA_POST_TOKEN': os.getenv('JSA_POST_TOKEN', ''),
-        'JSA_POST_DEFAULT_HOST': os.getenv('JSA_POST_DEFAULT_HOST', 'titan2'),
+        'JSA_POST_HOST_URL': os.getenv('JSA_POST_HOST_URL'),
+        'JSA_POST_TOKEN': os.getenv('JSA_POST_TOKEN'),
+        'JSA_POST_DEFAULT_HOST': os.getenv('JSA_POST_DEFAULT_HOST'),
     }
     content = Template(s).render(vars)
     if not definitions:

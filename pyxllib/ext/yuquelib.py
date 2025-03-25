@@ -65,7 +65,7 @@ class Yuque(metaclass=SingletonForEveryInitArgs):
             "X-Auth-Token": token or os.getenv('YUQUE_TOKEN'),
             "Content-Type": "application/json"
         }
-        self._user_id = user_id
+        self._user_id = os.getenv('YUQUE_USER_ID') or user_id
 
     def get_user(self):
         """ 获取用户信息
@@ -110,7 +110,7 @@ class Yuque(metaclass=SingletonForEveryInitArgs):
         :param int|str return_mode: 返回模式
             0（默认），返回原始json结构
             df，df结构
-            nickname2id，获取知识库namespace或昵称到ID的映射
+            nickname2id，获取知识库 "namespace和昵称"到ID的映射
         """
         if return_mode == 0:
             url = f"{self.base_url}/users/{self.user_id}/repos"
@@ -494,13 +494,27 @@ class LakeImage(GetAttr, XlBs4Tag):
         return cls._init_from_src(url)
 
     @classmethod
-    def from_local_image(cls, img, *, limit_size=0.6 * 1024 * 1024, suffix='.png'):
+    def _reduce_img(cls, img, limit_size, suffix):
+        # 1 初步读取压缩
+        im = xlcv.read(img)
+        if suffix is None:
+            suffix = '.png' if min(xlcv.imsize(im)) > 50 else '.jpg'
+        im = xlcv.reduce_filesize(im, limit_size, suffix)
+
+        # 2 如果是过小的.jpg图片（最短边小余50像素），需要改用.png保存
+        if suffix == '.jpg' and min(xlcv.imsize(im)) < 50:
+            suffix = '.png'
+
+        # 3
+        return im, suffix
+
+    @classmethod
+    def from_local_image(cls, img, *, limit_size=0.6 * 1024 * 1024, suffix=None):
         """ 传入一个本地图片。本地图片必须转换为base64格式
 
         :param limit_size: 整个文档有1MB的限制，所以单张图片一般最大也只能给0.5MB的尺寸
         """
-        im = xlcv.read(img)
-        im = xlcv.reduce_filesize(im, limit_size, suffix)
+        im, suffix = cls._reduce_img(img, limit_size, suffix)
         buffer = xlcv.to_buffer(im, suffix, b64encode=True).decode('utf-8')
         return cls._init_from_src(f'data:image/{suffix[1:]};base64,{buffer}')
 
@@ -570,11 +584,11 @@ class LakeDoc(GetAttr, XlBs4Tag):
         content = re.sub(r'\s{2,}', '', content)
         return content
 
-    def to_url(self, url, *, yuque=None):
+    def to_url(self, url, *, yuque=None, use_dp=False):
         """ 把文章内容更新到指定url位置
         """
         yuque = yuque or Yuque()
-        yuque.update_doc_from_url(url, self.to_lake_str())
+        yuque.update_doc(url, self.to_lake_str(), use_dp=use_dp)
 
     def __其他功能(self):
         pass

@@ -45,7 +45,7 @@ class SyncFileClient:
     def link_host(self, hostname):
         from requests.exceptions import Timeout
 
-        host = f'https://xmutpriu.com/{hostname}'
+        host = f'{os.getenv("MAIN_WEBSITE")}/{hostname}'
         resp = requests.get(f'{host}/common/get_local_server', headers=self.headers)
         ip = resp.json()['ip']
 
