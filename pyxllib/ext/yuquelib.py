@@ -3,7 +3,7 @@
 # @Author : 陈坤泽
 # @Email  : 877362867@qq.com
 # @Date   : 2024/01/01
-
+import html
 import re
 import time
 from enum import Enum
@@ -28,10 +28,15 @@ def __1_语雀主api():
 
 
 def update_yuque_doc_by_dp(doc_url):
+    """ 语雀更新文档的api，并不会触发pc上客户端对应内容的更新
+    除非打开浏览器编辑更新一下，这里可以用dp模拟自动进行这一操作
+
+    注意新建文档添加到目录的api是可以立即在客户端生效的，只是更新不行
+    """
     from DrissionPage import Chromium, ChromiumOptions
     from pyxllib.ext.drissionlib import dp_check_quit
 
-    # 1 打开浏览器
+    # 1 打开浏览器：注意必须事先手动登录过账号
     co = ChromiumOptions()
     # co.headless()  # 无头模式效果不一定稳，一般还是不能开
     # co.set_argument('--window-size', '100,100')  # 修改窗口尺寸也不行
@@ -604,43 +609,45 @@ def check_block_type(tag):
 
 def parse_blocks(childrens):
     """ 获得最原始的段落数组 """
-    contents = []
+    blocks = []
     for c in childrens:
         match check_block_type(c):
+            case LakeBlockTypes.P:
+                c = LakeP(c)
+            case LakeBlockTypes.HEADING:
+                c = LakeHeading(c)
             case LakeBlockTypes.IMAGE:
                 c = LakeImage(c)
             case LakeBlockTypes.CODEBLOCK:
                 c = LakeCodeBlock(c)
             case LakeBlockTypes.COLLAPSE:
                 c = LakeCollapse(c)
-            case LakeBlockTypes.P:
-                c = LakeP(c)
             case _:
                 c = LakeBlock(c)
-        contents.append(c)
-    return contents
+        blocks.append(c)
+    return blocks
 
 
-def print_blocks(contents, indent=0):
+def print_blocks(blocks, indent=0):
     """ 检查文档基本内容 """
 
     def myprint(t):
         print(indent * '\t' + t)
 
-    for i, c in enumerate(contents):
-        match c.type:
+    for i, b in enumerate(blocks):
+        match b.type:
             case LakeBlockTypes.STR:
-                myprint(f'{i}、{c.type} {shorten(c.text, 200)}')
+                myprint(f'{i}、{b.type} {shorten(b.text, 200)}')
             case LakeBlockTypes.CODEBLOCK | LakeBlockTypes.IMAGE:  # 使用 | 匹配多个类型
-                myprint(f'{i}、{c.type} {shorten(c.prettify(), 100)}\n')
-                myprint(shorten(pprint.pformat(c.value_dict), 400))
+                myprint(f'{i}、{b.type} {shorten(b.prettify(), 100)}\n')
+                myprint(shorten(pprint.pformat(b.value_dict), 400))
             case LakeBlockTypes.COLLAPSE:
-                myprint(f'{i}、{c.type} {shorten(c.prettify(), 100)}')
-                print_blocks(c.get_blocks(), indent=indent + 1)
+                myprint(f'{i}、{b.type} {shorten(b.prettify(), 100)}')
+                print_blocks(b.get_blocks(), indent=indent + 1)
             case _:  # 默认情况
-                myprint(f'{i}、{c.type} {shorten(c.prettify(), 200)}')
+                myprint(f'{i}、{b.type} {shorten(b.prettify(), 200)}')
         print()
-    return contents
+    return blocks
 
 
 def __3_语雀结构化模组():
@@ -655,6 +662,23 @@ class LakeBlock(GetAttr, XlBs4Tag):
         self.tag = tag
         self.type = check_block_type(tag)
 
+    def is_foldable(self):
+        # 默认是不可折叠块
+        return False
+
+    def is_empty_line(self):
+        # 默认不是空行
+        return False
+
+    def __part功能(self):
+        pass
+
+    def _get_part_number(self, text):
+        m = re.match(r'^(\d+|\+)、', text)
+        if m:
+            t = m.group(1)
+            return t if t != '+' else True
+
     def get_part_number(self):
         """ 【私人】我的日记普遍用 "1、" "2、" "+、" 的模式来区分内容分块
         该函数用来判断当前块是否是这种分块的开始
@@ -662,23 +686,8 @@ class LakeBlock(GetAttr, XlBs4Tag):
         :return: 找到的话会返回匹配的数字，'+'会返回True，如果没有返回None
             目前我的笔记编号一般不存在从0开始编号，也从来没用过负值。但有需要的话这里是可以扩展的。
         """
-        # 1 先取到判断依据文本
-        text = ''
-        match self.type:
-            case LakeBlockTypes.P:
-                text = self.text
-            case LakeBlockTypes.CODEBLOCK:
-                text = self.value_dict.get('name')
-            case LakeBlockTypes.COLLAPSE:
-                text = self.summary.text
-            case _:  # 其他类型无论如何内容都不是
-                pass
-
-        # 2 判断文本
-        m = re.match(r'^(\d+|\+)、', text)
-        if m:
-            t = m.group(1)
-            return t if t != '+' else True
+        # 默认return None
+        return
 
     @classmethod
     def _set_part_number(cls, tag, number):
@@ -712,6 +721,19 @@ class LakeBlock(GetAttr, XlBs4Tag):
         # 这个功能很特别，还是每类节点里单独实现更合理
         raise NotImplementedError
 
+    def is_part_end(self):
+        """ 【私人】判断当前块是否是分块的结束 """
+        return False
+
+
+class LakeHeading(LakeBlock):
+    def __init__(self, tag):  # noqa
+        super().__init__(tag)
+        self.type = LakeBlockTypes.HEADING
+
+    def is_part_end(self):
+        return True
+
 
 class LakeP(LakeBlock):
     """ 语雀代码块 """
@@ -723,33 +745,15 @@ class LakeP(LakeBlock):
     def set_part_number(self, number):
         return self._set_part_number(self, number)
 
+    def is_empty_line(self):
+        return self.text.strip() == ''
 
-class LakeCodeBlock(LakeBlock):
-    """ 语雀代码块 """
+    def is_part_end(self):
+        # 出现新的编号块内容的时候，就是上一个part结束的时候
+        return not self.get_part_number()
 
-    def __init__(self, tag):  # noqa
-        super().__init__(tag)
-        self.type = LakeBlockTypes.CODEBLOCK
-        self._value_dict = None
-
-    @property
-    def value_dict(self):
-        if self._value_dict is None:
-            self._value_dict = decode_block_value(self.tag.attrs['value'])
-        return self._value_dict
-
-    def update_value_dict(self):
-        """ 把当前value_dict的字典值更新回html标签 """
-        self.tag.attrs['value'] = encode_block_value(self.value_dict)
-
-    def set_part_number(self, number):
-        title = self.value_dict['name']
-        title = re.sub(r'^(\d+|\+)、', '', title)
-        if number is not None:
-            title = f'{number}、{title}'
-        self.value_dict['name'] = title
-        self.update_value_dict()
-        return title
+    def get_part_number(self):
+        return self._get_part_number(self.text)
 
 
 class LakeImage(LakeBlock):
@@ -815,11 +819,73 @@ class LakeImage(LakeBlock):
         return cls._init_from_src(f'data:image/{suffix[1:]};base64,{buffer}')
 
 
+class LakeCodeBlock(LakeBlock):
+    """ 语雀代码块 """
+
+    def __init__(self, tag):  # noqa
+        super().__init__(tag)
+        self.type = LakeBlockTypes.CODEBLOCK
+        self._value_dict = None
+
+    @property
+    def value_dict(self):
+        if self._value_dict is None:
+            self._value_dict = decode_block_value(self.tag.attrs['value'])
+        return self._value_dict
+
+    def update_value_dict(self):
+        """ 把当前value_dict的字典值更新回html标签 """
+        self.tag.attrs['value'] = encode_block_value(self.value_dict)
+
+    def is_foldable(self):
+        return True
+
+    def fold(self):
+        """ 折叠代码块 """
+        self.tag.value_dict['collapsed'] = True
+
+    def unfold(self):
+        """ 展开代码块 """
+        self.tag.value_dict['collapsed'] = False
+
+    def __part功能(self):
+        pass
+
+    def set_part_number(self, number):
+        title = self.value_dict['name']
+        title = re.sub(r'^(\d+|\+)、', '', title)
+        if number is not None:
+            title = f'{number}、{title}'
+        self.value_dict['name'] = title
+        self.update_value_dict()
+        return title
+
+    def is_part_end(self):
+        return not self.get_part_number()
+
+    def get_part_number(self):
+        return self._get_part_number(self.value_dict.get('name'))
+
+
 class LakeCollapse(LakeBlock):
     """ 语雀折叠块 """
 
     def __init__(self, tag):  # noqa
         super().__init__(tag)
+
+    @classmethod
+    def create(cls, summary='', blocks=None, *, open=True):
+        """ 创建一个折叠块 """
+        # 1 details
+        summary = html.escape(summary)
+        summary = f'<summary><span>{summary}</span></summary>'
+        details = f'<details class="lake-collapse" open="{str(open).lower()}">{summary}</details>'
+
+        # 2 tag
+        details = BeautifulSoup(details, 'lxml').details
+        for b in blocks:
+            details.append_html(b.tag.prettify())
+        return cls(details)
 
     def get_blocks(self):
         """ 获得最原始的段落数组 """
@@ -827,8 +893,8 @@ class LakeCollapse(LakeBlock):
 
     def print_blocks(self, indent=1):
         """ 检查文档基本内容 """
-        contents = self.get_blocks()
-        print_blocks(contents, indent=indent)
+        blocks = self.get_blocks()
+        print_blocks(blocks, indent=indent)
 
     def add_block(self, node):
         """ 在折叠块末尾添加一个新节点内容
@@ -837,8 +903,28 @@ class LakeCollapse(LakeBlock):
         """
         self.tag.append_html(node)
 
+    def is_foldable(self):
+        return True
+
+    def fold(self):
+        """ 折叠代码块 """
+        self.tag.attrs['open'] = 'false'
+
+    def unfold(self):
+        """ 展开代码块 """
+        self.tag.attrs['open'] = 'true'
+
+    def __part功能(self):
+        pass
+
     def set_part_number(self, number):
         return self._set_part_number(self.summary, number)
+
+    def is_part_end(self):
+        return not self.get_part_number()
+
+    def get_part_number(self):
+        return self._get_part_number(self.summary.text)
 
 
 # GetAttr似乎必须放在前面，这样找不到的属性似乎是会优先使用GetAttr机制的，但后者又可以为IDE提供提示
@@ -898,8 +984,8 @@ class LakeDoc(GetAttr, XlBs4Tag):
 
     def print_blocks(self):
         """ 检查文档基本内容 """
-        contents = self.get_blocks()
-        return print_blocks(contents)
+        blocks = self.get_blocks()
+        return print_blocks(blocks)
 
     def delete_lake_id(self):
         """ 删除文档中所有语雀标签的id标记 """
@@ -915,16 +1001,102 @@ class LakeDoc(GetAttr, XlBs4Tag):
         """
         self.soup.body.append_html(node)
 
+    def fold_blocks(self):
+        """ 把文档中的可折叠块全部折叠 """
+        for b in self.get_blocks():
+            if b.is_foldable():
+                b.fold()
+
+    def remove_empty_lines_between_collapses(self):
+        """ 删除文档中可折叠块之间的全部空行 """
+        blocks = self.get_blocks()
+        collapse_indices = []
+        for idx, b in enumerate(blocks):
+            if b.is_foldable():
+                collapse_indices.append(idx)
+
+        to_remove = []
+
+        # 检查每对相邻的可折叠块之间的块
+        for i in range(len(collapse_indices) - 1):
+            prev_idx = collapse_indices[i]
+            current_idx = collapse_indices[i + 1]
+            start = prev_idx + 1
+            end = current_idx - 1
+
+            if start > end:
+                continue
+
+            # 检查中间所有块是否均为空行
+            all_empty = True
+            for j in range(start, end + 1):
+                block = blocks[j]
+                if not block.is_empty_line():
+                    all_empty = False
+                    break
+            if all_empty:
+                to_remove.extend(range(start, end + 1))
+
+        # 按逆序删除，避免索引变化
+        for index in sorted(to_remove, reverse=True):
+            blocks[index].tag.decompose()
+
+    def __part系列功能(self):
+        """ 偏个人向笔记风格的定制功能 """
+        pass
+
     def reset_part_numbers(self):
-        """ 【私人】重置文档中所有的序号 """
-        contents = self.get_blocks()
+        """ 重置文档中所有的序号 """
+        blocks = self.get_blocks()
         cnt = 0
-        for c in contents:
-            if c.type == LakeBlockTypes.HEADING:
+        for b in blocks:
+            if b.type == LakeBlockTypes.HEADING:
                 cnt = 0
-            elif c.get_part_number() is not None:
+            elif b.get_part_number() is not None:
                 cnt += 1
-                c.set_part_number(cnt)
+                b.set_part_number(cnt)
+
+    @classmethod
+    def get_part_blocks(cls, blocks, start_idx):
+        """ 获得指定part的全部blocks """
+        # 1 先找到硬结尾
+        part_blocks = [blocks[start_idx]]
+        for b in blocks[start_idx + 1:]:
+            if b.type == LakeBlockTypes.HEADING:
+                break
+            elif b.get_part_number() is not None:
+                break
+            part_blocks.append(b)
+
+        # 2 再去掉软结尾，即末尾是空白的行都去掉
+        while part_blocks:
+            b = part_blocks[-1]
+            if b.is_empty_line():
+                part_blocks.pop()
+            else:
+                break
+
+        return part_blocks
+
+    def part_to_collapse(self):
+        """ 把文档中的part内容转为折叠块 """
+        blocks = self.get_blocks()
+
+        i = 0
+        while i < len(blocks):
+            b = blocks[i]
+            if b.get_part_number() is None:
+                pass  # 没有编号的跳过，不是part的起始位置
+            elif b.type == LakeBlockTypes.P:  # 只对段落类型的编号进行处理
+                part_blocks = self.get_part_blocks(blocks, i)
+                summary = part_blocks[0].text
+                collapse = LakeCollapse.create(summary, part_blocks, open=False)
+                # 以下.tag都不能省略
+                b.tag.insert_html_before(collapse.tag)
+                for b2 in part_blocks:
+                    b2.tag.decompose()
+                i += len(part_blocks) - 1
+            i += 1
 
 
 if __name__ == '__main__':
