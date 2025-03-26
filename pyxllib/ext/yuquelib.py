@@ -564,46 +564,59 @@ def decode_block_value(encoded_str):
     return json.loads(decoded_str)
 
 
+class LakeBlockTypes(Enum):
+    HEADING = 'heading'  # 标题
+    P = 'p'  # 普通段落
+    OL = 'ol'  # 有序列表
+    IMAGE = 'image'  # 图片
+    CODEBLOCK = 'codeblock'  # 代码块
+    SUMMARY = 'summary'  # 折叠块标题
+    COLLAPSE = 'collapse'  # 折叠块
+    UNKNOWN = 'unknown'  # 未知类型
+    STR = 'str'  # 文本。这个语雀本身没这个类型，是用bs解析才引出的。
+
+    def __str__(self):
+        return self.value
+
+
 def check_block_type(tag):
     """ 这个分类会根据对语雀文档结构了解的逐渐深入和逐步细化 """
-    tag_name = tag.tag_name
-    if tag_name == 'p':
-        if tag.find('card'):
-            return 'image'  # 图片
-        else:
-            return 'p'  # 就用p表示最普通的段落类型
-    elif tag_name == 'card':
-        return 'codeblock'  # 代码块
-    elif tag_name == 'ol':
-        return 'ol'  # 列表
-    elif re.match(r'h\d+$', tag_name):
-        return 'heading'  # 标题
-    elif tag_name == 'details':
-        return 'lake-collapse'  # 折叠块
-    elif tag_name == 'summary':
-        return 'summary'
-    elif tag_name == 'NavigableString':
-        return 'str'  # 文本。这个语雀本身没这个类型，是用bs解析才引出的。
-    else:
-        raise TypeError('未识别类型')
+    match tag.tag_name:
+        case 'p' if tag.find('card'):
+            return LakeBlockTypes.IMAGE
+        case 'p':
+            return LakeBlockTypes.P
+        case 'card':
+            return LakeBlockTypes.CODEBLOCK
+        case 'ol':
+            return LakeBlockTypes.OL
+        case s if re.match(r'h\d+$', s):
+            return LakeBlockTypes.HEADING
+        case 'details':
+            return LakeBlockTypes.COLLAPSE
+        case 'summary':
+            return LakeBlockTypes.SUMMARY
+        case 'NavigableString':
+            return LakeBlockTypes.STR
+        case _:
+            raise LakeBlockTypes.UNKNOWN
 
 
 def parse_blocks(childrens):
     """ 获得最原始的段落数组 """
     contents = []
     for c in childrens:
-        tp = check_block_type(c)
-        if tp == 'image':
-            c = LakeImage(c)
-        elif tp == 'codeblock':
-            c = LakeCodeBlock(c)
-        elif tp == 'lake-collapse':
-            c = LakeCollapse(c)
-        elif tp == 'str':
-            # c = LakeP(c)
-            pass
-        else:
-            pass
+        match check_block_type(c):
+            case LakeBlockTypes.IMAGE:
+                c = LakeImage(c)
+            case LakeBlockTypes.CODEBLOCK:
+                c = LakeCodeBlock(c)
+            case LakeBlockTypes.COLLAPSE:
+                c = LakeCollapse(c)
+            case LakeBlockTypes.P:
+                c = LakeP(c)
+            case _:
+                c = LakeBlock(c)
         contents.append(c)
     return contents
 
@@ -615,17 +628,17 @@ def print_blocks(contents, indent=0):
         print(indent * '\t' + t)
 
     for i, c in enumerate(contents):
-        tp = check_block_type(c)
-        if tp == 'str':
-            myprint(f'{i}、{shorten(c.text, 200)}')
-        elif tp in ['codeblock', 'image']:
-            myprint(f'{i}、{shorten(c.prettify(), 100)}\n')
-            myprint(shorten(pprint.pformat(c.value_dict), 400))
-        elif tp == 'lake-collapse':
-            myprint(f'{i}、{shorten(c.prettify(), 100)}')
-            print_blocks(c.get_blocks(), indent=indent + 1)
-        else:
-            myprint(f'{i}、{shorten(c.prettify(), 200)}')
+        match c.type:
+            case LakeBlockTypes.STR:
+                myprint(f'{i}、{c.type} {shorten(c.text, 200)}')
+            case LakeBlockTypes.CODEBLOCK | LakeBlockTypes.IMAGE:  # 使用 | 匹配多个类型
+                myprint(f'{i}、{c.type} {shorten(c.prettify(), 100)}\n')
+                myprint(shorten(pprint.pformat(c.value_dict), 400))
+            case LakeBlockTypes.COLLAPSE:
+                myprint(f'{i}、{c.type} {shorten(c.prettify(), 100)}')
+                print_blocks(c.get_blocks(), indent=indent + 1)
+            case _:  # 默认情况
+                myprint(f'{i}、{c.type} {shorten(c.prettify(), 200)}')
         print()
     return contents
 
@@ -634,22 +647,89 @@ def __3_语雀结构化模组():
     pass
 
 
-class LakeP(GetAttr, XlBs4Tag):
-    """ 语雀代码块 """
+class LakeBlock(GetAttr, XlBs4Tag):
+    """ 语雀文档中的基本块类型 """
     _default = 'tag'
-    type = 'p'
 
     def __init__(self, tag):  # noqa
         self.tag = tag
+        self.type = check_block_type(tag)
+
+    def get_part_number(self):
+        """ 【私人】我的日记普遍用 "1、" "2、" "+、" 的模式来区分内容分块
+        该函数用来判断当前块是否是这种分块的开始
+
+        :return: 找到的话会返回匹配的数字，'+'会返回True，如果没有返回None
+            目前我的笔记编号一般不存在从0开始编号，也从来没用过负值。但有需要的话这里是可以扩展的。
+        """
+        # 1 先取到判断依据文本
+        text = ''
+        match self.type:
+            case LakeBlockTypes.P:
+                text = self.text
+            case LakeBlockTypes.CODEBLOCK:
+                text = self.value_dict.get('name')
+            case LakeBlockTypes.COLLAPSE:
+                text = self.summary.text
+            case _:  # 其他类型无论如何内容都不是
+                pass
+
+        # 2 判断文本
+        m = re.match(r'^(\d+|\+)、', text)
+        if m:
+            t = m.group(1)
+            return t if t != '+' else True
+
+    @classmethod
+    def _set_part_number(cls, tag, number):
+        """ 常规xml模式的设置编号 """
+        # 1 如果没有span，在最前面加上span
+        if not tag.find('span'):
+            childrens = list(tag.children)
+            if childrens:
+                childrens[0].insert_html_before('<span></span>')
+            else:
+                tag.append_html('<span></span>')
+
+        # 2 定位第一个span
+        span = tag.span
+
+        # 3 string删掉原有编号
+        span.string = re.sub(r'^(\d+|\+)、', '', span.text)
+
+        # 4 string加上新的编号前缀
+        if number is not None:
+            span.string = f'{number}、{span.text}'
+
+        return span.string
+
+    def set_part_number(self, number):
+        """ 【私人】更新当前块的序号
+
+        如果当前part没有编号，会增设编号标记
+        如果number设为None，会删除编号标记
+        """
+        # 这个功能很特别，还是每类节点里单独实现更合理
+        raise NotImplementedError
 
 
-class LakeCodeBlock(GetAttr, XlBs4Tag):
+class LakeP(LakeBlock):
     """ 语雀代码块 """
-    _default = 'tag'
-    type = 'codeblock'
 
     def __init__(self, tag):  # noqa
-        self.tag = tag
+        super().__init__(tag)
+        self.type = LakeBlockTypes.P
+
+    def set_part_number(self, number):
+        return self._set_part_number(self, number)
+
+
+class LakeCodeBlock(LakeBlock):
+    """ 语雀代码块 """
+
+    def __init__(self, tag):  # noqa
+        super().__init__(tag)
+        self.type = LakeBlockTypes.CODEBLOCK
         self._value_dict = None
 
     @property
@@ -662,18 +742,26 @@ class LakeCodeBlock(GetAttr, XlBs4Tag):
         """ 把当前value_dict的字典值更新回html标签 """
         self.tag.attrs['value'] = encode_block_value(self.value_dict)
 
+    def set_part_number(self, number):
+        title = self.value_dict['name']
+        title = re.sub(r'^(\d+|\+)、', '', title)
+        if number is not None:
+            title = f'{number}、{title}'
+        self.value_dict['name'] = title
+        self.update_value_dict()
+        return title
 
-class LakeImage(GetAttr, XlBs4Tag):
+
+class LakeImage(LakeBlock):
     """ 语雀文档中的图片类型
 
     这个内容结构一般是 <p><card type="inline" name="image" value="data:..."></card></p>
     其中value是可以解析出一个字典，有详细数据信息的
     """
-    _default = 'tag'
-    type = 'image'
 
     def __init__(self, tag):  # noqa
-        self.tag = tag
+        super().__init__(tag)
+        self.type = LakeBlockTypes.IMAGE
         self._value_dict = None
 
     @property
@@ -727,13 +815,11 @@ class LakeImage(GetAttr, XlBs4Tag):
         return cls._init_from_src(f'data:image/{suffix[1:]};base64,{buffer}')
 
 
-class LakeCollapse(GetAttr, XlBs4Tag):
+class LakeCollapse(LakeBlock):
     """ 语雀折叠块 """
-    _default = 'tag'
-    type = 'lake-collapse'
 
     def __init__(self, tag):  # noqa
-        self.tag = tag
+        super().__init__(tag)
 
     def get_blocks(self):
         """ 获得最原始的段落数组 """
@@ -751,6 +837,9 @@ class LakeCollapse(GetAttr, XlBs4Tag):
         """
         self.tag.append_html(node)
 
+    def set_part_number(self, number):
+        return self._set_part_number(self.summary, number)
+
 
 # GetAttr似乎必须放在前面，这样找不到的属性似乎是会优先使用GetAttr机制的，但后者又可以为IDE提供提示
 class LakeDoc(GetAttr, XlBs4Tag):
@@ -760,6 +849,7 @@ class LakeDoc(GetAttr, XlBs4Tag):
     def __init__(self, soup):  # noqa，这个类初始化就是跟父类不同的
         # 原始完整的html文档内容
         self.soup: XlBs4Tag = soup
+        self.type = 'doc'
 
     def __文档导入导出(self):
         pass
@@ -809,7 +899,7 @@ class LakeDoc(GetAttr, XlBs4Tag):
     def print_blocks(self):
         """ 检查文档基本内容 """
         contents = self.get_blocks()
-        print_blocks(contents)
+        return print_blocks(contents)
 
     def delete_lake_id(self):
         """ 删除文档中所有语雀标签的id标记 """
@@ -824,6 +914,17 @@ class LakeDoc(GetAttr, XlBs4Tag):
         :param node: 要添加的节点内容，或者html文本
         """
         self.soup.body.append_html(node)
+
+    def reset_part_numbers(self):
+        """ 【私人】重置文档中所有的序号 """
+        contents = self.get_blocks()
+        cnt = 0
+        for c in contents:
+            if c.type == LakeBlockTypes.HEADING:
+                cnt = 0
+            elif c.get_part_number() is not None:
+                cnt += 1
+                c.set_part_number(cnt)
 
 
 if __name__ == '__main__':
