@@ -810,18 +810,17 @@ def extract_definitions_with_comments(js_code):
         如果实现中间内容也会出现这种单行}结尾，可以想写特殊手段规避开
     """
     pattern = r"""
-    (                                  # 开始捕获注释部分
-        (?:(?:/\*[^*]*\*+(?:[^/*][^*]*\*+)*/)|(?://[^\n]*))\s*  # 匹配注释
-    )*
-    (                                  # 开始捕获声明部分
-        \b(?:var|let|const|function|class)\b\s+    # 匹配声明关键字
-    )
-    (\w+)                               # 捕获变量名或函数名
-    \s*(?:\(.*?\))?\s*\{                # 匹配函数参数列表后跟'{'
-    [\s\S]+?                            # 非贪婪匹配所有字符
-    (?<=\n\}\n)                         # 确认'}'出现在单独一行
+    # 第1组：前缀注释
+    ( (?:(?:/\*[^*]*\*+(?:[^/*][^*]*\*+)*/)|(?://[^\n]*))\s* )*
+    # 第2组：声明部分
+    ( \b(?:var|let|const|function|class)\b\s+ )
+    # 第3组：变量名或函数名
+    (\w+).*?
+    # 第4组：不以{结尾的行，或者已{结尾的行且后续有配对的}
+    ( (?:[^\{]\n) | (?:\{[\s\S]+?(?<=\n\}\n)) )
     """
-    matches = re.finditer(pattern, js_code, re.VERBOSE)
+    matches = re.finditer(pattern, js_code, flags=re.VERBOSE)
+
     definitions = {}
     for match in matches:
         identifier = match.group(3).strip()  # 根据正则表达式的修改，更新捕获组的索引
@@ -915,4 +914,8 @@ def assemble_dependencies_from_jstools(cur_code, jstools=None, place_tail=False,
 
 
 if __name__ == '__main__':
-    pass
+    # 1 检查正则匹配从代码提取的结构化字典
+    # d = get_airscript_head2(True)
+
+    # 2 检查使用runIsolatedPyScript函数时提取依赖项的具体效果
+    print(assemble_dependencies_from_jstools('runIsolatedPyScript'))

@@ -18,6 +18,7 @@ import tempfile
 
 import psutil
 import pandas as pd
+from fastcore.basics import GetAttr
 
 from loguru import logger
 # ui组件大多是树形组织结构，auto库自带树形操作太弱。没有专业的树形结构库，能搞个毛线。
@@ -32,7 +33,8 @@ if sys.platform == 'win32':
     import win32process
     import win32clipboard
 
-    import uiautomation as auto
+    import uiautomation as uia
+    from uiautomation import WindowControl
 
 
 def __1_clipboard_utils():
@@ -198,7 +200,7 @@ def get_windows_info():
         }
 
         if not data['proc_name'].endswith('.tmp') and is_visible:
-            ctrl = auto.ControlFromHandle(hwnd)
+            ctrl = uia.ControlFromHandle(hwnd)
             data['ControlTypeName'] = ctrl.ControlTypeName
 
         window_list.append(data)
@@ -212,11 +214,13 @@ def find_ctrl(class_name=None, name=None, **kwargs):
         kwargs['ClassName'] = class_name
     if name is not None:
         kwargs['Name'] = name
-    ctrl = auto.WindowControl(**kwargs)
+    ctrl = uia.WindowControl(**kwargs)
     return ctrl
 
 
-class UiCtrlNode(NodeMixin):
+class UiCtrlNode(NodeMixin, GetAttr, WindowControl):
+    _default = 'ctrl'
+
     def __0_构建(self):
         pass
 
@@ -246,6 +250,7 @@ class UiCtrlNode(NodeMixin):
         """ 激活当前窗口
         """
         while True:
+            # todo 这种限定情况并不严谨，有概率出现重复的~
             hwnd = win32gui.FindWindow(self.ctrl.ClassName, self.text)
             # logger.info(hwnd)
             if not hwnd:
