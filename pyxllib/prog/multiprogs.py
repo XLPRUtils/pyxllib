@@ -49,13 +49,13 @@ class SchedulerUtils:
     def calculate_next_cron_time(cls, cron_tag, base_time=None):
         """ 使用crontab标记的运行周期，然后计算相对当前时间，下一次要启动运行的时间
 
-        :param str cron_tag:
+        :param str cron_tag: 自定义的cron标记，跟asp的差不多，但星期几部分做了调整
             30 2 * * 1: 这部分是时间和日期的设定，具体含义如下：
                 30: 表示分钟，即每小时的第 30 分钟。
                 2: 表示小时，即凌晨 2 点。
                 第三个星号 *: 表示日，这里的星号意味着每天。
                 第四个星号 *: 表示月份，星号同样表示每个月。
-                1: 表示星期中的日子，这里的 1 代表星期一（实际运行写7报错了，感觉不对~或者就是0就是7）
+                1: 表示星期中的日子，这里的 1 代表星期一，7表示星期日。不能写1~7以外的值。
         :param datetime base_time: 基于哪个时间点计算下次时间
         """
 
@@ -343,10 +343,12 @@ class MultiProgramLauncher:
             # 检查是否为有效的 6 字段 cron 表达式
             if len(cron_parts) == 6:
                 # 统一处理为 6 字段格式
-                # 把cron的星期标记转换为aps的星期标记。前者用1234560，后者用0123456表示星期一到星期日
+                # 把我自定义的cron的星期标记转换为aps的星期标记。前者用1234567，后者用0123456表示星期一到星期日
                 x = cron_parts[5]
                 if x != '*':  # 写0或7都表示周日
-                    x = 6 if x in '07' else (int(x) + 1)
+                    if x == '0':
+                        x = '7'
+                    x = (int(x) - 1)
                 self.scheduler.add_job(
                     task,
                     CronTrigger(

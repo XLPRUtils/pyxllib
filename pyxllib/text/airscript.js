@@ -1,3 +1,16 @@
+// 我个人一般使用的启动函数
+function __main__() {
+    // 1 这里填上要支持的函数接口清单
+    const funcsMap = {packTableDataFields}
+    // 2 支持三种触发方式，及优先级：py-jsa调用 > 选中单元格指定函数名 > 选中单元格所在第1列是触发函数名
+    let funcName = Context.argv.funcName || Selection.Cells(1, 1).Value2 || ''
+    if (!funcsMap[funcName]) funcName = ActiveSheet.Cells(Selection.Row, 1)
+    // 3 如果找得到函数则运行
+    Context.argv.args = Context.argv.args || []
+    if (funcsMap[funcName]) return funcsMap[funcName](...Context.argv.args)
+    // 4 也可以注释掉3，下面写自己手动调试要运行的代码
+}
+
 function __1_算法工具() {
 
 }
@@ -511,45 +524,40 @@ function insertNewDataWithHeaders(jsonData, headerRow = 1, dataStartRow = 2, ws 
     }
 }
 
-function __4_py服务工具箱() {
+function __4_py服务工具() {
 
 }
 
+// 服务器路径，url
+const JSA_POST_HOST_URL = '{{JSA_POST_HOST_URL}}'
+// 要处理的目标主机
+const JSA_POST_DEFAULT_HOST = '{{JSA_POST_DEFAULT_HOST}}'
+// 请求的header格式，以及对应的token
+const JSA_HTTP_HEADERS = {
+    'Authorization': 'Bearer {{JSA_POST_TOKEN}}',
+    'Content-Type': 'application/json'
+}
+
 // 保留环境状态，运行短小任务，返回代码中print输出的内容
-function runPyScript(script, query = '', host = '{{JSA_POST_DEFAULT_HOST}}') {
-    const url = `{{JSA_POST_HOST_URL}}/${host}/common/run_py`
-    const resp = HTTP.post(url, {query, script}, {
-        headers: {
-            'Authorization': 'Bearer {{JSA_POST_TOKEN}}',
-            'Content-Type': 'application/json'
-        }
-    })
+function runPyScript(script, query = '', host = JSA_POST_DEFAULT_HOST) {
+    const url = `${JSA_POST_HOST_URL}/${host}/common/run_py`
+    const resp = HTTP.post(url, {query, script}, {headers: JSA_HTTP_HEADERS})
     return resp.json().output
 }
 
 // 每次都是独立环境状态，运行较长时间任务，返回代码中return的字典数据
-function runIsolatedPyScript(script, host = '{{JSA_POST_DEFAULT_HOST}}') {
-    const url = `{{JSA_POST_HOST_URL}}/${host}/common/run_isolated_py`
+function runIsolatedPyScript(script, host = JSA_POST_DEFAULT_HOST) {
+    const url = `${JSA_POST_HOST_URL}/${host}/common/run_isolated_py`
     // 判断 script 的类型: script可以只输入py代码，也可以输入配置好的整个字典数据
     const payload = typeof script === 'string' ? {script} : script
-    const resp = HTTP.post(url, payload, {
-        headers: {
-            'Authorization': 'Bearer {{JSA_POST_TOKEN}}',
-            'Content-Type': 'application/json'
-        }
-    })
+    const resp = HTTP.post(url, payload, {headers: JSA_HTTP_HEADERS})
     return resp.json()
 }
 
-function getPyTaskResult(taskId, retries = 1, host = '{{JSA_POST_DEFAULT_HOST}}', delay = 5000) {
-    const url = `{{JSA_POST_HOST_URL}}/${host}/common/get_task_result/${taskId}`
+function getPyTaskResult(taskId, retries = 1, host = JSA_POST_DEFAULT_HOST, delay = 5000) {
+    const url = `${JSA_POST_HOST_URL}/${host}/common/get_task_result/${taskId}`
     for (let attempt = 0; attempt < retries; attempt++) {
-        const resp = HTTP.get(url, {
-            headers: {
-                'Authorization': 'Bearer {{JSA_POST_TOKEN}}',
-                'Content-Type': 'application/json'
-            }
-        });
+        const resp = HTTP.get(url, {headers: JSA_HTTP_HEADERS})
         const jsonResp = resp.json()
         if ('__get_task_result_error__' in jsonResp) {
             console.log(`第 ${attempt + 1} 次获取任务结果失败，请稍后再试...`)
@@ -768,17 +776,3 @@ function highlightCourseProgress(refundDict, cell) {
     // 5 返回返款金额
     return refundAmount || 0
 }
-
-function __x_main() {
-    // 我常用的jsa脚本触发运行的模式
-}
-
-// 1 这里填上要支持的函数接口清单
-const funcsMap = {packTableDataFields}
-// 2 支持三种触发方式，及优先级：py-jsa调用 > 选中单元格指定函数名 > 选中单元格所在第1列是触发函数名
-let funcName = Context.argv.funcName || Selection.Cells(1, 1).Value2 || ''
-if (!funcsMap[funcName]) funcName = ActiveSheet.Cells(Selection.Row, 1)
-// 3 如果找得到函数则运行
-Context.argv.args = Context.argv.args || []
-if (funcsMap[funcName]) return funcsMap[funcName](...Context.argv.args)
-// 4 也可以注释掉3，下面写自己手动调试要运行的代码
