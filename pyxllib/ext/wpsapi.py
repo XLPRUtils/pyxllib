@@ -4,8 +4,9 @@
 # @Date   : 2024/07/31
 
 import os
-import requests
+import re
 
+import requests
 import pandas as pd
 
 
@@ -18,12 +19,12 @@ class WpsOnlineBook:
     def __1_基础功能(self):
         pass
 
-    def __init__(self, file_id=None, script_id=None, *, token=None):
+    def __init__(self, file_id, script_id=None, *, token=None):
         self.headers = {
             'Content-Type': "application/json",
             'AirScript-Token': token or os.getenv('WPS_SCRIPT_TOKEN', ''),
         }
-        self.default_file_id = file_id
+        self.file_id = file_id
         self.default_script_id = script_id
 
     def post_request(self, url, payload):
@@ -38,12 +39,9 @@ class WpsOnlineBook:
             print(f"请求失败: {e}")
             return None
 
-    def run_script(self, script_id=None, file_id=None, context_argv=None, sync=True):
-        """
-        执行 WPS 脚本并返回执行结果
+    def run_script(self, script_id=None, context_argv=None, sync=True):
+        """ 原本执行 WPS 脚本并返回执行结果
 
-        :param file_id: 文件 ID
-            虽然提供了file_id，但并不支持跨文件调用as脚本
         :param script_id: 脚本 ID
         :param context_argv: 脚本参数 (可选)
             context本来能支持这些参数的：
@@ -61,8 +59,7 @@ class WpsOnlineBook:
 
         这个接口跟普通as一样，运行有30秒时限
         """
-        file_id = file_id or self.default_file_id
-        url = f"https://www.kdocs.cn/api/v3/ide/file/{file_id}/script/{script_id}/{'sync_task' if sync else 'task'}"
+        url = f"https://www.kdocs.cn/api/v3/ide/file/{self.file_id}/script/{script_id}/{'sync_task' if sync else 'task'}"
         payload = {
             "Context": {'argv': context_argv or {}}
         }
@@ -73,12 +70,14 @@ class WpsOnlineBook:
             return res
 
     def __2_封装的更高级的接口(self):
+        """ 这系列的功能需要配套这个框架范式使用：
+        https://github.com/XLPRUtils/pyxllib/blob/master/pyxllib/text/airscript.js
+        """
         pass
 
-    def run_script2(self, func_name, *args):
+    def run_func(self, func_name, *args):
         """ 我自己常用的jsa框架，jsa那边已经简化了对接模式，所以一般都只用这个高级的接口即可
-
-        配合这个框架范式使用：https://github.com/XLPRUtils/pyxllib/blob/master/pyxllib/text/airscript.js
+        （旧函数名run_script2不再使用）
         """
         return self.run_script(self.default_script_id, context_argv={'funcName': func_name, 'args': args})
 
@@ -91,11 +90,34 @@ class WpsOnlineBook:
         :param int data_row: 数据起始行，详细用法见packTableDataFields
         :param return_mode: 'pd' or 'json'
         """
-        data = self.run_script2('packTableDataFields', sheet_name, fields, data_row, filter_empty_rows)
+        data = self.run_func('packTableDataFields', sheet_name, fields, data_row, filter_empty_rows)
         if return_mode == 'json':
             return data
         elif return_mode == 'pd':
             return pd.DataFrame(data)
+
+    def write_arr(self, rows, start_cell, batch_size=None):
+        """ 把一个二维数组数据写入表格
+
+        :param rows: 一个n*m的数据
+        :param start_cell: 写入的起始位置，例如'A1'，也可以使用Sheet1!A1的格式表示具体的表格位置
+        :param batch_size: 为了避免一次写入内容过多，超时写入失败，可以分成多批运行
+            这里写每批的数据行数
+            默认表示一次性全部提交
+        :return:
+        """
+        if batch_size is None:
+            batch_size = len(rows)  # 如果未指定批次大小，一次性写入所有行
+
+        def func(m):
+            return str(int(m.group()) + batch_size)
+
+        current_cell = start_cell
+        for start in range(0, len(rows), batch_size):
+            end = start + batch_size
+            batch_rows = rows[start:end]
+            self.run_func('writeArrToSheet', batch_rows, current_cell)
+            current_cell = re.sub(r'\d+$', func, current_cell)
 
 
 if __name__ == '__main__':

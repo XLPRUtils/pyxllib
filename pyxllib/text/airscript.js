@@ -1,15 +1,27 @@
 // 我个人一般使用的启动函数
 function __main__() {
-    // 1 这里填上要支持的函数接口清单
-    const funcsMap = {packTableDataFields}
-    // 2 支持三种触发方式，及优先级：py-jsa调用 > 选中单元格指定函数名 > 选中单元格所在第1列是触发函数名
-    let funcName = Context.argv.funcName || Selection.Cells(1, 1).Value2 || ''
+    // 1 这里填上api、智能匹配要支持的函数接口清单
+    const funcsMap = {
+        findCol, writeArrToSheet, locateTableRange, packTableDataFields,
+    }
+
+    // 2 api：py-jsa脚本令牌模式永远是最高匹配优先级
+    if (Context.argv.funcName) return funcsMap[Context.argv.funcName](...Context.argv.args)
+
+    // 3 自定义：有需要可以打开这部分代码，手动设计要执行的功能，并使用return结束不用进入第4部分
+    // return 自动填充考勤表日期()
+
+    // 4 智能匹配，优先级：可以在第1个字符串自定义要运行的功能 > 选中单元格指定函数名 > 选中单元格所在第1列是触发函数名
+    let funcName = '' || Selection.Cells(1, 1).Value2
     if (!funcsMap[funcName]) funcName = ActiveSheet.Cells(Selection.Row, 1)
-    // 3 如果找得到函数则运行
-    Context.argv.args = Context.argv.args || []
-    if (funcsMap[funcName]) return funcsMap[funcName](...Context.argv.args)
-    // 4 也可以注释掉3，下面写自己手动调试要运行的代码
+    if (funcsMap[funcName]) return funcsMap[funcName]()
 }
+
+// 这段一般要手动放到代码的最后面
+// const res = sanitizeForJSON(main())
+// console.log(res)
+// return res
+
 
 function __1_算法工具() {
 
@@ -55,9 +67,7 @@ function levenshteinSimilarity(a, b) {
 function findTopKMatches(target, candidates, k) {
     let stdCands
     if (Array.isArray(candidates)) {
-        stdCands = typeof candidates[0] === "string"
-            ? candidates.map((s, i) => [i, s])
-            : candidates
+        stdCands = typeof candidates[0] === "string" ? candidates.map((s, i) => [i, s]) : candidates
     } else if (typeof candidates === "function") {
         stdCands = []
         for (let i = 1; i <= candidates.Rows.Count; i++) {
@@ -89,6 +99,7 @@ function __2_定位工具() {
  * todo 支持多行表头的嵌套定位？比如料理一级标题下的二级标题合计定位方式：['料理', '合计']，可以区别于另一个"合计": ['酒水', '合计']
  */
 function findCel(what, ur = ActiveSheet.UsedRange, lookAt = xlWhole) {
+    if (typeof ur === 'string') ur = ur.includes(':') ? Range(ur) : Sheets(ur).UsedRange
     return ur.Find(what, undefined, undefined, lookAt)
 }
 
@@ -104,9 +115,7 @@ function findCol(what, ur = ActiveSheet.UsedRange, lookAt = xlWhole) {
 
 // 判断 cells 集合是否全空
 function isEmpty(cels) {
-    for (let i = 1; i <= cels.Count; i++)
-        if (cels.Item(i).Text)
-            return false
+    for (let i = 1; i <= cels.Count; i++) if (cels.Item(i).Text) return false
     return true
 }
 
@@ -121,21 +130,13 @@ function getUsedRange(ws = ActiveSheet) {
     // todo 待官方支持TRIMRANGE后可能有更简洁的解决方案。期望官方底层不是这样暴力检索，应该有更高效的解决方式
 
     // 找到最后一个非空行
-    for (; lastRow >= firstRow; lastRow--)
-        if (!isEmpty(ur.Rows(lastRow).Cells))
-            break
+    for (; lastRow >= firstRow; lastRow--) if (!isEmpty(ur.Rows(lastRow).Cells)) break
     // 最后一个非空列
-    for (; lastCol >= firstCol; lastCol--)
-        if (!isEmpty(ur.Columns(lastCol).Cells))
-            break
+    for (; lastCol >= firstCol; lastCol--) if (!isEmpty(ur.Columns(lastCol).Cells)) break
     // 第一个非空行
-    for (; firstRow <= lastRow; firstRow++)
-        if (!isEmpty(ur.Rows(firstRow).Cells))
-            break
+    for (; firstRow <= lastRow; firstRow++) if (!isEmpty(ur.Rows(firstRow).Cells)) break
     // 第一个非空列
-    for (; firstCol <= lastCol; firstCol++)
-        if (!isEmpty(ur.Columns(firstCol).Cells))
-            break
+    for (; firstCol <= lastCol; firstCol++) if (!isEmpty(ur.Columns(firstCol).Cells)) break
 
     // 3 创建一个新的 Range 对象，它只包含非空的行和列
     return ws.Range(ur.Cells(firstRow, firstCol), ur.Cells(lastRow, lastCol))
@@ -235,7 +236,7 @@ function locateTableRange(ws, dataRow = [0, 0], fields = []) {
 /**
  * 表格结构化定位工具的增强版本，在locateTableRange基础上增加了tools简化一些常用操作
  * tools增加的工具详见内部实现的子函数注释
- * todo 250109周四14:07 这套时间并不太好，过渡封装了，后续还是研究下怎么做出ur.Cells我感觉更好。
+ * todo 250109周四14:07 这套实现并不太好，过渡封装了，后续还是研究下怎么做出ur.Cells我感觉更好。
  */
 function locateTableRange2(ws, dataRow = [0, 0], fields = []) {
     let [ur, rows, cols] = locateTableRange(ws, dataRow, fields)
@@ -440,7 +441,11 @@ function writeDfSplitDictToSheet(jsonData, headerRow = 1, dataStartRow = 2, ws =
 
 
 function writeArrToSheet(arr, startCel) {
-    // 遍历数组，将每行的数据写入 Excel
+    // 1 startCel可以输入字符串，且注意这样是可以附带表格位置信息的 'Sheet1!A1'
+    // 如果是字符串，转Range对象
+    if (typeof startCel === 'string') startCel = Range(startCel)
+
+    // 2 遍历数组，将每行的数据写入 Excel
     for (let i = 0; i < arr.length; i++) {
         const row = arr[i]
         // 如果当前行存在，则遍历该行的元素
@@ -534,8 +539,7 @@ const JSA_POST_HOST_URL = '{{JSA_POST_HOST_URL}}'
 const JSA_POST_DEFAULT_HOST = '{{JSA_POST_DEFAULT_HOST}}'
 // 请求的header格式，以及对应的token
 const JSA_HTTP_HEADERS = {
-    'Authorization': 'Bearer {{JSA_POST_TOKEN}}',
-    'Content-Type': 'application/json'
+    'Authorization': 'Bearer {{JSA_POST_TOKEN}}', 'Content-Type': 'application/json'
 }
 
 // 保留环境状态，运行短小任务，返回代码中print输出的内容
@@ -572,23 +576,7 @@ function getPyTaskResult(taskId, retries = 1, host = JSA_POST_DEFAULT_HOST, dela
 
 function __5_日期处理() {
     /*
-    为了理解js相关的日期处理原理，有时区和时间戳两个关键点要明白：
-    1、js中的Date存储的不是"年/月/日"这样简单的数值，而是有带"时区"标记的，是一个时间点的"精确指定"，而不是"数值描述"。
-        说人话，意思就是我们输入的任何时间，都是要精确转换对应到utc0时区的时间上的。
-            console.log看到的就是utc版的时间。
-        但是我们使用.getHours()等方法的时候，又会自动转换到本地时间的数值。
-        理解这套逻辑，就好理解核心的存储、转换逻辑，不容易混乱和出错了。
-
-        Date的初始化还很智能，使用'2024-11'等标准的ISO格式时，默认输入的就是utc时间。
-        而使用'2024/11'等斜杠模式的时候，默认输入的就是本地时间。
-    2、js的时间戳(timestamp)是1970-01-01到当前的毫秒数，excel的时间戳是1900-01-01到当前的天数(小数部分表示时分秒)
-        二者是不一样的，差25569天，所以需要一套转换操作逻辑
-        但如果是要把excel的日期转成js，如果没有太高的精度要求，
-            且恰好用'2024/11'的斜杠格式表示本地时间的话，有简单的初始化方法 new Date(cell.Text)
-
-    也有人整理的资料：https://bbs.wps.cn/topic/17094
-
-    具体的excelDateToJSDate、jsDateToExcelDate是gpt给我实现的，我也搞不太懂，但测试正确就行了~
+    文档：https://www.yuque.com/xlpr/pyxllib/zdgppdtls3a15nhg
     */
 
     // 输入utc时间点
@@ -687,6 +675,38 @@ function __6_其他() {
 
 }
 
+// 将数据转换为可标准化为json的格式
+function sanitizeForJSON(data, depth = 1) {
+    const type = typeof data
+
+    // 1 基本类型直接返回
+    if (data === undefined) return null
+    if (data === null || type === 'number' || type === 'string' || type === 'boolean') return data
+
+    // 2 处理数组
+    if (Array.isArray(data)) return data.map(sanitizeForJSON)
+
+    // 3 通过关键词判定特殊类型
+    // 判定所用的key要尽量冷门，避免和普通字典的有效key冲突歧义。一般可以挑一个名字最长的，实在不行的时候也可以复合检查多个key。
+    if (data.hasOwnProperty('FillAcrossSheets')) return 'Sheets' else if (data.hasOwnProperty('EnableFormatConditionsCalculation')) return `Sheets('${data.Name}')`
+    // Cells也算Range类型
+    else if (data.hasOwnProperty('CalculateRowMajorOrder')) return `Range('${data.Address(false, false)}')`
+
+    // 4 处理对象
+    const result = {}
+    let isEmpty = true
+
+    for (const key in data) {
+        if (data.hasOwnProperty(key)) {
+            result[key] = depth > 0 ? sanitizeForJSON(data[key], depth - 1) : ''
+            isEmpty = false
+        }
+    }
+
+    return isEmpty ? type : result
+}
+
+
 /**
  * 为单元格添加或删除超链接
  * @param {Object} cel - 单元格对象
@@ -706,73 +726,18 @@ function setHyperlink(cel, link, text, screenTip) {
     }
 }
 
-
-function __7_考勤() {
-    // 个人的考勤业务定制化功能
-}
-
-// 分析回放规则文本，从中提取结构化的字典解释
-function parseRefundRules(text) {
-    const match = text.match(/"\d+(\/\d+)*"/)
-    const refundDict = {}
-
-    if (match) {
-        const values = match[0].slice(1, -1).split('/') // 去掉引号，然后分割
-        // 遍历数字并构建键名
-        values.forEach((value, index) => {
-            if (parseInt(value) === 0) return // 如果数字是0，终止添加
-            const key = index === 0 ? "当堂" : `第${index}天`
-            refundDict[key] = parseInt(value)
-        })
-    }
-    refundDict['回放'] = 0  // 其他未明确标记的带'回放'字眼的一律返款金额为0
-    return refundDict
-}
-
-function highlightCourseProgress(refundDict, cell) {
-    let color, refundAmount, text
-    text = cell.Text
-
-    // 1 找到redundDict字典中最大值
-    const sortedEntries = Object.entries(refundDict).sort((a, b) => b[1] - a[1])  // 确保按照值从大到小排序
-    const maxRefund = sortedEntries[0][1] || 0
-    const secondRefund = sortedEntries.length > 1 ? sortedEntries[1][1] : maxRefund
-
-    // 2 遍历refundDict中的所有key，判断cell的文本值是否包含了对应key，存储对应的refundAmount值
-    for (const [key, value] of sortedEntries) {
-        if (text.includes(key)) {
-            refundAmount = value
-            break
+// 将条件格式的应用范围从部分行扩展到整列（手动增删表格过程中，可能会破坏原本比如L:L条件格式范围为L1:L100，这里可以批量调整变回L:L）
+function extendFormatConditionsToFullColumns(sheet) {
+    const formatConditions = sheet.UsedRange.FormatConditions
+    for (let i = 1; i <= formatConditions.Count; i++) {
+        const condition = formatConditions.Item(i)
+        const addr = condition.AppliesTo.Address()
+        // 使用正则匹配类似 $J$2:$J$1048576 的格式，变成$J:$J
+        const match = addr.match(/^\$([A-Z]+)\$\d+:\$\1\$\d+$/)
+        if (match) {
+            // match[1] 是捕获的列字母
+            const colLetter = match[1]
+            condition.ModifyAppliesToRange(sheet.Range(`${colLetter}:${colLetter}`))
         }
     }
-
-    // 3 根据refundAmout设置基础颜色：与maxRefund相等设置绿色，正值设为黄色，0值设为灰色，undefined设为白色
-    if (refundAmount === maxRefund) {
-        color = [0, 255, 0]  // 绿色
-    } else if (refundAmount > 0) {
-        color = [255, 255, 0]  // 黄色
-        // 黄色情况下，要根据refundAmount权重，淡化颜色
-        color[2] = (1 - refundAmount / secondRefund) * 128
-    } else if (refundAmount === 0) {
-        color = [128, 128, 128]  // 灰色
-    } else {
-        color = [255, 255, 255]  // 白色
-    }
-
-    // 4 根据完成进度再进行一轮颜色渲染
-
-    // 提取百分比
-    let percentageRegex = /\d*%/g  // 全局标志 'g'
-    let matches = Array.isArray(text.match(percentageRegex)) ? text.match(percentageRegex) : []
-    let weight = parseFloat(matches.pop()) || 0 // 最后一个匹配结果
-
-    // 颜色淡化
-    for (let i = 0; i < 3; i++)
-        color[i] = (color[i] * weight + 255 * 100) / (weight + 100)
-
-    // 设置颜色
-    cell.Interior.Color = RGB(color[0], color[1], color[2])
-
-    // 5 返回返款金额
-    return refundAmount || 0
 }

@@ -905,7 +905,8 @@ def assemble_dependencies_from_jstools(cur_code, jstools=None, place_tail=False,
     # 3 拼接代码
     required_code = [definitions[identifier] for identifier in definitions if identifier in visited]
     if place_tail:
-        required_code.insert(0, '\n\n// 以下是工具代码')
+        # required_code.insert(0, '\n\n// 以下是工具代码')
+        required_code.insert(0, '\n\nfunction __x_工具代码() {\n}')
         required_code.insert(0, cur_code)
     else:
         required_code.append(cur_code)
