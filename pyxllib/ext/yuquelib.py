@@ -54,9 +54,11 @@ def update_yuque_doc_by_dp(doc_url):
     tab.actions.type(' ')
     time.sleep(1)
     tab.actions.key_down('BACKSPACE')
-    time.sleep(0.5)
+    time.sleep(2)
     tab.actions.key_up('BACKSPACE')
+    time.sleep(5)
     tab('t:button@@text():更新').click(by_js=True)
+    time.sleep(20)
     tab.close()
 
     # 4 退出

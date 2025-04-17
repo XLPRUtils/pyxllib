@@ -4,7 +4,7 @@
 # @Email  : 877362867@qq.com
 # @Date   : 2020/10/21 09:22
 
-
+import os
 import time
 import hmac
 import hashlib
@@ -37,9 +37,10 @@ class DingtalkRobot:
     https://ding-doc.dingtalk.com/doc#/serverapi2/qf2nxq
     """
 
-    def __init__(self, url, secret):
-        self.url = url
-        self.url += self.add_secret(secret)
+    def __init__(self, access_token=None, secret=None):
+        access_token = access_token or os.getenv('DINGTALK_ROBOT_SECRET')
+        self.url = f'https://oapi.dingtalk.com/robot/send?access_token={access_token}'
+        self.url += self.add_secret(secret or os.getenv('DINGTALK_ROBOT_SECRET'))
         self.headers = {"Content-Type": "application/json"}
 
     @classmethod
@@ -89,3 +90,35 @@ class DingtalkRobot:
 
     def send_feedcard(self):
         raise NotImplementedError
+
+
+class DingtalkRobot2(DingtalkRobot):
+
+    def __init__(self, title=None):
+        super().__init__()
+        self.title = title
+
+    def send_text2(self, text):  # 增加一个更加定制化的便捷接口
+        from pyxllib.prog.pupil import utc_timestamp
+
+        if self.title:
+            self.send_text(f'{utc_timestamp()} {get_host_nickname()} [{self.title}] {text}')
+        else:
+            self.send_text(f'{utc_timestamp()} {get_host_nickname()} {text}')
+
+    def __enter__(self):
+        self.send_text2('启动')
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        from pyxllib.prog.pupil import format_exception
+
+        if exc_tb is None:
+            self.send_text2('完成')
+        else:
+            self.send_text2(f'报错\n{format_exception(exc_val, 3)}')
+
+if __name__ == '__main__':
+    pass
+
+    from pyxllib.prog.newbie import typename

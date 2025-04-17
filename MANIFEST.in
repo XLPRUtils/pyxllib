@@ -1,5 +1,0 @@
-include README.md
-include requirements.txt
-recursive-include pyxllib *.html *.js
-recursive-include pyxlpr *.py *.txt
-exclude pyxllib/ext/wpsapi2.py

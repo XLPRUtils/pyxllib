@@ -16,6 +16,8 @@ a = a - a.isoweekday() + kwargs['weekday']  # 先减去当前星期几，再加�
 import datetime
 import re
 
+from fastcore.utils import GetAttr
+
 
 def parse_datetime(*argv):
     """ 解析字符串日期时间
@@ -102,6 +104,11 @@ def parse_datetime(*argv):
     # 1 没有参数则默认当前运行时间
     if not argv:
         dt = datetime.datetime.now()
+    if not dt and isinstance(argv[0], datetime.datetime):
+        dt = argv[0]
+    if not dt and isinstance(argv[0], datetime.date):
+        # 要转成datetime类型，time部分默认00:00:00
+        dt = datetime.datetime.combine(argv[0], datetime.time())
     if not dt and isinstance(argv[0], float):
         dt = datetime.datetime.fromtimestamp(argv[0])
     # 2 如果上述解析不了，且argv恰好为两个参数，则判断为使用strptime初始化
@@ -132,3 +139,61 @@ def parse_timedelta(s):
     d = {k: int(v) for k, v in zip(['seconds', 'minutes', 'hours'], parts)}
     td = datetime.timedelta(**d)
     return td
+
+
+class XlWeekTag(GetAttr):
+    """ 个人周标签转换工具 """
+    _default = 'dt'
+
+    def __init__(self, dt=None):
+        """
+        :param datetime|其他类日期表达 dt: 可以输入一个日期，默认为今天
+        """
+        if dt is None:
+            dt = datetime.date.today()
+        self.dt = parse_datetime(dt)
+
+    def __1_日期移动(self):
+        pass
+
+    def add_days(self, days):
+        """ 增加指定天数，支持负数 """
+        return self.__class__(self.dt + datetime.timedelta(days=days))
+
+    def monday(self):
+        """ 移动到本周周一 """
+        return self.add_days(-self.dt.weekday())
+
+    def next_week(self):
+        """ 移动到下一周 """
+        return self.add_days(7)
+
+    def prev_week(self):
+        """ 移动到上一周 """
+        return self.add_days(-7)
+
+    def __2_生成标签(self):
+        pass
+    
+    def weektag(self):
+        """
+        :return: 周标签名，例如 'w250414'，表示所属周的周一是2025年4月14日
+        """
+        monday = self.monday()  # 获取本周周一
+        tag = 'w' + monday.strftime('%y%m%d')
+        return tag
+
+    def daytag(self):
+        """
+        :return: 日标签名，例如 '250415周二'，表示当天的日期标记，一般是语雀周报中使用
+        """
+        ch = '一二三四五六日'[self.dt.weekday()]
+        tag = self.dt.strftime('%y%m%d') + '周' + ch
+        return tag
+
+    def week_daytags(self):
+        # 循环获得本周每天的daytag
+        monday = self.monday()
+        tags = [monday.add_days(i).daytag() for i in range(7)]
+        return tags
+ 

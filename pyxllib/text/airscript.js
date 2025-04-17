@@ -688,7 +688,8 @@ function sanitizeForJSON(data, depth = 1) {
 
     // 3 通过关键词判定特殊类型
     // 判定所用的key要尽量冷门，避免和普通字典的有效key冲突歧义。一般可以挑一个名字最长的，实在不行的时候也可以复合检查多个key。
-    if (data.hasOwnProperty('FillAcrossSheets')) return 'Sheets' else if (data.hasOwnProperty('EnableFormatConditionsCalculation')) return `Sheets('${data.Name}')`
+    if (data.hasOwnProperty('FillAcrossSheets')) return 'Sheets'
+    else if (data.hasOwnProperty('EnableFormatConditionsCalculation')) return `Sheets('${data.Name}')`
     // Cells也算Range类型
     else if (data.hasOwnProperty('CalculateRowMajorOrder')) return `Range('${data.Address(false, false)}')`
 
@@ -727,8 +728,8 @@ function setHyperlink(cel, link, text, screenTip) {
 }
 
 // 将条件格式的应用范围从部分行扩展到整列（手动增删表格过程中，可能会破坏原本比如L:L条件格式范围为L1:L100，这里可以批量调整变回L:L）
-function extendFormatConditionsToFullColumns(sheet) {
-    const formatConditions = sheet.UsedRange.FormatConditions
+function extendFormatConditionsToFullColumns(ws) {
+    const formatConditions = ws.UsedRange.FormatConditions
     for (let i = 1; i <= formatConditions.Count; i++) {
         const condition = formatConditions.Item(i)
         const addr = condition.AppliesTo.Address()
@@ -737,7 +738,7 @@ function extendFormatConditionsToFullColumns(sheet) {
         if (match) {
             // match[1] 是捕获的列字母
             const colLetter = match[1]
-            condition.ModifyAppliesToRange(sheet.Range(`${colLetter}:${colLetter}`))
+            condition.ModifyAppliesToRange(st.Range(`${colLetter}:${colLetter}`))
         }
     }
 }

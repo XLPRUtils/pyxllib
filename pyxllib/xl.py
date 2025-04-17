@@ -37,3 +37,6 @@ from pyxllib.file.specialist import *
 if __name__ == '__main__':
     # 直接运行的话，支持开放出所有函数类接口
     fire.Fire()
+
+
+    from pyxllib.ext.demolib import test_re
