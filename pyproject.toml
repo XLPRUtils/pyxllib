@@ -1,0 +1,58 @@
+[project]
+name = "pyxllib"
+version = "0.3.197"
+description = "厦门理工模式识别团队通用python代码工具库"
+readme = "README.md"
+authors = [
+    { name = "code4101", email = "877362867@qq.com" },
+]
+requires-python = ">=3.6, <3.13"  # 3.6可以兼容大部分功能，但并不保证所有功能都可用
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Operating System :: OS Independent",
+    "License :: OSI Approved :: Apache Software License",
+]
+dependencies = [
+    "arrow",
+    "charset-normalizer",
+    "requests",
+    "qiniu",
+    "pyyaml",
+    "loguru",
+    "humanfriendly",
+    "tqdm",
+    "ujson",
+    "Deprecated",
+    "pyperclip",
+    "envariable",
+    "decorator",
+    "more-itertools",
+    "fire",
+    "xlrd",
+    "pympler",
+    "lxml",
+    "beautifulsoup4",
+    "numpy",
+    "Jinja2",
+    "pandas>=0.23.4",
+    "pillow",
+]
+
+[project.urls]
+Homepage = "https://github.com/XLPRUtils/pyxllib"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build]
+exclude = [
+    ".github",
+    ".gitignore",
+    ".gitattributes",
+]
+
+[tool.uv]
+index-url = "https://pypi.tuna.tsinghua.edu.cn/simple"
+dev-dependencies = [
+]
