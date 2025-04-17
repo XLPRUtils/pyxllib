@@ -1,0 +1,23 @@
+name: Release to PyPI using Trusted Publisher
+on:
+  release:
+    types: [created]
+
+jobs:
+  publish:
+    name: Publish to PyPI
+    runs-on: ubuntu-latest
+
+    environment:
+      name: release
+
+    permissions:
+      id-token: write
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          version: "0.6.10"  # 要使用的uv版本
+      - run: uv build
+      - run: uv publish --trusted-publishing always
