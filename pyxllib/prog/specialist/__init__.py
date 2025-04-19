@@ -90,49 +90,6 @@ def mtqdm(func, iterable, *args, max_workers=1, check_per_seconds=0.01, **kwargs
         executor.shutdown()
 
 
-def distribute_package(root, version=None, repository=None, *,
-                       upload=True,
-                       version_file='setup.py',
-                       delete_dist=True):
-    """ 发布包的工具函数
-
-    :param root: 项目的根目录，例如 'D:/slns/pyxllib'
-        根目录下有对应的 setup.py 等文件
-    :param repository: 比如我配置了 [xlpr]，就可以传入 'xlpr'
-    :param version_file: 保存版本号的文件，注意看正则规则，需要满足特定的范式，才会自动更新版本号
-    :param delete_dist: 上传完是否自动删除dist目录，要检查上传包是否有遗漏时，要关闭
-    """
-    import sys
-    from pyxllib.file.specialist import XlPath
-
-    # 1 切换工作目录
-    os.chdir(str(root))
-
-    # 2 改版本号
-    if version:
-        f = XlPath(root) / version_file
-        s = re.sub(r"(version\s*=\s*)(['\"])(.+?)(\2)", fr'\1\g<2>{version}\4', f.read_text())
-        f.write_text(s)
-
-    # 3 打包
-    subprocess.run(f'{sys.executable} setup.py sdist')
-
-    # 4 上传
-    if upload:
-        # 上传
-        cmd = 'twine upload dist/*'
-        if repository:
-            cmd += f' -r {repository}'
-        subprocess.run(cmd)
-        # 删除打包生成的中间文件
-        if delete_dist:
-            XlPath('dist').delete()
-        XlPath('build').delete()
-
-        # 这个不能删，不然importlib会读取不到模块的版本号
-        # [d.delete() for d in XlPath('.').select_dirs(r'*.egg-info')]
-
-
 def estimate_package_size(package):
     """ 估计一个库占用的存储大小 """
 
