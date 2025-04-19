@@ -1,6 +1,6 @@
 [project]
 name = "pyxllib"
-version = "3.201.1"
+version = "3.202"
 description = "厦门理工模式识别团队通用python代码工具库"
 readme = "README.md"
 license = "Apache-2.0"
@@ -15,7 +15,7 @@ dependencies = []
 
 [project.optional-dependencies]
 basic = [ # 基础依赖，一般情况都是要安装的，但是有些打包exe的特殊情景可能要纯净的pyxllib，则不用预先安装这些依赖
-    "pyxllib[prog,algo,text,file,data,net,xlcv]",
+    "pyxllib[prog,algo,text,file,data,net]",
 ]
 prog = [ # 工程需要的一些特殊工具
     "python-dotenv",   # 读取环境变量
@@ -33,12 +33,12 @@ prog = [ # 工程需要的一些特殊工具
 ]
 algo = [ # 算法库
     "anytree",      # 树形结构处理
-    "shapely",      # 几何多边形计算
     "disjoint-set", # 并查集
     "xlsxwriter",   # pyxllib.algo.stat有个小的数据处理模块，需要用到这个操作表格
 ]
 ext_algo = [
-    "pint", # 单位计算工具
+    "shapely", # 几何多边形计算
+    "pint",    # 单位计算工具
 ]
 text = [ # 文本处理
     "python-Levenshtein", # 计算编辑距离
@@ -104,7 +104,7 @@ autogui = [
 pyqt = ["PyQt6; sys_platform == 'win32'", "PySide6; sys_platform == 'win32'"]
 advance = [ # 比较全面的，高级的依赖
     "pyxllib[basic]",
-    "pyxllib[xlsx,autogui]",
+    "pyxllib[xlcv,xlsx,autogui]",
 ]
 flask = [
     "flask",              # 传统写后端的工具
