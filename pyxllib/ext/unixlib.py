@@ -3,14 +3,8 @@
 # @Author : 陈坤泽
 # @Email  : 877362867@qq.com
 # @Date   : 2021/06/03 20:41
+
 import time
-
-from pyxllib.prog.pupil import check_install_package
-
-check_install_package('paramiko')
-check_install_package('scp')
-# 对 paramiko 进一步封装的库
-# check_install_package('fabric')
 
 import warnings
 from cryptography.utils import CryptographyDeprecationWarning

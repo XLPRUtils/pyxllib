@@ -4,10 +4,6 @@
 # @Email  : 877362867@qq.com
 # @Date   : 2024/05/10
 
-from pyxllib.prog.pupil import check_install_package
-
-check_install_package('tiktoken')
-
 import re
 
 import tiktoken

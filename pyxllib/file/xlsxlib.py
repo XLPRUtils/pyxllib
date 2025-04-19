@@ -7,18 +7,9 @@
 """
 扩展了些自己的openpyxl工具
 """
+
 import copy
-
 import time
-
-from pyxllib.prog.pupil import check_install_package, run_once
-
-check_install_package('openpyxl')
-# check_install_package('premailer')
-# check_install_package('xlrd2')
-check_install_package('yattag')
-check_install_package('jsonpickle')
-
 from collections import Counter, OrderedDict, defaultdict
 import csv
 import datetime
@@ -48,7 +39,7 @@ except ModuleNotFoundError:
 
 from pyxllib.prog.newbie import human_readable_number
 from pyxllib.prog.pupil import (inject_members, dprint, xlmd5, shuffle_dict_keys, Timeout,
-                                safe_div, format_exception, DictTool)
+                                safe_div, format_exception, DictTool, run_once)
 from pyxllib.prog.specialist import browser, TicToc
 from pyxllib.algo.specialist import product
 from pyxllib.text.pupil import calc_chinese_ratio

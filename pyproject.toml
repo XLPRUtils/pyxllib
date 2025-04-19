@@ -3,56 +3,160 @@ name = "pyxllib"
 version = "0.3.200"
 description = "厦门理工模式识别团队通用python代码工具库"
 readme = "README.md"
-authors = [
-    { name = "code4101", email = "877362867@qq.com" },
-]
-requires-python = ">=3.6, <3.13"  # 3.6可以兼容大部分功能，但并不保证所有功能都可用
+license = "Apache-2.0"
+authors = [{ name = "code4101", email = "877362867@qq.com" }]
+requires-python = ">=3.6, <3.13" # 3.6可以兼容大部分功能，但并不保证所有功能都可用
 classifiers = [
     "Programming Language :: Python :: 3",
     "Operating System :: OS Independent",
     "License :: OSI Approved :: Apache Software License",
 ]
-dependencies = [
-    "arrow",
-    "charset-normalizer",
-    "requests",
-    "qiniu",
-    "pyyaml",
-    "loguru",
-    "humanfriendly",
-    "tqdm",
-    "ujson",
-    "Deprecated",
-    "pyperclip",
-    "envariable",
-    "decorator",
-    "more-itertools",
-    "fire",
-    "xlrd",
-    "pympler",
-    "lxml",
-    "beautifulsoup4",
-    "numpy",
-    "Jinja2",
-    "pandas>=0.23.4",
+dependencies = []
+
+[project.optional-dependencies]
+basic = [ # 基础依赖，一般情况都是要安装的，但是有些打包exe的特殊情景可能要纯净的pyxllib，则不用预先安装这些依赖
+    "pyxllib[prog,algo,text,file,data,net,xlcv]",
+]
+prog = [ # 工程需要的一些特殊工具
+    "python-dotenv",   # 读取环境变量
+    "loguru",          # 日志工具
+    "humanfriendly",   # 人性化的时间显示等
+    "tqdm",            # 进度条
+    "Deprecated",      # 弃用函数的标记
+    "more-itertools",  # 更多的迭代器工具
+    "joblib>=1.3.2",   # 并行处理工具，实际首次是在pyxllib.file中需要调用
+    "pympler",         # 计算对象的内存占用
+    "fastcore>=1.8.1", # 有些好用的工程功能，比如from fastcore.utils import GetAttr，用于不实际继承的情况拥有类似继承的操作模式
+    "fire",            # 制作命令行工具
+    "cachetools",      # 通用缓存工具，适用范围更广
+    "cached_property", # 类属性特用工具，相对比较简洁些
+]
+algo = [ # 算法库
+    "anytree",      # 树形结构处理
+    "shapely",      # 几何多边形计算
+    "disjoint-set", # 并查集
+    "xlsxwriter",   # pyxllib.algo.stat有个小的数据处理模块，需要用到这个操作表格
+]
+ext_algo = [
+    "pint", # 单位计算工具
+]
+text = [ # 文本处理
+    "python-Levenshtein", # 计算编辑距离
+    # pip install安装包名，从pypi、git/vcs安装时不区分大小写，本地安装时若为linux则区分。一般建议按照官方推荐的大小写名称安装。
+    "Jinja2",         # 模板渲染，pyxllib.text下的jinjalib、jscode有使用，from jinja2 import Template
+    "beautifulsoup4", # html等解析，from bs4 import BeautifulSoup
+    "lxml",           # xml/html解析，bs4、表格均需要使用
+    "xpath-parser",   # xpath解析
+]
+ext_text = [
+    "pyahocorasick",  # ac自动机
+    "pyspellchecker", # 拼写检查
+]
+file = [ # 文件功能需要的一些特殊工具
+    "filetype",           # 文件类型判断
+    "charset-normalizer", # import charset_normalizer，文件编码自动识别
+    "qiniu",              # etag哈希值计算
+    "ujson",              # json读取加速
+    "pyyaml",             # yaml文件处理
+]
+ext_file = [
+    "PyMuPdf>=1.18.17", # pdf处理工具，import fitz
+    "pdf2docx",
+    "python-docx",      # docxlib的依赖，import docx
+    "moviepy",          # 视频处理
+    "gitpython",        # from git import Repo，git项目管理
+]
+data = [
+    "numpy",           # 科学计算
+    "pandas>=0.23.4",  # 数据处理分析
+    "psycopg[binary]", # 对pg数据库的操作
+    "pyecharts",       # 画echart图标
+    "jmespath",        # json查询
+]
+net = [
+    "requests",               # 网络请求
+    "DrissionPage>=4.1.0.17", # 特别好用的爬虫工具
+]
+xlcv = [ # 图像处理相关
     "pillow",
+    "opencv-python",
+    "ImageHash",     # 图像hash值计算
+]
+xlsx = [ # 表格相关工具
+    "openpyxl==3.1.5", # 表格处理库，不要用3.1.2，有bug
+    "xlrd",            # 比较轻量的读取excel工具
+    "premailer",       # pyxllib.stdlib.tablepyxl的依赖
+    "jsonpickle",      # 表格需要用到这个导出json结构化数据
+    "yattag",          # 表格模块需要用这个转html表格
+]
+autogui = [
+    "psutil",                                # 进程管理
+    "mss",                                   # 获取屏幕窗口
+    "pyperclip",                             # 剪切板复制粘贴，我的qt、utools、docxlib等有使用
+    "klembord",                              # 富文本复制粘贴
+    "keyboard",                              # 键盘操作
+    "pynput",
+    "pyautogui",                             # 包含pygetwindow，这个库主要也就用来比较简单获得当前激活窗口，全部窗口等信息。更综合的能力不如pywinauto
+    "uiautomation; sys_platform == 'win32'", # ui窗口自动化操作
+    "wxauto; sys_platform == 'win32'",       # wxauto官方另有付费vip用户可加设wxautox
+    "pywin32; sys_platform == 'win32'",      # win32com、win32api等很多win32前缀的库
+]
+pyqt = ["PyQt6; sys_platform == 'win32'", "PySide6; sys_platform == 'win32'"]
+advance = [ # 比较全面的，高级的依赖
+    "pyxllib[basic]",
+    "pyxllib[xlsx,autogui]",
+]
+flask = [
+    "flask",              # 传统写后端的工具
+    "flask-cors",         # 跨域问题
+    "flask-jwt-extended", # 身份验证
+    "flask-restful",      # restful风格的api
+    "flask-wtf",          # 表单验证
+]
+xlai = [
+    "pynvml",
+    "visdom",
+    # "fvcore",
+    "scikit-learn", # import sklearn
+]
+xlapi = [ # 各种api接口服务
+    "baidu-aip", # 百度云服务api
+    # "openai",  # openai官方api
+    "arts==2024.9.14", # 这个库包含了作者写的openai2，但被我改版到pyxlpr.openai2
+]
+xlserver = [ # 如果要开后端服务相关
+    "fastapi", # 现在最流行的写后端的库
+    "uvicorn", # 运行fastapi的库
+    # 后端服务需要用到pyxllib.prog.multiprogs，其中有些依赖
+    "croniter",    # 支持cron表达式的定时处理
+    "APScheduler", # 调度能力
+]
+unix = [ # pyxllib.ext.unixlib依赖的包
+    "paramiko",
+    "fabric",   # 对 paramiko 进一步封装的库
+    "scp",      # 文件传输
+]
+xlpr = [
+    "tiktoken", # 计算大模型token数
+    "visualdl", # xlpaddle需要使用的可视化工具
+]
+full = [ # full的依赖很重，如无必要一般用advance就足够了，有其他缺失的运行中有需要再临时补
+    "pyxllib[advance]",
+    "pyxllib[ext_text,ext_algo,ext_file]", # 几个大类其他一些特殊扩展库
+    "pyxllib[flask,xlapi,xlserver]",       # api、后端服务
+    "pyxllib[pyqt,xlai,unix,xlpr]",        # 其他散件
 ]
 
 [project.urls]
-Homepage = "https://github.com/XLPRUtils/pyxllib"
+Source = "https://github.com/XLPRUtils/pyxllib"
+Documentation = "https://www.yuque.com/xlpr/pyxllib"
 
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build]
-exclude = [
-    ".github",
-    ".gitignore",
-    ".gitattributes",
-]
+exclude = [".github", ".gitignore", ".gitattributes"]
 
 [tool.uv]
 index-url = "https://pypi.tuna.tsinghua.edu.cn/simple"
-dev-dependencies = [
-]

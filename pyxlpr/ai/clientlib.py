@@ -23,7 +23,7 @@ import numpy as np
 import requests
 
 from pyxllib.prog.newbie import round_int
-from pyxllib.prog.pupil import check_install_package, is_url
+from pyxllib.prog.pupil import is_url
 from pyxllib.prog.xlosenv import XlOsEnv
 from pyxllib.algo.geo import xywh2ltrb, rect_bounds
 from pyxllib.file.specialist import XlPath, get_etag
@@ -241,7 +241,6 @@ class XlAiClient:
         """
         注：带透明底的png百度api识别不了，要先转成RGB格式
         """
-        check_install_package('aip', 'baidu-aip')
         import aip
 
         self._aipocr = aip.AipOcr(str(app_id), api_key, secret_key)

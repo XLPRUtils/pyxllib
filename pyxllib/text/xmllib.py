@@ -8,11 +8,6 @@
 xml等网页结构方面的处理
 """
 
-# from pyxllib.prog.pupil import check_install_package
-
-# 一个xpath解析库
-# check_install_package('xpath_parser', 'xpath-parser')
-
 import collections
 from collections import Counter, defaultdict
 import re
@@ -23,7 +18,6 @@ import pandas as pd
 import bs4
 from bs4 import BeautifulSoup
 from humanfriendly import format_size
-# from xpath_parser import XpathExpression
 
 from pyxllib.prog.newbie import round_int
 from pyxllib.prog.pupil import dprint, run_once, inject_members

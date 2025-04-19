@@ -10,10 +10,6 @@ Apache ECharts: https://echarts.apache.org/zh/index.html
 python版：pyechats的封装
 """
 
-from pyxllib.prog.pupil import check_install_package
-
-check_install_package('pyecharts')
-
 # import types
 
 import pyecharts

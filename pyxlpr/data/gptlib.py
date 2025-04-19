@@ -4,10 +4,6 @@
 # @Email  : 877362867@qq.com
 # @Date   : 2023/07/13 14:26
 
-from pyxllib.prog.pupil import check_install_package
-
-# check_install_package('transformers', 'transformers')
-
 import ast
 from collections import OrderedDict
 from collections import Counter

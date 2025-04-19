@@ -4,12 +4,12 @@
 # @Email  : 877362867@qq.com
 # @Date   : 2021/06/06 17:01
 
-from pyxllib.prog.pupil import check_install_package
+# from pyxllib.prog.pupil import check_install_package
 
 # 这个需要C++14编译器 https://download.microsoft.com/download/5/f/7/5f7acaeb-8363-451f-9425-68a90f98b238/visualcppbuildtools_full.exe
 # 在需要的时候安装，防止只是想用pyxllib很简单的功能，但是在pip install阶段处理过于麻烦
 # MatchSimString计算编辑距离需要
-check_install_package('Levenshtein', 'python-Levenshtein')
+# check_install_package('Levenshtein', 'python-Levenshtein')
 
 from collections import defaultdict
 from more_itertools import chunked

@@ -6,10 +6,6 @@
 
 """ 单位功能库 """
 
-from pyxllib.prog.pupil import check_install_package
-
-check_install_package('pint')
-
 import pint
 
 import pandas as pd

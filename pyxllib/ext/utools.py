@@ -6,12 +6,6 @@
 
 """ 专门给utools的快捷命令扩展的一系列python工具库
 """
-from pyxllib.prog.pupil import check_install_package
-
-check_install_package('fire')
-check_install_package('humanfriendly')
-check_install_package('pandas')
-check_install_package('pyautogui', 'PyAutoGui')  # 其实pip install不区分大小写，不过官方这里安装是驼峰名
 
 import datetime
 import json

@@ -10,10 +10,6 @@
 半定制化的功能组件
 """
 
-from pyxllib.prog.pupil import check_install_package
-
-check_install_package('joblib')
-
 from collections import defaultdict, Counter
 import datetime
 import re

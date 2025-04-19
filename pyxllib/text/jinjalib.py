@@ -4,11 +4,6 @@
 # @Email  : 877362867@qq.com
 # @Date   : 2024/05/26
 
-from pyxllib.prog.pupil import check_install_package
-
-# 一个xpath解析库
-check_install_package('jinja2')
-
 import jinja2
 from jinja2 import Template, Environment
 

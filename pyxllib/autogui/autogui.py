@@ -19,13 +19,8 @@ if sys.platform == 'win32':
     import pyautogui
     import win32gui
 
-try:
-    import pyscreeze  # NOQA pyautogui安装的时候会自动安装依赖的pyscreeze
-except ModuleNotFoundError:
-    pass
-
 from pyxllib.prog.newbie import first_nonnone, round_int
-from pyxllib.prog.pupil import xlwait, DictTool, check_install_package
+from pyxllib.prog.pupil import xlwait, DictTool
 from pyxllib.prog.specialist import TicToc
 from pyxllib.algo.geo import ComputeIou, ltrb2xywh, xywh2ltrb, ltrb2polygon
 from pyxllib.algo.shapelylib import ShapelyPolygon
@@ -646,7 +641,6 @@ def type_text(text):
 
     这种需求一般也可以用剪切板实现，但是剪切板不够独立轻量，可能会有意想不到的副作用
     """
-    check_install_package('pynput')
     from pynput.keyboard import Controller
 
     keyboard = Controller()

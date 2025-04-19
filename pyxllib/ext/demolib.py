@@ -15,7 +15,12 @@ test：测试代码，注重分析功能稳定性
 perf：性能测试，注重分析代码的运行效率
 """
 
-from pyxllib.xl import *
+import re
+
+from pyxllib.prog.pupil import dprint, dformat
+from pyxllib.prog.specialist import Timer, TicToc
+from pyxllib.file.pupil import getfiles
+from pyxllib.file.specialist import mygetfiles
 
 ____stdlib = """
 标准库相关

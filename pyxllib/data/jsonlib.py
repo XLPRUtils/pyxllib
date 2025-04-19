@@ -6,10 +6,6 @@
 
 from collections import Counter
 
-from pyxllib.prog.pupil import check_install_package
-
-check_install_package('jmespath')
-
 import jmespath
 
 
