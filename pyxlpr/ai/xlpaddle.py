@@ -357,8 +357,6 @@ class VisualAcc(paddle.callbacks.Callback):
         :param reset: 是否重置目录
         :param save_model_with_input: 默认不存储模型结构
         """
-        from pyxllib.prog.pupil import check_install_package
-        check_install_package('visualdl')
         from visualdl import LogWriter
 
         super().__init__()

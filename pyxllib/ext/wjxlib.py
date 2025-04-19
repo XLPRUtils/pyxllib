@@ -21,19 +21,22 @@ class WjxWeb(DpWebBase):
     """ 问卷星网页的爬虫 """
 
     def __init__(self, url=None):
-        super().__init__(url or 'https://www.wjx.cn')
+        super().__init__('https://www.wjx.cn/login.aspx')
         self.login()
+        self.tab.get(url)
 
     def login(self):
         tab = self.tab
 
         if tab.url.startswith('https://www.wjx.cn/wjx/activitystat/resultlimit.aspx'):
-            tab('tag:a@@text():登录').click()
+            tab('t:a@@text():登录').click()
 
-        if tab.url.lower().startswith('https://www.wjx.cn/login.aspx'):
-            tab('tag:input@@name=UserName').input(os.getenv('WJX_USERNAME'), clear=True)
-            tab('tag:input@@name=Password').input(os.getenv('WJX_PASSWORD'), clear=True)
-            tab('tag:input@@type=submit').click()
+        if tab.url.startswith('https://www.wjx.cn/login.aspx'):
+            tab('t:input@@name=UserName').input(os.getenv('WJX_USERNAME'), clear=True)
+            tab('t:input@@name=Password').input(os.getenv('WJX_PASSWORD'), clear=True)
+            tab('t:label@@for=RememberMe').click()
+            time.sleep(2)
+            tab('t:input@@type=submit').click()
 
     def get_page_num(self):
         """

@@ -4,13 +4,6 @@
 # @Email  : 877362867@qq.com
 # @Date   : 2024/05/29
 
-from pyxllib.prog.pupil import check_install_package
-
-# cachetools，通用缓存工具，适用范围更广
-check_install_package('cachetools')
-# cached-property，类属性特用工具，相对比较简洁些
-check_install_package('cached_property', 'cached-property')
-
 # 对于普通函数，一般用lru_cache即可
 from functools import lru_cache
 import threading
@@ -37,6 +30,7 @@ def xlcache(maxsize=128, *, ttl=None, lock=None, property=False):
         而是外部再加一层@property，不然IDE会识别不了这是一个property，影响开发
 
     """
+
     def decorator(func):
         if property:
             if ttl is not None:

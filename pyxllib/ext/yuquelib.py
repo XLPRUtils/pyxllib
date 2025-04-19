@@ -3,23 +3,28 @@
 # @Author : 陈坤泽
 # @Email  : 877362867@qq.com
 # @Date   : 2024/01/01
+
+import os
 import html
 import re
 import time
 from enum import Enum
+import pprint
+import json
 
 import requests
 import urllib.parse
+import pandas as pd
 
 from fastcore.basics import GetAttr
-from pprint import pprint
+from loguru import logger
 
-from pyxllib.xl import *
-from pyxllib.algo.stat import *
 from pyxllib.prog.newbie import SingletonForEveryInitArgs
-from pyxllib.text.pupil import UrlQueryBuilder
+from pyxllib.prog.pupil import run_once
+from pyxllib.text.pupil import UrlQueryBuilder, shorten
 from pyxllib.text.nestenv import NestEnv
 from pyxllib.text.xmllib import BeautifulSoup, XlBs4Tag
+from pyxllib.file.specialist import refinepath, XlPath
 from pyxllib.cv.xlcvlib import xlcv
 
 

@@ -4,9 +4,6 @@
 # @Email  : 877362867@qq.com
 # @Date   : 2020/05/30 20:37
 
-from pyxllib.prog.pupil import check_install_package
-
-check_install_package('filetype')
 
 from typing import Callable, Any
 import io
@@ -24,7 +21,6 @@ import math
 from itertools import islice
 import datetime
 
-# import chardet
 import charset_normalizer
 import qiniu
 import requests

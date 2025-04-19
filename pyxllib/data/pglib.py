@@ -8,25 +8,9 @@
 针对PostgreSQL封装的工具
 """
 
-import os
 import sys
 
-from pyxllib.prog.pupil import check_install_package
-from pyxllib.file.specialist import XlPath, ensure_localdir
-
-# 使用binary安装，好像就不需要自己配置依赖了
-# if sys.platform == 'win32':
-#     # windows系统中pg的默认安装位置
-#     # https://www.yuque.com/xlpr/pyxllib/install_psycopg
-#     pgdll_dir = XlPath('C:/Program Files/PostgreSQL/14/bin')
-#     if not pgdll_dir.is_dir():  # 换一个自定义目录继续检查
-#         pgdll_dir = XlPath.userdir() / '.xlpr/pgdll'
-#     if not pgdll_dir.is_dir():
-#         print('没有PostgreSQL对应的dll文件，自动下载：')
-#         ensure_localdir(pgdll_dir, 'https://xmutpriu.com/download/pgdll_v14.zip')
-#     os.environ['PATH'] += ';' + pgdll_dir.as_posix()
-
-check_install_package('psycopg', 'psycopg[binary]')
+from pyxllib.file.specialist import XlPath
 
 import io
 from collections import Counter

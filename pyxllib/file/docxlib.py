@@ -4,10 +4,6 @@
 # @Email  : 877362867@qq.com
 # @Date   : 2021/08/31 09:56
 
-from pyxllib.prog.pupil import check_install_package
-
-check_install_package('win32com', 'pywin32')
-check_install_package('docx', 'python-docx')
 
 import json
 import os

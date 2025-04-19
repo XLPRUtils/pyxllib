@@ -4,9 +4,6 @@
 # @Email  : 877362867@qq.com
 # @Date   : 2020/06/02 16:06
 
-from pyxllib.prog.pupil import check_install_package
-
-check_install_package('fitz', 'PyMuPdf>=1.18.17')
 
 import json
 import os
@@ -91,7 +88,6 @@ class FitzDoc:
 
     def to_docx(self, docx_file=None):
         """ pdf转docx """
-        check_install_package('pdf2docx')
         from pdf2docx import parse
 
         pdf_file = self.src_file

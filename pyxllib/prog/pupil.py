@@ -386,6 +386,17 @@ class EnchantBase:
         raise NotImplementedError
 
 
+def check_package(package, speccal_install_name=None):
+    """ 250418周五16:36，check_install_package的简化版本，只检查、报错，提示安装依赖，但不自动进行安装
+    """
+    try:
+        __import__(package)
+    except ModuleNotFoundError:
+        cmds = [sys.executable, "-m", "pip", "install"]
+        cmds.append(speccal_install_name if speccal_install_name else package)
+        raise ModuleNotFoundError(f'缺少依赖包：{package}，请自行安装扩展依赖：{cmds}\n')
+
+
 def check_install_package(package, speccal_install_name=None, *, user=False):
     """ https://stackoverflow.com/questions/12332975/installing-python-module-within-code
 

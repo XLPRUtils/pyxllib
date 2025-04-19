@@ -4,6 +4,8 @@
 # @Email  : 877362867@qq.com
 # @Date   : 2024/10/30
 
+# from pyxllib.prog.pupil import check_package
+# check_package('envariable')
 
 import os
 import json

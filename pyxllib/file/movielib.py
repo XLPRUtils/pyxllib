@@ -4,10 +4,6 @@
 # @Email  : 877362867@qq.com
 # @Date   : 2022/02/25 17:54
 
-from pyxllib.prog.pupil import check_install_package
-
-check_install_package('moviepy')
-
 import cv2
 from moviepy.editor import VideoFileClip
 from moviepy.editor import cvsecs

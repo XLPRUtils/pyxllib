@@ -4,9 +4,6 @@
 # @Email  : 877362867@qq.com
 # @Date   : 2021/06/06 16:57
 
-from pyxllib.prog.pupil import check_install_package
-
-check_install_package('ahocorasick', 'pyahocorasick')
 
 from collections import Counter
 import re

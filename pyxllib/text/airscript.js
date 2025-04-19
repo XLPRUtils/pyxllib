@@ -742,3 +742,13 @@ function extendFormatConditionsToFullColumns(ws) {
         }
     }
 }
+
+function 新建一条条件格式() {
+    const ws = ActiveSheet
+    const rng = ws.UsedRange
+
+    const formatConditions = rng.FormatConditions
+    // B列重复值高亮
+    const newCondition = formatConditions.Add(st.XlFormatConditionType.xlCellValue, st.XlFormatConditionOperator.xlEqual, '=B2')
+
+}
