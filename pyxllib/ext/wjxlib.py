@@ -32,11 +32,15 @@ class WjxWeb(DpWebBase):
             tab('t:a@@text():登录').click()
 
         if tab.url.startswith('https://www.wjx.cn/login.aspx'):
+            time.sleep(2)
             tab('t:input@@name=UserName').input(os.getenv('WJX_USERNAME'), clear=True)
+            time.sleep(2)
             tab('t:input@@name=Password').input(os.getenv('WJX_PASSWORD'), clear=True)
+            time.sleep(2)
             tab('t:label@@for=RememberMe').click()
             time.sleep(2)
             tab('t:input@@type=submit').click()
+            time.sleep(10)
 
     def get_page_num(self):
         """

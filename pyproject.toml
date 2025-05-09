@@ -1,6 +1,6 @@
 [project]
 name = "pyxllib"
-version = "3.202"
+version = "3.203"
 description = "厦门理工模式识别团队通用python代码工具库"
 readme = "README.md"
 license = "Apache-2.0"
@@ -60,8 +60,8 @@ file = [ # 文件功能需要的一些特殊工具
     "pyyaml",             # yaml文件处理
 ]
 ext_file = [
-    "PyMuPdf>=1.18.17", # pdf处理工具，import fitz
-    "pdf2docx",
+    # "PyMuPdf>=1.18.17", # pdf处理工具，import fitz
+    # "pdf2docx",
     "python-docx",      # docxlib的依赖，import docx
     "moviepy",          # 视频处理
     "gitpython",        # from git import Repo，git项目管理
@@ -130,6 +130,7 @@ xlserver = [ # 如果要开后端服务相关
     # 后端服务需要用到pyxllib.prog.multiprogs，其中有些依赖
     "croniter",    # 支持cron表达式的定时处理
     "APScheduler", # 调度能力
+    "python-multipart",  # 好像fastapi会依赖的一个底层
 ]
 unix = [ # pyxllib.ext.unixlib依赖的包
     "paramiko",
