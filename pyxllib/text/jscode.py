@@ -816,7 +816,7 @@ def extract_definitions_with_comments(js_code):
     ( \b(?:var|let|const|function|class)\b\s+ )
     # 第3组：变量名或函数名
     (\w+).*?
-    # 第4组：不以{结尾的行，或者已{结尾的行且后续有配对的}
+    # 第4组：不以{结尾的行，或者以{结尾的行且后续有配对的}
     ( (?:[^\{]\n) | (?:\{[\s\S]+?(?<=\n\}\n)) )
     """
     matches = re.finditer(pattern, js_code, flags=re.VERBOSE)

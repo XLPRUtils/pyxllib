@@ -23,18 +23,38 @@ function __main__() {
 // return res
 
 
-function __1_算法工具() {
+function __0_prog() {
 
+}
+
+// 安全转换为数字类型
+function safeToNumber(value) {
+    if (value === null || value === undefined || value === '') return NaN
+    const num = Number(value)
+    return isNaN(num) ? NaN : num
+}
+
+// 获取数组中的有效数字
+function getValidNumbers(array) {
+    return array
+        .map(safeToNumber)
+        .filter(num => !isNaN(num))
+}
+
+// 获取数组中的最大值
+function getMaxValue(array) {
+    const validNumbers = getValidNumbers(array)
+    return validNumbers.length > 0 ? Math.max(...validNumbers) : undefined
 }
 
 function levenshteinDistance(a, b) {
     const matrix = []
 
     let i
-    for (i = 0; i <= b.length; i++) matrix[i] = [i];
+    for (i = 0; i <= b.length; i++) matrix[i] = [i]
 
     let j
-    for (j = 0; j <= a.length; j++) matrix[0][j] = j;
+    for (j = 0; j <= a.length; j++) matrix[0][j] = j
 
     for (i = 1; i <= b.length; i++) {
         for (j = 1; j <= a.length; j++) {
@@ -84,7 +104,7 @@ function findTopKMatches(target, candidates, k) {
     return k ? results.slice(0, k) : results
 }
 
-function __2_定位工具() {
+function __1_定位工具() {
 
 }
 
@@ -301,7 +321,7 @@ function locateTableRange2(ws, dataRow = [0, 0], fields = []) {
 }
 
 
-function __3_json数据导入导出() {
+function __2_json数据导入导出() {
 
 }
 
@@ -462,7 +482,7 @@ function writeArrToSheet(arr, startCel) {
  * 插入新行并复制格式，兼容jsa1.0和2.0，并可选择格式复制方向
  * @param {number} dataStartRow - 数据起始行
  * @param {number} insertCount - 需要插入的行数
- * @param {string} direction - 复制格式的方向，支持 'xlUp' 或 'xlDown'
+ * @param {string} direction - 复制格式的方向，支持 'xlUp'（往上复制，表示基于下面一行的格式） 或 'xlDown'（与xlUp相反）
  * @param {object} ws - 工作表对象，默认为ActiveSheet
  */
 function insertRowsWithFormat(dataStartRow, insertCount, ws = ActiveSheet, direction = 'xlUp') {
@@ -478,12 +498,13 @@ function insertRowsWithFormat(dataStartRow, insertCount, ws = ActiveSheet, direc
         }
     } else {
         // 2.0的insert才能传参。1.0或默认不传参相当于是xlDown的效果，指新插入的行是拷贝的上面一行的格式。
+        direction = direction === 'xlUp' ? xlUp : xlDown
         ws.Rows(insertRange).Insert(direction)
     }
 }
 
 
-function insertNewDataWithHeaders(jsonData, headerRow = 1, dataStartRow = 2, ws = ActiveSheet) {
+function insertNewDataWithHeaders(jsonData, headerRow = 1, dataStartRow = 2, ws = ActiveSheet, direction = 'xlUp') {
     // 1 预处理 index，将其合并到 columns 和 data
     let columns = jsonData.columns || []
     let data = jsonData.data || []
@@ -518,7 +539,7 @@ function insertNewDataWithHeaders(jsonData, headerRow = 1, dataStartRow = 2, ws 
     }
 
     // 3 插入新行
-    insertRowsWithFormat(dataStartRow, data.length, ws)
+    insertRowsWithFormat(dataStartRow, data.length, ws, direction)
     for (let i = 0; i < data.length; i++) {
         const rowData = data[i]
         for (let j = 0; j < columns.length; j++) {
@@ -529,7 +550,7 @@ function insertNewDataWithHeaders(jsonData, headerRow = 1, dataStartRow = 2, ws 
     }
 }
 
-function __4_py服务工具() {
+function __3_py服务工具() {
 
 }
 
@@ -574,7 +595,7 @@ function getPyTaskResult(taskId, retries = 1, host = JSA_POST_DEFAULT_HOST, dela
     }
 }
 
-function __5_日期处理() {
+function __4_日期处理() {
     /*
     文档：https://www.yuque.com/xlpr/pyxllib/zdgppdtls3a15nhg
     */
@@ -671,7 +692,7 @@ function formatLocalDatetime(date = new Date()) {
     return `${year}/${month}/${day} ${hour}:${minute}:${second}`
 }
 
-function __6_其他() {
+function __5_其他() {
 
 }
 
