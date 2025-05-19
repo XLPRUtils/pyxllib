@@ -835,7 +835,11 @@ def find_identifiers_in_code(code):
     用基于esprima的语法树实现的方式，遇到不是那么标准的代码的时候，太多问题和局限了
     还会多此一举过滤掉注释部分等
     """
-    return set(re.findall(r'\b(\w+)\b', code))
+    keys = set(re.findall(r'\b(\w+)\b', code))
+    # 如果有主函数，要特殊补充
+    if re.search(r'\bfunction\s+main\(', code):
+        keys.add('sanitizeForJSON')
+    return keys
 
 
 def find_direct_dependencies(definitions):
@@ -910,6 +914,19 @@ def assemble_dependencies_from_jstools(cur_code, jstools=None, place_tail=False,
         required_code.insert(0, cur_code)
     else:
         required_code.append(cur_code)
+
+    # 4 我的主函数特殊框架
+    template = """function __y_main() {
+
+}
+
+const res = sanitizeForJSON(main())
+console.log(res)
+// noinspection JSAnnotator
+return res
+"""
+    if re.search(r'\bfunction\s+main\(', cur_code):
+        required_code.append(template)
 
     return "\n\n".join(required_code)
 

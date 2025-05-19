@@ -1050,6 +1050,28 @@ class LakeDoc(GetAttr, XlBs4Tag):
         for index in sorted(to_remove, reverse=True):
             blocks[index].tag.decompose()
 
+    def remove_empty_lines_at_start(self):
+        """ 删除文档开头的空行，最多保留一个 """
+        blocks = self.get_blocks()
+        if not blocks:
+            return
+
+        # 找到第一个非空行的索引
+        first_non_empty = None
+        for idx, b in enumerate(blocks):
+            if not b.is_empty_line():
+                first_non_empty = idx
+                break
+
+        # 如果没有非空行，直接返回
+        if first_non_empty is None:
+            return
+
+        # 删除第一个非空行之前的所有空行
+        for i in range(first_non_empty):
+            if blocks[i].is_empty_line():
+                blocks[i].tag.decompose()
+
     def __part系列功能(self):
         """ 偏个人向笔记风格的定制功能 """
         pass

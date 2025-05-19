@@ -2,26 +2,23 @@
 function __main__() {
     // 1 这里填上api、智能匹配要支持的函数接口清单
     const funcsMap = {
-        findCol, writeArrToSheet, locateTableRange, packTableDataFields,
+        findCol,
+        writeArrToSheet,
+        locateTableRange,
+        packTableDataFields,
     }
 
     // 2 api：py-jsa脚本令牌模式永远是最高匹配优先级
     if (Context.argv.funcName) return funcsMap[Context.argv.funcName](...Context.argv.args)
 
     // 3 自定义：有需要可以打开这部分代码，手动设计要执行的功能，并使用return结束不用进入第4部分
-    // return 自动填充考勤表日期()
+    // return sanitizeForJSON()
 
     // 4 智能匹配，优先级：可以在第1个字符串自定义要运行的功能 > 选中单元格指定函数名 > 选中单元格所在第1列是触发函数名
     let funcName = '' || Selection.Cells(1, 1).Value2
     if (!funcsMap[funcName]) funcName = ActiveSheet.Cells(Selection.Row, 1)
     if (funcsMap[funcName]) return funcsMap[funcName]()
 }
-
-// 这段一般要手动放到代码的最后面
-// const res = sanitizeForJSON(main())
-// console.log(res)
-// return res
-
 
 function __0_prog() {
 
@@ -764,7 +761,8 @@ function extendFormatConditionsToFullColumns(ws) {
     }
 }
 
-function 新建一条条件格式() {
+
+function 测试中_新建一条条件格式() {
     const ws = ActiveSheet
     const rng = ws.UsedRange
 
@@ -772,4 +770,151 @@ function 新建一条条件格式() {
     // B列重复值高亮
     const newCondition = formatConditions.Add(st.XlFormatConditionType.xlCellValue, st.XlFormatConditionOperator.xlEqual, '=B2')
 
+}
+
+function __5_资源描述计算() {
+    // 我自己原创的一套资源描述机制、应用
+}
+
+// 简单的高精度计算类
+class SimpleDecimal {
+    constructor(value) {
+        this.value = typeof value === 'string' ? value : String(value)
+    }
+
+    plus(other) {
+        const otherValue = other instanceof SimpleDecimal ? other.value : String(other)
+        const result = (parseFloat(this.value) + parseFloat(otherValue)).toFixed(10)
+        return new SimpleDecimal(parseFloat(result))
+    }
+
+    minus(other) {
+        const otherValue = other instanceof SimpleDecimal ? other.value : String(other);
+        const result = (parseFloat(this.value) - parseFloat(otherValue)).toFixed(10)
+        return new SimpleDecimal(parseFloat(result))
+    }
+
+    isZero() {
+        return Math.abs(parseFloat(this.value)) < 1e-10
+    }
+
+    isPositive() {
+        return parseFloat(this.value) > 0
+    }
+
+    toString() {
+        return this.value
+    }
+}
+
+/**
+ * 解析物品描述字符串，返回物品及其数量的字典 (使用高精度计算)
+ * @param desc 物品描述，如"招募令1,三品元气宝箱1.5,灵石120,玄晶120" (支持小数数量)
+ * @returns {Object} 返回格式 {"招募令": SimpleDecimal(1), "三品元气宝箱": SimpleDecimal(1.5), ...}
+ */
+function 解析物资清单(desc) {
+    if (!desc) return {}
+
+    return desc.split(',').reduce((items, item) => {
+        // 跳过空项
+        if (!item.trim()) return items
+
+        const m = item.match(/^(.+?)([+-]?\d+\.?\d*)?$/)
+        if (!m) {
+            const itemName = item.trim()
+            items[itemName] = items[itemName]
+                ? items[itemName].plus(1)
+                : new SimpleDecimal(1)
+        } else {
+            const itemName = m[1].trim()
+            const countStr = m[2] ? m[2].trim() : '1'
+            const count = new SimpleDecimal(countStr)
+            items[itemName] = items[itemName]
+                ? items[itemName].plus(count)
+                : new SimpleDecimal(count)
+        }
+        return items
+    }, {})
+}
+
+/**
+ * 资源清单减法操作，支持高精度计算
+ * @param desc1 第一个资源清单描述
+ * @param desc2 第二个资源清单描述 (要减去的)
+ * @returns {string} 减法结果的字符串表示
+ * 示例：'a1,b2,c3'-'b1,c1'='a,b,c2'
+ */
+function 物资清单相减(desc1, desc2) {
+    const items1 = 解析物资清单(desc1)
+    const items2 = 解析物资清单(desc2)
+    const result = {}
+
+    // 添加第一个清单的项目
+    for (const item in items1) {
+        result[item] = items1[item] // 已经是 SimpleDecimal 实例
+    }
+
+    // 减去第二个清单的项目
+    for (const item in items2) {
+        if (result[item]) {
+            result[item] = result[item].minus(items2[item])
+        } else {
+            // 如果第一个清单没有此项，则添加负值
+            result[item] = new SimpleDecimal(0).minus(items2[item])
+        }
+    }
+
+    // 构建结果字符串，过滤掉数量为0的项目
+    return Object.entries(result)
+        .filter(([_, count]) => !count.isZero())
+        .map(([item, count]) => {
+            // 如果数量等于1，则省略数量显示
+            if (count.toString() === '1') {
+                return item
+            } else {
+                return `${item}${count}`
+            }
+        })
+        .join(',')
+}
+
+/**
+ * 资源清单加法操作，支持高精度计算
+ * @param desc1 第一个资源清单描述
+ * @param desc2 第二个资源清单描述 (要加上的)
+ * @returns {string} 加法结果的字符串表示
+ * 示例：'a,b2,c3'+'b,c'='a,b3,c4'
+ */
+function 物资清单相加(desc1, desc2) {
+    const items1 = 解析物资清单(desc1)
+    const items2 = 解析物资清单(desc2)
+    const result = {}
+
+    // 添加第一个清单的项目
+    for (const item in items1) {
+        result[item] = items1[item] // 已经是 SimpleDecimal 实例
+    }
+
+    // 加上第二个清单的项目
+    for (const item in items2) {
+        if (result[item]) {
+            result[item] = result[item].plus(items2[item])
+        } else {
+            // 如果第一个清单没有此项，则直接添加
+            result[item] = items2[item]
+        }
+    }
+
+    // 构建结果字符串，过滤掉数量为0的项目
+    return Object.entries(result)
+        .filter(([_, count]) => !count.isZero())
+        .map(([item, count]) => {
+            // 如果数量等于1，则省略数量显示
+            if (count.toString() === '1') {
+                return item
+            } else {
+                return `${item}${count}`
+            }
+        })
+        .join(',')
 }
