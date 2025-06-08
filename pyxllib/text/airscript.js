@@ -187,9 +187,13 @@ function as1_locateTableRange(ws, dataRow = [0, 0], fields = []) {
     ws = ur.Worksheet
     // dataRow可以输入单个数值
     if (typeof dataRow === 'number') dataRow = [dataRow, 0]
+    // let rows = {
+    //     start: dataRow[0] === 0 ? ur.Row + 1 : dataRow[0],
+    //     end: dataRow[1] === 0 ? ur.Row + ur.Rows.Count - 1 : dataRow[1]
+    // }
     let rows = {
-        start: dataRow[0] === 0 ? ur.Row + 1 : dataRow[0],
-        end: dataRow[1] === 0 ? ur.Row + ur.Rows.Count - 1 : dataRow[1]
+        start: dataRow[0],
+        end: dataRow[1]
     }
 
     // 2 获取列名对应的列号
@@ -217,6 +221,10 @@ function as1_locateTableRange(ws, dataRow = [0, 0], fields = []) {
         rows.end = cel.Row
         if (isEmpty(cel)) rows.end = cel.End(xlUp).Row
     }
+
+    // 默认值
+    if  (rows.start === 0) rows.start = ur.Row + 1
+    if (rows.end === 0) rows.end = ur.Row + ur.Rows.Count - 1
 
     // 4 转成ur里的相对行号
     rows.start -= ur.Row - 1
@@ -689,7 +697,64 @@ function formatLocalDatetime(date = new Date()) {
     return `${year}/${month}/${day} ${hour}:${minute}:${second}`
 }
 
-function __5_其他() {
+function __5_颜色() {
+
+}
+
+/**
+ * @description 计算文本的哈希颜色
+ * @param {string} text 要计算颜色的文本
+ * @param {number} light 0 不改变颜色，0~1，增加亮度权重，-1~0，增加暗度权重
+ * 参考资料：cel.Font.Color 设置前景色，cel.Interior.Color 设置背景色
+ */
+function textHashToColor(text, light = 0) {
+    // 1 计算哈希值
+    const hash = Array.from(text).reduce((acc, char) =>
+        ((acc << 5) - acc + char.charCodeAt(0)) | 0, 0)
+
+    if (hash === 0) return -1
+
+    // 2 提取RGB组件
+    let [r, g, b] = [
+        (hash & 0xFF0000) >> 16,
+        (hash & 0x00FF00) >> 8,
+        hash & 0x0000FF
+    ]
+
+    // 3 调整亮度
+    if (light !== 0) {
+        const adjust = (value) => light > 0
+            ? (1 - light) * value + light * 255
+            : (1 + light) * value;
+
+        [r, g, b] = [r, g, b].map(adjust).map(Math.round)
+    }
+
+    return RGB(r, g, b)
+}
+
+function 设置哈希前景色(rng, light = 0) {
+    rng = rng || Selection
+    for (let i = 1; i <= rng.Rows.Count; i++) {
+        for (let j = 1; j <= rng.Columns.Count; j++) {
+            let cell = rng.Cells(i, j)
+            cell.Font.Color = textHashToColor(cell.Text, light)
+        }
+    }
+}
+
+function 设置哈希背景色(rng, light = 0) {
+    rng = rng || Selection
+    for (let i = 1; i <= rng.Rows.Count; i++) {
+        for (let j = 1; j <= rng.Columns.Count; j++) {
+            let cell = rng.Cells(i, j)
+            cell.Interior.Color = textHashToColor(cell.Text, light)
+        }
+    }
+}
+
+
+function __6_其他() {
 
 }
 
@@ -729,8 +794,8 @@ function sanitizeForJSON(data, depth = 1) {
 /**
  * 为单元格添加或删除超链接
  * @param {Object} cel - 单元格对象
- * @param {string} [link] - 超链接地址（可选）。如果不提供，则删除超链接。
- * @param {string} [text] - 显示文本（可选）。默认使用单元格当前内容，如果为空则显示链接地址。
+ * @param {string} [link] - 超链接地址。如果不提供，则删除超链接。
+ * @param {string} [text] - 显示文本。默认使用单元格当前内容，如果为空则显示链接地址。
  */
 function setHyperlink(cel, link, text, screenTip) {
     // 必须清空，否则如果在旧的url基础上操作，实测会有bug

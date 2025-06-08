@@ -160,6 +160,7 @@ class Browser(Explorer):
                     app = 'msedge'
                 else:  # 默认使用谷歌。之前试过explorer不行~~
                     app = 'C:/Program Files/Google/Chrome/Application/chrome.exe'
+                    # app = r"C:\Users\13255\AppData\Local\MyChrome\Chrome\Application\chrone.exe"
             elif platform.system() == 'Linux':  # Linux系统（包括Ubuntu）
                 # 可以在这里添加对应的Unix-like系统浏览器的命令行名称
                 # 这里默认设置为 'google-chrome'，如果你想使用其他的浏览器，例如Firefox，可以修改为 'firefox'
