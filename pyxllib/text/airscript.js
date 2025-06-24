@@ -71,7 +71,7 @@ function levenshteinSimilarity(a, b) {
 }
 
 /**
- * @description 找到与目标字符串匹配度最高的前K个结果。
+ * 找到与目标字符串匹配度最高的前K个结果。
  * @param {string} target 目标字符串。
  * @param {Array|Function} candidates 候选集合，有以下三种格式：
  *     1. 字符串数组，例如 ["abc", "def"]。
@@ -100,6 +100,38 @@ function findTopKMatches(target, candidates, k) {
         .sort((a, b) => b[2] - a[2])
     return k ? results.slice(0, k) : results
 }
+
+/**
+ * 设置互斥锁，主要用在使用js-py的场景，确保触发的py程序只有一个
+ * @param {Range} cel 单元格对象
+ * @returns {string} 如果已经有锁，返回undefined；否则返回新设置的锁
+ */
+function setMutexLock(cel) {
+    if (cel.Text.startsWith('已启动程序: ')) return
+    cel.Value2 = '已启动程序: ' + formatLocalDatetime(new Date())
+    return cel.Text
+}
+
+
+/** 
+ * 使用js-py同步的时候，一般是js端释放锁，异步则是py端释放锁
+ * @param {Range|string} celOrSheetName 单元格对象或工作表名
+ * @param {string} argName 要解锁的参数名
+ * @param {number} rowOffset 相对于argCel的行偏移量，默认参数值在参数名下面
+ * @param {number} colOffset 相对于argCel的列偏移量
+ */
+function releaseMutexLock(celOrSheetName, argName, rowOffset=1, colOffset=0) {
+    let cel
+    if (typeof celOrSheetName === 'string') {
+        cel = findCel(argName, celOrSheetName)
+        if (cel === undefined) throw new Error(`未找到参数名${argName}`)
+        cel = cel.Offset(rowOffset, colOffset)
+    } else {
+        cel = celOrSheetName
+    }
+    cel.Value2 = '待机中，可启动程序'
+}
+
 
 function __1_定位工具() {
 
