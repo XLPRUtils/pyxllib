@@ -528,7 +528,7 @@ class MultiProgramLauncher:
         :param str|list extcmds:
         """
         if locations is None:
-            locations = f'/api/{prog.split('.')[-1]}'
+            locations = f'/api/{prog.split(".")[-1]}'
         self.add_program_python_module(prog,
                                        extcmds,
                                        ports=ports, locations=locations,

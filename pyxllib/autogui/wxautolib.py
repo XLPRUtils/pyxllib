@@ -39,7 +39,7 @@ class WeChatSingletonLock:
         self.lock.release()
 
 
-def wechat_lock_send(user, text=None, files=None, *, timeout=-1):
+def wechat_lock_send(user, text=None, files=None, url=None, *, timeout=-1, **kwargs):
     """ 使用全局唯一单例锁，确保同一时间仅有一个微信自动化程序在操作 """
     with WeChatSingletonLock(timeout) as we:
         # 241223周一12:27，今天可被这个默认2秒坑惨了，往错误群一直发骚扰消息
@@ -50,9 +50,14 @@ def wechat_lock_send(user, text=None, files=None, *, timeout=-1):
             raise ValueError(f'无法找到用户：{user}')
 
         if text:
-            we.SendMsg(text, user)
+            if kwargs.get('at') == '所有人':
+                we.AtAll(text, user)
+            else:
+                we.SendMsg(text, user, **kwargs)
         if files:
-            we.SendFiles(files, user)
+            we.SendFiles(files, user, **kwargs)
+        if url:
+            we.SendUrlCard(url, user)
 
 
 def wechat_handler(message):

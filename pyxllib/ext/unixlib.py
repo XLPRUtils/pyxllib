@@ -415,7 +415,7 @@ class XlSSHClient(paramiko.SSHClient):
             remote_path = self.__remote_dir(local_path, None) / local_path.name
             local_dir = local_path.parent
         else:
-            remote_path = self.Path(remote_path.as_posix())
+            remote_path = self.Path(XlPath(remote_path).as_posix())
             local_dir = self.__local_dir(remote_path, local_dir)
             local_path = local_dir / remote_path.name
 
