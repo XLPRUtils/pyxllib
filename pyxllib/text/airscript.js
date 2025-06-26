@@ -5,7 +5,7 @@ function __main__() {
         findCol,
         writeArrToSheet,
         locateTableRange,
-        packTableDataFields,
+        sqlSelect,
     }
 
     // 2 api：py-jsa脚本令牌模式永远是最高匹配优先级
@@ -369,13 +369,13 @@ function __2_json数据导入导出() {
  * @param dataRow 数据起始行，默认[0, 0]
  * @param filterEmptyRows 是否过滤空行，默认true
  * @param useTextFormat 是否根据单元格格式返回Text格式，默认true
- * @return {'名称': [x1, x2, ...], '标签': [y1, y2, ...]}
+ * @return dict {'名称': [x1, x2, ...], '标签': [y1, y2, ...]}
  */
-// 使用示例：packTableDataFields('料理', ['名称', '标签']
+// 使用示例：sqlSelect('料理', ['名称', '标签']
 // todo fields能否不输入，默认获取所有字段数据（此时需要给出表头所在行）
 // todo 多级表头类的数据怎么处理？
 // todo 支持一定的筛选功能？避免表格太大时要传输的数据过多。
-function packTableDataFields(ws, fields, dataRow = [0, 0], filterEmptyRows = true, useTextFormat = true) {
+function sqlSelect(ws, fields, dataRow = [0, 0], filterEmptyRows = true, useTextFormat = true) {
     // 1 确定数据范围和字段列号映射
     const [ur, rows, cols] = locateTableRange(ws, dataRow, fields)
 
@@ -390,7 +390,7 @@ function packTableDataFields(ws, fields, dataRow = [0, 0], filterEmptyRows = tru
         Object.entries(cols).forEach(([field, col]) => {
             let firstCell = ur.Cells(rows.start, col)
             let format = firstCell.NumberFormat
-            formatMap[field] = format !== 'G/通用格式' ? 'Text' : 'Value2'
+            formatMap[field] = format !== 'G/通用格式' ? 'Text' : 'Value2'  // 默认使用Text格式
         })
     }
 
@@ -416,10 +416,10 @@ function packTableDataFields(ws, fields, dataRow = [0, 0], filterEmptyRows = tru
     return fieldsData
 }
 
-// 和packTableDataFields仅差在返回的数据格式上，这个版本的返回值是主流的jsonl格式
+// 和sqlSelect仅差在返回的数据格式上，这个版本的返回值是主流的jsonl格式
 // 返回格式：list[dict]， [{'名称': x1, '标签': y1}, {'名称': x2, '标签': y2}, ...]
-function packTableDataList(ws, fields, dataRow, filterEmptyRows = true) {
-    const fieldsData = packTableDataFields(ws, fields, dataRow, filterEmptyRows)
+function sqlSelectList(ws, fields, dataRow, filterEmptyRows = true) {
+    const fieldsData = sqlSelect(ws, fields, dataRow, filterEmptyRows)
     const rowCount = fieldsData[fields[0]].length
     const listData = []
 
@@ -434,7 +434,7 @@ function packTableDataList(ws, fields, dataRow, filterEmptyRows = true) {
     return listData
 }
 
-function clearSheetData(headerRow = 1, dataStartRow = 2, ws = ActiveSheet) {
+function sqlDelete(headerRow = 1, dataStartRow = 2, ws = ActiveSheet) {
     let headerStartRow, headerEndRow, dataEndRow
 
     // 检查 headerRow 参数，-1 表示不处理表头
