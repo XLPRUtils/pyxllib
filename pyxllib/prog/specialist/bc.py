@@ -176,16 +176,21 @@ def filetext_replace(files, func, *,
     :param write: 是否原地修改文件内容进行保存
     :param if_exists: 是否进行备份，详见writefile里的参数文件
     :return: 满足条件的文件清单
+
+    todo 这是一个很旧的函数功能，有待重构优化
     """
     ls = []
     total = 0
     for f in filesmatch(files):
+        if '.venv/' in f:
+            continue
+
         # if 'A4-Exam' in f:
         #     continue
         total += 1
         if total < start:
             continue
-        s0 = File(f).read()
+        s0 = XlPath(f).read_text()
         s1 = func(s0)
         if s0 != s1:
             match = len(ls) + 1

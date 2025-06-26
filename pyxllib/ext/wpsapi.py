@@ -19,12 +19,12 @@ class WpsOnlineBook:
     def __1_基础功能(self):
         pass
 
-    def __init__(self, file_id, script_id=None, *, token=None):
+    def __init__(self, book_id, script_id=None, *, token=None):
         self.headers = {
             'Content-Type': "application/json",
             'AirScript-Token': token or os.getenv('WPS_SCRIPT_TOKEN', ''),
         }
-        self.file_id = file_id
+        self.book_id = book_id
         self.default_script_id = script_id
 
     def post_request(self, url, payload):
@@ -59,7 +59,7 @@ class WpsOnlineBook:
 
         这个接口跟普通as一样，运行有30秒时限
         """
-        url = f"https://www.kdocs.cn/api/v3/ide/file/{self.file_id}/script/{script_id}/{'sync_task' if sync else 'task'}"
+        url = f"https://www.kdocs.cn/api/v3/ide/file/{self.book_id}/script/{script_id}/{'sync_task' if sync else 'task'}"
         payload = {
             "Context": {'argv': context_argv or {}}
         }
@@ -80,21 +80,6 @@ class WpsOnlineBook:
         （旧函数名run_script2不再使用）
         """
         return self.run_script(self.default_script_id, context_argv={'funcName': func_name, 'args': args})
-
-    def get_sheet_data(self, sheet_name, fields, data_row=0, filter_empty_rows=True, *,
-                       return_mode='pd') -> pd.DataFrame:
-        """ 获取某张sheet表格数据
-
-        :param sheet_name: sheet表名
-        :param list[str] fields: 字段名列表
-        :param int data_row: 数据起始行，详细用法见packTableDataFields
-        :param return_mode: 'pd' or 'json'
-        """
-        data = self.run_func('packTableDataFields', sheet_name, fields, data_row, filter_empty_rows)
-        if return_mode == 'json':
-            return data
-        elif return_mode == 'pd':
-            return pd.DataFrame(data)
 
     def write_arr(self, rows, start_cell, batch_size=None):
         """ 把一个二维数组数据写入表格
@@ -118,6 +103,27 @@ class WpsOnlineBook:
             batch_rows = rows[start:end]
             self.run_func('writeArrToSheet', batch_rows, current_cell)
             current_cell = re.sub(r'\d+$', func, current_cell)
+
+    def __3_增删改查(self):
+        """ 表格数据很多概念跟sql数据库是类似的，也有增删改查系列的功能需求 """
+        pass
+
+    def sql_select(self, sheet_name, fields,
+                   data_row=0,
+                   filter_empty_rows=True, *,
+                   return_mode='pd') -> pd.DataFrame:
+        """ 获取某张sheet表格数据
+
+        :param sheet_name: sheet表名
+        :param list[str] fields: 字段名列表
+        :param int data_row: 数据起始行，详细用法见sqlSelect
+        :param return_mode: 'pd' or 'json'
+        """
+        data = self.run_func('sqlSelect', sheet_name, fields, data_row, filter_empty_rows)
+        if return_mode == 'json':
+            return data
+        elif return_mode == 'pd':
+            return pd.DataFrame(data)
 
 
 if __name__ == '__main__':
