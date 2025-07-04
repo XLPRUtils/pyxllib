@@ -859,6 +859,12 @@ function extendFormatConditionsToFullColumns(ws) {
 }
 
 
+// 输入类似[cel1, '+', cel2]这样的数组，会计算cel1.Address(false, false)等，然后把字符串拼接出来，一般用于组装公式
+function joinFormula(parts) {
+    return '=' + parts.map(part => typeof part === 'string' ? part : part.Address(false, false)).join('')
+}
+
+
 function 测试中_新建一条条件格式() {
     const ws = ActiveSheet
     const rng = ws.UsedRange
