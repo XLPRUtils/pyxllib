@@ -173,6 +173,18 @@ class XlChromiumBase(ChromiumBase):
         else:
             self.actions.click(ele).type(text)
 
+    def find_ele_with_refresh(self, locator, index=1, timeout=None, *, refresh=5):
+        """ 查找元素，如果找不到则刷新页面refresh次继续检查，用来应对一些网页有时候出现白屏没加载出元素的情况 """
+        ele = None
+        for i in range(refresh):
+            ele = self.ele(locator, index=index, timeout=timeout)
+            if ele:
+                break
+            else:
+                logger.warning(f'找不到元素"{locator}"')
+                self.refresh()
+        return ele
+
 
 inject_members(XlChromiumBase, ChromiumBase)
 
