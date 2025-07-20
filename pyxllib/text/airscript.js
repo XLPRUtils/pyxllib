@@ -113,14 +113,14 @@ function setMutexLock(cel) {
 }
 
 
-/** 
+/**
  * 使用js-py同步的时候，一般是js端释放锁，异步则是py端释放锁
  * @param {Range|string} celOrSheetName 单元格对象或工作表名
  * @param {string} argName 要解锁的参数名
  * @param {number} rowOffset 相对于argCel的行偏移量，默认参数值在参数名下面
  * @param {number} colOffset 相对于argCel的列偏移量
  */
-function releaseMutexLock(celOrSheetName, argName, rowOffset=1, colOffset=0) {
+function releaseMutexLock(celOrSheetName, argName, rowOffset = 1, colOffset = 0) {
     let cel
     if (typeof celOrSheetName === 'string') {
         cel = findCel(argName, celOrSheetName)
@@ -130,6 +130,20 @@ function releaseMutexLock(celOrSheetName, argName, rowOffset=1, colOffset=0) {
         cel = celOrSheetName
     }
     cel.Value2 = '待机中，可启动程序'
+}
+
+// 输入'数量3*单价5'的注释算式模式，返回'3*5'的算式内容
+// 支持用${xx}来引用其他'名称变量'
+function 解析文本算式(commentText) {
+    // 使用正则表达式提取数字、运算符、圆括号和${...}格式的内容
+    let extracted = commentText.match(/[=\d.+\-*/\(\)^]+|\$\{[^}]*\}/g)
+    if (!extracted) return ''
+
+    let result = extracted.join('')
+    // 处理${名称}格式，去掉定界符${}但保留内部内容
+    result = result.replace(/\$\{([^}]*)\}/g, '$1')
+
+    return result
 }
 
 
@@ -255,7 +269,7 @@ function as1_locateTableRange(ws, dataRow = [0, 0], fields = []) {
     }
 
     // 默认值
-    if  (rows.start === 0) rows.start = ur.Row + 1
+    if (rows.start === 0) rows.start = ur.Row + 1
     if (rows.end === 0) rows.end = ur.Row + ur.Rows.Count - 1
 
     // 4 转成ur里的相对行号
@@ -858,10 +872,82 @@ function extendFormatConditionsToFullColumns(ws) {
     }
 }
 
+/**
+ * 输入类似[cel1, '+', cel2]这样的数组，会计算cel1.Address(false, false)等，然后把字符串拼接出来，一般用于组装公式
+ * @param {Array} parts 公式部分组成的数组
+ * @param {boolean} withSheetName 默认为false，表示不添加工作表名前缀
+ * @param {boolean|Array<boolean>} addressParams 控制Address方法的参数，可以是单个布尔值(同时应用于两个参数)或包含两个布尔值的数组[rowAbs, colAbs]
+ */
+function joinFormula(parts, withSheetName = false, addressParams = false) {
+    // 处理addressParams参数
+    let rowAbsolute, colAbsolute;
+    if (Array.isArray(addressParams) && addressParams.length >= 2) {
+        [rowAbsolute, colAbsolute] = addressParams;
+    } else {
+        rowAbsolute = colAbsolute = addressParams;
+    }
 
-// 输入类似[cel1, '+', cel2]这样的数组，会计算cel1.Address(false, false)等，然后把字符串拼接出来，一般用于组装公式
-function joinFormula(parts) {
-    return '=' + parts.map(part => typeof part === 'string' ? part : part.Address(false, false)).join('')
+    return '=' + parts.map(part => {
+        if (typeof part === 'string') {
+            return part
+        } else {
+            // 如果启用工作表名前缀，且单元格有工作表属性
+            if (withSheetName && part.Worksheet) {
+                return `${part.Worksheet.Name}!${part.Address(rowAbsolute, colAbsolute)}`
+            }
+            return part.Address(rowAbsolute, colAbsolute)
+        }
+    }).join('')
+}
+
+/**
+ * 获取工作簿名称管理器（Name）中的值，如果名称不存在则返回 undefined
+ * @param {string} name 要获取值的名称
+ * @returns {string|undefined} 名称对应的值，如果不存在则返回 undefined
+ */
+function getName(name) {
+    const names = Application.ActiveWorkbook.Names
+
+    // 遍历所有名称检查是否存在
+    for (let i = 1; i <= names.Count; i++) {
+        if (names.Item(i).Name === name) {
+            // 名称存在，返回其值
+            return names.Item(name).Value
+        }
+    }
+
+    // 名称不存在，返回undefined
+    return undefined
+}
+
+/**
+ * 设置工作簿名称管理器（Name）中的值，这个名称一般用于一些公式场景
+ * @param {string} name 名称
+ * @param {string|undefined} value 值，如果为 undefined 则删除该名称
+ */
+function setName(name, value) {
+    // 1 检查名称是否存在（避免 try-catch）
+    const names = Application.ActiveWorkbook.Names
+    let nameExists = false
+
+    for (let i = 1; i <= names.Count; i++) {
+        if (names.Item(i).Name === name) {
+            nameExists = true
+            break
+        }
+    }
+
+    // 2 如果 value 是 undefined，则删除名称（如果存在）
+    if (value === undefined && nameExists) {
+        names.Item(name).Delete()
+        return
+    }
+
+    // 3 设置或创建名称
+    if (nameExists) names.Item(name).Value = value
+    else names.Add(name, value)
+
+    return value
 }
 
 
