@@ -57,7 +57,8 @@ class WjxWeb(DpWebBase):
 
     def _parse_table(self):
         """处理并解析网页中的表格数据"""
-        table_html = self.tab('tag:table').html
+        self.tab.find_ele_with_refresh(f't:table')
+        table_html = self.tab.eles('t:table')[-1].html
         df = pd.read_html(io.StringIO(table_html))[0]  # 读取表格
         df.columns = [col.replace('\ue645', '') for col in df.columns]
         # "星标"的内容特殊字符
@@ -77,7 +78,7 @@ class WjxWeb(DpWebBase):
             select.click()
 
     def get_df(self, all_pages=False):
-        """获得当前页面的表格数据，如果 all_pages 为 True，则下载所有页面的数据"""
+        """ 获得当前页面的表格数据，如果 all_pages 为 True，则下载所有页面的数据 """
         # 初始化DataFrame列表，用于存储每页的数据
         dfs = [self._parse_table()]  # 获取当前页面的数据
 
