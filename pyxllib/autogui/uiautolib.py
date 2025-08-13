@@ -179,7 +179,10 @@ def get_windows_info():
 
     def get_all_hwnd(hwnd, mouse):
         thread_id, process_id = win32process.GetWindowThreadProcessId(hwnd)
-        proc = psutil.Process(process_id)
+        try:
+            proc = psutil.Process(process_id)
+        except psutil.NoSuchProcess:
+            return
 
         is_window = win32gui.IsWindow(hwnd)
         is_enabled = win32gui.IsWindowEnabled(hwnd)
@@ -240,6 +243,18 @@ class UiCtrlNode(NodeMixin, GetAttr, WindowControl):
 
         # 自动递归创建子节点
         self.build_children(build_depth)
+
+    @property
+    def ltrb(self):
+        rect = self.ctrl.BoundingRectangle
+        return [rect.left, rect.top, rect.right, rect.bottom]
+
+    @property
+    def ltwh(self):
+        rect = self.ctrl.BoundingRectangle
+        l, t, r, b = [rect.left, rect.top, rect.right, rect.bottom]
+        w, h = r - l, b - t
+        return [l, t, w, h]
 
     @classmethod
     def init_from_name(cls, class_name=None, name=None, *, build_depth=-1, **kwargs):
