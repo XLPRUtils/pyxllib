@@ -16,6 +16,7 @@ import sys
 import time
 import textwrap
 import threading
+import re
 
 from deprecated import deprecated
 from loguru import logger
@@ -346,9 +347,12 @@ class MultiProgramLauncher:
                 # 把我自定义的cron的星期标记转换为aps的星期标记。前者用1234567，后者用0123456表示星期一到星期日
                 x = cron_parts[5]
                 if x != '*':  # 写0或7都表示周日
-                    if x == '0':
-                        x = '7'
-                    x = (int(x) - 1)
+                    # 改成正则获取x每个数值减去1（遇到0则改为6）：相当于把原本1~7的周标记，改为这里0~6的标记
+                    def f(m):
+                        x = int(m.group(0))
+                        return '6' if x == 0 else str(x - 1)
+                    x = re.sub(r'\d+', f, x)                    
+                    
                 self.scheduler.add_job(
                     task,
                     CronTrigger(
@@ -359,6 +363,7 @@ class MultiProgramLauncher:
                         month=cron_parts[4],
                         day_of_week=x,
                     ),
+
                     # 检测的时候有概率错过了精确时间点。但一般不论延迟了多久，都要补运行上。
                     misfire_grace_time=misfire_grace_time,
                 )

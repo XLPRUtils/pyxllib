@@ -841,6 +841,6 @@ class UiTracePath:
 
 
 if __name__ == '__main__':
-    with TicToc(__name__):
-        agld = AutoGuiLabelData(r'D:\slns\py4101\py4101\touhou\label')
-        agld.writes()
+    # agld = AutoGuiLabelData(r'D:\slns\py4101\py4101\touhou\label')
+    agld = AutoGuiLabelData(r'D:\home\chenkunze\data\m2508凡修')
+    agld.writes()
