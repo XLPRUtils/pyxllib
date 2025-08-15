@@ -250,7 +250,7 @@ class UiCtrlNode(NodeMixin, GetAttr, WindowControl):
         return [rect.left, rect.top, rect.right, rect.bottom]
 
     @property
-    def ltwh(self):
+    def xywh(self):
         rect = self.ctrl.BoundingRectangle
         l, t, r, b = [rect.left, rect.top, rect.right, rect.bottom]
         w, h = r - l, b - t
