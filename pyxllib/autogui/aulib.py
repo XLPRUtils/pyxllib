@@ -156,12 +156,15 @@ class AuShape(UserDict):
         """ 将这个shape升级为一个view对象 """
         img = self.shot()
         view = AuView.init_from_image(img)
-        view.parent = self.parent
+        view.parent = self
         view['text'] = view_name
         return view
 
-    def save_image(self, impath):
+    def save_image(self, region_folder, view_name=None):
         """ 保存当前快照图片 """
+        if not view_name:  # 未输入则用时间戳代替
+            view_name = datetime.datetime.now().strftime('%Y%m%d_%H%M%S_%f')[:-3]
+        impath = XlPath(region_folder) / f'{view_name}.jpg'
         os.makedirs(os.path.dirname(impath), exist_ok=True)
         xlcv.write(self.shot(), impath)
 
@@ -169,7 +172,7 @@ class AuShape(UserDict):
         """ 保存当前视图（即保存图片和对应的标注数据） """
         view = self.convert_to_view(view_name)
         if not view_name:  # 未输入则用时间戳代替
-            view_name = datetime.datetime.now().isoformat(timespec='milliseconds')
+            view_name = datetime.datetime.now().strftime('%Y%m%d_%H%M%S_%f')[:-3]
         impath = XlPath(region_folder) / f'{view_name}.jpg'
         view.save_labelme_file(impath)
 
@@ -204,10 +207,10 @@ class AuShape(UserDict):
         current = self
         while current.parent and current.parent.get('xywh'):
             # 父节点的xywh格式为[x, y, width, height]
-            parent_x, parent_y = current.parent['xywh'][:2]
+            x, y = current.parent['xywh'][:2]
             # 将父节点的偏移量添加到绝对坐标
-            point[0] += parent_x
-            point[1] += parent_y
+            point[0] += x
+            point[1] += y
             # 移动到上一级父节点
             current = current.parent
 
@@ -219,8 +222,9 @@ class AuShape(UserDict):
     def shot(self):
         """ 截取当前的快照画面 """
         # 计算绝对坐标下的xywh
-        x, y = self.get_abs_point([0, 0])  # 左上角相对坐标转绝对坐标
+        x, y = self.get_abs_point(self['xywh'][:2])  # 左上角相对坐标转绝对坐标
         w, h = self['xywh'][2:]  # 宽度和高度
+        # logger.info(f'{x} {y} {w} {h}')
         pil_img = pyautogui.screenshot(region=[x, y, w, h])
         return xlpil.to_cv2_image(pil_img)
 
@@ -514,6 +518,18 @@ class AuView(AuShape):
         shapes = self.find_shapes_by_text(text, limit=1)
         return shapes[0] if shapes else None
 
+    def loc(self, item):
+        if isinstance(item, int):
+            return self.shapes[item]
+        elif isinstance(item, str):
+            return self.find_shape_by_text(item)
+        elif isinstance(item, slice):
+            # 处理slice对象，返回切片后的子列表
+            start, stop, step = item.indices(len(self.shapes))
+            return [self.shapes[i] for i in range(start, stop, step)]
+        else:
+            raise TypeError
+
     def __getitem__(self, item):
         """
         :return:
@@ -524,16 +540,8 @@ class AuView(AuShape):
         """
         if item in self.data:
             return self.data[item]
-        elif isinstance(item, int):
-            return self.shapes[item]
-        elif isinstance(item, str):
-            return self.find_shape_by_text(item)
-        elif isinstance(item, slice):
-            # 处理slice对象，返回切片后的子列表
-            start, stop, step = item.indices(len(self.shapes))
-            return [self.shapes[i] for i in range(start, stop, step)]
         else:
-            raise TypeError
+            return self.loc(item)
 
     def __x_保存(self):
         pass
@@ -546,6 +554,7 @@ class AuView(AuShape):
         :param impath: 要保存的路径，只要输入图片路径就行，json路径是同位置同名的，只有后缀区别
             如果已经有 self.impath ，这里可以不输入
         :param save_image: 是否覆盖原有的图片文件
+            todo 注意，如果原本没有图片，这里又不进行覆盖，生成lmdict时候会报错
         :return:
         """
         # 1 读取
@@ -557,18 +566,18 @@ class AuView(AuShape):
         os.makedirs(os.path.dirname(jsonpath), exist_ok=True)
 
         # 2 生成格式
+        if save_image:
+            xlcv.write(self['img'], impath)  # 图片有概率也发生的变动
         lmdict = LabelmeDict.gen_data(impath)
         for sp in self.shapes:
             DictTool.isub(sp, ['img'])
-            shape = LabelmeDict.gen_shape(json.dumps(sp, ensure_ascii=False),
+            shape = LabelmeDict.gen_shape(json.dumps(sp.data, ensure_ascii=False, default=str),
                                           sp['points'], sp['shape_type'],
                                           group_id=sp['group_id'], flags=sp['flags'])
             lmdict['shapes'].append(shape)
 
         # 3 保存
         jsonpath.write_json(lmdict, indent=2)
-        if save_image:
-            xlcv.write(impath, self['img'])  # 图片有概率也发生的变动
 
 
 class AuRegion(AuShape):
@@ -605,16 +614,20 @@ class AuRegion(AuShape):
             view.parent = self
             self.views[view_name] = view
 
-    def __getitem__(self, item):
-        if item in self.data:
-            return self.data[item]
-        elif '/' in item:
+    def loc(self, item):
+        if '/' in item:
             # 注意功能效果：os.path.split('a/b/c') -> ('a/b', 'c')
             # 注意还有种很特殊的：'a' -> ('', 'a')
             view_name, shape_name = os.path.split(item)
             return self.views[view_name][shape_name]
         else:
             return self.views.get(item)
+
+    def __getitem__(self, item):
+        if item in self.data:
+            return self.data[item]
+        else:
+            return self.loc(item)
 
 
 class AuWindow(AuRegion):
