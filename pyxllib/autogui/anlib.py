@@ -36,7 +36,7 @@ from pyxlpr.data.labelme import LabelmeDict
 from pyxllib.autogui.uiautolib import find_ctrl, UiCtrlNode
 
 """
-桌面自动化操作，Auto GUI，简称Au
+桌面自动化操作，Anto GUI，简称An
 
 相关概念，名称定义如下
 
@@ -76,7 +76,7 @@ class ImageTools:
         return cmp.sum() / cmp.size
 
 
-class AuShape(UserDict):
+class AnShape(UserDict):
 
     def __1_构建(self):
         pass
@@ -108,23 +108,22 @@ class AuShape(UserDict):
     def read_lmshape(self, lmshape):
         """
         将labelme格式的shape字典改为该任务特有的字典结构
-        我们称labelme shape为lmshape，该任务的auto ui shape为aushape
         """
         # 1 解析原label为字典
         # 如果是来自普通的label，会把原文本自动转换为text字段。如果是来自xllabelme，则一般默认就是字典值，带text字段。
         if isinstance(lmshape['label'], str):
-            aushape = DictTool.json_loads(lmshape['label'], 'text')
+            anshape = DictTool.json_loads(lmshape['label'], 'text')
         else:
-            aushape = lmshape['label']
-        aushape.update(DictTool.sub(lmshape, ['label']))  # 因为原本的label被展开成字典了，这里要删掉label
+            anshape = lmshape['label']
+        anshape.update(DictTool.sub(lmshape, ['label']))  # 因为原本的label被展开成字典了，这里要删掉label
 
         # 2 中心点 center（无论任何原始形状，都转成矩形处理。这跟下游功能有关，目前只能做矩形。）
         shape_type = lmshape['shape_type']
         pts = lmshape['points']
         if shape_type in ('rectangle', 'polygon', 'line'):
-            aushape['center'] = np.array(np.array(pts).mean(axis=0), dtype=int).tolist()
+            anshape['center'] = np.array(np.array(pts).mean(axis=0), dtype=int).tolist()
         elif shape_type == 'circle':
-            aushape['center'] = pts[0]
+            anshape['center'] = pts[0]
 
         # 3 外接矩形 rect
         if shape_type in ('rectangle', 'polygon'):
@@ -134,20 +133,20 @@ class AuShape(UserDict):
             r = ((x - pts[1][0]) ** 2 + (y - pts[1][1]) ** 2) ** 0.5
             ltrb = [round_int(v) for v in [x - r, y - r, x + r, y + r]]
         # 把ltrb转换为xywh
-        aushape['xywh'] = ltrb2xywh(ltrb)
+        anshape['xywh'] = ltrb2xywh(ltrb)
 
         # 4 图片数据 img, etag
-        if self.parent.get('img') is not None and aushape['xywh']:
-            aushape['img'] = xlcv.get_sub(self.parent['img'], ltrb)
-            # aushape['etag'] = get_etag(aushape['img'])
+        if self.parent.get('img') is not None and anshape['xywh']:
+            anshape['img'] = xlcv.get_sub(self.parent['img'], ltrb)
+            # anshape['etag'] = get_etag(anshape['img'])
             # TODO 这里目的其实就是让相同图片对比尽量相似，所以可以用dhash而不是etag
 
         # 5 中心点像素值 pixel
-        p = aushape['center']
+        p = anshape['center']
         if self.parent.get('img') is not None and p:
-            aushape['pixel'] = tuple(self.parent['img'][p[1], p[0]].tolist()[::-1])
+            anshape['pixel'] = tuple(self.parent['img'][p[1], p[0]].tolist()[::-1])
 
-        self.update(aushape)
+        self.update(anshape)
 
     def __2_转换与保存(self):
         pass
@@ -155,7 +154,7 @@ class AuShape(UserDict):
     def convert_to_view(self, view_name=None):
         """ 将这个shape升级为一个view对象 """
         img = self.shot()
-        view = AuView.init_from_image(img)
+        view = AnView.init_from_image(img)
         view.parent = self
         view['text'] = view_name
         return view
@@ -423,7 +422,7 @@ class AuShape(UserDict):
         self.click(**kwargs)
 
 
-class AuView(AuShape):
+class AnView(AnShape):
 
     def __1_构建(self):
         pass
@@ -435,7 +434,7 @@ class AuView(AuShape):
         self['text'] = 'view'
 
         self.impath = None  # 如果是从文件读取来的数据，存储原始图片路径，在save重写回去的时候就可以缺省保存参数
-        self.shapes = []  # 以列表的形式顺序存储的aushapes
+        self.shapes = []  # 以列表的形式顺序存储的anshapes
 
     def init_from_xywh(self, xywh=None):
         if xywh is None and 'img' in self:
@@ -452,7 +451,7 @@ class AuView(AuShape):
     def read_lmshapes(self, lmshapes):
         self.shapes = []
         for lmsp in lmshapes:
-            sp = AuShape(parent=self)
+            sp = AnShape(parent=self)
             sp.read_lmshape(lmsp)
             self.shapes.append(sp)
 
@@ -462,7 +461,7 @@ class AuView(AuShape):
         lmfile = XlPath(lmfile)
         lmdict = lmfile.read_json()
 
-        view = AuView()
+        view = AnView()
         view.impath = lmfile.with_name(lmdict['imagePath'])
         view['img'] = xlcv.read(view.impath)
         view.read_lmshapes(lmdict['shapes'])
@@ -476,7 +475,7 @@ class AuView(AuShape):
         这里默认会调用xlapi来生成labelme标注文件
         """
         # 1 读取图片
-        view = AuView()
+        view = AnView()
         view['img'] = xlcv.read(image)
         if isinstance(image, (str, XlPath)):
             view.impath = image
@@ -549,7 +548,7 @@ class AuView(AuShape):
     def save_labelme_file(self, impath=None, save_image=True):
         """ 将数据保存为labelme标注文件
 
-        aushape中有存储了原始的lmshape信息。
+        anshape中有存储了原始的lmshape信息。
 
         :param impath: 要保存的路径，只要输入图片路径就行，json路径是同位置同名的，只有后缀区别
             如果已经有 self.impath ，这里可以不输入
@@ -580,7 +579,7 @@ class AuView(AuShape):
         jsonpath.write_json(lmdict, indent=2)
 
 
-class AuRegion(AuShape):
+class AnRegion(AnShape):
 
     def __init__(self,
                  folder=None,
@@ -609,7 +608,7 @@ class AuRegion(AuShape):
         self.views = {}
         for json_file in self.folder.rglob_files('*.json'):
             view_name = json_file.relative_to(self.folder).as_posix()[:-5]  # 注意 要去掉后缀.json
-            view = AuView.init_from_labelme_json_file(json_file)
+            view = AnView.init_from_labelme_json_file(json_file)
             view['text'] = view_name
             view.parent = self
             self.views[view_name] = view
@@ -630,7 +629,7 @@ class AuRegion(AuShape):
             return self.loc(item)
 
 
-class AuWindow(AuRegion):
+class AnWindow(AnRegion):
     """ 某个软件的窗口区域 """
 
     def __0_构建(self):
