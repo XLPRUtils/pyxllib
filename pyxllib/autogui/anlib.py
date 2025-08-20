@@ -75,6 +75,26 @@ class ImageTools:
         cmp = np.array(abs(np.array(img1, dtype=int) - img2) > color_tolerance)
         return cmp.sum() / cmp.size
 
+    @classmethod
+    def find_img(cls, img, haystack=None, *, grayscale=None, confidence=None):
+        """ 根据预存的img数据，匹配出多个内容对应的所在的rect位置
+
+        :param img: 要查找的目标的子图
+        :param haystack: 整张大图
+        :return: 会返回多个匹配结果的坐标
+        """
+        # pyautogui提供了一个工具
+        boxes = pyautogui.locateAll(img, haystack, grayscale=grayscale, confidence=confidence)
+
+        # 过滤掉重叠超过一半面积的框
+        rects = ComputeIou.nms_xywh([box for box in list(boxes)])
+
+        # rects里会有numpy.int64类型的数据，需要做个转换
+        rects2 = []
+        for rect in rects:
+            rects2.append([int(x) for x in rect])
+        return rects2
+
 
 class AnShape(UserDict):
 
@@ -159,19 +179,28 @@ class AnShape(UserDict):
         view['text'] = view_name
         return view
 
-    def save_image(self, region_folder, view_name=None):
+    def save_image(self, region_folder, view_name=None, timetag=None):
         """ 保存当前快照图片 """
+        timetag_ = datetime.datetime.now().strftime('%Y%m%d_%H%M%S_%f')[:-3]
         if not view_name:  # 未输入则用时间戳代替
-            view_name = datetime.datetime.now().strftime('%Y%m%d_%H%M%S_%f')[:-3]
+            view_name = timetag_
+        elif timetag:  # 如果指定了时间戳参数，则强制加上时间戳前缀
+            view_name = timetag_ + view_name
+
         impath = XlPath(region_folder) / f'{view_name}.jpg'
         os.makedirs(os.path.dirname(impath), exist_ok=True)
         xlcv.write(self.shot(), impath)
 
-    def save_view(self, region_folder, view_name=None):
+    def save_view(self, region_folder, view_name=None, timetag=None):
         """ 保存当前视图（即保存图片和对应的标注数据） """
         view = self.convert_to_view(view_name)
+
+        timetag_ = datetime.datetime.now().strftime('%Y%m%d_%H%M%S_%f')[:-3]
         if not view_name:  # 未输入则用时间戳代替
-            view_name = datetime.datetime.now().strftime('%Y%m%d_%H%M%S_%f')[:-3]
+            view_name = timetag_
+        elif timetag:  # 如果指定了时间戳参数，则强制加上时间戳前缀
+            view_name = timetag_ + view_name
+
         impath = XlPath(region_folder) / f'{view_name}.jpg'
         view.save_labelme_file(impath)
 
@@ -272,10 +301,18 @@ class AnShape(UserDict):
 
     def ocr_value(self):
         text = self.ocr_text()
-        m = re.search(r'\d+', text) or 0
-        if m:
-            m = int(m.group())
-        return m
+        m = re.search(r'\d+(\.\d+)?', text)
+        v = m.group() if m else '0'
+        return float(v) if '.' in v else int(v)
+
+    def ocr_values(self):
+        def parse_val(v):
+            return float(v) if '.' in v else int(v)
+
+        text = self.ocr_text()
+        vals = re.findall(r'\d+', text) or []
+        vals = [parse_val(v) for v in vals]
+        return vals
 
     def __6_操作(self):
         pass
@@ -300,9 +337,11 @@ class AnShape(UserDict):
         pyautogui.moveTo(*point)
         return point
 
-    def click(self, *, random_bias=None, back=None, wait_change=None, wait_seconds=None):
+    def click(self, x_bias=0, y_bias=0, *, random_bias=None, back=None, wait_change=None, wait_seconds=None):
         """ 点击这个shape
 
+        :param x_bias: 原本中心点击位置，增设一个偏移量
+        :param y_bias: y轴偏移量
         :param int random_bias: 允许在一定范围内随机点击点
         :param bool back: 是否点击后鼠标移回原坐标
         :param wait_change: 点击后，等待画面产生变化，才结束函数
@@ -317,6 +356,9 @@ class AnShape(UserDict):
 
         # 1 计算出相对根节点的目标point位置
         point = self.get_abs_point(self['center'])
+        if x_bias or y_bias:
+            point[0] += x_bias
+            point[1] += y_bias
 
         # 2 添加随机偏移
         if random_bias:
@@ -420,6 +462,65 @@ class AnShape(UserDict):
     def wait_img_click(self, **kwargs):
         self.wait_img()
         self.click(**kwargs)
+
+    check_click = check_img_click
+    wait_click = wait_img_click
+
+    def ocr_find_click(self, text):
+        """ 查找某段文本，并直接点击其对应的子shape """
+        sub_view = self.convert_to_view()
+        for sp in sub_view.shapes:
+            if sp['text'] == text:
+                sp.click()
+                return True
+
+    def ocr_search_click(self, pattern):
+        """ 正则版本 """
+        sub_view = self.convert_to_view()
+        for sp in sub_view.shapes:
+            if re.search(pattern, sp['text']):
+                sp.click()
+                return True
+
+    def __7_图像匹配(self):
+        pass
+
+    def find_img(self, img, *, grayscale=None, confidence=None):
+        if isinstance(img, AnShape):
+            img = img['img']
+
+        # 1 找到匹配的区域
+        grayscale = self.get_parent_argv('grayscale', grayscale) or False
+        confidence = self.get_parent_argv('confidence', confidence) or 0.95
+        rects = ImageTools.find_img(img, self['img'], grayscale=grayscale, confidence=confidence)
+
+        # 2 把rects转成AnShape类型，每个rect都是[x, y, w, h]的list，不过其有numpy格式，要转成int类型
+        shapes = []
+        for rect in rects:
+            sp = AnShape(parent=self)
+            sp.set_shape('', [int(x) for x in rect])
+            shapes.append(sp)
+
+        return shapes
+
+    def find_img_with_drag(self, img, *, grayscale=None, confidence=None,
+                           percentage=50, direction='up', limit=5):
+        """ 在可滚动的窗口里检测目标图片 """
+        # 1 查找目标图片
+        grayscale = self.get_parent_argv('grayscale', grayscale) or False
+        confidence = self.get_parent_argv('confidence', confidence) or 0.95
+        shapes = self.find_img(img, grayscale=grayscale, confidence=confidence)
+
+        # 2 滚动查找
+        # todo 寻找更合理的，判断划到末尾的判定机制
+        # while not shapes:
+        for i in range(limit):
+            self.drag_to(percentage=percentage, direction=direction)
+            shapes = self.find_img(img, grayscale=grayscale, confidence=confidence)
+            if shapes:
+                break
+
+        return shapes
 
 
 class AnView(AnShape):
@@ -529,6 +630,12 @@ class AnView(AnShape):
         else:
             raise TypeError
 
+    def search(self, pattern, flags=0):
+        """ 正则的search语法匹配，在shapes的sp['text']查找返回第一个的sp """
+        for sp in self.shapes:
+            if re.search(pattern, sp['text'], flags=flags):
+                return sp
+
     def __getitem__(self, item):
         """
         :return:
@@ -598,7 +705,7 @@ class AnRegion(AnShape):
         self.folder = None if folder is None else XlPath(folder)
         self.views = {}  # views由于是文件存储，是不会重名的，所以直接用字典存储
 
-        if read_views:
+        if read_views:  # todo 支持惰性加载？使用到对应view的时候才读取？不然以后标注文件特别多，初始化内存不爆炸？
             self.read_views()
 
     def read_views(self):
@@ -668,109 +775,6 @@ class AnWindow(AnRegion):
 
     def speak_text(self, text):
         self.speaker.Speak(text)
-
-
-def __x_旧代码备份():
-    pass
-
-
-# 这个是"数据库"用法，存储了一些特定shape类型的图片数据，用于后续检索使用
-# 有点像图片分类任务，用这个框架可以完成简单的图片分类而不需要专门训练分类模型
-def update_loclabel_img(self, loclabel, img, *, if_exists='update'):
-    """ 添加一个标注框
-    注：这个功能未被任何地方使用过
-
-    :param if_exists:
-        update，更新
-        skip，跳过，不更新
-    """
-    loc, label = os.path.split(loclabel)
-    h, w = img.shape[:2]
-
-    # 1 如果不存在这组loc，则新建一个jpg图片
-    update = True
-    if loc not in self.locs or not self.locs[loc]:
-        imfile = xlcv.write(img, self.folder / f'{loc}.jpg')
-        self.imfiles[loc] = imfile
-        shape = LabelmeDict.gen_shape(label, [[0, 0], [w, h]])
-        self.locs[loc][label] = self.parse_shape(shape)
-    # 2 不存在的标签，则在最后一行新建一张图
-    elif label not in self.locs[loc]:
-        image = xlcv.read(self.imfiles[loc])
-        height, width = image.shape[:2]
-        assert width == w  # 先按行拼接，以后有时间可以扩展更灵活的拼接操作
-        # 拼接，并重新存储为图片
-        image = np.concatenate([image, img])
-        xlcv.write(image, self.imfiles[loc])
-        shape = LabelmeDict.gen_shape(label, [[0, height], [width, height + h]])
-        self.locs[loc][label] = self.parse_shape(shape)
-    # 3 已有的图，则进行替换
-    elif if_exists == 'update':
-        image = xlcv.read(self.imfiles[loc])
-        [x1, y1, x2, y2] = self.locs[loc][label]['ltrb']
-        image[y1:y2, x1:x2] = img
-        xlcv.write(image, self.imfiles[loc])
-    else:
-        update = False
-
-    if update:  # 需要实时保存到文件中
-        self.write(loc)
-
-
-class NamedLocate:
-    """ 对有命名的标注数据进行定位
-
-    注意labelme在每张图片上写的label值最好不要有重复，否则按字典存储后可能会被覆盖
-
-    特殊取值：
-    '@IMAGE_ID' 该状态图的标志区域，即游戏中在该位置出现此子图，则认为进入了对应的图像状态
-
-    截图：screenshot，update_shot
-    检查固定位像素：point2pixel，pixel_distance，check_pixel
-    检查固定位图片：rect2img，img_distance，check_img
-    检索图片：img2rects, img2rect，img2point，img2img
-    操作：click，move_to
-    高级：wait，check_click，wait_click
-    """
-
-    def img2rects(self, img, haystack=None, *, grayscale=None, confidence=None):
-        """ 根据预存的img数据，匹配出多个内容对应的所在的rect位置 """
-        # 1 配置参数
-        if isinstance(img, str):
-            img = self[img]['img']
-        grayscale = first_nonnone([grayscale, self.grayscale, False])
-        confidence = first_nonnone([confidence, self.confidence, 0.95])
-        # 2 查找子图
-        if haystack is None:
-            self.update_shot()
-            haystack = self.last_shot
-        boxes = pyautogui.locateAll(img, haystack,
-                                    grayscale=grayscale,
-                                    confidence=confidence)
-        # 3 过滤掉重叠超过一半面积的框
-        rects = ComputeIou.nms_ltrb([xywh2ltrb(box) for box in list(boxes)])
-        return rects
-
-    def img2rect(self, img, haystack=None, *, grayscale=None, confidence=None):
-        """ img2rects的简化，只返回一个匹配框
-        """
-        rects = self.img2rects(img, haystack, grayscale=grayscale, confidence=confidence)
-        return rects[0] if rects else None
-
-    def img2point(self, img, haystack=None, *, grayscale=None, confidence=None):
-        """ 将 img2rect 的结果统一转成点 """
-        res = self.img2rect(img, haystack, grayscale=grayscale, confidence=confidence)
-        if res:
-            return np.array(np.array(res).reshape(2, 2).mean(axis=0), dtype=int).tolist()
-
-    def img2img(self, img, haystack=None, *, grayscale=None, confidence=None):
-        """ 找到rect后，返回匹配的目标img图片内容 """
-        ltrb = self.img2rect(img, haystack, grayscale=grayscale, confidence=confidence)
-        if ltrb:
-            l, t, r, b = ltrb
-            if haystack is not None:
-                haystack = self.last_shot
-            return haystack[t:b, l:r]
 
 
 if __name__ == '__main__':
