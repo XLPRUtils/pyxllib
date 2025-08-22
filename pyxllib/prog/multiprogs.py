@@ -81,7 +81,7 @@ class SchedulerUtils:
             wait_seconds = (dst_time - datetime.datetime.now()).total_seconds()
             if wait_seconds <= 0:
                 break
-            time.sleep(max(1, wait_seconds))  # 最少等待1秒
+            time.sleep(min(1, wait_seconds))  # 分段休眠，避免长时间阻塞
 
     @classmethod
     def smart_wait(cls, start_time, end_time, wait_tag, print_mode=0):

@@ -19,6 +19,7 @@ from collections import UserDict
 import numpy as np
 import win32com
 from loguru import logger
+import pyscreeze
 
 from pyxlpr.ai.clientlib import XlAiClient
 
@@ -67,36 +68,63 @@ class ImageTools:
         return max([abs(x - y) for x, y in zip(pixel1, pixel2)])
 
     @classmethod
-    def img_distance(cls, img1, img2, *, color_tolerance=10):
+    def img_distance(cls, img1, img2, *, grayscale=None, color_tolerance=10):
         """ 返回距离：不相同像素占的百分比，相同返回0
 
+        :param grayscale: 是否转换为灰度图进行比较，默认为None，即不转换
         :param color_tolerance: 每个像素允许的颜色差值。RGB情况计算的是3个值分别的差的和。
         """
-        cmp = np.array(abs(np.array(img1, dtype=int) - img2) > color_tolerance)
+        img1 = np.array(img1, dtype=int)
+        img2 = np.array(img2, dtype=int)
+
+        if grayscale:
+            # 如果是灰度图，将图像转换为单通道
+            if len(img1.shape) == 3:
+                img1 = np.mean(img1, axis=2, dtype=int)
+            if len(img2.shape) == 3:
+                img2 = np.mean(img2, axis=2, dtype=int)
+            cmp = np.array(abs(img1 - img2) > color_tolerance)
+        else:
+            # 彩色图情况，计算每个通道的差值
+            cmp = np.array(abs(img1 - img2) > color_tolerance)
+            # 只要有一个通道的差值超过阈值，就认为该像素不同
+            cmp = np.any(cmp, axis=-1)
+
         return cmp.sum() / cmp.size
 
     @classmethod
-    def find_img(cls, img, haystack=None, *, grayscale=None, confidence=None):
+    def base_find_img(cls, img, haystack=None, *, grayscale=None, confidence=None):
         """ 根据预存的img数据，匹配出多个内容对应的所在的rect位置
+        这函数不能取同名find_img，否则IDE不好自动识别跳转
 
         :param img: 要查找的目标的子图
         :param haystack: 整张大图
         :return: 会返回多个匹配结果的坐标
         """
-        # pyautogui提供了一个工具
-        boxes = pyautogui.locateAll(img, haystack, grayscale=grayscale, confidence=confidence)
+        try:
+            # pyautogui提供了一个工具
+            boxes = pyautogui.locateAll(img, haystack, grayscale=grayscale, confidence=confidence)
 
-        # 过滤掉重叠超过一半面积的框
-        rects = ComputeIou.nms_xywh([box for box in list(boxes)])
+            try:
+                boxes = list(boxes)
+            except pyscreeze.ImageNotFoundException:
+                return []
 
-        # rects里会有numpy.int64类型的数据，需要做个转换
-        rects2 = []
-        for rect in rects:
-            rects2.append([int(x) for x in rect])
-        return rects2
+            # 过滤掉重叠超过一半面积的框
+            rects = ComputeIou.nms_xywh(boxes)
+
+            # rects里会有numpy.int64类型的数据，需要做个转换
+            rects2 = []
+            for rect in rects:
+                rects2.append([int(x) for x in rect])
+            return rects2
+        except pyautogui.ImageNotFoundException:
+            # 捕获图像未找到异常，返回空列表
+            return []
 
 
-class AnShape(UserDict):
+class _AnShapeBasic(UserDict):
+    """ 基本你的初始化、保存等模块 """
 
     def __1_构建(self):
         pass
@@ -244,7 +272,20 @@ class AnShape(UserDict):
 
         return point
 
-    def __4_分析图像(self):
+    def total_name(self):
+        """ 按父节点 text1/text2 的形式组织的完整text内容 """
+        names = []
+        cur = self
+        while cur:
+            names.append(cur.get('text', ''))
+            cur = cur.parent
+        return '/'.join(names[::-1])
+
+
+class _AnShapePupil(_AnShapeBasic):
+    """ 基础操作功能 """
+
+    def __1_获取图像(self):
         pass
 
     def shot(self):
@@ -266,33 +307,7 @@ class AnShape(UserDict):
         shot = self.shot()
         return tuple(shot[h // 2, w // 2].tolist()[::-1])
 
-    def check_pixel(self, *, color_tolerance=None):
-        """ 判断对应位置上的像素值是否相同
-        """
-        color_tolerance = self.get_parent_argv('color_tolerance', color_tolerance) or 20
-        p1 = self['pixel']
-        p2 = self.get_pixel()
-        return ImageTools.pixel_distance(p1, p2) < color_tolerance
-
-    def check_img(self, *, color_tolerance=None, grayscale=None, confidence=None):
-        """
-        :param color_tolerance:
-        :param grayscale: 灰度图的功能效果暂时还没做
-            因为这套参数是从原本pyautogui.locateAll迁移过来的，原本是能直接支持这个参数的
-        :param confidence:
-        :return:
-        """
-        color_tolerance = self.get_parent_argv('color_tolerance', color_tolerance) or 20
-        confidence = self.get_parent_argv('confidence', confidence) or 0.95
-
-        shot = self.shot()
-        if confidence >= 1:
-            return np.array_equal(self['img'], shot)
-        else:
-            dist = ImageTools.img_distance(self['img'], shot, color_tolerance=color_tolerance)
-            return dist < 1 - confidence
-
-    def __5_ocr识别(self):
+    def __2_ocr识别(self):
         pass
 
     def ocr_text(self):
@@ -300,10 +315,8 @@ class AnShape(UserDict):
         return text
 
     def ocr_value(self):
-        text = self.ocr_text()
-        m = re.search(r'\d+(\.\d+)?', text)
-        v = m.group() if m else '0'
-        return float(v) if '.' in v else int(v)
+        vals = self.ocr_values()
+        return vals[0] if vals else 0
 
     def ocr_values(self):
         def parse_val(v):
@@ -314,12 +327,12 @@ class AnShape(UserDict):
         vals = [parse_val(v) for v in vals]
         return vals
 
-    def __6_操作(self):
+    def __3_基础操作(self):
         pass
 
     def move_to(self, *, random_bias=None):
         """ 移动鼠标到该形状的中心位置，支持随机偏移
-        
+
         :param int random_bias: 允许在一定范围内随机偏移目标坐标
         """
         # 0 检索配置参数
@@ -375,7 +388,7 @@ class AnShape(UserDict):
 
         # 4 等待
         if wait_change:
-            color_tolerance = self.get_parent_argv('color_tolerance', None) or 20
+            color_tolerance = self.get_parent_argv('color_tolerance', None) or 10
             confidence = self.get_parent_argv('confidence', None) or 0.95
             func = lambda: ImageTools.img_distance(before_click_shot, self.shot(),
                                                    color_tolerance=color_tolerance) > confidence
@@ -385,10 +398,10 @@ class AnShape(UserDict):
 
         return point
 
-    def drag_to(self, percentage=50, direction='up', duration=None, **kwargs):
+    def drag_to(self, percent=50, direction='up', duration=None, **kwargs):
         """ 在当前shape里拖拽
 
-        :param int percentage: 拖拽比例，范围0-100，表示滚动区域的百分比
+        :param int percent: 拖拽比例，范围0-100，表示滚动区域的百分比
         :param str direction: 滚动方向，可选 'up', 'down', 'left', 'right'
         :param float duration: 拖拽动作持续时间(秒)
         """
@@ -400,8 +413,8 @@ class AnShape(UserDict):
         width, height = self['xywh'][2:]
 
         # 限制百分比在0-100之间
-        percentage = max(0, min(100, percentage))
-        offset = percentage / 2  # 从中心点偏移的百分比
+        percent = max(0, min(100, percent))
+        offset = percent / 2  # 从中心点偏移的百分比
 
         # 根据方向和百分比计算起点和终点
         if direction == 'up':
@@ -429,98 +442,235 @@ class AnShape(UserDict):
 
         # 本来有想过返回拖拽前后图片是否有变化，但是这个会较影响性能，还是另外设计更合理
 
-    def wait_pixel(self, *, limit=None, interval=1):
-        """ 等到目标匹配像素出现 """
-        xlwait(lambda: self.check_pixel(), limit=limit, interval=interval)
 
-    def wait_img(self, *, limit=None, interval=1):
-        """ 等到目标匹配图片出现 """
-        xlwait(lambda: self.check_img(), limit=limit, interval=interval)
+class AnShape(_AnShapePupil):
+    """ 高级交互功能 """
 
-    def wait_pixel_leave(self, *, limit=None, interval=1):
-        """ 等到目标像素消失 """
-        xlwait(lambda: not self.check_pixel(), limit=limit, interval=interval)
-
-    def wait_img_leave(self, *, limit=None, interval=1):
-        xlwait(lambda: not self.check_img(), limit=limit, interval=interval)
-
-    def check_pixel_click(self, **kwargs):
-        """ 检查目标对应才点击
-        注意子类view、region可以设计更高级的check_click，实现位置可变的目标检索
-        """
-        if self.check_pixel():
-            self.click(**kwargs)
-
-    def check_img_click(self, **kwargs):
-        if self.check_img():
-            self.click(**kwargs)
-
-    def wait_pixel_click(self, **kwargs):
-        self.wait_pixel()
-        self.click(**kwargs)
-
-    def wait_img_click(self, **kwargs):
-        self.wait_img()
-        self.click(**kwargs)
-
-    check_click = check_img_click
-    wait_click = wait_img_click
-
-    def ocr_find_click(self, text):
-        """ 查找某段文本，并直接点击其对应的子shape """
-        sub_view = self.convert_to_view()
-        for sp in sub_view.shapes:
-            if sp['text'] == text:
-                sp.click()
-                return True
-
-    def ocr_search_click(self, pattern):
-        """ 正则版本 """
-        sub_view = self.convert_to_view()
-        for sp in sub_view.shapes:
-            if re.search(pattern, sp['text']):
-                sp.click()
-                return True
-
-    def __7_图像匹配(self):
+    def __1_图像类(self):
         pass
 
-    def find_img(self, img, *, grayscale=None, confidence=None):
-        if isinstance(img, AnShape):
-            img = img['img']
+    def find_img(self,
+                 dst=None,
+                 *,
+                 part=None,
+                 drag=0,
+                 drag_percent=50,
+                 drag_direction='up',
+                 drag_duration=None,
+                 color_tolerance=None,
+                 grayscale=None,
+                 confidence=None,
+                 ):
+        """ 查找图像匹配
 
-        # 1 找到匹配的区域
+        :param dst: 匹配目标
+            None，默认自匹配，使用self['img']
+        :param part:
+            False, 全匹配模式，比如图片就是指整张图匹配，文本指整张图的文本
+            True, 局部匹配模式，比如图片是指局部匹配到图片，文本指局部文本行匹配
+            None, 根据上下文智能判断类型。
+        :param int drag: 是否支持在该区域滚动检索，以及支持的拖拽上限次数
+        :param color_tolerance: 每个像素允许的差值
+            注意以下3个图像配参数，不要在函数里设默认值，函数里优先级是高于父节点设置参数的
+            默认值只能在代码里get_parent_argv后再or默认值
+        :param grayscale: 是否转成灰度图对比，默认不转。
+        :param confidence: 置信度，距离。默认95%即要求95%区域的相同性。
+        :return:
+            全匹配模式返回None或self
+            局部匹配返回匹配的shapes列表
+        """
+        # 1 匹配目标
+        if dst is None:
+            dst, part = self['img'], False
+        elif isinstance(dst, str):  # XlPath不是str类型，利用这个特性可以输入图片路径用xlcv读取
+            """ 如果输入字符串，表示这是一个相对当前self的view路径名 """
+            dst = self[str]
+
+        if isinstance(dst, AnShape):
+            img = dst['img']
+            img_wh = dst['xywh'][:2]
+            if part is None:
+                part = self['xywh'][2:] != dst['xywh'][:2]
+        else:
+            # 否则当作输入自定义图片了，用xlcv读取
+            img = xlcv.read(dst)
+            img_wh = list(img.shape[1::-1])
+
+        if part is None:
+            # 根据wh判断part
+            part = self['xywh'][2:] != img_wh
+
+        # 配置参数
+        color_tolerance = self.get_parent_argv('color_tolerance', color_tolerance) or 10
         grayscale = self.get_parent_argv('grayscale', grayscale) or False
         confidence = self.get_parent_argv('confidence', confidence) or 0.95
-        rects = ImageTools.find_img(img, self['img'], grayscale=grayscale, confidence=confidence)
 
-        # 2 把rects转成AnShape类型，每个rect都是[x, y, w, h]的list，不过其有numpy格式，要转成int类型
-        shapes = []
-        for rect in rects:
-            sp = AnShape(parent=self)
-            sp.set_shape('', [int(x) for x in rect])
-            shapes.append(sp)
+        # 2 完全匹配场景（该场景不支持drag参数）
+        if not part:
+            # 这种情况不用pyautogui的接口，用我自带的函数够了
+            conf = 1 - ImageTools.img_distance(self.shot(), img, color_tolerance=color_tolerance)
+            logger.info(f'{self.total_name()} {round(conf, 4)}')
+            return self if conf > confidence else None
+
+        # 3 局部匹配场景
+        def find_subimg():
+            # 单帧检索
+            rects = ImageTools.base_find_img(img, self.shot(), grayscale=grayscale, confidence=confidence)
+            # 把rects转成AnShape类型，每个rect都是[x, y, w, h]的list，不过其有numpy格式，要转成int类型
+            shapes = []
+            for rect in rects:
+                sp = AnShape(parent=self)
+                sp.set_shape('', [int(x) for x in rect])
+                shapes.append(sp)
+            return shapes
+
+        # 有无drag都走这套逻辑
+        k, shapes = 0, find_subimg()
+        while not shapes and k < drag:
+            self.drag_to(drag_percent, drag_direction, drag_duration)
+            shapes = find_subimg()
+            k += 1
 
         return shapes
 
-    def find_img_with_drag(self, img, *, grayscale=None, confidence=None,
-                           percentage=50, direction='up', limit=5):
-        """ 在可滚动的窗口里检测目标图片 """
-        # 1 查找目标图片
-        grayscale = self.get_parent_argv('grayscale', grayscale) or False
-        confidence = self.get_parent_argv('confidence', confidence) or 0.95
-        shapes = self.find_img(img, grayscale=grayscale, confidence=confidence)
+    def wait_img(self, dst=None, *, limit=None, interval=None, **kwargs):
+        """ 等到目标匹配图片出现 """
+        interval = self.get_parent_argv('wait_interval', interval) or 1
+        return xlwait(lambda: self.find_img(dst, **kwargs), limit=limit, interval=interval)
 
-        # 2 滚动查找
-        # todo 寻找更合理的，判断划到末尾的判定机制
-        # while not shapes:
-        for i in range(limit):
-            self.drag_to(percentage=percentage, direction=direction)
-            shapes = self.find_img(img, grayscale=grayscale, confidence=confidence)
-            if shapes:
-                break
+    def waitleave_img(self, dst=None, *, limit=None, interval=None, **kwargs):
+        """ 等到目标匹配图片离开（不再出现） """
+        interval = self.get_parent_argv('wait_interval', interval) or 1
+        return xlwait(lambda: not self.find_img(dst, **kwargs), limit=limit, interval=interval)
+
+    def __2_文本类(self):
+        """ find_系列统一返回shapes匹配列表 """
+        pass
+
+    def find_text(self,
+                  dst=None,
+                  *,
+                  part=True,
+                  drag=0,
+                  drag_percent=50,
+                  drag_direction='up',
+                  drag_duration=None,
+                  ):
+        """ 查找文本匹配
+
+        :param dst: 匹配目标
+            None，默认自匹配，使用self['img']
+        :param part:
+            False, 全匹配模式，比如图片就是指整张图匹配，文本指整张图的文本
+            True, 局部匹配模式，比如图片是指局部匹配到图片，文本指局部文本行匹配
+        :param int drag: 是否支持在该区域滚动检索，以及支持的拖拽上限次数
+        :return:
+            全匹配模式返回None或self
+            局部匹配返回匹配的shapes列表
+        """
+        # 1 匹配目标
+        if dst is None:
+            pattern = self['text']
+        elif isinstance(dst, AnShape):
+            pattern = dst['text']
+        else:
+            pattern = dst
+
+        # 2 全图匹配
+        if not part:
+            return self if re.search(pattern, self.ocr_text()) else None
+
+        # 3 局部匹配场景
+        def find_subtext():
+            shapes = []
+            sub_view = self.convert_to_view()
+            for sp in sub_view.shapes:
+                if re.search(pattern, sp['text']):
+                    shapes.append(sp)
+            return shapes
+
+        # 有无drag都走这套逻辑
+        k, shapes = 0, find_subtext()
+        while not shapes and k < drag:
+            self.drag_to(drag_percent, drag_direction, drag_duration)
+            shapes = find_subtext()
+            k += 1
 
         return shapes
+
+    def wait_text(self, dst=None, *, limit=None, interval=None, **kwargs):
+        """ 等到目标匹配文本出现 """
+        return xlwait(lambda: self.find_text(dst, **kwargs), limit=limit, interval=interval)
+
+    def waitleave_text(self, dst=None, *, limit=None, interval=None, **kwargs):
+        """ 等到目标匹配文本离开（不再出现） """
+        return xlwait(lambda: not self.find_text(dst, **kwargs), limit=limit, interval=interval)
+
+    def __3_查找点击功能(self):
+        """ 一些常用情况的简化名称，使用起来更快捷 """
+
+    @classmethod
+    def _split_kwargs(self, kwargs):
+        # 定义需要传递给 click 方法的参数
+        click_params = ['x_bias', 'y_bias', 'random_bias', 'back', 'wait_change', 'wait_seconds']
+        # 分离参数，click_kwargs 存储给 click 用的参数，find_img_kwargs 存储给 find_img 用的参数
+        find_img_kwargs = {k: v for k, v in kwargs.items() if k not in click_params}
+        click_kwargs = {k: v for k, v in kwargs.items() if k in click_params}
+        return find_img_kwargs, click_kwargs
+
+    @classmethod
+    def _try_click(cls, shapes, **kwargs):
+        if shapes:
+            sp = shapes[0] if isinstance(shapes, list) else shapes
+            sp.click(**kwargs)
+
+    def find_img_click(self, dst=None, **kwargs):
+        find_img_kwargs, click_kwargs = self._split_kwargs(kwargs)
+        shapes = self.find_img(dst, **find_img_kwargs)
+        self._try_click(shapes, **click_kwargs)
+
+    def wait_img_click(self, dst=None, **kwargs):
+        wait_img_kwargs, click_kwargs = self._split_kwargs(kwargs)
+        shapes = self.wait_img(dst, **wait_img_kwargs)
+        self._try_click(shapes, **click_kwargs)
+
+    def find_text_click(self, dst=None, **kwargs):
+        find_text_kwargs, click_kwargs = self._split_kwargs(kwargs)
+        shapes = self.find_text(dst, **find_text_kwargs)
+        self._try_click(shapes, **click_kwargs)
+
+    def wait_text_click(self, dst=None, **kwargs):
+        wait_text_kwargs, click_kwargs = self._split_kwargs(kwargs)
+        shapes = self.wait_text(dst, **wait_text_kwargs)
+        self._try_click(shapes, **click_kwargs)
+
+    def __4_其他高级功能(self):
+        pass
+
+    def wait_img_notchange(self, *, limit=None, interval=2, **kwargs):
+        """ 一直等待到图片不再变化，以当前shot为原图，类似find_img的基础匹配 """
+        interval = self.get_parent_argv('wait_interval', interval) or 1
+        interval *= 2  # 这个等待可以久一点
+
+        # 获取颜色容差参数，默认值为20
+        color_tolerance = self.get_parent_argv('color_tolerance', kwargs.get('color_tolerance')) or 10
+        # 获取置信度参数，默认值为0.05，表示允许5%的变化
+        confidence = self.get_parent_argv('confidence', kwargs.get('confidence')) or 0.95
+
+        # 初始截图
+        prev_shot = self.shot()
+
+        # 定义判断图片是否未变化的函数
+        def check_not_change():
+            nonlocal prev_shot
+            current_shot = self.shot()
+            # 计算图片距离
+            conf = 1 - ImageTools.img_distance(prev_shot, current_shot, color_tolerance=color_tolerance)
+            prev_shot = current_shot
+            return conf >= confidence
+
+        # 使用xlwait等待图片不再变化
+        return xlwait(check_not_change, limit=limit, interval=interval)
 
 
 class AnView(AnShape):
@@ -564,6 +714,9 @@ class AnView(AnShape):
 
         view = AnView()
         view.impath = lmfile.with_name(lmdict['imagePath'])
+        if not view.impath.exists():
+            view.impath = lmfile.with_suffix('.jpg')
+
         view['img'] = xlcv.read(view.impath)
         view.read_lmshapes(lmdict['shapes'])
         view.init_from_xywh()
