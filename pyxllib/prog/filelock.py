@@ -23,7 +23,7 @@ class XlFileLock(FileLock):
         super().__init__(lock_file=lock_file_path, timeout=timeout, **kwargs)
 
 
-def get_autoui_lock(lock_file='autoui.lock', timeout=-1):
+def get_autogui_lock(lock_file='autogui.lock', timeout=-1):
     """
     注意：XlFileLock中的lock_file无法设置默认值，这跟FileLock的底层有关
         所以无法继承一个AutoUiLock类，但是可以通过这种函数的方式，绕开它特殊的初始化限制
@@ -34,7 +34,7 @@ def get_autoui_lock(lock_file='autoui.lock', timeout=-1):
 
 if __name__ == "__main__":
     try:
-        with get_autoui_lock(timeout=5):
+        with get_autogui_lock(timeout=5):
             print("Lock acquired, doing some work...")
             time.sleep(3)
             print("Work done.")

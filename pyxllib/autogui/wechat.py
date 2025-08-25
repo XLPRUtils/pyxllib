@@ -22,7 +22,7 @@ if sys.platform == 'win32':
     import win32con
     import win32gui
 
-from pyxllib.prog.filelock import get_autoui_lock
+from pyxllib.prog.filelock import get_autogui_lock
 
 from pyxllib.autogui.uiautolib import find_ctrl, UiCtrlNode, copy_files_to_clipboard
 
@@ -457,11 +457,11 @@ class WeChatMainWnd(UiCtrlNode):
 
 
 class WeChatSingletonLock:
-    """ 基于 get_autoui_lock 的微信全局唯一单例控制器，确保同一时间仅有一个微信自动化程序在操作 """
+    """ 基于 get_autogui_lock 的微信全局唯一单例控制器，确保同一时间仅有一个微信自动化程序在操作 """
 
     def __init__(self, lock_timeout: Optional[float] = -1):
         # 初始化全局锁
-        self.lock = get_autoui_lock(timeout=lock_timeout)
+        self.lock = get_autogui_lock(timeout=lock_timeout)
         self.wechat = WeChatMainWnd()
 
     def __enter__(self):
