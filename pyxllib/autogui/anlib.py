@@ -29,11 +29,11 @@ if sys.platform == 'win32':
 
 from pyxllib.prog.newbie import first_nonnone, round_int
 from pyxllib.prog.pupil import xlwait, DictTool, run_once
+from pyxllib.prog.filelock import get_autogui_lock
 from pyxllib.algo.geo import ComputeIou, ltrb2xywh, xywh2ltrb
 from pyxllib.file.specialist import XlPath
 from pyxllib.cv.expert import xlcv, xlpil
 from pyxlpr.data.labelme import LabelmeDict
-
 from pyxllib.autogui.uiautolib import find_ctrl, UiCtrlNode
 
 """
@@ -55,8 +55,8 @@ shape: view里的各个位置对象标记内容。上述所有类其实都是sha
 
 @run_once()
 def get_xlapi():
-    xlapi = XlAiClient()
-    xlapi.login_priu(os.getenv('XL_API_PRIU_TOKEN'), 'http://xmutpriu.com')
+    xlapi = XlAiClient(auto_login=False, check=False)
+    xlapi.login_priu(os.getenv('XL_API_PRIU_TOKEN'), os.getenv('MAIN_WEBSITE'))
     return xlapi
 
 
@@ -207,8 +207,8 @@ class _AnShapeBasic(UserDict):
         view['text'] = view_name
         return view
 
-    def save_image(self, region_folder, view_name=None, timetag=None):
-        """ 保存当前快照图片 """
+    @classmethod
+    def raw_save_image(cls, img, region_folder, view_name=None, timetag=None):
         timetag_ = datetime.datetime.now().strftime('%Y%m%d_%H%M%S_%f')[:-3]
         if not view_name:  # 未输入则用时间戳代替
             view_name = timetag_
@@ -217,7 +217,11 @@ class _AnShapeBasic(UserDict):
 
         impath = XlPath(region_folder) / f'{view_name}.jpg'
         os.makedirs(os.path.dirname(impath), exist_ok=True)
-        xlcv.write(self.shot(), impath)
+        xlcv.write(img, impath)
+
+    def save_image(self, region_folder, view_name=None, timetag=None):
+        """ 保存当前快照图片 """
+        self.raw_save_image(self.shot(), region_folder, view_name, timetag)
 
     def save_view(self, region_folder, view_name=None, timetag=None):
         """ 保存当前视图（即保存图片和对应的标注数据） """
@@ -281,11 +285,7 @@ class _AnShapeBasic(UserDict):
             cur = cur.parent
         return '/'.join(names[::-1])
 
-
-class _AnShapePupil(_AnShapeBasic):
-    """ 基础操作功能 """
-
-    def __1_获取图像(self):
+    def __3_获取图像(self):
         pass
 
     def shot(self):
@@ -307,7 +307,11 @@ class _AnShapePupil(_AnShapeBasic):
         shot = self.shot()
         return tuple(shot[h // 2, w // 2].tolist()[::-1])
 
-    def __2_ocr识别(self):
+
+class _AnShapePupil(_AnShapeBasic):
+    """ 基础操作功能 """
+
+    def __1_ocr识别(self):
         pass
 
     def ocr_text(self):
@@ -327,7 +331,7 @@ class _AnShapePupil(_AnShapeBasic):
         vals = [parse_val(v) for v in vals]
         return vals
 
-    def __3_基础操作(self):
+    def __2_基础操作(self):
         pass
 
     def move_to(self, *, random_bias=None):
@@ -347,7 +351,8 @@ class _AnShapePupil(_AnShapeBasic):
             point[1] += random.randint(-random_bias, random_bias)
 
         # 3 执行鼠标移动
-        pyautogui.moveTo(*point)
+        with get_autogui_lock():  # 全局ui锁，避免跟微信同时操作等冲突问题
+            pyautogui.moveTo(*point)
         return point
 
     def click(self, x_bias=0, y_bias=0, *, random_bias=None, back=None, wait_change=None, wait_seconds=None):
@@ -379,12 +384,13 @@ class _AnShapePupil(_AnShapeBasic):
             point[1] += random.randint(-random_bias, random_bias)
 
         # 3 鼠标移动
-        origin_point = pyautogui.position()
-        if wait_change:
-            before_click_shot = self.shot()
-        pyautogui.click(*point)
-        if back:
-            pyautogui.moveTo(*origin_point)  # 恢复鼠标原位置
+        with get_autogui_lock():
+            origin_point = pyautogui.position()
+            if wait_change:
+                before_click_shot = self.shot()
+            pyautogui.click(*point)
+            if back:
+                pyautogui.moveTo(*origin_point)  # 恢复鼠标原位置
 
         # 4 等待
         if wait_change:
@@ -437,8 +443,9 @@ class _AnShapePupil(_AnShapeBasic):
             raise ValueError("方向必须是 'up', 'down', 'left', 'right' 之一")
 
         # 2 执行拖拽操作
-        pyautogui.moveTo(*start_point)
-        pyautogui.dragTo(*end_point, drag_duration, **kwargs)
+        with get_autogui_lock():
+            pyautogui.moveTo(*start_point)
+            pyautogui.dragTo(*end_point, drag_duration, **kwargs)
 
         # 本来有想过返回拖拽前后图片是否有变化，但是这个会较影响性能，还是另外设计更合理
 
@@ -600,10 +607,12 @@ class AnShape(_AnShapePupil):
 
     def wait_text(self, dst=None, *, limit=None, interval=None, **kwargs):
         """ 等到目标匹配文本出现 """
+        interval = self.get_parent_argv('wait_interval', interval) or 1
         return xlwait(lambda: self.find_text(dst, **kwargs), limit=limit, interval=interval)
 
     def waitleave_text(self, dst=None, *, limit=None, interval=None, **kwargs):
         """ 等到目标匹配文本离开（不再出现） """
+        interval = self.get_parent_argv('wait_interval', interval) or 1
         return xlwait(lambda: not self.find_text(dst, **kwargs), limit=limit, interval=interval)
 
     def __3_查找点击功能(self):
@@ -623,26 +632,27 @@ class AnShape(_AnShapePupil):
         if shapes:
             sp = shapes[0] if isinstance(shapes, list) else shapes
             sp.click(**kwargs)
+            return sp
 
     def find_img_click(self, dst=None, **kwargs):
         find_img_kwargs, click_kwargs = self._split_kwargs(kwargs)
         shapes = self.find_img(dst, **find_img_kwargs)
-        self._try_click(shapes, **click_kwargs)
+        return self._try_click(shapes, **click_kwargs)
 
     def wait_img_click(self, dst=None, **kwargs):
         wait_img_kwargs, click_kwargs = self._split_kwargs(kwargs)
         shapes = self.wait_img(dst, **wait_img_kwargs)
-        self._try_click(shapes, **click_kwargs)
+        return self._try_click(shapes, **click_kwargs)
 
     def find_text_click(self, dst=None, **kwargs):
         find_text_kwargs, click_kwargs = self._split_kwargs(kwargs)
         shapes = self.find_text(dst, **find_text_kwargs)
-        self._try_click(shapes, **click_kwargs)
+        return self._try_click(shapes, **click_kwargs)
 
     def wait_text_click(self, dst=None, **kwargs):
         wait_text_kwargs, click_kwargs = self._split_kwargs(kwargs)
         shapes = self.wait_text(dst, **wait_text_kwargs)
-        self._try_click(shapes, **click_kwargs)
+        return self._try_click(shapes, **click_kwargs)
 
     def __4_其他高级功能(self):
         pass
@@ -844,7 +854,7 @@ class AnRegion(AnShape):
     def __init__(self,
                  folder=None,
                  *,
-                 read_views=True,
+                 read_views=False,
                  initialdata=None,
                  parent=None,
                  ):
@@ -861,25 +871,32 @@ class AnRegion(AnShape):
         if read_views:  # todo 支持惰性加载？使用到对应view的时候才读取？不然以后标注文件特别多，初始化内存不爆炸？
             self.read_views()
 
+    def _read_view(self, json_file):
+        view_name = json_file.relative_to(self.folder).as_posix()[:-5]  # 注意 要去掉后缀.json
+        view = AnView.init_from_labelme_json_file(json_file)
+        view['text'] = view_name
+        view.parent = self
+        self.views[view_name] = view
+        return view
+
     def read_views(self):
         if not (self.folder and self.folder.exists()):
             return
 
         self.views = {}
         for json_file in self.folder.rglob_files('*.json'):
-            view_name = json_file.relative_to(self.folder).as_posix()[:-5]  # 注意 要去掉后缀.json
-            view = AnView.init_from_labelme_json_file(json_file)
-            view['text'] = view_name
-            view.parent = self
-            self.views[view_name] = view
+            self._read_view(json_file)
 
     def loc(self, item):
+        # views的具体值，采用惰性加载机制，只有使用到时，才会读取文件
         if '/' in item:
             # 注意功能效果：os.path.split('a/b/c') -> ('a/b', 'c')
             # 注意还有种很特殊的：'a' -> ('', 'a')
             view_name, shape_name = os.path.split(item)
+            self._read_view(self.folder / f'{view_name}.json')
             return self.views[view_name][shape_name]
         else:
+            self._read_view(self.folder / f'{item}.json')
             return self.views.get(item)
 
     def __getitem__(self, item):
