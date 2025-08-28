@@ -93,16 +93,27 @@ class ImageTools:
         return cmp.sum() / cmp.size
 
     @classmethod
-    def base_find_img(cls, img, haystack=None, *, grayscale=None, confidence=None):
+    def base_find_img(cls, img, haystack=None, *, grayscale=None, confidence=None, sort_by_confidence=False):
         """ 根据预存的img数据，匹配出多个内容对应的所在的rect位置
         这函数不能取同名find_img，否则IDE不好自动识别跳转
 
         :param img: 要查找的目标的子图
         :param haystack: 整张大图
+        :param grayscale: 是否使用灰度图像进行匹配
+        :param confidence: 匹配置信度阈值
+        :param sort_by_confidence: 是否按照置信度排序返回结果
         :return: 会返回多个匹配结果的坐标
         """
+        # 若不需要按置信度排序，使用原始pyautogui方法
+        if not sort_by_confidence:
+            return cls._find_with_pyautogui(img, haystack, grayscale, confidence)
+        else:
+            return cls._find_with_opencv(img, haystack, grayscale, confidence)
+
+    @classmethod
+    def _find_with_pyautogui(cls, img, haystack, grayscale, confidence):
+        """使用pyautogui原始方法查找匹配"""
         try:
-            # pyautogui提供了一个工具
             boxes = pyautogui.locateAll(img, haystack, grayscale=grayscale, confidence=confidence)
 
             try:
@@ -121,6 +132,97 @@ class ImageTools:
         except pyautogui.ImageNotFoundException:
             # 捕获图像未找到异常，返回空列表
             return []
+
+    @classmethod
+    def _find_with_opencv(cls, img, haystack, grayscale, confidence):
+        """使用OpenCV查找匹配并按置信度排序"""
+        try:
+            # 转换图像格式
+            template, search_img = cls._prepare_images(img, haystack, grayscale)
+
+            # 获取匹配结果及置信度
+            matches_with_conf = cls._match_template_with_confidence(template, search_img, confidence)
+
+            # 按置信度排序
+            matches_with_conf.sort(key=lambda x: x[4], reverse=True)
+
+            # 提取位置信息
+            boxes = [(x, y, w, h) for x, y, w, h, _ in matches_with_conf]
+
+            # 应用NMS
+            if boxes:
+                rects = ComputeIou.nms_xywh(boxes)
+
+                # 转换为整数类型
+                rects2 = []
+                for rect in rects:
+                    rects2.append([int(x) for x in rect])
+                return rects2
+            return []
+        except Exception as e:
+            # 捕获异常，返回空列表
+            print(f"Error in OpenCV template matching: {e}")
+            return []
+
+    @classmethod
+    def _prepare_images(cls, img, haystack, grayscale):
+        """准备图像用于OpenCV模板匹配"""
+        import cv2
+        import numpy as np
+
+        # 如果是文件路径，则读取图像
+        if isinstance(img, str):
+            template = cv2.imread(img, cv2.IMREAD_COLOR)
+        elif isinstance(img, np.ndarray):
+            template = img
+        else:
+            # 如果是PIL图像，转换为OpenCV格式
+            template = np.array(img)
+            template = cv2.cvtColor(template, cv2.COLOR_RGB2BGR)
+
+        if isinstance(haystack, str):
+            search_img = cv2.imread(haystack, cv2.IMREAD_COLOR)
+        elif isinstance(haystack, np.ndarray):
+            search_img = haystack
+        else:
+            # 如果是PIL图像，转换为OpenCV格式
+            search_img = np.array(haystack)
+            search_img = cv2.cvtColor(search_img, cv2.COLOR_RGB2BGR)
+
+        # 如果需要灰度图像
+        if grayscale:
+            if len(template.shape) > 2:
+                template = cv2.cvtColor(template, cv2.COLOR_BGR2GRAY)
+            if len(search_img.shape) > 2:
+                search_img = cv2.cvtColor(search_img, cv2.COLOR_BGR2GRAY)
+
+        return template, search_img
+
+    @classmethod
+    def _match_template_with_confidence(cls, template, search_img, confidence):
+        """使用OpenCV进行模板匹配并返回带置信度的结果"""
+        import cv2
+        import numpy as np
+
+        # 确保置信度设置
+        if confidence is None:
+            confidence = 0.8
+
+        # 执行模板匹配
+        result = cv2.matchTemplate(search_img, template, cv2.TM_CCOEFF_NORMED)
+        w, h = template.shape[1], template.shape[0]
+
+        # 找出所有超过阈值的点
+        locations = np.where(result >= confidence)
+        matches = []
+
+        # 收集坐标和置信度
+        for pt in zip(*locations[::-1]):  # 转换为(x, y)格式
+            x, y = pt
+            conf = float(result[y, x])  # 获取该位置的置信度值
+            matches.append((x, y, w, h, conf))
+
+        return matches
 
 
 class _AnShapeBasic(UserDict):
@@ -467,6 +569,7 @@ class AnShape(_AnShapePupil):
                  color_tolerance=None,
                  grayscale=None,
                  confidence=None,
+                 sort_by_confidence=False,
                  ):
         """ 查找图像匹配
 
@@ -487,13 +590,16 @@ class AnShape(_AnShapePupil):
             局部匹配返回匹配的shapes列表
         """
         # 1 匹配目标
+        default_text = ''
         if dst is None:
             dst, part = self['img'], False
+            default_text = self['text']
         elif isinstance(dst, str):  # XlPath不是str类型，利用这个特性可以输入图片路径用xlcv读取
             """ 如果输入字符串，表示这是一个相对当前self的view路径名 """
             dst = self[str]
 
         if isinstance(dst, AnShape):
+            default_text = dst['text']
             img = dst['img']
             img_wh = dst['xywh'][:2]
             if part is None:
@@ -522,12 +628,13 @@ class AnShape(_AnShapePupil):
         # 3 局部匹配场景
         def find_subimg():
             # 单帧检索
-            rects = ImageTools.base_find_img(img, self.shot(), grayscale=grayscale, confidence=confidence)
+            rects = ImageTools.base_find_img(img, self.shot(),grayscale=grayscale,
+                                             confidence=confidence, sort_by_confidence=sort_by_confidence)
             # 把rects转成AnShape类型，每个rect都是[x, y, w, h]的list，不过其有numpy格式，要转成int类型
             shapes = []
             for rect in rects:
                 sp = AnShape(parent=self)
-                sp.set_shape('', [int(x) for x in rect])
+                sp.set_shape(default_text, [int(x) for x in rect])
                 shapes.append(sp)
             return shapes
 
