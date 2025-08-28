@@ -4,6 +4,10 @@
 # @Email  : 877362867@qq.com
 # @Date   : 2021/06/06 17:01
 
+"""
+d250822，本库不再推荐使用，建议使用三方库处理类似需求：rapidfuzz
+"""
+
 # from pyxllib.prog.pupil import check_install_package
 
 # 这个需要C++14编译器 https://download.microsoft.com/download/5/f/7/5f7acaeb-8363-451f-9425-68a90f98b238/visualcppbuildtools_full.exe
@@ -153,7 +157,7 @@ class MatchSimString:
         :param threshold: 可以理解成距离的阈值，距离小于这个阈值的字符串会被聚为一类
             值越小，分出的类别越多越细
         """
-        check_install_package('sklearn', 'scikit-learn')
+        # check_install_package('sklearn', 'scikit-learn')
         from sklearn.cluster import AgglomerativeClustering
 
         # 1 给每个样本标类别
@@ -224,7 +228,7 @@ class HierarchicalMatchSimString(MatchSimString):
             center，中心样本
             first，第一个样本
         """
-        check_install_package('sklearn', 'scikit-learn')
+        # check_install_package('sklearn', 'scikit-learn')
         from sklearn.cluster import AgglomerativeClustering
 
         # 1 给每个样本标类别

@@ -16,7 +16,7 @@ import shutil
 import subprocess
 import tempfile
 import ujson
-from collections import defaultdict, Counter
+from collections import defaultdict, Counter, UserDict
 import math
 from itertools import islice
 import datetime
@@ -2823,3 +2823,25 @@ class BatchFileRenamer:
             if print_mode:
                 print(cnt, f.as_posix(), '-->', f2.name)
             f.rename2(f2)
+
+
+class CacheJsonFile(XlPath, UserDict):
+    def __init__(self, file=None, root=None):
+        if file is None:
+            file = XlPath.create_tempfile_path('.json', root)
+        else:
+            root = XlPath(root) if root else XlPath.tempdir()
+            file = root / file
+        XlPath.__init__(self, file)
+
+        self.data = {}
+        # XlPath.parent也会调用到这个函数，所以一定要严格区分开is_file
+        if self.is_file():
+            self.data = self.read_json()
+
+    def __bool__(self):
+        return bool(self.data)
+
+    def save(self):
+        os.makedirs(self.parent, exist_ok=True)
+        self.write_json(self.data)
