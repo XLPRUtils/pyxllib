@@ -56,6 +56,7 @@ shape: view里的各个位置对象标记内容。上述所有类其实都是sha
 @run_once()
 def get_xlapi():
     xlapi = XlAiClient(auto_login=False, check=False)
+    logger.info(f"{os.getenv('XL_API_PRIU_TOKEN')}, {os.getenv('MAIN_WEBSITE')}")
     xlapi.login_priu(os.getenv('XL_API_PRIU_TOKEN'), os.getenv('MAIN_WEBSITE'))
     return xlapi
 
@@ -628,7 +629,7 @@ class AnShape(_AnShapePupil):
         # 3 局部匹配场景
         def find_subimg():
             # 单帧检索
-            rects = ImageTools.base_find_img(img, self.shot(),grayscale=grayscale,
+            rects = ImageTools.base_find_img(img, self.shot(), grayscale=grayscale,
                                              confidence=confidence, sort_by_confidence=sort_by_confidence)
             # 把rects转成AnShape类型，每个rect都是[x, y, w, h]的list，不过其有numpy格式，要转成int类型
             shapes = []
@@ -1021,6 +1022,10 @@ class AnWindow(AnRegion):
 
     def __init__(self, folder=None, **kwargs):
         super().__init__(folder, **kwargs)
+
+        w, h = pyautogui.size()
+        self['text'] = 'screen'
+        self['xywh'] = [0, 0, w, h]  # 默认获取全屏幕
 
         self.ctrl = None
 
