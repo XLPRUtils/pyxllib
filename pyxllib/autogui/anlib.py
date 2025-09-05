@@ -56,7 +56,7 @@ shape: view里的各个位置对象标记内容。上述所有类其实都是sha
 @run_once()
 def get_xlapi():
     xlapi = XlAiClient(auto_login=False, check=False)
-    logger.info(f"{os.getenv('XL_API_PRIU_TOKEN')}, {os.getenv('MAIN_WEBSITE')}")
+    # logger.info(f"{os.getenv('XL_API_PRIU_TOKEN')}, {os.getenv('MAIN_WEBSITE')}")
     xlapi.login_priu(os.getenv('XL_API_PRIU_TOKEN'), os.getenv('MAIN_WEBSITE'))
     return xlapi
 
@@ -278,7 +278,12 @@ class _AnShapeBasic(UserDict):
 
         # 3 外接矩形 rect
         if shape_type in ('rectangle', 'polygon'):
-            ltrb = np.array(pts, dtype=int).reshape(-1).tolist()
+            pts_array = np.array(pts)
+            left = int(pts_array[:, 0].min())
+            top = int(pts_array[:, 1].min())
+            right = int(pts_array[:, 0].max())
+            bottom = int(pts_array[:, 1].max())
+            ltrb = [left, top, right, bottom]
         elif shape_type == 'circle':
             x, y = pts[0]
             r = ((x - pts[1][0]) ** 2 + (y - pts[1][1]) ** 2) ** 0.5
