@@ -489,58 +489,6 @@ class XlprDb(Connection):
         super().__init__(*args, **kwargs)
         self.seckey = ''
 
-    @classmethod
-    def set_conninfo(cls, conninfo, seckey=''):
-        """ 提前将登录信息加密写到环境变量中，这样代码中就没有明文的账号密码信息
-
-        :param conninfo:
-        :param seckey: 如果要获得数据库里较重要的密码等信息，需要配置key值，否则默认可以不设
-
-        使用后，需要重启IDE重新加载环境变量
-        并且本句明文代码需要删除
-        """
-        # TODO 目前只设一个账号，后续可以扩展支持多个账号指定配置
-        # conninfo = 'postgresql://postgres:yourpassword@172.16.170.110/xlpr'
-        return XlOsEnv.persist_set('XlprDbAccount', {'conninfo': conninfo, 'seckey': seckey}, encoding=True)
-
-    @classmethod
-    def connect(cls, conninfo='', seckey='', *,
-                autocommit=False, row_factory=None, context=None, **kwargs) -> 'XlprDb':
-        """ 因为要标记 -> XlprDb，IDE才会识别出类别，有自动补全功能
-        但在类中写@classmethod，无法标记 -> XlprDb，所以就放外面单独写一个方法了
-        """
-        d = XlOsEnv.get('XlprDbAccount', decoding=True)
-        if conninfo == '':
-            conninfo = d['conninfo']
-        if seckey == '' and isinstance(d, dict) and 'seckey' in d:
-            seckey = d['seckey']
-        # 注意这里获取的是XlprDb类型
-        con = super(XlprDb, cls).connect(conninfo, autocommit=autocommit, row_factory=row_factory, context=context,
-                                         **kwargs)
-        con.seckey = seckey
-        return con
-
-    @classmethod
-    def connect2(cls, name, passwd, database=None, ip_list=None, **kwargs):
-        """ 简化的登录方式，并且自带优先尝试局域网连接，再公网连接
-
-        一般用在jupyter等对启动速度没有太高要求的场合，因为不断尝试localhost等需要耗费不少时间
-        """
-        if database is None:
-            database = name
-
-        xldb = None
-        if ip_list is None:
-            ip_list = ['localhost', '172.16.170.136', 'xmutpriu.com']
-        for ip in ip_list:
-            try:
-                xldb = cls.connect(f'postgresql://{name}:{passwd}@{ip}/{database}', **kwargs)
-                break
-            except psycopg.OperationalError:
-                pass
-
-        return xldb
-
     def __1_hosts相关数据表操作(self):
         pass
 

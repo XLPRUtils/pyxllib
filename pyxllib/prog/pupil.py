@@ -997,13 +997,22 @@ def get_hostname():
     return hostname
 
 
-@run_once()
-def get_hostname2():
-    """ 更加定制化的操作 """
-    hostname = socket.getfqdn()
-    hostname = hostname.replace('-', '_')
-    hostname = hostname.split('.')[0]
-    return hostname
+def get_xl_hostname():
+    """ 特殊定制版的获取主机名 """
+    if not os.getenv('XL_HOSTNAME'):
+        # 1 获得基础名
+        hostname = socket.getfqdn()
+        # 2 初步预处理
+        hostname = hostname.replace('-', '_')
+        hostname = hostname.split('.')[0]
+        # 3 如果环境变量有配置则进一步映射名称
+        host_map = {}
+        if os.getenv('XL_HOSTNAME_MAP'):
+            # XL_HOSTNAME_MAP是备用字典，支持更进一步的精细自定义控制：存储预处理后的hostname到目标昵称的映射
+            host_map = json.loads(os.getenv('XL_HOSTNAME_MAP'))
+        os.environ['XL_HOSTNAME'] = host_map.get(hostname, hostname)
+
+    return os.getenv('XL_HOSTNAME')
 
 
 @run_once()

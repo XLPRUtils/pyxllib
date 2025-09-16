@@ -656,11 +656,13 @@ class AnShape(_AnShapePupil):
     def wait_img(self, dst=None, *, limit=None, interval=None, **kwargs):
         """ 等到目标匹配图片出现 """
         interval = self.get_parent_argv('wait_interval', interval) or 1
+        limit = self.get_parent_argv('limit', limit)
         return xlwait(lambda: self.find_img(dst, **kwargs), limit=limit, interval=interval)
 
     def waitleave_img(self, dst=None, *, limit=None, interval=None, **kwargs):
         """ 等到目标匹配图片离开（不再出现） """
         interval = self.get_parent_argv('wait_interval', interval) or 1
+        limit = self.get_parent_argv('limit', limit)
         return xlwait(lambda: not self.find_img(dst, **kwargs), limit=limit, interval=interval)
 
     def __2_文本类(self):
