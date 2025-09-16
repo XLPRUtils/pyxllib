@@ -15,9 +15,10 @@ from pyxllib.text.newbie import add_quote
 
 
 class XlOsEnv:
-    """ pyxllib库自带的一套环境变量数据解析类
+    """ 环境变量数据解析类
 
-    会将json的字符串值，或者普通str，存储到环境变量中
+    可以读取、存储json的字符串值，或者普通str
+    有些敏感信息，可以再加一层base64加密存储
 
     环境变量也可以用来实现全局变量的信息传递，虽然不太建议这样做
 
@@ -55,7 +56,7 @@ class XlOsEnv:
                 return value
 
     @classmethod
-    def set(cls, name, value, encoding=False):
+    def set(cls, name, value, *, encoding=False):
         """ 临时改变环境变量
 
         :param name: 环境变量名
@@ -70,7 +71,7 @@ class XlOsEnv:
         """
         # 1 打包
         if isinstance(value, str):
-            value = add_quote(value)
+            value = add_quote(value)  # 不加引号下次也能json.loads，但对于"123"这种会变成int类型，而非原本的str类型
         else:
             value = json.dumps(value)
 
@@ -108,3 +109,11 @@ class XlOsEnv:
         """ 删除环境变量 """
         from envariable import unsetenv
         unsetenv(name)
+
+    @classmethod
+    def get_df(cls, name, *, decoding=False):
+        """ 将内容按照表格的形式读取成pandas的df """
+        data = cls.get(name, decoding=decoding)
+        if data:
+            import pandas as pd
+            return pd.DataFrame(data[1:], columns=data[0])
