@@ -24,7 +24,7 @@ import requests
 
 from pyxllib.prog.newbie import round_int
 from pyxllib.prog.pupil import is_url
-from pyxllib.prog.xlosenv import XlOsEnv
+from pyxllib.prog.xlenv import XlEnv
 from pyxllib.algo.geo import xywh2ltrb, rect_bounds
 from pyxllib.file.specialist import XlPath, get_etag
 from pyxllib.cv.expert import xlcv
@@ -205,7 +205,7 @@ class XlAiClient:
         self._priu_host = None
 
         # 2 (旧)如果环境变量预存了账号信息，自动加载使用
-        accounts = XlOsEnv.get('XlAiAccounts', decoding=True)
+        accounts = XlEnv.get('XlAiAccounts', decoding=True)
         if accounts and auto_login:
             if 'aipocr' in accounts:
                 self.login_aipocr(**accounts['aipocr'])

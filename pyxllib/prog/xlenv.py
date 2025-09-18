@@ -1,0 +1,268 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+# @Author : 陈坤泽
+# @Email  : 877362867@qq.com
+# @Date   : 2024/10/30
+
+import os
+import json
+import base64
+import socket
+from pathlib import Path
+
+from pyxllib.prog.lazyimport import safe_import
+
+try:
+    import pandas as pd
+except ModuleNotFoundError:
+    pd = safe_import('pandas')
+
+try:
+    from envariable import setenv, unsetenv
+except ModuleNotFoundError:
+    setenv, unsetenv = safe_import('from envariable import setenv, unsetenv')
+
+try:
+    from deprecated import deprecated
+except ModuleNotFoundError:
+    deprecated = safe_import('from deprecated import deprecated')
+
+from pyxllib.text.newbie import add_quote
+
+
+class XlEnv:
+    """ 环境变量数据解析类
+
+    可以读取、存储json的字符串值，或者普通str
+    有些敏感信息，可以再加一层base64加密存储
+
+    环境变量也可以用来实现全局变量的信息传递，虽然不太建议这样做
+
+    >> XlEnv.persist_set('TP10_ACCOUNT',
+                           {'server': '172.16.250.250', 'port': 22, 'user': 'ckz', 'passwd': '123456'},
+                           True)
+    >> print(XlEnv.get('TP10_ACCOUNT'), True)  # 展示存储的账号信息
+    eyJzZXJ2ZXIiOiAiMTcyLjE2LjE3MC4xMzQiLCAicG9ydCI6IDIyLCAidXNlciI6ICJjaGVua3VuemUiLCAicGFzc3dkIjogImNvZGV4bHByIn0=
+    >> XlEnv.unset('TP10_ACCOUNT')
+    """
+
+    @classmethod
+    def get(cls, name, *, decoding=False):
+        """ 获取环境变量值
+
+        :param name: 环境变量名
+        :param decoding: 是否需要先进行base64解码
+        :return:
+            返回json解析后的数据
+            或者普通的字符串值
+        """
+        value = os.getenv(name, None)
+        if value is None:
+            return value
+
+        if decoding:
+            value = base64.b64decode(value.encode())
+
+        try:
+            return json.loads(value)
+        except json.decoder.JSONDecodeError:
+            if isinstance(value, bytes):
+                return value.decode()
+            else:
+                return value
+
+    @classmethod
+    def set(cls, name, value, *, encoding=False):
+        """ 临时改变环境变量
+
+        :param name: 环境变量名
+        :param value: 要存储的值
+        :param encoding: 是否将内容转成base64后，再存储环境变量
+            防止一些密码信息，明文写出来太容易泄露
+            不过这个策略也很容易被破解；只防君子，难防小人
+
+            当然，谁看到这有闲情功夫的话，可以考虑做一套更复杂的加密系统
+            并且encoding支持多种不同的解加密策略，这样单看环境变量值就很难破译了
+        :return: str, 最终存储的字符串内容
+        """
+        # 1 打包
+        if isinstance(value, str):
+            value = add_quote(value)  # 不加引号下次也能json.loads，但对于"123"这种会变成int类型，而非原本的str类型
+        else:
+            value = json.dumps(value)
+
+        # 2 编码
+        if encoding:
+            value = base64.b64encode(value.encode()).decode()
+
+        # 3 存储到环境变量
+        os.environ[name] = value
+
+        return value
+
+    @classmethod
+    def persist_set(cls, name, value, encoding=False, *, cfgfile=None):
+        """ python里默认是改不了系统变量的，需要使用一些特殊手段
+        https://stackoverflow.com/questions/17657686/is-it-possible-to-set-an-environment-variable-from-python-permanently/17657905
+
+        :param cfgfile: 在linux系统时，可以使用该参数
+            默认是把环境变量写入 ~/.bashrc，可以考虑写到
+            TODO 有这个设想，但很不好实现，不是很关键的功能，所以还未开发
+
+        """
+        # 写入环境变量这里是有点小麻烦的，要考虑unix和windows不同平台，以及怎么持久化存储的问题，这里直接调用一个三方库来解决
+        from envariable import setenv
+
+        value = cls.set(name, value, encoding)
+        if value[0] == value[-1] == '"':
+            value = '\\' + value + '\\'
+        setenv(name, value)
+
+        return value
+
+    @classmethod
+    def unset(cls, name):
+        """ 删除环境变量 """
+        from envariable import unsetenv
+        unsetenv(name)
+
+    @classmethod
+    def get_df(cls, name, *, decoding=False):
+        """ 将内容按照表格的形式读取成pandas的df """
+        data = cls.get(name, decoding=decoding)
+        if data:
+            return pd.DataFrame(data[1:], columns=data[0])
+
+
+def get_xl_hostname():
+    """ 特殊定制版的获取主机名 """
+    if not os.getenv('XL_HOSTNAME'):
+        # 1 获得基础名
+        hostname = socket.getfqdn()
+        # 2 初步预处理
+        hostname = hostname.replace('-', '_')
+        hostname = hostname.split('.')[0]
+        # 3 如果环境变量有配置则进一步映射名称
+        df = XlHosts.get_df('XL_MACHINES')
+        # 获得的df有raw_name、name两个字段
+        # 查找df['raw_name']中，如果有等于hostname的值，需要把当前hostname映射到df中对应的df['name']的值
+        matched_rows = df[df['raw_name'] == hostname]
+        if not matched_rows.empty: hostname = matched_rows['name'].iloc[0]
+        os.environ['XL_HOSTNAME'] = hostname
+
+    return os.getenv('XL_HOSTNAME')
+
+
+@deprecated(reason='请改用get_xl_hostname')
+def get_host_nickname():
+    """ 获取主机昵称 """
+    return get_xl_hostname()
+
+
+class XlHosts:
+    """ 设备、链接、服务等相关管理器 """
+
+    def __1_一级工具(self):
+        pass
+
+    @classmethod
+    def get_df(cls, env_name):
+        """ 读取一个环境变量的表格数据 """
+        import pandas as pd
+
+        # 1 读取初步数据
+        df = XlEnv.get_df(env_name)
+
+        # 2 第1列如果有逗号，要展开数据
+        processed_rows = []
+        for _, row in df.iterrows():
+            col = df.columns[0]
+            names = row[col]
+            # 如果from字段包含逗号，拆分成多条记录
+            if pd.notna(names) and ',' in str(names):
+                names = str(names).split(',')
+                for name in names:
+                    new_row = row.copy()
+                    new_row[col] = name.strip()
+                    # 链接表，局域网清单展开的本机自联，ip统一改为127.0.0.1
+                    if env_name == 'XL_LINKS' and name == row['to']:
+                        new_row['ip'] = '127.0.0.1'
+                    processed_rows.append(new_row)
+            else:
+                processed_rows.append(row)
+
+        df = pd.DataFrame(processed_rows).reset_index(drop=True)
+
+        # 3 有些特殊数据需要补充处理
+        if env_name == 'XL_LINKS':
+            df = df.drop_duplicates(subset=['from', 'to'], keep='first')
+
+        return df
+
+    def __2_二级工具(self):
+        """ 解析表格 """
+        pass
+
+    @classmethod
+    def find_host(cls, host):
+        """获取主机的详细信息（工作目录、账号密码等）
+
+        :param host: 主机名
+        :return: 主机信息字典，如果不存在返回None
+        """
+        host = host or get_xl_hostname()
+        hosts = cls.get_df('XL_HOSTS')
+        matched = hosts.loc[hosts['host'] == host]
+        # 返回第一条匹配的记录
+        return matched.iloc[0].to_dict() if matched else {}
+
+    @classmethod
+    def find_link(cls, to_host, *, from_host=None):
+        """查找从from_host到to_host的链接配置
+
+        :param to_host: 目标主机名
+        :param from_host: 源主机名，如果为None则使用当前主机名
+        :return: 匹配的链接记录，如果没有找到返回None
+        """
+        # 获取基础参数
+        from_host = from_host or get_xl_hostname()
+        links = cls.get_df('XL_LINKS')
+
+        # 优先级1：精确匹配from_host到to_host的映射（包括本机自连）
+        matched = links.loc[(links['from'] == from_host) & (links['to'] == to_host)]
+
+        # 优先级2：通用映射（from为"*"表示任意主机）
+        if len(matched) == 0:
+            matched = links.loc[(links['from'] == '*') & (links['to'] == to_host)]
+
+        return matched.iloc[0].to_dict() if matched else {}
+
+    @classmethod
+    def find_service(cls, to_host, service_type):
+        df = cls.get_df('XL_SERVICES')
+        matched = df[(df['host'] == to_host) & (df['service'] == service_type)]
+        return matched.iloc[0].to_dict() if matched else {}
+
+    def __3_三级工具(self):
+        """ 最终用途接口 """
+        pass
+
+    @classmethod
+    def find_wkdir(cls, host=None):
+        return Path(cls.find_host(host).get('wkdir', '.'))
+
+    @classmethod
+    def find_port(cls, to_host, service_type, *, from_host=None):
+        """ 查找某个服务的端口，对于web来说，则是对应的url
+        """
+        link = cls.find_link(to_host, from_host=from_host)
+        return link['service'].get(service_type)
+
+    @classmethod
+    def find_passwd(cls, to_host, service_type, user_name):
+        return cls.find_service(to_host, service_type)['accounts'].get(user_name)
+
+
+def get_wkdir(host=None):
+    """ 获取用户工作目录 """
+    return XlHosts.find_wkdir(host)
