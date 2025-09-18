@@ -26,7 +26,7 @@ from humanfriendly import parse_size
 
 from pyxllib.prog.newbie import human_readable_size
 from pyxllib.prog.pupil import get_installed_packages, aligned_range, percentage_and_value
-from pyxllib.prog.xlosenv import XlOsEnv
+from pyxllib.prog.xlenv import XlEnv
 from pyxllib.file.specialist import cache_file
 
 

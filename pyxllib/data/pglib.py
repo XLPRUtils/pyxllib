@@ -27,7 +27,7 @@ import psycopg.rows
 
 from pyxllib.prog.newbie import round_int, human_readable_number
 from pyxllib.prog.pupil import utc_now, utc_timestamp, is_valid_identifier
-from pyxllib.prog.specialist import XlOsEnv
+from pyxllib.prog.specialist import XlEnv
 from pyxllib.algo.pupil import ValuesStat2
 from pyxllib.file.specialist import get_etag, StreamJsonlWriter
 from pyxllib.data.sqlite import SqlBase, SqlBuilder
