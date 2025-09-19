@@ -4,11 +4,28 @@
 # @Email  : 877362867@qq.com
 # @Date   : 2022/02/25 17:54
 
-import cv2
-from moviepy.editor import VideoFileClip
-from moviepy.editor import cvsecs
-import numpy as np
-from tqdm import tqdm
+from pyxllib.prog.lazyimport import lazy_import
+
+try:
+    from tqdm import tqdm
+except ModuleNotFoundError:
+    tqdm = lazy_import('from tqdm import tqdm')
+
+try:
+    import numpy as np
+except ModuleNotFoundError:
+    np = lazy_import('numpy')
+
+try:
+    import cv2
+except ModuleNotFoundError:
+    cv2 = lazy_import('cv2', 'opencv-python')
+
+try:
+    from moviepy.editor import VideoFileClip, cvsecs
+except ModuleNotFoundError:
+    VideoFileClip = lazy_import('from moviepy.editor import VideoFileClip', 'moviepy')
+    cvsecs = lazy_import('from moviepy.editor import cvsecs', 'moviepy')
 
 from pyxllib.prog.pupil import inject_members
 from pyxllib.file.specialist import XlPath

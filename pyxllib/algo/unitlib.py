@@ -6,9 +6,17 @@
 
 """ 单位功能库 """
 
-import pint
+from pyxllib.prog.lazyimport import lazy_import
 
-import pandas as pd
+try:
+    import pandas as pd
+except ModuleNotFoundError:
+    pd = lazy_import('pandas')
+
+try:
+    import pint
+except ModuleNotFoundError:
+    pint = lazy_import('pint')
 
 from pyxllib.prog.newbie import xl_format_g
 from pyxllib.prog.pupil import run_once

@@ -15,8 +15,17 @@ import datetime
 import platform
 import re
 
-import pandas as pd
-from bs4 import BeautifulSoup
+from pyxllib.prog.lazyimport import lazy_import
+
+try:
+    import pandas as pd
+except ModuleNotFoundError:
+    pd = lazy_import('pandas')
+
+try:
+    from bs4 import BeautifulSoup
+except ModuleNotFoundError:
+    BeautifulSoup = lazy_import('from bs4 import BeautifulSoup', 'beautifulsoup4')
 
 from pyxllib.prog.newbie import typename
 from pyxllib.prog.pupil import dprint, func_input_message, is_url, is_file

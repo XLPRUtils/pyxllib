@@ -8,15 +8,19 @@
 并查集相关功能
 """
 
-from tqdm import tqdm
-
-from pyxllib.prog.pupil import check_install_package
-
-check_install_package('disjoint_set', 'disjoint-set==0.6.3')
-
 from itertools import combinations
 
-from disjoint_set import DisjointSet
+from pyxllib.prog.lazyimport import lazy_import
+
+try:
+    from tqdm import tqdm
+except ModuleNotFoundError:
+    tqdm = lazy_import('from tqdm import tqdm')
+
+try:
+    from disjoint_set import DisjointSet
+except ModuleNotFoundError:
+    DisjointSet = lazy_import('from disjoint_set import DisjointSet', 'disjoint-set')
 
 
 def disjoint_set(items, join_checker, print_mode=False):

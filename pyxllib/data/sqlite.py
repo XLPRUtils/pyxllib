@@ -11,7 +11,12 @@ import sqlite3
 import warnings
 from collections import defaultdict
 
-import pandas as pd
+from pyxllib.prog.lazyimport import lazy_import
+
+try:
+    import pandas as pd
+except ModuleNotFoundError:
+    pd = lazy_import('pandas')
 
 # 旧版的pandas警告
 warnings.filterwarnings('ignore', message="pandas only support SQLAlchemy connectable")

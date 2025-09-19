@@ -13,8 +13,17 @@ from pyxlib.cv.debugtools import *
 import math
 import time
 
-import cv2
-import numpy as np
+from pyxllib.prog.lazyimport import lazy_import
+
+try:
+    import numpy as np
+except ModuleNotFoundError:
+    np = lazy_import('numpy')
+
+try:
+    import cv2
+except ModuleNotFoundError:
+    cv2 = lazy_import('cv2', 'opencv-python')
 
 from pyxllib.prog.specialist import TicToc
 from pyxllib.cv.expert import xlcv

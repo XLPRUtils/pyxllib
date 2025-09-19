@@ -12,12 +12,30 @@ from enum import Enum
 import pprint
 import json
 
-import requests
-import urllib.parse
-import pandas as pd
+from pyxllib.prog.lazyimport import lazy_import
 
-from fastcore.basics import GetAttr
-from loguru import logger
+try:
+    from loguru import logger
+except ModuleNotFoundError:
+    logger = lazy_import('from loguru import logger')
+
+try:
+    from fastcore.basics import GetAttr
+except ModuleNotFoundError:
+    GetAttr = lazy_import('from fastcore.basics import GetAttr')
+
+try:
+    import requests
+except ModuleNotFoundError:
+    requests = lazy_import('requests')
+
+# urllib是Python标准库，不需要转换
+import urllib.parse
+
+try:
+    import pandas as pd
+except ModuleNotFoundError:
+    pd = lazy_import('pandas')
 
 from pyxllib.prog.newbie import SingletonForEveryInitArgs
 from pyxllib.prog.pupil import run_once

@@ -8,7 +8,13 @@
 from collections import OrderedDict
 import sqlite3
 
-from joblib import Parallel, delayed
+from pyxllib.prog.lazyimport import lazy_import
+
+try:
+    from joblib import Parallel, delayed
+except ModuleNotFoundError:
+    Parallel = lazy_import('from joblib import Parallel')
+    delayed = lazy_import('from joblib import delayed')
 
 from pyxllib.file.specialist.filelib import *
 from pyxllib.file.specialist.dirlib import *

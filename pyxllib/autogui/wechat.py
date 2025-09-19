@@ -15,12 +15,24 @@ from typing import (Iterable, Callable, List)
 from typing import Optional
 from unittest.mock import MagicMock
 
-from loguru import logger
+from pyxllib.prog.lazyimport import lazy_import
 
-if sys.platform == 'win32':
-    import uiautomation as auto
+try:
+    from loguru import logger
+except ModuleNotFoundError:
+    logger = lazy_import('from loguru import logger')
+
+try:
     import win32con
     import win32gui
+except ModuleNotFoundError:
+    win32con = lazy_import('win32con', 'pywin32')
+    win32gui = lazy_import('win32gui', 'pywin32')
+
+try:
+    import uiautomation as auto
+except ModuleNotFoundError:
+    auto = lazy_import('uiautomation', 'uiautomation')
 
 from pyxllib.prog.filelock import get_autogui_lock
 

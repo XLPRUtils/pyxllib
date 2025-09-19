@@ -20,10 +20,18 @@ import textwrap
 import datetime
 import re
 
-from tqdm import tqdm
+from pyxllib.prog.lazyimport import lazy_import
 
-import psycopg
-import psycopg.rows
+try:
+    from tqdm import tqdm
+except ModuleNotFoundError:
+    tqdm = lazy_import('from tqdm import tqdm')
+
+try:
+    import psycopg
+    import psycopg.rows
+except ModuleNotFoundError:
+    psycopg = lazy_import('psycopg', 'psycopg[binary]')
 
 from pyxllib.prog.newbie import round_int, human_readable_number
 from pyxllib.prog.pupil import utc_now, utc_timestamp, is_valid_identifier

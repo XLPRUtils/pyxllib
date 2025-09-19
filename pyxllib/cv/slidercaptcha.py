@@ -1,7 +1,18 @@
 import os
-import cv2
-import numpy as np
-from xlproject.code4101 import XlPath
+
+from pyxllib.prog.lazyimport import lazy_import
+
+try:
+    import numpy as np
+except ModuleNotFoundError:
+    np = lazy_import('numpy')
+
+try:
+    import cv2
+except ModuleNotFoundError:
+    cv2 = lazy_import('cv2', 'opencv-python')
+
+from pyxllib.file.specialist import XlPath
 
 from pyxllib.file.specialist import download_file
 from pyxllib.prog.pupil import is_url

@@ -19,9 +19,22 @@ from collections import defaultdict
 from more_itertools import chunked
 import warnings
 
-import Levenshtein
-import numpy as np
-import pandas as pd
+from pyxllib.prog.lazyimport import lazy_import
+
+try:
+    import Levenshtein
+except ModuleNotFoundError:
+    Levenshtein = lazy_import('Levenshtein', 'python-Levenshtein')
+
+try:
+    import numpy as np
+except ModuleNotFoundError:
+    np = lazy_import('numpy')
+
+try:
+    import pandas as pd
+except ModuleNotFoundError:
+    pd = lazy_import('pandas')
 
 from pyxllib.prog.pupil import run_once
 from pyxllib.prog.specialist import dataframe_str

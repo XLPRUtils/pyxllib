@@ -9,8 +9,17 @@ import copy
 import re
 import sys
 
-import pandas as pd
-from more_itertools import unique_everseen
+from pyxllib.prog.lazyimport import lazy_import
+
+try:
+    import pandas as pd
+except ModuleNotFoundError:
+    pd = lazy_import('pandas')
+
+try:
+    from more_itertools import unique_everseen
+except ModuleNotFoundError:
+    unique_everseen = lazy_import('from more_itertools import unique_everseen')
 
 from pyxllib.prog.newbie import typename
 from pyxllib.algo.pupil import natural_sort_key

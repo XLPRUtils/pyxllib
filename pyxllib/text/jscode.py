@@ -9,12 +9,17 @@ import re
 import textwrap
 import os
 
-from jinja2 import Template
+from pyxllib.prog.lazyimport import lazy_import
+
+try:
+    from jinja2 import Template
+except ModuleNotFoundError:
+    Template = lazy_import('from jinja2 import Template')
 
 try:
     import jsbeautifier
 except ModuleNotFoundError:
-    pass
+    jsbeautifier = lazy_import('jsbeautifier')
 
 from pyxllib.file.specialist import XlPath
 from pyxllib.prog.cachetools import xlcache
@@ -239,7 +244,7 @@ class JSParser:
                 self.jsWithoutComment += si
                 self.反引号()
             elif si == "S" and self.jsCodeLength - self.indexPointer > 11 and self.jsSourceCode[
-                                                                              self.indexPointer:self.indexPointer + 11] == 'String.raw`':  # String.raw` 元字符串
+                self.indexPointer:self.indexPointer + 11] == 'String.raw`':  # String.raw` 元字符串
                 self.jsWithoutComment += si
                 self.indexPointer += 10;
                 self.jsWithoutComment += 'tring.raw`'  # 分两步，以便上面那个能和其它情景合并

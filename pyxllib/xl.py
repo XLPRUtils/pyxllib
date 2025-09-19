@@ -7,19 +7,18 @@
 """ pyxllib常用功能
 """
 
+from pyxllib.prog.lazyimport import lazy_import
+
 try:
     import fire
-except:
-    # 除了模块找不到，在labelme场景可能还有AttributeError: 'NoneType' object has no attribute 'isatty'
-    # 遇到这种情况，都可以忽略
-    pass
+except ModuleNotFoundError:
+    fire = lazy_import('fire')
 
 from pyxllib.file.packlib import *
 
 from pyxllib.prog.newbie import *
 from pyxllib.prog.pupil import *
 from pyxllib.prog.specialist import *
-# from pyxllib.prog.deprecatedlib import deprecated
 from deprecated import deprecated
 
 from pyxllib.algo.newbie import *
@@ -37,6 +36,3 @@ from pyxllib.file.specialist import *
 if __name__ == '__main__':
     # 直接运行的话，支持开放出所有函数类接口
     fire.Fire()
-
-
-    from pyxllib.ext.demolib import test_re

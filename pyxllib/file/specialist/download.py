@@ -10,8 +10,17 @@ import shutil
 from typing import Callable, List, Optional
 from urllib import request
 
-import requests
-from bs4 import BeautifulSoup
+from pyxllib.prog.lazyimport import lazy_import
+
+try:
+    import requests
+except ModuleNotFoundError:
+    requests = lazy_import('requests')
+
+try:
+    from bs4 import BeautifulSoup
+except ModuleNotFoundError:
+    BeautifulSoup = lazy_import('from bs4 import BeautifulSoup', 'beautifulsoup4')
 
 from pyxllib.file.specialist import File, Dir, refinepath
 

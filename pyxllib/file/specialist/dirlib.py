@@ -14,7 +14,12 @@ import re
 import shutil
 import tempfile
 
-import humanfriendly
+from pyxllib.prog.lazyimport import lazy_import
+
+try:
+    import humanfriendly
+except ModuleNotFoundError:
+    humanfriendly = lazy_import('humanfriendly')
 
 # 大小写不敏感字典
 from pyxllib.prog.newbie import first_nonnone

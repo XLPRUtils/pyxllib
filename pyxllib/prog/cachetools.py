@@ -8,13 +8,28 @@
 from functools import lru_cache
 import threading
 
-from cachetools import cached, LRUCache, TTLCache
+from pyxllib.prog.lazyimport import lazy_import
 
-# 官方文档：https://pypi.org/project/cached-property/
-from cached_property import cached_property
-from cached_property import threaded_cached_property  # 线程安全
-from cached_property import cached_property_with_ttl  # 限时缓存，单位秒
-from cached_property import threaded_cached_property_with_ttl  # 线程 + 限时
+try:
+    from cachetools import cached, LRUCache, TTLCache
+except ModuleNotFoundError:
+    cached = lazy_import('from cachetools import cached')
+    LRUCache = lazy_import('from cachetools import LRUCache')
+    TTLCache = lazy_import('from cachetools import TTLCache')
+
+try:
+    # 官方文档：https://pypi.org/project/cached-property/
+    from cached_property import (
+        cached_property,
+        threaded_cached_property,  # 线程安全
+        cached_property_with_ttl,  # 限时缓存，单位秒
+        threaded_cached_property_with_ttl  # 线程 + 限时
+    )
+except ModuleNotFoundError:
+    cached_property = lazy_import('from cached_property import cached_property')
+    threaded_cached_property = lazy_import('from cached_property import threaded_cached_property')
+    cached_property_with_ttl = lazy_import('from cached_property import cached_property_with_ttl')
+    threaded_cached_property_with_ttl = lazy_import('from cached_property import threaded_cached_property_with_ttl')
 
 
 # todo 240609周日21:19 https://github.com/awolverp/cachebox，据说这个缓存库速度更快的多

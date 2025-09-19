@@ -7,11 +7,22 @@
 import sys
 import time
 
-import mss
+from pyxllib.prog.lazyimport import lazy_import
 
-if sys.platform == 'win32':
+try:
+    import mss
+except ModuleNotFoundError:
+    mss = lazy_import('mss')
+
+try:
     import pyautogui
+except ModuleNotFoundError:
+    pyautogui = lazy_import('pyautogui')
+
+try:
     import win32gui
+except ModuleNotFoundError:
+    win32gui = lazy_import('win32gui', 'pywin32')
 
 from pyxllib.algo.geo import ltrb2polygon
 

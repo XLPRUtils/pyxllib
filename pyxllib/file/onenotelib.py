@@ -12,18 +12,39 @@ import warnings
 import os
 from threading import Thread
 from functools import reduce
-
-import bs4
-import pytz
 from xml.etree import ElementTree
-from humanfriendly import format_size
-from anytree.importer import DictImporter
-from anytree.exporter import DictExporter
+
+from pyxllib.prog.lazyimport import lazy_import
+
+try:
+    import bs4
+except ModuleNotFoundError:
+    bs4 = lazy_import('bs4', 'beautifulsoup4')
+
+try:
+    import pytz
+except ModuleNotFoundError:
+    pytz = lazy_import('pytz')
+
+try:
+    from humanfriendly import format_size
+except ModuleNotFoundError:
+    format_size = lazy_import('from humanfriendly import format_size')
+
+try:
+    from anytree.importer import DictImporter
+    from anytree.exporter import DictExporter
+except ModuleNotFoundError:
+    DictImporter = lazy_import('from anytree.importer import DictImporter')
+    DictExporter = lazy_import('from anytree.exporter import DictExporter')
+
+try:
+    import win32com.client
+except ModuleNotFoundError:
+    win32com = lazy_import('win32com.client', 'pywin32')
 
 # 过滤这类警告
 warnings.filterwarnings("ignore", category=bs4.MarkupResemblesLocatorWarning, module='bs4')
-
-import win32com.client
 
 if win32com.client.gencache.is_readonly:
     win32com.client.gencache.is_readonly = False

@@ -19,13 +19,34 @@ import threading
 import re
 import itertools
 
-from deprecated import deprecated
-from loguru import logger
-from croniter import croniter
-import pandas as pd
+from pyxllib.prog.lazyimport import lazy_import
 
-from fastapi import FastAPI
-from fastapi.responses import PlainTextResponse
+try:
+    from deprecated import deprecated
+except ModuleNotFoundError:
+    deprecated = lazy_import('deprecated', 'Deprecated')
+
+try:
+    from loguru import logger
+except ModuleNotFoundError:
+    logger = lazy_import('from loguru import logger')
+
+try:
+    from croniter import croniter
+except ModuleNotFoundError:
+    croniter = lazy_import('from croniter import croniter')
+
+try:
+    import pandas as pd
+except ModuleNotFoundError:
+    pd = lazy_import('pandas')
+
+try:
+    from fastapi import FastAPI
+    from fastapi.responses import PlainTextResponse
+except ModuleNotFoundError:
+    FastAPI = lazy_import('from fastapi import FastAPI')
+    PlainTextResponse = lazy_import('from fastapi.responses import PlainTextResponse')
 
 from pyxllib.prog.specialist import parse_datetime
 from pyxllib.algo.stat import print_full_dataframe

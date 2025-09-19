@@ -16,7 +16,12 @@ a = a - a.isoweekday() + kwargs['weekday']  # 先减去当前星期几，再加�
 import datetime
 import re
 
-from fastcore.utils import GetAttr
+from pyxllib.prog.lazyimport import lazy_import
+
+try:
+    from fastcore.utils import GetAttr
+except ModuleNotFoundError:
+    GetAttr = lazy_import('from fastcore.utils import GetAttr', 'fastcore')
 
 
 def parse_datetime(*argv):
@@ -174,7 +179,7 @@ class XlWeekTag(GetAttr):
 
     def __2_生成标签(self):
         pass
-    
+
     def weektag(self):
         """
         :return: 周标签名，例如 'w250414'，表示所属周的周一是2025年4月14日
@@ -196,4 +201,3 @@ class XlWeekTag(GetAttr):
         monday = self.monday()
         tags = [monday.add_days(i).daytag() for i in range(7)]
         return tags
- 

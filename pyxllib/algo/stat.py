@@ -12,16 +12,22 @@
 import sys
 from collections import defaultdict, Counter
 
-import pandas as pd
+from pyxllib.prog.lazyimport import lazy_import
+
+try:
+    import pandas as pd
+
+    pd.options.display.unicode.east_asian_width = True  # 优化中文输出对齐问题
+    try:
+        pd.set_option('future.no_silent_downcasting', True)
+    except Exception as e:
+        pass
+
+except ModuleNotFoundError:
+    pd = lazy_import('pandas')
 
 from pyxllib.prog.pupil import dprint, typename
 from pyxllib.file.specialist import XlPath
-
-pd.options.display.unicode.east_asian_width = True  # 优化中文输出对齐问题
-try:
-    pd.set_option('future.no_silent_downcasting', True)
-except Exception as e:
-    pass
 
 
 def treetable(childreds, parents, arg3=None, nodename_colname=None):

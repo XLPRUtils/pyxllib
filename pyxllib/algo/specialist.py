@@ -7,12 +7,24 @@
 import copy
 import itertools
 
-import numpy as np
-import pandas as pd
+from pyxllib.prog.lazyimport import lazy_import
+
+try:
+    import numpy as np
+except ModuleNotFoundError:
+    np = lazy_import('numpy')
+
+try:
+    import pandas as pd
+except ModuleNotFoundError:
+    pd = lazy_import('pandas')
+
+try:
+    from deprecated import deprecated
+except ModuleNotFoundError:
+    deprecated = lazy_import('deprecated', 'Deprecated')
 
 from pyxllib.prog.pupil import DictTool
-# from pyxllib.prog.deprecatedlib import deprecated
-from deprecated import deprecated
 
 
 @deprecated(reason='这个实现方式不佳，请参考 make_index_function')

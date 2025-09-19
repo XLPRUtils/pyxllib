@@ -10,15 +10,26 @@ Apache ECharts: https://echarts.apache.org/zh/index.html
 python版：pyechats的封装
 """
 
-# import types
+from pyxllib.prog.lazyimport import lazy_import
 
-import pyecharts
-from pyecharts import options as opts
-from pyecharts.commons.utils import JsCode
-from pyecharts.globals import ChartType
-from pyecharts import types
-from pyecharts.charts import Bar, Line, Radar
-from pyecharts.charts.chart import Chart
+try:
+    import pyecharts
+    from pyecharts import options as opts
+    from pyecharts.commons.utils import JsCode
+    from pyecharts.globals import ChartType
+    from pyecharts import types
+    from pyecharts.charts import Bar, Line, Radar
+    from pyecharts.charts.chart import Chart
+except ModuleNotFoundError:
+    pyecharts = lazy_import('pyecharts', 'pyecharts')
+    opts = lazy_import('from pyecharts import options as opts', 'pyecharts')
+    JsCode = lazy_import('from pyecharts.commons.utils import JsCode', 'pyecharts')
+    ChartType = lazy_import('from pyecharts.globals import ChartType', 'pyecharts')
+    types = lazy_import('from pyecharts import types', 'pyecharts')
+    Bar = lazy_import('from pyecharts.charts import Bar', 'pyecharts')
+    Line = lazy_import('from pyecharts.charts import Line', 'pyecharts')
+    Radar = lazy_import('from pyecharts.charts import Radar', 'pyecharts')
+    Chart = lazy_import('from pyecharts.charts.chart import Chart', 'pyecharts')
 
 from pyxllib.prog.pupil import inject_members
 from pyxllib.prog.specialist import TicToc

@@ -8,11 +8,12 @@
 oss2 · PyPI: https://pypi.org/project/oss2/
 """
 
-from pyxllib.prog.pupil import check_install_package
+from pyxllib.prog.lazyimport import lazy_import
 
-check_install_package('oss2')
-
-import oss2
+try:
+    import oss2
+except ModuleNotFoundError:
+    oss2 = lazy_import('oss2', 'oss2')
 
 from pyxllib.file.specialist import File
 

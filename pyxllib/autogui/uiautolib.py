@@ -15,26 +15,55 @@ import time
 from typing import Iterable, Callable, List
 import subprocess
 import tempfile
-
-import psutil
-import pandas as pd
-from fastcore.basics import GetAttr
-
-from loguru import logger
-# ui组件大多是树形组织结构，auto库自带树形操作太弱。没有专业的树形结构库，能搞个毛线。
-from anytree import NodeMixin
-
 import ctypes
 from ctypes import wintypes
 
-if sys.platform == 'win32':
+from pyxllib.prog.lazyimport import lazy_import
+
+try:
+    from loguru import logger
+except ModuleNotFoundError:
+    logger = lazy_import('from loguru import logger')
+
+try:
+    import psutil
+except ModuleNotFoundError:
+    psutil = lazy_import('psutil')
+
+try:
+    import pandas as pd
+except ModuleNotFoundError:
+    pd = lazy_import('pandas')
+
+try:
+    from fastcore.basics import GetAttr
+except ModuleNotFoundError:
+    GetAttr = lazy_import('from fastcore.basics import GetAttr', 'fastcore')
+
+# ui组件大多是树形组织结构，auto库自带树形操作太弱。没有专业的树形结构库，能搞个毛线。
+try:
+    from anytree import NodeMixin
+except ModuleNotFoundError:
+    NodeMixin = lazy_import('from anytree import NodeMixin', 'anytree')
+
+try:
     import win32con
     import win32gui
     import win32process
     import win32clipboard
+except ModuleNotFoundError:
+    win32con = lazy_import('win32con', 'pywin32')
+    win32gui = lazy_import('win32gui', 'pywin32')
+    win32process = lazy_import('win32process', 'pywin32')
+    win32clipboard = lazy_import('win32clipboard', 'pywin32')
 
+# uiautomation相关模块
+try:
     import uiautomation as uia
     from uiautomation import WindowControl
+except ModuleNotFoundError:
+    uia = lazy_import('uiautomation')
+    WindowControl = lazy_import('from uiautomation import WindowControl')
 
 
 def __1_clipboard_utils():

@@ -10,9 +10,22 @@ import os
 import io
 import time
 
-from loguru import logger
-from DrissionPage import Chromium
-import pandas as pd
+from pyxllib.prog.lazyimport import lazy_import
+
+try:
+    from loguru import logger
+except ModuleNotFoundError:
+    logger = lazy_import('from loguru import logger')
+
+try:
+    from DrissionPage import Chromium
+except ModuleNotFoundError:
+    Chromium = lazy_import('from DrissionPage import Chromium')
+
+try:
+    import pandas as pd
+except ModuleNotFoundError:
+    pd = lazy_import('pandas')
 
 from pyxllib.ext.drissionlib import DpWebBase
 

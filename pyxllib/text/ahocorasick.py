@@ -8,8 +8,12 @@
 from collections import Counter
 import re
 
-import ahocorasick
+from pyxllib.prog.lazyimport import lazy_import
 
+try:
+    import ahocorasick
+except ModuleNotFoundError:
+    ahocorasick = lazy_import('ahocorasick', 'pyahocorasick')
 
 def make_automaton(words):
     """ 根据输入的一串words模式，生成一个AC自动机 """

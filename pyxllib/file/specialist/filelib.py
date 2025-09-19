@@ -21,14 +21,47 @@ import math
 from itertools import islice
 import datetime
 
-import charset_normalizer
-import qiniu
-import requests
-import yaml
-import humanfriendly
-from more_itertools import chunked
-import filetype
-from tqdm import tqdm
+from pyxllib.prog.lazyimport import lazy_import
+
+try:
+    import charset_normalizer
+except ModuleNotFoundError:
+    charset_normalizer = lazy_import('charset_normalizer')
+
+try:
+    import qiniu
+except ModuleNotFoundError:
+    qiniu = lazy_import('qiniu')
+
+try:
+    import requests
+except ModuleNotFoundError:
+    requests = lazy_import('requests')
+
+try:
+    import yaml
+except ModuleNotFoundError:
+    yaml = lazy_import('yaml', 'PyYAML')
+
+try:
+    import humanfriendly
+except ModuleNotFoundError:
+    humanfriendly = lazy_import('humanfriendly')
+
+try:
+    from more_itertools import chunked
+except ModuleNotFoundError:
+    chunked = lazy_import('from more_itertools import chunked')
+
+try:
+    import filetype
+except ModuleNotFoundError:
+    filetype = lazy_import('filetype')
+
+try:
+    from tqdm import tqdm
+except ModuleNotFoundError:
+    tqdm = lazy_import('from tqdm import tqdm')
 
 from pyxllib.prog.newbie import round_int, human_readable_size
 from pyxllib.prog.pupil import is_url, is_file, DictTool

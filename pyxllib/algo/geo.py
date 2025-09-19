@@ -11,8 +11,17 @@ specialist级别
 
 import copy
 
-import numpy as np
-import cv2
+from pyxllib.prog.lazyimport import lazy_import
+
+try:
+    import numpy as np
+except ModuleNotFoundError:
+    np = lazy_import('import numpy as np')
+
+try:
+    import cv2
+except ModuleNotFoundError:
+    cv2 = lazy_import('cv2')
 
 from pyxllib.algo.intervals import Intervals
 

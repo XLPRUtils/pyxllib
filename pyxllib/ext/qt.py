@@ -9,11 +9,37 @@ import sys
 import time
 from datetime import datetime, timedelta
 
-from PyQt5 import QtWidgets
-from PyQt5.QtCore import QTimer, Qt, QThread, pyqtSignal, QEventLoop
-from PyQt5.QtWidgets import QApplication, QMainWindow, QFrame, QInputDialog, QMessageBox, QVBoxLayout, \
-    QTextEdit, QSizePolicy, QLabel, QProgressBar, QDialog
-from PyQt5.QtGui import QTextOption
+from pyxllib.prog.lazyimport import lazy_import
+
+try:
+    from PyQt5 import QtWidgets
+    from PyQt5.QtCore import QTimer, Qt, QThread, pyqtSignal, QEventLoop
+    from PyQt5.QtWidgets import (
+        QApplication, QMainWindow, QFrame, QInputDialog, QMessageBox,
+        QVBoxLayout, QTextEdit, QSizePolicy, QLabel, QProgressBar, QDialog
+    )
+    from PyQt5.QtGui import QTextOption
+except ModuleNotFoundError:
+    QtWidgets = lazy_import('from PyQt5 import QtWidgets', 'PyQt5')
+    QTimer = lazy_import('from PyQt5.QtCore import QTimer', 'PyQt5')
+    Qt = lazy_import('from PyQt5.QtCore import Qt', 'PyQt5')
+    QThread = lazy_import('from PyQt5.QtCore import QThread', 'PyQt5')
+    pyqtSignal = lazy_import('from PyQt5.QtCore import pyqtSignal', 'PyQt5')
+    QEventLoop = lazy_import('from PyQt5.QtCore import QEventLoop', 'PyQt5')
+
+    QApplication = lazy_import('from PyQt5.QtWidgets import QApplication', 'PyQt5')
+    QMainWindow = lazy_import('from PyQt5.QtWidgets import QMainWindow', 'PyQt5')
+    QFrame = lazy_import('from PyQt5.QtWidgets import QFrame', 'PyQt5')
+    QInputDialog = lazy_import('from PyQt5.QtWidgets import QInputDialog', 'PyQt5')
+    QMessageBox = lazy_import('from PyQt5.QtWidgets import QMessageBox', 'PyQt5')
+    QVBoxLayout = lazy_import('from PyQt5.QtWidgets import QVBoxLayout', 'PyQt5')
+    QTextEdit = lazy_import('from PyQt5.QtWidgets import QTextEdit', 'PyQt5')
+    QSizePolicy = lazy_import('from PyQt5.QtWidgets import QSizePolicy', 'PyQt5')
+    QLabel = lazy_import('from PyQt5.QtWidgets import QLabel', 'PyQt5')
+    QProgressBar = lazy_import('from PyQt5.QtWidgets import QProgressBar', 'PyQt5')
+    QDialog = lazy_import('from PyQt5.QtWidgets import QDialog', 'PyQt5')
+
+    QTextOption = lazy_import('from PyQt5.QtGui import QTextOption', 'PyQt5')
 
 from pyxllib.prog.newbie import CvtType
 

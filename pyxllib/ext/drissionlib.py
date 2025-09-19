@@ -10,13 +10,30 @@ import tempfile
 import time
 from urllib.parse import urlparse
 
-from deprecated import deprecated
-from loguru import logger
-import DrissionPage
-from DrissionPage import ChromiumPage, Chromium
-from DrissionPage._pages.chromium_base import ChromiumBase
-from DrissionPage._pages.chromium_tab import ChromiumTab
-import DrissionPage.errors
+from pyxllib.prog.lazyimport import lazy_import
+
+try:
+    from deprecated import deprecated
+except ModuleNotFoundError:
+    deprecated = lazy_import('deprecated', 'Deprecated')
+
+try:
+    from loguru import logger
+except ModuleNotFoundError:
+    logger = lazy_import('from loguru import logger')
+
+try:
+    import DrissionPage
+    from DrissionPage import ChromiumPage, Chromium
+    from DrissionPage._pages.chromium_base import ChromiumBase
+    from DrissionPage._pages.chromium_tab import ChromiumTab
+    import DrissionPage.errors
+except ModuleNotFoundError:
+    DrissionPage = lazy_import('DrissionPage')
+    ChromiumPage = lazy_import('from DrissionPage import ChromiumPage')
+    Chromium = lazy_import('from DrissionPage import Chromium')
+    ChromiumBase = lazy_import('from DrissionPage._pages.chromium_base import ChromiumBase')
+    ChromiumTab = lazy_import('from DrissionPage._pages.chromium_tab import ChromiumTab')
 
 from pyxllib.prog.pupil import inject_members
 from pyxllib.text.pupil import strfind

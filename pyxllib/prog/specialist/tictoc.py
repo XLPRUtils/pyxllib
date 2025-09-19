@@ -8,8 +8,17 @@
 import time
 import timeit
 
-from loguru import logger
-from humanfriendly import format_timespan
+from pyxllib.prog.lazyimport import lazy_import
+
+try:
+    from loguru import logger
+except ModuleNotFoundError:
+    logger = lazy_import('from loguru import logger')
+
+try:
+    from humanfriendly import format_timespan
+except ModuleNotFoundError:
+    format_timespan = lazy_import('from humanfriendly import format_timespan')
 
 from pyxllib.algo.pupil import natural_sort, ValuesStat
 from pyxllib.text.pupil import shorten, listalign

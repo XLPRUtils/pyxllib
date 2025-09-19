@@ -6,13 +6,32 @@
 
 import base64
 
-import PIL.Image
-import cv2
-import filetype
-import humanfriendly
-import numpy as np
-import requests
+from pyxllib.prog.lazyimport import lazy_import
 
+try:
+    import numpy as np
+except ModuleNotFoundError:
+    np = lazy_import('numpy')
+
+try:
+    import cv2
+except ModuleNotFoundError:
+    cv2 = lazy_import('cv2', 'opencv-python')
+
+try:
+    import PIL.Image
+except ModuleNotFoundError:
+    PIL = lazy_import('PIL', 'Pillow')
+
+try:
+    import filetype
+except ModuleNotFoundError:
+    filetype = lazy_import('filetype')
+
+try:
+    import requests
+except ModuleNotFoundError:
+    requests = lazy_import('requests')
 
 from pyxllib.prog.newbie import round_int, RunOnlyOnce
 from pyxllib.prog.pupil import EnchantBase, EnchantCvt
@@ -131,7 +150,7 @@ class xlcv(EnchantBase):
         maxy = max([p[1] for s in strokes for p in s])
 
         # 2 画出图片
-        canvas = np.zeros((maxy + margin*2, maxx + margin*2, 3), dtype=np.uint8)
+        canvas = np.zeros((maxy + margin * 2, maxx + margin * 2, 3), dtype=np.uint8)
         canvas[:, :] = bgcolor
 
         # 画出每个笔划轨迹
@@ -794,7 +813,7 @@ class xlcv(EnchantBase):
         # pip install deskew
         from deskew import determine_skew  # 用来做图像倾斜矫正的，这个库不大，就自动安装了
 
-        gray = xlcv.reduce_area(xlcv.read(image, 0), 1000*1000)  # 转成灰度图，并且可以适当缩小计算图片
+        gray = xlcv.reduce_area(xlcv.read(image, 0), 1000 * 1000)  # 转成灰度图，并且可以适当缩小计算图片
         angle = determine_skew(gray)  # 计算图像的倾斜角度
         (h, w) = image.shape[:2]  # 获取图像尺寸
         center = (w // 2, h // 2)  # 计算图像中心（默认按中心旋转了，以后如果有需要按非中心点旋转的，可以再改）

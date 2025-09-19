@@ -20,14 +20,49 @@ import logging
 
 logging.disable(logging.CRITICAL)
 
-from PyQt5.QtWidgets import QApplication, QMainWindow, QAction, QFileDialog, QListWidget, QLineEdit, QVBoxLayout, \
-    QSplitter, QTreeView, QPlainTextEdit, QPushButton, QLabel, QHBoxLayout, QSizePolicy, QWidget, QStatusBar, \
-    QAbstractItemView, QHeaderView, QMessageBox
-from PyQt5.QtWidgets import QItemDelegate, QTextEdit
-from PyQt5.QtWidgets import QItemDelegate, QDialog, QVBoxLayout, QTextEdit, QPushButton
+from pyxllib.prog.lazyimport import lazy_import
 
-from PyQt5.QtGui import QTextOption, QStandardItemModel, QStandardItem
-from PyQt5.QtCore import Qt, QModelIndex, QSettings, QFileInfo
+try:
+    from PyQt5.QtWidgets import QApplication, QMainWindow, QAction, QFileDialog, QListWidget, QLineEdit, QVBoxLayout, \
+        QSplitter, QTreeView, QPlainTextEdit, QPushButton, QLabel, QHBoxLayout, QSizePolicy, QWidget, QStatusBar, \
+        QAbstractItemView, QHeaderView, QMessageBox
+    from PyQt5.QtWidgets import QItemDelegate, QTextEdit
+    from PyQt5.QtWidgets import QItemDelegate, QDialog, QVBoxLayout, QTextEdit, QPushButton
+
+    from PyQt5.QtGui import QTextOption, QStandardItemModel, QStandardItem
+    from PyQt5.QtCore import Qt, QModelIndex, QSettings, QFileInfo
+except ModuleNotFoundError:
+    QApplication = lazy_import('from PyQt5.QtWidgets import QApplication', 'PyQt5')
+    QMainWindow = lazy_import('from PyQt5.QtWidgets import QMainWindow', 'PyQt5')
+    QAction = lazy_import('from PyQt5.QtWidgets import QAction', 'PyQt5')
+    QFileDialog = lazy_import('from PyQt5.QtWidgets import QFileDialog', 'PyQt5')
+    QListWidget = lazy_import('from PyQt5.QtWidgets import QListWidget', 'PyQt5')
+    QLineEdit = lazy_import('from PyQt5.QtWidgets import QLineEdit', 'PyQt5')
+    QVBoxLayout = lazy_import('from PyQt5.QtWidgets import QVBoxLayout', 'PyQt5')
+    QSplitter = lazy_import('from PyQt5.QtWidgets import QSplitter', 'PyQt5')
+    QTreeView = lazy_import('from PyQt5.QtWidgets import QTreeView', 'PyQt5')
+    QPlainTextEdit = lazy_import('from PyQt5.QtWidgets import QPlainTextEdit', 'PyQt5')
+    QPushButton = lazy_import('from PyQt5.QtWidgets import QPushButton', 'PyQt5')
+    QLabel = lazy_import('from PyQt5.QtWidgets import QLabel', 'PyQt5')
+    QHBoxLayout = lazy_import('from PyQt5.QtWidgets import QHBoxLayout', 'PyQt5')
+    QSizePolicy = lazy_import('from PyQt5.QtWidgets import QSizePolicy', 'PyQt5')
+    QWidget = lazy_import('from PyQt5.QtWidgets import QWidget', 'PyQt5')
+    QStatusBar = lazy_import('from PyQt5.QtWidgets import QStatusBar', 'PyQt5')
+    QAbstractItemView = lazy_import('from PyQt5.QtWidgets import QAbstractItemView', 'PyQt5')
+    QHeaderView = lazy_import('from PyQt5.QtWidgets import QHeaderView', 'PyQt5')
+    QMessageBox = lazy_import('from PyQt5.QtWidgets import QMessageBox', 'PyQt5')
+    QItemDelegate = lazy_import('from PyQt5.QtWidgets import QItemDelegate', 'PyQt5')
+    QTextEdit = lazy_import('from PyQt5.QtWidgets import QTextEdit', 'PyQt5')
+    QDialog = lazy_import('from PyQt5.QtWidgets import QDialog', 'PyQt5')
+
+    QTextOption = lazy_import('from PyQt5.QtGui import QTextOption', 'PyQt5')
+    QStandardItemModel = lazy_import('from PyQt5.QtGui import QStandardItemModel', 'PyQt5')
+    QStandardItem = lazy_import('from PyQt5.QtGui import QStandardItem', 'PyQt5')
+
+    Qt = lazy_import('from PyQt5.QtCore import Qt', 'PyQt5')
+    QModelIndex = lazy_import('from PyQt5.QtCore import QModelIndex', 'PyQt5')
+    QSettings = lazy_import('from PyQt5.QtCore import QSettings', 'PyQt5')
+    QFileInfo = lazy_import('from PyQt5.QtCore import QFileInfo', 'PyQt5')
 
 from pyxllib.file.specialist import XlPath
 
@@ -289,7 +324,8 @@ class JLineViewer(QMainWindow):
                 self.statusBar.showMessage(f"总条目数: {len(self.lines)}, 仅预加载1000条，"
                                            f"加载条目耗时: {time.time() - start_time:.2f} 秒")
             else:
-                self.statusBar.showMessage(f"总条目数: {len(self.lines)}, 加载条目耗时: {time.time() - start_time:.2f} 秒")
+                self.statusBar.showMessage(
+                    f"总条目数: {len(self.lines)}, 加载条目耗时: {time.time() - start_time:.2f} 秒")
 
     def reload(self):
         self.showDialog(fname=self.lastOpenDir or None)
@@ -326,7 +362,8 @@ class JLineViewer(QMainWindow):
             self.listWidget.addItems([f'{i + 1}. {line.strip()[:1000]}'
                                       for i, line in enumerate(self.lines)])
             QApplication.processEvents()
-            self.statusBar.showMessage(f"全部加载完毕, 总条目数: {len(self.lines)}, 加载耗时: {time.time() - start_time:.2f} 秒")
+            self.statusBar.showMessage(
+                f"全部加载完毕, 总条目数: {len(self.lines)}, 加载耗时: {time.time() - start_time:.2f} 秒")
 
             # 加载完所有项目后，设置 allItemsLoaded 变量为 True
             self.allItemsLoaded = True

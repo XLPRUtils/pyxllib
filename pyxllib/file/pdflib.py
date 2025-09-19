@@ -10,7 +10,17 @@ import os
 import pprint
 import re
 
-import fitz
+from pyxllib.prog.lazyimport import lazy_import
+
+try:
+    import fitz
+except ModuleNotFoundError:
+    fitz = lazy_import('fitz', 'PyMuPDF')
+
+try:
+    import pdf2docx
+except ModuleNotFoundError:
+    pdf2docx = lazy_import('pdf2docx')
 
 from pyxllib.prog.newbie import round_int, decode_bitflags
 from pyxllib.prog.pupil import DictTool, inject_members, dprint
@@ -88,15 +98,13 @@ class FitzDoc:
 
     def to_docx(self, docx_file=None):
         """ pdf转docx """
-        from pdf2docx import parse
-
         pdf_file = self.src_file
 
         if docx_file is None:
             docx_file = pdf_file.with_suffix('.docx')
 
         # 注意这里是日志显示进度，不是printf输出.
-        parse(str(pdf_file), str(docx_file))
+        pdf2docx.parse(str(pdf_file), str(docx_file))
 
     def browser(self, opt='pdf'):
         if opt == 'pdf':

@@ -8,12 +8,17 @@
 TODO 写一些图片相似度相关功能
 """
 
-from pyxllib.prog.pupil import check_install_package
+from pyxllib.prog.lazyimport import lazy_import
 
-check_install_package('imagehash', 'ImageHash')
+try:
+    import imagehash
+except ModuleNotFoundError:
+    imagehash = lazy_import('imagehash', 'ImageHash')
 
-import imagehash
-import numpy as np
+try:
+    import numpy as np
+except ModuleNotFoundError:
+    np = lazy_import('numpy')
 
 from pyxllib.cv.xlpillib import xlpil
 
