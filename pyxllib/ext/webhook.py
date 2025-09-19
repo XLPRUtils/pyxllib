@@ -102,9 +102,9 @@ class DingtalkRobot2(DingtalkRobot):
         from pyxllib.prog.pupil import utc_timestamp
 
         if self.title:
-            self.send_text(f'{utc_timestamp()} {get_host_nickname()} [{self.title}] {text}')
+            self.send_text(f'{utc_timestamp()} {get_xl_hostname()} [{self.title}] {text}')
         else:
-            self.send_text(f'{utc_timestamp()} {get_host_nickname()} {text}')
+            self.send_text(f'{utc_timestamp()} {get_xl_hostname()} {text}')
 
     def __enter__(self):
         self.send_text2('启动')

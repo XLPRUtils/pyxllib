@@ -17,6 +17,7 @@ import time
 import textwrap
 import threading
 import re
+import itertools
 
 from deprecated import deprecated
 from loguru import logger
@@ -351,8 +352,9 @@ class MultiProgramLauncher:
                     def f(m):
                         x = int(m.group(0))
                         return '6' if x == 0 else str(x - 1)
-                    x = re.sub(r'\d+', f, x)                    
-                    
+
+                    x = re.sub(r'\d+', f, x)
+
                 self.scheduler.add_job(
                     task,
                     CronTrigger(
@@ -828,8 +830,136 @@ class LauncherDashboard:
         uvicorn.run(self.app, host="0.0.0.0", port=port, log_level="warning")
 
 
-def __3_装饰器工具():
-    pass
+def __进程管理():
+    """ 这里的功能后续做通用后可以进入pyxllib """
+
+
+def run_python_module(*args,
+                      repeat_num=None,
+                      wait_mode=0,
+                      success_continue=False,
+                      **kwargs):
+    """
+    用于重复启动 Python 模块的函数。
+
+    :param repeat_num: 重复次数。如果为None，则无限重试。
+    :param wait_mode: 每次重试之间的等待时间（秒）
+        正值是程序运行结束(报错)后，等待的秒数
+        负值则是另一种特殊的等待机制，是以程序启动时间作为相对计算的
+
+    :param success_continue: 运行成功的情况下，是否也要重试，默认成功后就不重试了
+
+    python -m xlproject.code4101 run_python_module
+    """
+    from pyxllib.prog.multiprogs import SchedulerUtils
+
+    start_time = end_time = None
+    round_num = itertools.count(1) if repeat_num is None else range(1, 1 + int(repeat_num))
+    for round_id in round_num:
+        # 0 上一轮次的等待
+        SchedulerUtils.smart_wait(start_time, end_time, 0 if start_time is None else wait_mode, print_mode=1)
+
+        # 1 标记当前轮次
+        logger.info(f'进程运行轮次：{round_id}')
+        start_time = datetime.datetime.now()
+
+        # 2 配置参数
+        cmds = [f'{sys.executable}', '-m']
+        cmds.extend(map(str, args))  # 添加位置参数
+        for k, v in kwargs.items():
+            cmds.append(f'--{k}')  # 添加关键字参数的键
+            cmds.append(str(v))  # 添加关键字参数的值
+
+        # 3 custom 自定义配置
+        # 第2个参数是特殊参数，一般是模块名、启动位置。支持一定的缩略写法
+        # 但是这个不太好些，就暂时不写
+        cmds[2] = cmds[2].replace('/', '.')  # 支持输入路径形式
+
+        # 4 执行程序
+        res = subprocess.run(cmds)
+        end_time = datetime.datetime.now()
+
+        # 5 执行完成
+        if res.returncode == 0:
+            logger.info('进程成功完成')
+            if not success_continue:
+                break
+        else:
+            logger.info(f'遇到错误，返回码：{res.returncode}。尝试重启进程')
+
+
+def support_retry_process(repeat_num=None, wait_mode=0, success_continue=False):
+    """ 对函数进行扩展，支持重启运行
+
+    被装饰的函数，会扩展支持重启需要的几个参数：
+    repeat_num, wait_mode, success_continue
+
+    """
+    from pyxllib.prog.multiprogs import SchedulerUtils
+
+    def decorator(func):
+        def wrapper(*args, **kwargs):
+            nonlocal repeat_num, wait_mode, success_continue
+
+            retry = int(kwargs.pop('retry', False))
+
+            # 1 非重试，正常运行
+            if not retry:
+                return func(*args, **kwargs)
+
+            # 2 需要重试
+            wait_mode = int(kwargs.pop('wait_mode', wait_mode))
+            repeat_num = kwargs.pop('repeat_num', repeat_num)
+            success_continue = int(kwargs.pop('success_continue', success_continue))
+
+            start_time = end_time = None
+            round_num = itertools.count(1) if repeat_num is None else range(1, 1 + int(repeat_num))
+            for round_id in round_num:
+                # 0 上一轮次的等待
+                SchedulerUtils.smart_wait(start_time, end_time, 0 if start_time is None else wait_mode, print_mode=1)
+
+                # 1 标记当前轮次
+                logger.info(f'进程运行轮次：{round_id}')
+                start_time = datetime.datetime.now()
+
+                # 2 配置参数
+                cmds = [sys.executable, sys.argv[0], func.__name__]
+                cmds.extend(map(str, args))  # 添加位置参数
+                for k, v in kwargs.items():
+                    cmds.append(f'--{k}')  # 添加关键字参数的键
+                    cmds.append(str(v))  # 添加关键字参数的值
+
+                # 3 custom 自定义配置
+                # 第2个参数是特殊参数，一般是模块名、启动位置。支持一定的缩略写法
+                # 但是这个不太好些，就暂时不写
+                # cmds[2] = cmds[2].replace('/', '.')  # 支持输入路径形式
+
+                # 4 执行程序
+                print(cmds)
+                res = subprocess.run(cmds)
+
+                # todo 可以改成更高效的execv？估计有很多问题，那原本的实现如何修改避免无线嵌套执行子程序？
+                # os.execv(sys.executable, cmds)
+
+                end_time = datetime.datetime.now()
+
+                # 5 执行完成
+                if res.returncode == 0:
+                    logger.info('进程成功完成')
+                    if not success_continue:
+                        break
+                else:
+                    logger.info(f'遇到错误，返回码：{res.returncode}。尝试重启进程')
+
+        return wrapper
+
+    return decorator
+
+
+@support_retry_process(repeat_num=None, wait_mode=0)
+def healthy():
+    print('Hello')
+    exit(1)
 
 
 def support_multi_processes_hyx(default_processes=1):

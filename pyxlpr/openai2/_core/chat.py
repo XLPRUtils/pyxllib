@@ -25,6 +25,7 @@ from openai import OpenAI, AsyncOpenAI
 
 from pyxllib.text.jinjalib import set_template
 from pyxllib.file.specialist import download_file
+from pyxllib.prog.xlenv import XlHosts, link_to_host_service
 
 
 def __1_Chat类的基础功能():
@@ -855,3 +856,49 @@ class CompressContent:
         return cls.basic(content,
                          extra_prompts or xlprompts.compress_qq_message,
                          **kwargs)
+
+
+def __3_dify工作流():
+    pass
+
+
+class DifyChat:
+    def __init__(self, app_key, *,
+                 conversation_id=None,
+                 user=None,
+                 base_url=None):
+        if not app_key.startswith('app-'):
+            # 从环境变量读取服务映射key
+            accounts = XlHosts.find_service(os.getenv('XL_DIFY_HOST'), 'dify')['accounts']
+            app_key = accounts.get(app_key, app_key)
+
+        self.app_key = app_key
+        self.base_url = base_url or link_to_host_service(os.getenv('XL_DIFY_HOST'), 'dify')
+
+        self.headers = {
+            'Authorization': f'Bearer {self.app_key}',
+        }
+
+        self.conversation_state = {
+            'inputs': {},
+            # 'response_mode': 'streaming',
+            'conversation_id': conversation_id or '',
+            'user': user or 'code4101',
+        }
+
+    def query(self, query, *, files=None, images=None):
+        """ files、images等后期再加
+        """
+        # 1 请求
+        payload = self.conversation_state.copy()
+        payload['query'] = query
+        resp = requests.post(f'{self.base_url}/v1/chat-messages',
+                             headers=self.headers, json=payload)
+        resp_json = resp.json()  # 如果需要可以打印这个字典看结构
+
+        # 2 保存状态
+        self.conversation_state['conversation_id'] = resp_json.get('conversation_id', '')
+        loguru_logger.info(query)
+        loguru_logger.info(resp_json)
+
+        return resp_json['answer']
