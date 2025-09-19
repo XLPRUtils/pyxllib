@@ -4,11 +4,12 @@
 # @Email  : 877362867@qq.com
 # @Date   : 2024/10/30
 
-import os
-import json
 import base64
+import json
+import os
+import re
 import socket
-from pathlib import Path
+import subprocess
 
 from pyxllib.prog.lazyimport import safe_import
 
@@ -134,9 +135,22 @@ class XlEnv:
             return pd.DataFrame(data[1:], columns=data[0])
 
 
-def get_xl_hostname():
+def get_xl_homedir(host=None, *, reset=False):
+    """ 获取用户工作目录 """
+    from pyxllib.file.specialist import XlPath
+    if not os.getenv('XL_HOMEDIR') or reset:
+        os.environ['XL_HOMEDIR'] = XlHosts.find_homedir(host)
+    return XlPath(os.getenv('XL_HOMEDIR'))
+
+
+@deprecated(reason='请改用逻辑名称更正确的接口：get_xl_homedir')
+def get_xl_homedir(host=None, *, reset=False):
+    return get_xl_homedir(host, reset=reset)
+
+
+def get_xl_hostname(*, reset=False):
     """ 特殊定制版的获取主机名 """
-    if not os.getenv('XL_HOSTNAME'):
+    if not os.getenv('XL_HOSTNAME') or reset:
         # 1 获得基础名
         hostname = socket.getfqdn()
         # 2 初步预处理
@@ -153,8 +167,8 @@ def get_xl_hostname():
     return os.getenv('XL_HOSTNAME')
 
 
-@deprecated(reason='请改用get_xl_hostname')
-def get_host_nickname():
+@deprecated(reason='请改用逻辑名称更正确的接口：get_xl_hostname')
+def get_xl_hostname():
     """ 获取主机昵称 """
     return get_xl_hostname()
 
@@ -168,10 +182,9 @@ class XlHosts:
     @classmethod
     def get_df(cls, env_name):
         """ 读取一个环境变量的表格数据 """
-        import pandas as pd
-
         # 1 读取初步数据
         df = XlEnv.get_df(env_name)
+        assert df is not None, f'未配置环境变量{env_name}'
 
         # 2 第1列如果有逗号，要展开数据
         processed_rows = []
@@ -214,7 +227,7 @@ class XlHosts:
         hosts = cls.get_df('XL_HOSTS')
         matched = hosts.loc[hosts['host'] == host]
         # 返回第一条匹配的记录
-        return matched.iloc[0].to_dict() if matched else {}
+        return matched.iloc[0].to_dict() if len(matched) else {}
 
     @classmethod
     def find_link(cls, to_host, *, from_host=None):
@@ -235,34 +248,126 @@ class XlHosts:
         if len(matched) == 0:
             matched = links.loc[(links['from'] == '*') & (links['to'] == to_host)]
 
-        return matched.iloc[0].to_dict() if matched else {}
+        return matched.iloc[0].to_dict() if len(matched) else {}
 
     @classmethod
     def find_service(cls, to_host, service_type):
         df = cls.get_df('XL_SERVICES')
         matched = df[(df['host'] == to_host) & (df['service'] == service_type)]
-        return matched.iloc[0].to_dict() if matched else {}
+        return matched.iloc[0].to_dict() if len(matched) else {}
 
     def __3_三级工具(self):
         """ 最终用途接口 """
         pass
 
     @classmethod
-    def find_wkdir(cls, host=None):
-        return Path(cls.find_host(host).get('wkdir', '.'))
+    def find_homedir(cls, host=None):
+        info = cls.find_host(host)
+        # 注意这里不采用Path.home()，而是把目录直接展开，确保下游相关功能稳定、准确性更强
+        #   因为windows里的~并不会直接判别为用户目录，是可以直接作为路径名称的
+        return info['homedir'] if info else os.path.expanduser('~')
 
     @classmethod
-    def find_port(cls, to_host, service_type, *, from_host=None):
-        """ 查找某个服务的端口，对于web来说，则是对应的url
+    def find_locator(cls, to_host, service_type, *, from_host=None):
+        """ 查找某个服务的端口或路径，对于web来说，则是对应的url
         """
-        link = cls.find_link(to_host, from_host=from_host)
-        return link['service'].get(service_type)
+        link = cls.find_link(to_host, from_host=from_host) if isinstance(to_host, str) else to_host
+        assert service_type in link['service'], f"{to_host} 不存在 {service_type} 服务"
+        return link['service'][service_type]
 
     @classmethod
     def find_passwd(cls, to_host, service_type, user_name):
-        return cls.find_service(to_host, service_type)['accounts'].get(user_name)
+        accounts = cls.find_service(to_host, service_type)['accounts']
+        assert user_name in accounts, f"{to_host}/{service_type}，不存在 {user_name} 用户"
+        return accounts[user_name]
 
 
-def get_wkdir(host=None):
-    """ 获取用户工作目录 """
-    return XlHosts.find_wkdir(host)
+def __xlhome系列():
+    """ 跟文件相关的创建功能，默认根目录是homedir """
+
+
+def xlhome_dir(dir, root=None):
+    """ 创建、定位在home目录下的subdir目录 """
+    from pyxllib.file.specialist import XlPath
+    root = get_xl_hostname() if root is None else XlPath(root)
+    d = root / dir
+    d.mkdir(exist_ok=True, parents=True)
+    return d
+
+
+def xlhome_wkdir(dir, root=None):
+    """ 在home路面下创建subdir目录，并切换到该目录作为工作目录 """
+    d = xlhome_dir(dir, root)
+    os.chdir(d)
+    return d
+
+
+def xlhome_path(file, root=None):
+    """ 定位在home目录下的file文件
+    如果不存在，会自动创建文件所属的所有父目录
+    """
+    from pyxllib.file.specialist import XlPath
+    root = get_xl_hostname() if root is None else XlPath(root)
+    f = root / file
+    f.parent.mkdir(exist_ok=True, parents=True)
+    return f
+
+
+def open_network_file(host, name):
+    """ 打开network相关文件
+    """
+
+    # 1 分类处理
+    if name.endswith('.py'):
+        file = xlhome_path(f'slns/xlproject/xlserver/{name}')
+    elif name == 'nginx.conf':
+        file = xlhome_path(f'data/m2405network/sync/{host}/{name}')
+        if not file.is_file():
+            file = xlhome_path(f'data/m2405network/sync/{host}/nginx-1.26.1/conf/{name}')
+    else:
+        file = xlhome_path(f'data/m2405network/sync/{host}/{name}')
+
+    # 2 打开文件
+    if get_xl_hostname() == 'codepc_aw':
+        subprocess.run([os.getenv('CODEPC_AW_PYCHARM'), str(file)])
+    else:
+        os.startfile(str(file))
+
+
+def __service系列():
+    pass
+
+
+def link_to_host_service(to_host, service='web'):
+    """ 连接目标主机的网页、API服务
+
+    根据主机映射关系构建目标主机的访问URL。
+
+    :param str to_host: 目标主机名
+    :return str|None: 构建的URL，如果无法构建则返回None
+    """
+    # 1 查找链接、web配置
+    link = XlHosts.find_link(to_host)
+    locator = XlHosts.find_locator(link, service)
+    ip = link.get('ip', '')
+
+    # 2 处理locator格式
+    if isinstance(locator, int):
+        locator = f':{locator}'
+    elif isinstance(locator, str) and locator:
+        if locator.isdigit():
+            locator = f':{locator}'
+        else:
+            locator = f'/{locator}'
+    else:
+        locator = ''
+
+    # 3 确定协议（有端口号、IP地址或localhost时用http，否则用https）
+    is_ip = re.match(r'^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$', ip)
+    has_port = locator.startswith(':')
+    is_localhost = ip == 'localhost'
+
+    protocol = 'http://' if (is_ip or has_port or is_localhost) else 'https://'
+
+    # 4 拼接结果
+    return f'{protocol}{ip}{locator}'

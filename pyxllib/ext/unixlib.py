@@ -28,6 +28,7 @@ from tqdm import tqdm
 from pyxllib.prog.specialist import mtqdm, get_xllog
 from pyxllib.algo.pupil import natural_sort
 from pyxllib.file.specialist import XlPath
+from pyxllib.prog.xlenv import get_xl_hostname, XlHosts
 
 xllog = get_xllog()
 
@@ -819,3 +820,35 @@ class XlSSHs:
                 res[name] = out
 
         return res
+
+
+def get_ssh(to_host, user='root', cls=XlSSHClient):
+    """连接目标主机的SSH服务
+
+    根据主机映射关系建立到目标主机的SSH连接。
+
+    :param str to_host: 目标主机名
+    :param str user: SSH用户名，默认为 root
+    :param cls: SSH客户端类，默认XlSSHClient
+    :return: SSH连接实例
+    :rtype: XlSSHClient
+    """
+    # 1 读取配置参数
+    link = XlHosts.find_link(to_host)
+    ssh_port = XlHosts.find_locator(link, 'ssh')
+    ip = link.get('ip', '')
+    assert ip, f"主机 {to_host} 的IP地址未配置"
+    passwd = XlHosts.find_passwd(to_host, 'ssh', user)
+
+    # 2 获取目录映射
+    local_root = XlHosts.find_wkdir()
+    remote_root = XlHosts.find_wkdir(to_host)
+
+    # 3 创建SSH连接
+    return cls(
+        ip,
+        user,
+        passwd,
+        port=ssh_port,
+        map_path={local_root: remote_root}
+    )

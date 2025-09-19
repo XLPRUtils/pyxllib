@@ -59,7 +59,7 @@ class SyncFileClient:
             except Exception as e:
                 raise e
 
-        remote_root = requests.get(f'{host}/common/get_wkdir', headers=self.headers).json()['wkdir']
+        remote_root = requests.get(f'{host}/common/get_xl_homedir', headers=self.headers).json()['wkdir']
         self.remote_root = XlPath(remote_root)
 
         return host
@@ -139,7 +139,7 @@ class SyncFileClient:
 
     def download_file(self, remote_file=None, local_file=None, relpath=True):
         """
-        :param str remote_file: 要下载的远程文件路径，相对get_wkdir下的路径
+        :param str remote_file: 要下载的远程文件路径，相对get_xl_homedir下的路径
         :param str local_file: 下载到本地的文件路径，默认可以不指定，自动通过remote_file存储到对称位置
 
         todo 加进度条？方便超大文件下载查看进度。
@@ -339,3 +339,11 @@ class SyncFileClient:
                               verify_etag=verify_etag, relpath=False)
         else:
             raise ValueError(f"Unknown path type: {path_info['type']}")
+
+
+class XlSyncFileClient(SyncFileClient):
+    def __init__(self, host, token=None):
+        from pyxllib.prog.xlenv import get_xl_homedir
+
+        super().__init__(host, token)
+        self.local_root = get_xl_homedir()

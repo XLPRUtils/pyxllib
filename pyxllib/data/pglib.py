@@ -27,7 +27,7 @@ import psycopg.rows
 
 from pyxllib.prog.newbie import round_int, human_readable_number
 from pyxllib.prog.pupil import utc_now, utc_timestamp, is_valid_identifier
-from pyxllib.prog.specialist import XlEnv
+from pyxllib.prog.xlenv import XlHosts
 from pyxllib.algo.pupil import ValuesStat2
 from pyxllib.file.specialist import get_etag, StreamJsonlWriter
 from pyxllib.data.sqlite import SqlBase, SqlBuilder
@@ -1057,3 +1057,44 @@ class XlprDb(Connection):
             historys.append(status2)
 
         self.update_row(table_name, {'historys': historys}, where, commit=commit)
+
+
+def link_to_host_db(to_host, dbname, user=None, cls=XlprDb) -> XlprDb:
+    """连接目标主机的数据库服务
+
+    根据主机映射关系构建目标主机的数据库连接。
+
+    :param str to_host: 目标主机名
+    :param str dbname: 数据库名
+    :param str|None user: 数据库用户名，如果为None则使用dbname作为用户名
+    :param cls: 数据库连接类，默认XlprDb
+    :return: 数据库连接实例
+    :rtype: XlprDb
+    """
+    user = user or dbname
+    link = XlHosts.find_link(to_host)
+    pg_port = XlHosts.find_locator(link, 'postgresql')
+    ip = link.get('ip', '')
+    assert ip, f"主机 {to_host} 的IP地址未配置"
+    passwd = XlHosts.find_passwd(to_host, 'postgresql', user)
+
+    # 构建数据库连接
+    return cls.connect(
+        host=ip,
+        port=pg_port,
+        user=user,
+        password=passwd,
+        dbname=dbname
+    )
+
+
+def get_xldb1(dbname, user=None, cls=XlprDb):
+    return link_to_host_db('titan2', dbname, user, cls=cls)
+
+
+def get_xldb2(dbname, user=None, cls=XlprDb):
+    return link_to_host_db('senseserver3', dbname, user, cls=cls)
+
+
+def get_xldb3(dbname, user=None, cls=XlprDb):
+    return link_to_host_db('codepc_mi15', dbname, user, cls=cls)

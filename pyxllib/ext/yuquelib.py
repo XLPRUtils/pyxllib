@@ -828,6 +828,32 @@ class LakeImage(LakeBlock):
         return cls._init_from_src(f'data:image/{suffix[1:]};base64,{buffer}')
 
 
+class XlLakeImage(LakeImage):
+    @classmethod
+    def from_local_image(cls, img, limit_size=1 * 1024 * 1024, suffix=None):
+        """ 私人定制用功能
+        由于语雀限制不能上传太大的base64图片数据，所以使用url的形式中转
+
+        重载掉原本的from_local_image接口，这里需要把图片中转成我本地/download服务的文件接口
+
+        :param limit_size: 哪怕通过url提供，中转的图片理论上也不应该搞得太大，最好要压缩到一定大小内
+        :param suffix: 图片扩展名，使用None的时候会有一定自动判定机制
+            图片尺寸较小就用png，否则用jpg
+        """
+        from pyxllib.file.specialist import GetEtag
+        from pyxllib.prog.xlenv import xlhome_path, get_xl_hostname
+
+        # 1 读取、压缩、保存图片
+        im, suffix = cls._reduce_img(img, limit_size, suffix)
+        etag = GetEtag.from_bytes(xlcv.to_buffer(im, suffix))
+        file = xlhome_path(f'data/m2405network/download/images/{etag}{suffix}')
+        xlcv.write(im, file)
+
+        # 2 提供图片的url
+        hn = get_xl_hostname()
+        return cls.from_url(f'{os.getenv("MAIN_WEBSITE")}/{hn}/download/images/{file.name}')
+
+
 class LakeCodeBlock(LakeBlock):
     """ 语雀代码块 """
 
