@@ -11,9 +11,22 @@
 import os
 import time
 
-from loguru import logger
-from tqdm import tqdm
-import requests
+from pyxllib.prog.lazyimport import lazy_import
+
+try:
+    from loguru import logger
+except ModuleNotFoundError:
+    logger = lazy_import('from loguru import logger')
+
+try:
+    from tqdm import tqdm
+except ModuleNotFoundError:
+    tqdm = lazy_import('from tqdm import tqdm')
+
+try:
+    import requests
+except ModuleNotFoundError:
+    requests = lazy_import('requests')
 
 from pyxllib.file.specialist import XlPath, GetEtag
 from pyxllib.prog.pupil import format_exception

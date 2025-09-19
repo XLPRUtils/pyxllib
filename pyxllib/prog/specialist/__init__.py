@@ -20,9 +20,22 @@ import time
 from statistics import mean
 from threading import Thread
 
-from tqdm import tqdm
-import requests
-from humanfriendly import parse_size
+from pyxllib.prog.lazyimport import lazy_import
+
+try:
+    from tqdm import tqdm
+except ModuleNotFoundError:
+    tqdm = lazy_import('from tqdm import tqdm')
+
+try:
+    import requests
+except ModuleNotFoundError:
+    requests = lazy_import('requests')
+
+try:
+    from humanfriendly import parse_size
+except ModuleNotFoundError:
+    parse_size = lazy_import('from humanfriendly import parse_size')
 
 from pyxllib.prog.newbie import human_readable_size
 from pyxllib.prog.pupil import get_installed_packages, aligned_range, percentage_and_value

@@ -11,22 +11,22 @@ import re
 import socket
 import subprocess
 
-from pyxllib.prog.lazyimport import safe_import
+from pyxllib.prog.lazyimport import lazy_import
 
 try:
     import pandas as pd
 except ModuleNotFoundError:
-    pd = safe_import('pandas')
+    pd = lazy_import('pandas')
 
 try:
     from envariable import setenv, unsetenv
 except ModuleNotFoundError:
-    setenv, unsetenv = safe_import('from envariable import setenv, unsetenv')
+    setenv, unsetenv = lazy_import('from envariable import setenv, unsetenv')
 
 try:
     from deprecated import deprecated
 except ModuleNotFoundError:
-    deprecated = safe_import('from deprecated import deprecated')
+    deprecated = lazy_import('from deprecated import deprecated')
 
 from pyxllib.text.newbie import add_quote
 
@@ -143,11 +143,6 @@ def get_xl_homedir(host=None, *, reset=False):
     return XlPath(os.getenv('XL_HOMEDIR'))
 
 
-@deprecated(reason='请改用逻辑名称更正确的接口：get_xl_homedir')
-def get_xl_homedir(host=None, *, reset=False):
-    return get_xl_homedir(host, reset=reset)
-
-
 def get_xl_hostname(*, reset=False):
     """ 特殊定制版的获取主机名 """
     if not os.getenv('XL_HOSTNAME') or reset:
@@ -165,12 +160,6 @@ def get_xl_hostname(*, reset=False):
         os.environ['XL_HOSTNAME'] = hostname
 
     return os.getenv('XL_HOSTNAME')
-
-
-@deprecated(reason='请改用逻辑名称更正确的接口：get_xl_hostname')
-def get_xl_hostname():
-    """ 获取主机昵称 """
-    return get_xl_hostname()
 
 
 class XlHosts:
@@ -289,7 +278,7 @@ def __xlhome系列():
 def xlhome_dir(dir, root=None):
     """ 创建、定位在home目录下的subdir目录 """
     from pyxllib.file.specialist import XlPath
-    root = get_xl_hostname() if root is None else XlPath(root)
+    root = get_xl_homedir() if root is None else XlPath(root)
     d = root / dir
     d.mkdir(exist_ok=True, parents=True)
     return d

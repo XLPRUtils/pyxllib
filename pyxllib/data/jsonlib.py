@@ -6,7 +6,12 @@
 
 from collections import Counter
 
-import jmespath
+from pyxllib.prog.lazyimport import lazy_import
+
+try:
+    import jmespath
+except ModuleNotFoundError:
+    jmespath = lazy_import('jmespath')
 
 
 class JsonTool:

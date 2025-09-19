@@ -9,12 +9,29 @@
 from collections import Counter
 import re
 
-from tqdm import tqdm
-import pandas as pd
+from pyxllib.prog.lazyimport import lazy_import
 
-import jieba
-import jieba.posseg as pseg
-from simhash import Simhash
+try:
+    from tqdm import tqdm
+except ModuleNotFoundError:
+    tqdm = lazy_import('from tqdm import tqdm')
+
+try:
+    import pandas as pd
+except ModuleNotFoundError:
+    pd = lazy_import('pandas')
+
+try:
+    import jieba
+    import jieba.posseg as pseg
+except ModuleNotFoundError:
+    jieba = lazy_import('jieba')
+    pseg = lazy_import('jieba.posseg')
+
+try:
+    from simhash import Simhash
+except ModuleNotFoundError:
+    Simhash = lazy_import('from simhash import Simhash')
 
 from pyxllib.prog.pupil import DictTool, run_once
 from pyxllib.file.specialist import XlPath

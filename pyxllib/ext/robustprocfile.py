@@ -15,8 +15,18 @@ import datetime
 import re
 import json
 
-from tqdm import tqdm
-from joblib import Parallel, delayed
+from pyxllib.prog.lazyimport import lazy_import
+
+try:
+    from tqdm import tqdm
+except ModuleNotFoundError:
+    tqdm = lazy_import('from tqdm import tqdm')
+
+try:
+    from joblib import Parallel, delayed
+except ModuleNotFoundError:
+    Parallel = lazy_import('from joblib import Parallel')
+    delayed = lazy_import('from joblib import delayed')
 
 from pyxllib.prog.pupil import check_counter, tprint, typename
 from pyxllib.file.specialist import XlPath, refinepath

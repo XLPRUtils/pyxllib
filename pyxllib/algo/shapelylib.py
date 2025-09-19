@@ -4,22 +4,21 @@
 # @Email  : 877362867@qq.com
 # @Date   : 2021/06/23 11:26
 
-import subprocess
 import re
-import numpy as np
+
+from pyxllib.prog.lazyimport import lazy_import
+
+try:
+    import numpy as np
+except ModuleNotFoundError:
+    np = lazy_import('numpy')
 
 try:
     import shapely
+    from shapely.geometry import Polygon
 except ModuleNotFoundError:
-    try:
-        subprocess.run(['conda', 'install', 'shapely'])
-        import shapely
-    except FileNotFoundError:
-        # 这个库用pip安装是不够的，正常要用conda，有些dll才会自动配置上
-        subprocess.run(['pip3', 'install', 'shapely'])
-        import shapely
-
-from shapely.geometry import Polygon
+    shapely = lazy_import('shapely')
+    Polygon = lazy_import('from shapely.geometry import Polygon')
 
 from pyxllib.algo.geo import rect2polygon
 

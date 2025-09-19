@@ -9,12 +9,30 @@ import json
 import os
 import re
 
-import pythoncom
-from win32com.client import constants
-import win32com.client as win32
-import docx
-import docx.table
-import docx.enum
+from pyxllib.prog.lazyimport import lazy_import
+
+try:
+    import pythoncom
+    from win32com.client import constants
+    import win32com.client as win32
+except ModuleNotFoundError:
+    pythoncom = lazy_import('pythoncom', 'pywin32')
+    constants = lazy_import('from win32com.client import constants', 'pywin32')
+    win32 = lazy_import('win32com.client', 'pywin32')
+
+try:
+    import docx
+    import docx.table
+    import docx.enum
+except ModuleNotFoundError:
+    docx = lazy_import('docx', 'python-docx')
+    docx.table = lazy_import('docx.table', 'python-docx')
+    docx.enum = lazy_import('docx.enum', 'python-docx')
+
+try:
+    import docx2pdf
+except ModuleNotFoundError:
+    docx2pdf = lazy_import('docx2pdf')
 
 from pyxllib.prog.pupil import DictTool, inject_members, run_once
 from pyxllib.prog.specialist import get_etag, browser, XlPath
@@ -30,9 +48,6 @@ def __docx():
 class DocxTools:
     @classmethod
     def to_pdf(cls, docx_file, pdf_file=None):
-        check_install_package('docx2pdf')  # 安装不成功的时候可以考虑加参数：--user
-        import docx2pdf
-
         if pdf_file is None:
             pdf_file = docx_file.with_suffix('.pdf')
 

@@ -8,9 +8,22 @@ import re
 import sys
 import textwrap
 
-from bs4 import BeautifulSoup
-import pandas as pd
-import requests
+from pyxllib.prog.lazyimport import lazy_import
+
+try:
+    from bs4 import BeautifulSoup
+except ModuleNotFoundError:
+    BeautifulSoup = lazy_import('from bs4 import BeautifulSoup', 'beautifulsoup4')
+
+try:
+    import pandas as pd
+except ModuleNotFoundError:
+    pd = lazy_import('pandas')
+
+try:
+    import requests
+except ModuleNotFoundError:
+    requests = lazy_import('requests')
 
 from pyxllib.prog.newbie import len_in_dim2
 from pyxllib.prog.pupil import check_install_package

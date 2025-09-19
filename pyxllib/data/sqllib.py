@@ -4,17 +4,24 @@
 # @Email  : 877362867@qq.com
 # @Date   : 2020/06/03 09:52
 
-from pyxllib.prog.pupil import check_install_package
-
-check_install_package('bidict')
-check_install_package('sqlalchemy')
-check_install_package('mysqlclient')
-
 import math
 
-from bidict import bidict
-import pandas as pd
-import sqlalchemy
+from pyxllib.prog.lazyimport import lazy_import
+
+try:
+    from bidict import bidict
+except ModuleNotFoundError:
+    bidict = lazy_import('from bidict import bidict')
+
+try:
+    import pandas as pd
+except ModuleNotFoundError:
+    pd = lazy_import('pandas')
+
+try:
+    import sqlalchemy
+except ModuleNotFoundError:
+    sqlalchemy = lazy_import('sqlalchemy', 'SQLAlchemy')
 
 from pyxllib.file.specialist import File
 

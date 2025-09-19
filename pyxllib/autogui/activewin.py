@@ -8,29 +8,61 @@ import platform
 import sys
 import time
 
-import cv2
-import psutil
-import numpy as np
+from pyxllib.prog.lazyimport import lazy_import
 
-if sys.platform == 'win32':
+try:
+    import numpy as np
+except ModuleNotFoundError:
+    np = lazy_import('numpy')
+
+try:
+    import cv2
+except ModuleNotFoundError:
+    cv2 = lazy_import('cv2', 'opencv-python')
+
+try:
+    import psutil
+except ModuleNotFoundError:
+    psutil = lazy_import('psutil')
+
+try:
     import win32gui
+except ModuleNotFoundError:
+    win32gui = lazy_import('win32gui')
+
+try:
     import win32process
-    # from pywinauto import Desktop
+except ModuleNotFoundError:
+    win32process = lazy_import('win32process', 'pywin32')
+
+try:
     import uiautomation
+except ModuleNotFoundError:
+    uiautomation = lazy_import('uiautomation')
 
 from pyxllib.prog.cachetools import xlcache
 from pyxllib.cv.xlcvlib import CvImg
 from pyxlpr.ai.clientlib import XlAiClient
 
 # 根据平台扩展相应的类
-if platform.system().lower() == "darwin":
-    from mss.darwin import MSS as OriginalMSS
-elif platform.system().lower() == "linux":
-    from mss.linux import MSS as OriginalMSS
-elif platform.system().lower() == "windows":
-    from mss.windows import MSS as OriginalMSS
-else:
-    raise RuntimeError("Unsupported platform")
+try:
+    if platform.system().lower() == "darwin":
+        from mss.darwin import MSS as OriginalMSS
+    elif platform.system().lower() == "linux":
+        from mss.linux import MSS as OriginalMSS
+    elif platform.system().lower() == "windows":
+        from mss.windows import MSS as OriginalMSS
+    else:
+        raise RuntimeError("Unsupported platform")
+except ModuleNotFoundError:
+    if platform.system().lower() == "darwin":
+        OriginalMSS = lazy_import('from mss.darwin import MSS', 'mss')
+    elif platform.system().lower() == "linux":
+        OriginalMSS = lazy_import('from mss.linux import MSS', 'mss')
+    elif platform.system().lower() == "windows":
+        OriginalMSS = lazy_import('from mss.windows import MSS', 'mss')
+    else:
+        raise RuntimeError("Unsupported platform")
 
 
 def adjust_monitors(monitors, scale_factor):

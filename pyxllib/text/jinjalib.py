@@ -4,8 +4,15 @@
 # @Email  : 877362867@qq.com
 # @Date   : 2024/05/26
 
-import jinja2
-from jinja2 import Template, Environment
+from pyxllib.prog.lazyimport import lazy_import
+
+try:
+    import jinja2
+    from jinja2 import Template, Environment
+except ModuleNotFoundError:
+    jinja2 = lazy_import('jinja2')
+    Template = lazy_import('from jinja2 import Template')
+    Environment = lazy_import('from jinja2 import Environment')
 
 from pyxllib.file.specialist import XlPath
 

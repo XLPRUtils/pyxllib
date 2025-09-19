@@ -13,11 +13,29 @@ from collections import Counter, defaultdict
 import re
 import os
 
-import requests
-import pandas as pd
-import bs4
-from bs4 import BeautifulSoup
-from humanfriendly import format_size
+from pyxllib.prog.lazyimport import lazy_import
+
+try:
+    import requests
+except ModuleNotFoundError:
+    requests = lazy_import('requests')
+
+try:
+    import pandas as pd
+except ModuleNotFoundError:
+    pd = lazy_import('pandas')
+
+try:
+    import bs4
+    from bs4 import BeautifulSoup
+except ModuleNotFoundError:
+    bs4 = lazy_import('bs4', 'beautifulsoup4')
+    BeautifulSoup = lazy_import('from bs4 import BeautifulSoup', 'beautifulsoup4')
+
+try:
+    from humanfriendly import format_size
+except ModuleNotFoundError:
+    format_size = lazy_import('from humanfriendly import format_size')
 
 from pyxllib.prog.newbie import round_int
 from pyxllib.prog.pupil import dprint, run_once, inject_members

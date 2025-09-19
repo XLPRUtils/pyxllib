@@ -6,8 +6,17 @@
 import os
 import re
 
-import requests
-import pandas as pd
+from pyxllib.prog.lazyimport import lazy_import
+
+try:
+    import requests
+except ModuleNotFoundError:
+    requests = lazy_import('requests')
+
+try:
+    import pandas as pd
+except ModuleNotFoundError:
+    pd = lazy_import('pandas')
 
 
 class WpsOnlineBook:

@@ -7,13 +7,13 @@
 """ 惰性加载依赖包
 
 写法一：
-pd = safe_import('pandas')
+pd = lazy_import('pandas')
 
 写法二：
 try:
     import pandas as pd
 except ModuleNotFoundError:
-    pd = safe_import('pandas')
+    pd = lazy_import('pandas')
 
 其实工程上直接写法一就够了，如果有pandas就会正常导入返回正常的pd。
 但是这样写，IDE就懵了不知道这是import pandas的，所以一般更多用的是写法二的形式。
@@ -42,7 +42,7 @@ class LazyImportError:
             'PIL': 'Pillow',
             'cv2': 'opencv-python',
             'sklearn': 'scikit-learn',
-            'yaml': 'pyyaml',
+            'yaml': 'PyYAML',
         }
         base_module = module_name.split('.')[0]
         return package_map.get(base_module, base_module)
@@ -153,7 +153,7 @@ def _import_from_module(module_path, names, install_name=None, extra_msg=None):
             return [getattr(error_obj, name) for name in names]
 
 
-def safe_import(module_name, install_name=None, extra_msg=None):
+def lazy_import(module_name, install_name=None, extra_msg=None):
     """
     智能安全导入，支持多种导入语法
 
@@ -169,19 +169,19 @@ def safe_import(module_name, install_name=None, extra_msg=None):
 
     示例:
         # 普通导入
-        pd = safe_import('pandas')
-        pd = safe_import('import pandas')
+        pd = lazy_import('pandas')
+        pd = lazy_import('import pandas')
 
         # 子模块导入（返回基础模块）
-        PIL = safe_import('PIL.Image')  # 返回PIL，使用PIL.Image时触发错误
-        PIL = safe_import('import PIL.Image')  # 同上
+        PIL = lazy_import('PIL.Image')  # 返回PIL，使用PIL.Image时触发错误
+        PIL = lazy_import('import PIL.Image')  # 同上
 
         # from import
-        setenv = safe_import('from envariable import setenv')
-        setenv, unsetenv = safe_import('from envariable import setenv, unsetenv')
+        setenv = lazy_import('from envariable import setenv')
+        setenv, unsetenv = lazy_import('from envariable import setenv, unsetenv')
 
         # 自定义安装包名
-        cv2 = safe_import('cv2', install_name='opencv-python')
+        cv2 = lazy_import('cv2', install_name='opencv-python')
 
     不过这个工具并不是完美的，如果只是纯粹链式访问常量等，不触发call、下标索引，是不会报错的，而是返回LazyImportError对象
     这个功能不能改，改了又会不支持PIL.Image等相关形式的处理。只能使用中尽量注意。
@@ -205,15 +205,15 @@ def safe_import(module_name, install_name=None, extra_msg=None):
 
 if __name__ == "__main__":
     # 测试普通导入
-    pd = safe_import('pandas')
+    pd = lazy_import('pandas')
     print(f"pd: {pd}")
 
     # 测试子模块导入
-    PIL = safe_import('PIL.Image')
+    PIL = lazy_import('PIL.Image')
     print(f"PIL: {PIL}")
 
     # 测试from import
-    m, n = safe_import('from nonpackage.a import m,n', 'nonpackage>=1.0')
+    m, n = lazy_import('from nonpackage.a import m,n', 'nonpackage>=1.0')
     print(f"m: {m}")
 
     # 尝试使用会触发错误

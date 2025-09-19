@@ -16,16 +16,34 @@ import re
 import datetime
 from collections import UserDict
 
-import numpy as np
-import win32com
-from loguru import logger
-import pyscreeze
+from pyxllib.prog.lazyimport import lazy_import
 
-from pyxlpr.ai.clientlib import XlAiClient
+try:
+    from loguru import logger
+except ModuleNotFoundError:
+    logger = lazy_import('from loguru import logger')
 
-if sys.platform == 'win32':
-    import pyautogui
+try:
+    import numpy as np
+except ModuleNotFoundError:
+    np = lazy_import('numpy')
+
+try:
+    import win32com
     import win32gui
+except ModuleNotFoundError:
+    win32com = lazy_import('win32com', 'pywin32')
+    win32gui = lazy_import('win32gui', 'pywin32')
+
+try:
+    import pyautogui
+except ModuleNotFoundError:
+    pyautogui = lazy_import('pyautogui')
+
+try:
+    import pyscreeze
+except ModuleNotFoundError:
+    pyscreeze = lazy_import('pyscreeze')
 
 from pyxllib.prog.newbie import first_nonnone, round_int
 from pyxllib.prog.pupil import xlwait, DictTool, run_once
@@ -35,6 +53,8 @@ from pyxllib.file.specialist import XlPath
 from pyxllib.cv.expert import xlcv, xlpil
 from pyxlpr.data.labelme import LabelmeDict
 from pyxllib.autogui.uiautolib import find_ctrl, UiCtrlNode
+
+from pyxlpr.ai.clientlib import XlAiClient
 
 """
 桌面自动化操作，Anto GUI，简称An

@@ -8,7 +8,13 @@ import os
 import tempfile
 import time
 
-from filelock import FileLock, Timeout
+from pyxllib.prog.lazyimport import lazy_import
+
+try:
+    from filelock import FileLock, Timeout
+except ModuleNotFoundError:
+    FileLock = lazy_import('from filelock import FileLock')
+    Timeout = lazy_import('from filelock import Timeout')
 
 
 class XlFileLock(FileLock):

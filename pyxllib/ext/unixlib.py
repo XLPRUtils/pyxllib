@@ -7,7 +7,14 @@
 import time
 
 import warnings
-from cryptography.utils import CryptographyDeprecationWarning
+
+from pyxllib.prog.lazyimport import lazy_import
+
+try:
+    from cryptography.utils import CryptographyDeprecationWarning
+except ModuleNotFoundError:
+    CryptographyDeprecationWarning = lazy_import('from cryptography.utils import CryptographyDeprecationWarning',
+                                                 'cryptography')
 
 # 忽略特定的警告
 warnings.filterwarnings("ignore", category=CryptographyDeprecationWarning)
@@ -19,18 +26,42 @@ import shutil
 import sys
 import socket
 
-import humanfriendly
-import pandas as pd
-import paramiko
-import scp as scplib
-from tqdm import tqdm
+from pyxllib.prog.lazyimport import lazy_import
 
-from pyxllib.prog.specialist import mtqdm, get_xllog
+try:
+    from loguru import logger
+except ModuleNotFoundError:
+    logger = lazy_import('from loguru import logger')
+
+try:
+    from tqdm import tqdm
+except ModuleNotFoundError:
+    tqdm = lazy_import('from tqdm import tqdm')
+
+try:
+    import humanfriendly
+except ModuleNotFoundError:
+    humanfriendly = lazy_import('humanfriendly')
+
+try:
+    import pandas as pd
+except ModuleNotFoundError:
+    pd = lazy_import('pandas')
+
+try:
+    import paramiko
+except ModuleNotFoundError:
+    paramiko = lazy_import('paramiko')
+
+try:
+    import scp as scplib
+except ModuleNotFoundError:
+    scplib = lazy_import('scp')
+
+from pyxllib.prog.specialist import mtqdm
 from pyxllib.algo.pupil import natural_sort
 from pyxllib.file.specialist import XlPath
 from pyxllib.prog.xlenv import get_xl_hostname, XlHosts
-
-xllog = get_xllog()
 
 
 class SshCommandError(Exception):
@@ -87,7 +118,7 @@ class ScpProgress:
         if sent == size and self.kwargs.get('limit_bytes'):
             if self.trans_size >= self.kwargs.get('limit_bytes'):
                 if self.info:
-                    xllog.warning('达到限定上传大小，早停。')
+                    logger.warning('达到限定上传大小，早停。')
                 raise ScpLimitError
 
 
@@ -724,13 +755,13 @@ class XlSSHClient(paramiko.SSHClient):
         :param package: 要安装的目标版本，可以修改，以后有时间也可以考虑怎么做成自动找最新版
             这个版本配套的py是 3.9.12，默认路径在 /root/anaconda3/bin/python
         """
-        xllog.info('清除已有的anaconda3...')
+        logger.info('清除已有的anaconda3...')
         self.exec('rm -rf ~/anaconda3')
 
-        xllog.info(f'下载文件：{package}')
+        logger.info(f'下载文件：{package}')
         p = self.download_file(f'https://mirrors.tuna.tsinghua.edu.cn/anaconda/archive/{package}', package)
 
-        xllog.info('自动安装anaconda3...')
+        logger.info('自动安装anaconda3...')
         self.exec(f'bash {p}', pipe_in='\nyes\n' * 2, ignore_errors=True)
 
     def install_pytorch(self, cuda_version='10.2'):
@@ -783,7 +814,7 @@ class XlSSHs:
         try:
             self.sshs[name] = XlSSHClient(server, user, passwd, timeout=2)
         except (TimeoutError, socket.timeout, paramiko.ssh_exception.SSHException) as e:
-            xllog.warning(f'{name} {server} {user} 连接失败！')
+            logger.warning(f'{name} {server} {user} 连接失败！')
 
     def run(self, func, parallel=False):
         """

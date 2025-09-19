@@ -6,11 +6,23 @@
 
 import time
 
-from selenium import webdriver
-from selenium.webdriver.common.by import By
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
-from selenium.common.exceptions import ElementClickInterceptedException, NoSuchWindowException
+from pyxllib.prog.lazyimport import lazy_import
+
+try:
+    from selenium import webdriver
+    from selenium.webdriver.common.by import By
+    from selenium.webdriver.support.ui import WebDriverWait
+    from selenium.webdriver.support import expected_conditions as EC
+    from selenium.common.exceptions import (ElementClickInterceptedException,
+                                            NoSuchWindowException)
+except ModuleNotFoundError:
+    webdriver = lazy_import('selenium.webdriver', 'selenium')
+    By = lazy_import('from selenium.webdriver.common.by import By', 'selenium')
+    WebDriverWait = lazy_import('from selenium.webdriver.support.ui import WebDriverWait', 'selenium')
+    EC = lazy_import('from selenium.webdriver.support import expected_conditions as EC', 'selenium')
+    ElementClickInterceptedException = lazy_import(
+        'from selenium.common.exceptions import ElementClickInterceptedException', 'selenium')
+    NoSuchWindowException = lazy_import('from selenium.common.exceptions import NoSuchWindowException', 'selenium')
 
 
 class element_has_text(object):

@@ -5,8 +5,14 @@
 # @Date   : 2021/09/07 10:21
 
 
-import win32com.client as win32
-import pythoncom
+from pyxllib.prog.lazyimport import lazy_import
+
+try:
+    import win32com.client as win32
+    import pythoncom
+except ModuleNotFoundError:
+    win32 = lazy_import('win32com.client', 'pywin32')
+    pythoncom = lazy_import('pythoncom', 'pywin32')
 
 
 def get_win32_app(name, visible=False):

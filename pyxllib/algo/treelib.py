@@ -10,7 +10,13 @@
 
 import re
 
-from anytree import Node
+from pyxllib.prog.lazyimport import lazy_import
+
+try:
+    from anytree import Node
+except ModuleNotFoundError:
+    Node = lazy_import('from anytree import Node')
+    # 由于代码中使用了 class XlNode(Node)，所以缺失这个包是会立马报错的
 
 
 class XlNode(Node):
@@ -143,3 +149,8 @@ class XlNode(Node):
                 if sibing:
                     return sibing
                 cur_node = parent
+
+
+if __name__ == '__main__':
+    # XlNode(1)
+    pass

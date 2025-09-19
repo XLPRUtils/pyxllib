@@ -4,17 +4,18 @@
 # @Email  : 877362867@qq.com
 # @Date   : 2023/08/26
 
-# from pyxllib.prog.pupil import check_install_package
-
-# check_install_package('IPython', 'ipython')
-
 import os
 import sys
 from multiprocessing import Process, Pipe
 from io import StringIO
 import threading
 
-# from IPython.core.interactiveshell import InteractiveShell
+from pyxllib.prog.lazyimport import lazy_import
+
+try:
+    from IPython.core.interactiveshell import InteractiveShell
+except ModuleNotFoundError:
+    InteractiveShell = lazy_import('from IPython.core.interactiveshell import InteractiveShell', 'ipython')
 
 from pyxllib.prog.pupil import format_exception
 from pyxllib.file.specialist import XlPath

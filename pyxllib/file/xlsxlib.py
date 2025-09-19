@@ -21,21 +21,44 @@ import random
 import re
 import io
 
-import xlrd
+from pyxllib.prog.lazyimport import lazy_import
 
-import filetype
-import openpyxl
-from openpyxl import Workbook
-from openpyxl.cell.cell import MergedCell
-from openpyxl.styles import Font, Alignment
-from openpyxl.utils.cell import get_column_letter, column_index_from_string
-import openpyxl.worksheet.formula
-import pandas as pd
+try:
+    import xlrd
+except ModuleNotFoundError:
+    xlrd = lazy_import('xlrd')
+
+try:
+    import filetype
+except ModuleNotFoundError:
+    filetype = lazy_import('filetype')
+
+try:
+    import openpyxl
+    from openpyxl import Workbook
+    from openpyxl.cell.cell import MergedCell
+    from openpyxl.styles import Font, Alignment
+    from openpyxl.utils.cell import get_column_letter, column_index_from_string
+    import openpyxl.worksheet.formula
+except ModuleNotFoundError:
+    openpyxl = lazy_import('openpyxl')
+    Workbook = lazy_import('from openpyxl import Workbook')
+    MergedCell = lazy_import('from openpyxl.cell.cell import MergedCell')
+    Font = lazy_import('from openpyxl.styles import Font')
+    Alignment = lazy_import('from openpyxl.styles import Alignment')
+    get_column_letter = lazy_import('from openpyxl.utils.cell import get_column_letter')
+    column_index_from_string = lazy_import('from openpyxl.utils.cell import column_index_from_string')
+    openpyxl.worksheet.formula = lazy_import('openpyxl.worksheet.formula')
+
+try:
+    import pandas as pd
+except ModuleNotFoundError:
+    pd = lazy_import('pandas')
 
 try:
     import jsonpickle
 except ModuleNotFoundError:
-    pass
+    jsonpickle = lazy_import('jsonpickle')
 
 from pyxllib.prog.newbie import human_readable_number
 from pyxllib.prog.pupil import (inject_members, dprint, xlmd5, shuffle_dict_keys, Timeout,

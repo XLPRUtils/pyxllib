@@ -19,15 +19,20 @@ TODO 清单
 3、将数据以图片的直观形式展现
 """
 
-from pyxllib.prog.pupil import check_install_package
-
-check_install_package('git', 'gitpython')
-
 import os
 import re
 
-import git
-import pandas as pd
+from pyxllib.prog.lazyimport import lazy_import
+
+try:
+    import pandas as pd
+except ModuleNotFoundError:
+    pd = lazy_import('pandas')
+
+try:
+    import git
+except ModuleNotFoundError:
+    git = lazy_import('git', 'GitPython')
 
 from pyxllib.prog.newbie import swap_rowcol
 from pyxllib.prog.pupil import dprint

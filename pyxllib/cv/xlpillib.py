@@ -14,16 +14,34 @@ import io
 import os
 import random
 
-import cv2
-import numpy as np
-import PIL.ExifTags
-import PIL.Image
-import PIL.ImageOps
-import requests
+from pyxllib.prog.lazyimport import lazy_import
+
+try:
+    import numpy as np
+except ModuleNotFoundError:
+    np = lazy_import('numpy')
+
+try:
+    import cv2
+except ModuleNotFoundError:
+    cv2 = lazy_import('cv2', 'opencv-python')
+
+try:
+    import PIL.ExifTags
+    import PIL.Image
+    import PIL.ImageOps
+except ModuleNotFoundError:
+    PIL = lazy_import('PIL', 'Pillow')
+
+try:
+    import requests
+except ModuleNotFoundError:
+    requests = lazy_import('requests')
 
 try:
     import accimage
-except ImportError:
+    # 不用刻意安装这个包，这个是"被动"安装的，使用pytorch时可能会遇到要兼容处理而已
+except (ModuleNotFoundError, ImportError):
     accimage = None
 
 from pyxllib.prog.pupil import inject_members

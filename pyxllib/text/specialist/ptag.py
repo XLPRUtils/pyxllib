@@ -8,8 +8,14 @@
 
 import re
 
-import bs4
-from bs4 import BeautifulSoup
+from pyxllib.prog.lazyimport import lazy_import
+
+try:
+    import bs4
+    from bs4 import BeautifulSoup
+except ModuleNotFoundError:
+    bs4 = lazy_import('bs4', 'beautifulsoup4')
+    BeautifulSoup = lazy_import('from bs4 import BeautifulSoup', 'beautifulsoup4')
 
 from pyxllib.prog.pupil import dprint
 from pyxllib.text.pupil import grp_bracket

@@ -7,11 +7,27 @@
 from collections import defaultdict
 import concurrent.futures
 
-import cv2
-import pandas as pd
-from tqdm import tqdm
+from pyxllib.prog.lazyimport import lazy_import
 
-import PIL.Image
+try:
+    from tqdm import tqdm
+except ModuleNotFoundError:
+    tqdm = lazy_import('from tqdm import tqdm')
+
+try:
+    import pandas as pd
+except ModuleNotFoundError:
+    pd = lazy_import('pandas')
+
+try:
+    import cv2
+except ModuleNotFoundError:
+    cv2 = lazy_import('cv2', 'opencv-python')
+
+try:
+    import PIL.Image
+except ModuleNotFoundError:
+    PIL = lazy_import('PIL', 'Pillow')
 
 from pyxllib.algo.stat import update_dataframes_to_excel
 from pyxllib.file.specialist import get_etag, XlPath

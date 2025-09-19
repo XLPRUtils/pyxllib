@@ -35,10 +35,6 @@ import time
 import traceback
 
 from pyxllib.prog.newbie import classproperty, typename
-from pyxllib.prog.xlenv import XlEnv, get_xl_hostname
-
-
-# from loguru import logger
 
 
 def system_information():

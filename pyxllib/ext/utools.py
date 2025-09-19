@@ -11,13 +11,34 @@ import datetime
 import json
 import os
 import pathlib
-import pyperclip
 import re
 
-import fire
-from humanfriendly import format_timespan
-import pandas as pd
-import pyautogui
+from pyxllib.prog.lazyimport import lazy_import
+
+try:
+    import pyperclip
+except ModuleNotFoundError:
+    pyperclip = lazy_import('pyperclip')
+
+try:
+    import fire
+except ModuleNotFoundError:
+    fire = lazy_import('fire')
+
+try:
+    from humanfriendly import format_timespan
+except ModuleNotFoundError:
+    format_timespan = lazy_import('from humanfriendly import format_timespan')
+
+try:
+    import pandas as pd
+except ModuleNotFoundError:
+    pd = lazy_import('pandas')
+
+try:
+    import pyautogui
+except ModuleNotFoundError:
+    pyautogui = lazy_import('pyautogui')
 
 from pyxllib.prog.specialist import browser, TicToc, parse_datetime
 from pyxllib.file.specialist import XlPath

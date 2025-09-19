@@ -11,7 +11,12 @@ import hashlib
 import base64
 import urllib.parse
 
-import requests
+from pyxllib.prog.lazyimport import lazy_import
+
+try:
+    import requests
+except ModuleNotFoundError:
+    requests = lazy_import('requests')
 
 
 class WeixinRobot:
@@ -117,6 +122,7 @@ class DingtalkRobot2(DingtalkRobot):
             self.send_text2('完成')
         else:
             self.send_text2(f'报错\n{format_exception(exc_val, 3)}')
+
 
 if __name__ == '__main__':
     pass
