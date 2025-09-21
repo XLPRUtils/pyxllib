@@ -296,7 +296,7 @@ def xlhome_path(file, root=None):
     如果不存在，会自动创建文件所属的所有父目录
     """
     from pyxllib.file.specialist import XlPath
-    root = get_xl_hostname() if root is None else XlPath(root)
+    root = get_xl_homedir() if root is None else XlPath(root)
     f = root / file
     f.parent.mkdir(exist_ok=True, parents=True)
     return f

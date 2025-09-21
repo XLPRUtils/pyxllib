@@ -15,7 +15,7 @@ try:
 except ModuleNotFoundError:
     pd = lazy_import('pandas')
 
-其实工程上直接写法一就够了，如果有pandas就会正常导入返回正常的pd。
+其实工程上直接写法一就够了，如果有pandas就会正常导入返回pd。
 但是这样写，IDE就懵了不知道这是import pandas的，所以一般更多用的是写法二的形式。
 虽然代码冗余些，但开发的时候会方便的多。
 """
