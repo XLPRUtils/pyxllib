@@ -43,7 +43,7 @@ except ModuleNotFoundError:
 
 try:
     from fastapi import FastAPI
-    from fastapi.responses import PlainTextResponse
+    from fastapi.responses import PlainTextResponse, HTMLResponse
 except ModuleNotFoundError:
     FastAPI = lazy_import('from fastapi import FastAPI')
     PlainTextResponse = lazy_import('from fastapi.responses import PlainTextResponse')
@@ -203,7 +203,7 @@ class ProgramWorker(SimpleNamespace):
         self.port = port
         self.locations = locations
 
-        # 特殊调度模式，需要用到程序启动、结束时间
+        # 特殊调度模式，需要用到程序最近一次启动、结束时间
         self.last_start_time = None
         self.last_end_time = None
 
@@ -222,7 +222,7 @@ class ProgramWorker(SimpleNamespace):
         else:
             return callable
 
-    def lanuch(self):
+    def launch(self):
         """ 启动程序 """
         self.last_start_time = datetime.datetime.now()
         self.last_end_time = None
@@ -318,7 +318,7 @@ class MultiProgramLauncher:
             if worker.is_running():
                 logger.warning(f'由于程序"{name}"在上一次周期还没运行完，新周期不重复启动')
             else:
-                worker.lanuch()
+                worker.launch()
 
         self.init_scheduler()
 
@@ -336,7 +336,7 @@ class MultiProgramLauncher:
             def interval_task():
                 # 如果还没有启动过任务，直接启动
                 if worker.last_start_time is None:
-                    worker.lanuch()
+                    worker.launch()
                     return
 
                 # 如果任务正在运行，则不启动新任务
@@ -351,7 +351,7 @@ class MultiProgramLauncher:
 
                 # 看现在是否需要重启
                 if datetime.now() >= next_run:
-                    worker.lanuch()
+                    worker.launch()
 
             # 以 monitor_frequency 作为定时检查的间隔
             self.scheduler.add_job(interval_task, 'interval', seconds=monitor_frequency)
@@ -438,7 +438,7 @@ class MultiProgramLauncher:
         if schedule:
             self.worker_add_schedule(worker, schedule=schedule, misfire_grace_time=attrs.get('misfire_grace_time'))
         else:
-            worker.lanuch()
+            worker.launch()
 
         return worker
 
@@ -769,16 +769,6 @@ class MultiProgramLauncher:
             print("所有程序已终止，退出。")
 
 
-@deprecated(reason='已改名ProgramWorker')
-class ProcessWorker(ProgramWorker):
-    pass
-
-
-@deprecated(reason='已改名MultiProgramLauncher')
-class MultiProcessLauncher(MultiProgramLauncher):
-    pass
-
-
 class LauncherDashboard:
     def __init__(self, launcher):
         self.launcher = launcher
@@ -786,11 +776,12 @@ class LauncherDashboard:
         self.setup_routes()
 
     def setup_routes(self):
-        @self.app.get("/", response_class=PlainTextResponse)
+        @self.app.get("/", response_class=HTMLResponse)
         async def home():
             """主页，展示所有任务状态"""
             df = self.launcher.list_workers()
-            return self.render_text(df)
+            # return self.render_text(df)
+            return self.render_html(df)
 
         @self.app.get("/count", response_class=PlainTextResponse)
         async def get_count():
@@ -844,6 +835,119 @@ class LauncherDashboard:
 
         output.append("\n")
         return "\n".join(output)
+
+    def render_html(self, df):
+        """生成HTML格式的任务状态报表"""
+        if df.empty:
+            return """
+            <div style="padding: 20px; text-align: center; color: #666;">
+                <h3>没有任务正在运行</h3>
+            </div>
+            """
+
+        # 准备显示数据
+        display_df = pd.DataFrame()
+
+        # 添加编号列
+        display_df['编号'] = range(1, len(df) + 1)
+
+        # 添加基本信息列
+        display_df['任务名称'] = df['name']
+        display_df['进程ID'] = df['pid'].apply(
+            lambda x: f'<span style="font-family: monospace;">{int(x)}</span>' if pd.notna(
+                x) else '<span style="color: #999;">N/A</span>')
+
+        # 状态列，使用颜色标识
+        display_df['状态'] = df['poll'].apply(
+            lambda x: '<span style="color: #28a745; font-weight: bold;">● 运行中</span>' if x is None
+            else '<span style="color: #dc3545; font-weight: bold;">● 已结束</span>'
+        )
+
+        # 端口列
+        display_df['端口'] = df['port'].apply(
+            lambda x: f'<span style="font-family: monospace; color: #007bff;">{int(x)}</span>' if pd.notna(x) and x != 0
+            else '<span style="color: #999;">-</span>'
+        )
+
+        # 位置列，处理长路径
+        display_df['位置'] = df['locations'].apply(
+            lambda
+                x: f'<span title="{x}" style="max-width: 300px; display: inline-block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">{x}</span>'
+        )
+
+        # 命令列，格式化显示
+        def format_command(args):
+            if not isinstance(args, list):
+                return '<span style="color: #999;">N/A</span>'
+
+            args = [str(a) for a in args if a]
+            if not args:
+                return '<span style="color: #999;">N/A</span>'
+
+            # 第一个参数（通常是命令）用粗体
+            if len(args) > 0:
+                cmd = f'<strong>{args[0]}</strong>'
+                params = ' '.join(args[1:]) if len(args) > 1 else ''
+                full_cmd = f'{cmd} {params}'.strip()
+
+                # 如果命令太长，添加悬停提示
+                if len(' '.join(args)) > 50:
+                    return f'<span title="{" ".join(args)}" style="cursor: help;">{full_cmd[:50]}...</span>'
+                return full_cmd
+            return '<span style="color: #999;">N/A</span>'
+
+        display_df['命令'] = df['args'].apply(format_command)
+
+        # 生成HTML表格
+        html = f"""
+        <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; padding: 20px;">
+            <h2 style="color: #333; margin-bottom: 20px;">任务状态报表</h2>
+            <div style="background: #f8f9fa; padding: 10px; border-radius: 5px; margin-bottom: 15px;">
+                <span style="color: #666;">生成时间: {pd.Timestamp.now().strftime('%Y-%m-%d %H:%M:%S')}</span>
+                <span style="float: right; color: #666;">总任务数: {len(df)}</span>
+            </div>
+            <table style="width: 100%; border-collapse: collapse; background: white; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
+                <thead>
+                    <tr style="background: #f8f9fa; border-bottom: 2px solid #dee2e6;">
+                        <th style="padding: 12px; text-align: left; font-weight: 600; color: #495057;">编号</th>
+                        <th style="padding: 12px; text-align: left; font-weight: 600; color: #495057;">任务名称</th>
+                        <th style="padding: 12px; text-align: left; font-weight: 600; color: #495057;">进程ID</th>
+                        <th style="padding: 12px; text-align: left; font-weight: 600; color: #495057;">状态</th>
+                        <th style="padding: 12px; text-align: left; font-weight: 600; color: #495057;">端口</th>
+                        <th style="padding: 12px; text-align: left; font-weight: 600; color: #495057;">位置</th>
+                        <th style="padding: 12px; text-align: left; font-weight: 600; color: #495057;">命令</th>
+                    </tr>
+                </thead>
+                <tbody>
+        """
+
+        # 添加表格行
+        for idx, row in display_df.iterrows():
+            row_style = "background: #fff;" if idx % 2 == 0 else "background: #f8f9fa;"
+            html += f"""
+                    <tr style="{row_style} border-bottom: 1px solid #dee2e6;">
+                        <td style="padding: 12px; color: #666;">{row['编号']}</td>
+                        <td style="padding: 12px; font-weight: 500;">{row['任务名称']}</td>
+                        <td style="padding: 12px;">{row['进程ID']}</td>
+                        <td style="padding: 12px;">{row['状态']}</td>
+                        <td style="padding: 12px;">{row['端口']}</td>
+                        <td style="padding: 12px; font-size: 0.9em; color: #666;">{row['位置']}</td>
+                        <td style="padding: 12px; font-family: 'Consolas', 'Monaco', monospace; font-size: 0.9em;">{row['命令']}</td>
+                    </tr>
+            """
+
+        html += """
+                </tbody>
+            </table>
+            <div style="margin-top: 15px; padding: 10px; background: #e9ecef; border-radius: 5px; font-size: 0.9em; color: #666;">
+                <strong>说明:</strong> 
+                <span style="color: #28a745;">●</span> 运行中 
+                <span style="margin-left: 20px;"><span style="color: #dc3545;">●</span> 已结束</span>
+            </div>
+        </div>
+        """
+
+        return html
 
     def run(self, port=8080):
         """启动 FastAPI 服务"""
@@ -1002,7 +1106,7 @@ def support_multi_processes_hyx(default_processes=1):
                 else:
                     return func(*args, **kwargs, process_count=process_count, process_id=int(process_id))
             else:
-                mpl = MultiProcessLauncher()
+                mpl = MultiProgramLauncher()
                 for i in range(int(process_count)):
                     if isinstance(process_id, int) and i != process_id:
                         continue
@@ -1069,7 +1173,7 @@ def support_multi_processes(default_processes=1):
                 else:
                     return func(*args, **kwargs, process_count=process_count, process_id=int(process_id))
             else:
-                mpl = MultiProcessLauncher()
+                mpl = MultiProgramLauncher()
                 for i in range(int(process_count)):
                     if isinstance(process_id, int) and i != process_id:
                         continue
