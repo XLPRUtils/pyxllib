@@ -7,18 +7,18 @@
 
 import re
 
+from pyxllib.text.nestenv import PyNestEnv
 
-def py_remove_interaction_chars(s):
+
+def remove_interaction_chars(text):
     """ 去掉复制的一段代码中，前导的“>>>”标记 """
     # 这个算法可能还不够严谨，实际应用中再逐步写鲁棒
     # ">>> "、"... "
-    lines = [line[4:] for line in s.splitlines()]
+    lines = [line[4:] for line in text.splitlines()]
     return '\n'.join(lines)
 
 
-def pycode_sort_import(s):
-    from pyxllib.text.nestenv import PyNestEnv
-
+def sort_import(text):
     def cmp(line):
         """ 将任意一句import映射为一个可比较的list对象
 
@@ -43,5 +43,13 @@ def pycode_sort_import(s):
         parts.sort(key=cmp)
         return ''.join(parts)
 
-    res = PyNestEnv(s).imports().sub(sort_part, adjacent=True)  # 需要邻接，分块处理
+    res = PyNestEnv(text).imports().sub(sort_part, adjacent=True)  # 需要邻接，分块处理
     return res
+
+
+def rename_identifier(text, old_name, new_name):
+    """ 标识符重命名
+    """
+    ne = PyNestEnv(text).identifier(old_name)
+    new_text = ne.replace(new_name)
+    return new_text

@@ -57,7 +57,7 @@ def __1_定时工具():
     pass
 
 
-class SchedulerUtils:
+class XlTrigger:
     @classmethod
     def calculate_future_time(cls, start_time, wait_seconds):
         """ 计算延迟时间
@@ -112,7 +112,7 @@ class SchedulerUtils:
         :param datetime start_time: 程序启动的时间
         :param datetime end_time: 程序结束的时间
         :param str|float|int wait_tag: 等待标记
-            str，按crontab解析
+            str，按cronab解析
                 在end_time后满足条件的下次时间重启
             int|float，表示等待的秒数
                 正值是end_time往后等待，负值是start_time开始计算下次时间。
@@ -173,7 +173,8 @@ class ProgramWorker(SimpleNamespace):
     代表一个单独的程序（进程），基于 SimpleNamespace 实现。
     """
 
-    def __init__(self, name,
+    def __init__(self,
+                 name,
                  cmd,
                  shell=False,
                  run=True,
@@ -189,6 +190,8 @@ class ProgramWorker(SimpleNamespace):
         """
         super().__init__(**attrs)
 
+        self.scheduler = None
+
         # 执行程序需要使用的参数
         self.cmd = cmd
         self.shell = shell
@@ -199,11 +202,11 @@ class ProgramWorker(SimpleNamespace):
         self.program = None
         self.raw_cmd = raw_cmd
 
-        # 这两个是比较特别的属性，在我的工程框架中常用
+        # 这两个是比较特别的属性，在我的工程框架中常用，后端的url和nginx配置
         self.port = port
         self.locations = locations
 
-        # 特殊调度模式，需要用到程序最近一次启动、结束时间
+        # 特殊调度模式，定时控制，需要用到程序最近一次启动、结束时间
         self.last_start_time = None
         self.last_end_time = None
 
@@ -224,9 +227,11 @@ class ProgramWorker(SimpleNamespace):
 
     def launch(self):
         """ 启动程序 """
+        # 1 重置时间
         self.last_start_time = datetime.datetime.now()
         self.last_end_time = None
 
+        # 2 不需要实际运行的Mock标记
         if not self.run:
             # 如果不需要立即启动，则返回一个 Mock 对象
             proc = Mock()
@@ -235,11 +240,13 @@ class ProgramWorker(SimpleNamespace):
             self.program = proc
             return self.program
 
+        # 3 实际运行，需要从self里提取相关的参数
         kwargs = {}
         for name in ['stdin', 'stdout', 'stderr']:
             if hasattr(self, name):
                 kwargs[name] = getattr(self, name)
 
+        # 4 启动
         if sys.platform == 'win32':
             self.program = subprocess.Popen(self.cmd, shell=self.shell, **kwargs)
         else:
@@ -247,6 +254,9 @@ class ProgramWorker(SimpleNamespace):
                                             preexec_fn=self._set_pdeathsig())
 
         return self.program
+
+    def __call__(self):
+        self.launch()
 
     def terminate(self):
         """
@@ -281,21 +291,26 @@ class MultiProgramLauncher:
 
     def __init__(self):
         self.workers = []
-        self.scheduler = None
 
-    def __1_进场管理的核心底层函数(self):
+        self._scheduler = None
+
+    def __1_add_cmd(self):
         pass
 
-    def init_scheduler(self):
-        from apscheduler.schedulers.background import BackgroundScheduler
-        # from apscheduler.schedulers.asyncio import AsyncIOScheduler
+    @property
+    def scheduler(self):
+        """ 调度器 """
+        if self._scheduler is None:
+            try:
+                from apscheduler.schedulers.background import BackgroundScheduler
+            except ModuleNotFoundError:
+                BackgroundScheduler = lazy_import('from apscheduler.schedulers.background import BackgroundScheduler')
 
-        if self.scheduler is None:
-            self.scheduler = BackgroundScheduler()
+            self._scheduler = BackgroundScheduler()
 
-        return self.scheduler
+        return self._scheduler
 
-    def worker_add_schedule(self, worker, schedule=None, misfire_grace_time=None):
+    def worker_set_schedule(self, worker, schedule=None, misfire_grace_time=None):
         """ 将程序添加为定时任务
 
         :param int|float|str|list schedule: 定时任务配置，如果提供则添加到 APScheduler 调度器
@@ -319,8 +334,6 @@ class MultiProgramLauncher:
                 logger.warning(f'由于程序"{name}"在上一次周期还没运行完，新周期不重复启动')
             else:
                 worker.launch()
-
-        self.init_scheduler()
 
         name = worker.name
 
@@ -358,7 +371,11 @@ class MultiProgramLauncher:
             logger.info(f"已添加定时任务：{name}，等待时间: {wait_time} 秒，监测频率: {monitor_frequency} 秒")
 
         elif isinstance(schedule, str):
-            from apscheduler.triggers.cron import CronTrigger
+            try:
+                from apscheduler.triggers.cron import CronTrigger
+            except ModuleNotFoundError:
+                CronTrigger = lazy_import('from apscheduler.triggers.cron import CronTrigger')
+
             cron_parts = schedule.split()
             # 如果是 5 个字段，则补齐 "秒" 字段为 '0'
             if len(cron_parts) == 5:
@@ -404,15 +421,15 @@ class MultiProgramLauncher:
         else:
             logger.warning(f"无效的调度格式，跳过任务：{name}")
 
-    def add_program_cmd(self,
-                        cmd,
-                        name=None,
-                        shell=False,
-                        run=True,
-                        schedule=None,
-                        **attrs):
-        """
-        启动一个程序，或仅存储任务，并添加进管理列表
+    def _add_cmd_basic(self,
+                       cmd,
+                       name=None,
+                       shell=False,
+                       run=True,
+                       schedule=None,
+                       misfire_grace_time=None,
+                       **attrs):
+        """ 用命令行启动一个程序，或仅存储任务，并添加进管理列表
 
         :param cmd: 启动程序的命令
         :param name: 程序名称，如果未提供则从cmd中自动获取
@@ -421,6 +438,7 @@ class MultiProgramLauncher:
             True，启用shell进行交互操作，这种情况会更适合管道等模式的处理，此时cmd应该输入字符串格式
         :param int|float|str|list schedule: 定时任务配置，如果提供则添加到 APScheduler 调度器
         :param run: 如果为True，则立即启动程序；否则仅存储任务信息
+        :param int|None misfire_grace_time: 定时配置中，错过多少秒，仍然补充运行
         :param attrs: 其他需要传递给ProgramWorker的参数
         :return: 返回一个ProgramWorker实例，表示启动的程序或存储的任务
         """
@@ -436,15 +454,14 @@ class MultiProgramLauncher:
 
         # 3 如果有 schedule 配置，添加调度任务；否则就是正常的启动任务
         if schedule:
-            self.worker_add_schedule(worker, schedule=schedule, misfire_grace_time=attrs.get('misfire_grace_time'))
+            self.worker_set_schedule(worker, schedule=schedule, misfire_grace_time=misfire_grace_time)
         else:
-            worker.launch()
+            worker.launch()  # todo 这个也应该要套在schedule下，才方便统一管理
 
         return worker
 
-    def add_program_cmd2(self, cmd, ports=1, name=None, **kwargs):
-        """
-        增强版 add_program_cmd，支持 ports 的处理
+    def _add_cmd_with_ports(self, cmd, *, ports=1, name=None, **kwargs):
+        """ 支持 ports 的处理
 
         :param ports:
             int 表示要开启的进程数，端口号随机生成
@@ -466,16 +483,16 @@ class MultiProgramLauncher:
             for port in ports:
                 cmd_with_port = cmd + [f'--port', str(port)]
                 kwargs['port'] = port
-                worker = self.add_program_cmd(cmd_with_port, name=f'{name}:{port}', **kwargs)
+                worker = self._add_cmd_basic(cmd_with_port, name=f'{name}:{port}', **kwargs)
                 workers.append(worker)
         else:
-            workers = [self.add_program_cmd(cmd, name=name, **kwargs)]
+            workers = [self._add_cmd_basic(cmd, name=name, **kwargs)]
 
         return workers
 
-    def add_program_cmd3(self, cmd, ports=None, locations=None, *, devices=None, **kwargs):
+    def _add_cmd_with_nginx(self, cmd, ports=None, locations=None, *, devices=None, **kwargs):
         """
-        增强版 add_program_cmd2，支持 devices 等其他更多特殊的扩展参数的处理
+        增强版 _add_cmd_with_ports，支持nginx隐射配置，devices 等其他更多特殊的扩展参数的处理
 
         :param locations: URL 映射规则
         :param int|str|None devices: 使用的设备编号（显卡编号或 CPU）
@@ -498,17 +515,20 @@ class MultiProgramLauncher:
             del os.environ['CUDA_VISIBLE_DEVICES']  # 如果没设置 devices，就清除环境变量，使用 CPU
 
         # 3 处理 ports 参数
-        workers = self.add_program_cmd2(cmd, ports=ports, **kwargs)
+        workers = self._add_cmd_with_ports(cmd, ports=ports, **kwargs)
 
         return workers
+
+    def add_cmd(self, *args, **kwargs):
+        return self._add_cmd_with_nginx(*args, **kwargs)
 
     def __2_各种添加进程的机制(self):
         pass
 
-    def add_program_python(self, py_file, args='',
-                           ports=None, locations=None,
-                           name=None, shell=False, executer=None,
-                           **kwargs):
+    def add_py(self, py_file, args='',
+               ports=None, locations=None,
+               name=None, shell=False, executer=None,
+               **kwargs):
         """ 添加并启动一个Python文件作为后台程序
 
         :param str|list args:
@@ -520,12 +540,12 @@ class MultiProgramLauncher:
             cmd.append(args)
         else:
             cmd += list(args)
-        return self.add_program_cmd3(cmd, name, ports=ports, locations=locations, shell=shell, **kwargs)
+        return self.add_cmd(cmd, name, ports=ports, locations=locations, shell=shell, **kwargs)
 
-    def add_program_python_module(self, module, args='',
-                                  ports=None, locations=None,
-                                  name=None, shell=False, executer=None,
-                                  **kwargs):
+    def add_py_module(self, module, args='',
+                      ports=None, locations=None,
+                      name=None, shell=False, executer=None,
+                      **kwargs):
         """
         添加并启动一个Python模块作为后台程序
 
@@ -542,7 +562,7 @@ class MultiProgramLauncher:
             cmd += list(args)
         if name is None:
             name = module
-        return self.add_program_cmd3(cmd, ports=ports, name=name, locations=locations, shell=shell, **kwargs)
+        return self.add_cmd(cmd, ports=ports, name=name, locations=locations, shell=shell, **kwargs)
 
     def add_prog(self, prog, extcmds='',
                  ports=None, locations=None, *,
@@ -557,27 +577,27 @@ class MultiProgramLauncher:
         """
         if locations is None:
             locations = f'/api/{prog.split(".")[-1]}'
-        self.add_program_python_module(prog,
-                                       extcmds,
-                                       ports=ports, locations=locations,
-                                       name=name, devices=devices,
-                                       executer=executer,
-                                       run=run,
-                                       schedule=schedule,
-                                       )
+        self.add_py_module(prog,
+                           extcmds,
+                           ports=ports, locations=locations,
+                           name=name, devices=devices,
+                           executer=executer,
+                           run=run,
+                           schedule=schedule,
+                           )
 
     def add_server(self, prog, ports=None, locations=None, *args, **kwargs):
         """ 我自己部署的服务，基本都有特定的start_server启动函数 """
         self.add_prog(prog, extcmds='start_server', ports=ports, locations=locations, *args, **kwargs)
 
-    def add_os_command_task(self,
-                            script_content,
-                            extension=None,
-                            shell=False,
-                            run=True,
-                            name=None,
-                            schedule=None,
-                            **kwargs):
+    def add_script_task(self,
+                        script_content,
+                        extension=None,
+                        shell=False,
+                        run=True,
+                        name=None,
+                        schedule=None,
+                        **kwargs):
         """
         添加一个操作系统命令或脚本（如 .bat、.sh、.ps1 等）并启动。
 
@@ -621,8 +641,8 @@ class MultiProgramLauncher:
         else:
             raise ValueError(f"不支持的脚本类型: {extension}")
 
-        # 5 使用 add_program_cmd3 启动脚本
-        return self.add_program_cmd3(
+        # 5 使用 _add_cmd_with_nginx 启动脚本
+        return self.add_cmd(
             cmd=cmd,
             name=name or f"command_{script_file.stem}",
             shell=shell,
@@ -976,13 +996,13 @@ def run_python_module(*args,
 
     python -m xlproject.code4101 run_python_module
     """
-    from pyxllib.prog.multiprogs import SchedulerUtils
+    from pyxllib.prog.multiprogs import XlTrigger
 
     start_time = end_time = None
     round_num = itertools.count(1) if repeat_num is None else range(1, 1 + int(repeat_num))
     for round_id in round_num:
         # 0 上一轮次的等待
-        SchedulerUtils.smart_wait(start_time, end_time, 0 if start_time is None else wait_mode, print_mode=1)
+        XlTrigger.smart_wait(start_time, end_time, 0 if start_time is None else wait_mode, print_mode=1)
 
         # 1 标记当前轮次
         logger.info(f'进程运行轮次：{round_id}')
@@ -1020,7 +1040,7 @@ def support_retry_process(repeat_num=None, wait_mode=0, success_continue=False):
     repeat_num, wait_mode, success_continue
 
     """
-    from pyxllib.prog.multiprogs import SchedulerUtils
+    from pyxllib.prog.multiprogs import XlTrigger
 
     def decorator(func):
         def wrapper(*args, **kwargs):
@@ -1041,7 +1061,7 @@ def support_retry_process(repeat_num=None, wait_mode=0, success_continue=False):
             round_num = itertools.count(1) if repeat_num is None else range(1, 1 + int(repeat_num))
             for round_id in round_num:
                 # 0 上一轮次的等待
-                SchedulerUtils.smart_wait(start_time, end_time, 0 if start_time is None else wait_mode, print_mode=1)
+                XlTrigger.smart_wait(start_time, end_time, 0 if start_time is None else wait_mode, print_mode=1)
 
                 # 1 标记当前轮次
                 logger.info(f'进程运行轮次：{round_id}')
@@ -1146,7 +1166,7 @@ def support_multi_processes_hyx(default_processes=1):
                         cmds.append(f'--{k}')  # 添加关键字参数的键
                         cmds.append(str(v))  # 添加关键字参数的值
 
-                    mpl.add_program_python_module(header, cmds, shell=shell)
+                    mpl.add_py_module(header, cmds, shell=shell)
                 mpl.run_endless()
 
         return wrapper
@@ -1188,7 +1208,7 @@ def support_multi_processes(default_processes=1):
                         cmds.append(f'--{k}')  # 添加关键字参数的键
                         cmds.append(str(v))  # 添加关键字参数的值
 
-                    mpl.add_program_python(sys.argv[1], cmds, shell=shell)
+                    mpl.add_py(sys.argv[1], cmds, shell=shell)
                 mpl.run_endless()
 
         return wrapper
