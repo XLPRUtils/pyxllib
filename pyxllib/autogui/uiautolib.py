@@ -66,7 +66,17 @@ except ModuleNotFoundError:
     WindowControl = lazy_import('from uiautomation import WindowControl')
 
 
-def __1_clipboard_utils():
+def __1_定位窗口():
+    pass
+
+
+def check_active_window():
+    time.sleep(5)
+    win = uia.GetForegroundControl()
+    print(f'ClassName={win.ClassName}\tName={win.Name}')
+
+
+def __2_clipboard_utils():
     pass
 
 
@@ -198,15 +208,28 @@ def copy_files_to_clipboard(file_paths: Iterable[str]) -> bool:
     return validate_clipboard_files([os.path.normpath(file) for file in file_paths], CF_HDROP, buf=buf)
 
 
-def __2_窗口功能():
+def __3_窗口功能():
     pass
 
 
-def get_windows_info():
-    """ 得到当前机器的全部窗口信息清单 """
-    window_list = []
+def get_windows_info(classname=None, name=None):
+    """ 得到当前机器的全部窗口信息清单
 
+    :param classname: 如果输入，只会返回匹配值的项目
+    :param name: 同classname，名称过滤器
+    """
+
+    # 1 工具函数
     def get_all_hwnd(hwnd, mouse):
+        classname2 = win32gui.GetClassName(hwnd)
+        name2 = win32gui.GetWindowText(hwnd)
+
+        # 如果有过滤条件，只查看目标窗口
+        if classname and classname != classname2:
+            return
+        if name and name != name2:
+            return
+
         thread_id, process_id = win32process.GetWindowThreadProcessId(hwnd)
         try:
             proc = psutil.Process(process_id)
@@ -216,19 +239,19 @@ def get_windows_info():
         is_window = win32gui.IsWindow(hwnd)
         is_enabled = win32gui.IsWindowEnabled(hwnd)
         is_visible = win32gui.IsWindowVisible(hwnd)
-        text = win32gui.GetWindowText(hwnd)
 
         data = {
             'proc_name': proc.name(),
             'process_id': process_id,
             'thread_id': thread_id,
             'hwnd': hwnd,
-            'ClassName': win32gui.GetClassName(hwnd),
+            'ClassName': classname2,
             'ControlTypeName': '',
-            'WindowText': text,
+            'Name': name2,
             'IsWindow': is_window,
             'IsWindowEnabled': is_enabled,
-            'IsWindowVisible': is_visible
+            'IsWindowVisible': is_visible,
+            'ltrb': list(win32gui.GetWindowRect(hwnd)),
         }
 
         if not data['proc_name'].endswith('.tmp') and is_visible:
@@ -237,8 +260,11 @@ def get_windows_info():
 
         window_list.append(data)
 
+    # 2 获取窗口清单
+    window_list = []
     win32gui.EnumWindows(get_all_hwnd, 0)
-    return pd.DataFrame(window_list)
+    df = pd.DataFrame(window_list)
+    return df
 
 
 def find_ctrl(class_name=None, name=None, **kwargs):
@@ -273,10 +299,34 @@ class UiCtrlNode(NodeMixin, GetAttr, WindowControl):
         # 自动递归创建子节点
         self.build_children(build_depth)
 
+    @classmethod
+    def init_from_name(cls, class_name=None, name=None, *, build_depth=-1, **kwargs):
+        ctrl = find_ctrl(class_name=class_name, name=name, **kwargs)
+        return cls(ctrl, build_depth=build_depth)
+
+    @property
+    def hwnd(self):
+        return self.ctrl.NativeWindowHandle
+
     @property
     def ltrb(self):
         rect = self.ctrl.BoundingRectangle
         return [rect.left, rect.top, rect.right, rect.bottom]
+
+    @ltrb.setter
+    def ltrb(self, new_ltrb):
+        """设置控件的位置和大小（通过调整窗口位置）"""
+        left, top, right, bottom = new_ltrb
+        width = right - left
+        height = bottom - top
+
+        win32gui.SetWindowPos(
+            self.hwnd,
+            win32con.HWND_TOP,  # 保持窗口层级
+            left, top, width, height,
+            # 保持窗口的 Z 顺序（不改变窗口的层级），强制显示窗口（即使之前是隐藏状态）
+            win32con.SWP_NOZORDER | win32con.SWP_SHOWWINDOW,
+        )
 
     @property
     def xywh(self):
@@ -285,10 +335,18 @@ class UiCtrlNode(NodeMixin, GetAttr, WindowControl):
         w, h = r - l, b - t
         return [l, t, w, h]
 
-    @classmethod
-    def init_from_name(cls, class_name=None, name=None, *, build_depth=-1, **kwargs):
-        ctrl = find_ctrl(class_name=class_name, name=name, **kwargs)
-        return cls(ctrl, build_depth=build_depth)
+    @xywh.setter
+    def xywh(self, new_xywh):
+        """通过 [x, y, width, height] 设置控件的位置和大小"""
+        x, y, width, height = new_xywh
+
+        # 调用 SetWindowPos 调整窗口位置和大小
+        win32gui.SetWindowPos(
+            self.hwnd,
+            win32con.HWND_TOP,  # 忽略 Z 顺序（由 SWP_NOZORDER 控制）
+            x, y, width, height,
+            win32con.SWP_NOZORDER | win32con.SWP_SHOWWINDOW,
+        )
 
     def activate(self, check_seconds=2):
         """ 激活当前窗口
@@ -404,3 +462,9 @@ class UiCtrlNode(NodeMixin, GetAttr, WindowControl):
             line = textwrap.indent(line, '    ')
             lines.append(line)
         return '\n'.join(lines)
+
+
+if __name__ == '__main__':
+    check_active_window()
+
+    # UiCtrlNode.init_from_name()
