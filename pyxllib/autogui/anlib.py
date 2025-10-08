@@ -52,7 +52,7 @@ from pyxllib.algo.geo import ComputeIou, ltrb2xywh, xywh2ltrb
 from pyxllib.file.specialist import XlPath
 from pyxllib.cv.expert import xlcv, xlpil
 from pyxlpr.data.labelme import LabelmeDict
-from pyxllib.autogui.uiautolib import find_ctrl, UiCtrlNode
+from pyxllib.autogui.uiautolib import uia, find_ctrl, UiCtrlNode
 
 from pyxlpr.ai.clientlib import XlAiClient
 
@@ -1060,13 +1060,24 @@ class AnWindow(AnRegion):
         self._speaker = None  # 语音播报工具
         # todo 添加数据库db？
 
-    def set_ctrl(self, class_name=None, name=None, **kwargs):
-        """ 设置窗口控件 """
+    def set_ctrl(self,
+                 ctrl=None,  # 直接输入ctrl初始化
+                 hwnd=None,  # 输入窗口句柄
+                 class_name=None, name=None,  # 通过名称检索
+                 **kwargs):
 
-        ctrl = find_ctrl(class_name=class_name, name=name, **kwargs)
+        """ 设置窗口控件 """
+        # 1 定位控件
+        if ctrl is not None:
+            ctrl = ctrl
+        elif hwnd is not None:
+            ctrl = uia.ControlFromHandle(hwnd)
+        else:
+            ctrl = find_ctrl(class_name=class_name, name=name, **kwargs)
+
+        # 2 配置
         self.ctrl = UiCtrlNode(ctrl)
         self.ctrl.activate()
-
         self['text'] = self.ctrl.text
         self['xywh'] = self.ctrl.xywh
 
@@ -1088,3 +1099,4 @@ class AnWindow(AnRegion):
 
 if __name__ == '__main__':
     pass
+
