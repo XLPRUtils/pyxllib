@@ -6,6 +6,7 @@
 
 """ 这是一套基于labelme标注来进行 """
 
+import copy
 import sys
 from collections import defaultdict
 import json
@@ -269,12 +270,63 @@ class _AnShapeBasic(UserDict):
         super().__init__(initialdata)
         self.parent = parent or None
 
-    def set_shape(self, text, xywh):
-        """ 配置形状 """
-        self['text'] = text
-        self['xywh'] = xywh
-        # 通过xywh计算出center
-        self['center'] = [xywh[0] + xywh[2] // 2, xywh[1] + xywh[3] // 2]
+    def update_data(self, *, shot=False):
+        """ 更新衍生字段数据 """
+        # 1 补充 points
+        if 'xywh' in self.data and 'points' not in self.data:
+            self.data['shape_type'] = 'rectangle'
+            l, t, r, b = xywh2ltrb(self.data['xywh'])
+            self.data['points'] = [[l, t], [r, b]]
+        # 2 外接矩形 xywh
+        elif 'points' in self.data:
+            pts = self.data['points']
+            shape_type = self.data['shape_type'] or 'rectangle'
+            if shape_type in ('rectangle', 'polygon'):
+                pts_array = np.array(pts)
+                left = int(pts_array[:, 0].min())
+                top = int(pts_array[:, 1].min())
+                right = int(pts_array[:, 0].max())
+                bottom = int(pts_array[:, 1].max())
+                ltrb = [left, top, right, bottom]
+            elif shape_type == 'circle':
+                x, y = pts[0]
+                r = ((x - pts[1][0]) ** 2 + (y - pts[1][1]) ** 2) ** 0.5
+                ltrb = [round_int(v) for v in [x - r, y - r, x + r, y + r]]
+            # 把ltrb转换为xywh
+            self.data['xywh'] = ltrb2xywh(ltrb)
+
+        # 3 中心点
+        if 'xywh' in self.data:
+            xywh = self['xywh']
+            self.data['center'] = [xywh[0] + xywh[2] // 2, xywh[1] + xywh[3] // 2]
+
+        # 4 图片数据
+        if shot:
+            self.data['img'] = self.shot()
+        elif 'xywh' in self.data and self.parent and self.parent.get('img') is not None:
+            ltrb = xywh2ltrb(self.data['xywh'])
+            self.data['img'] = xlcv.get_sub(self.parent['img'], ltrb)
+
+        # 5 像素数据
+        if 'center' in self.data and self.parent and self.parent.get('img') is not None:
+            # 更新pixel数据
+            w, h = self.data['xywh'][2:]
+            self.data['pixel'] = tuple(self.data['img'][h // 2, w // 2].tolist()[::-1])
+
+    def move(self, dx, dy, *, shot=True):
+        """ 移动当前位置 """
+        if 'points' in self:
+            # 调整points中所有点的坐标
+            for point in self['points']:
+                point[0] += dx
+                point[1] += dy
+        elif 'xywh' in self:
+            # 调整xywh坐标
+            self['xywh'][0] += dx
+            self['xywh'][1] += dy
+
+        # 移动后更新图像数据
+        self.update_data(shot=shot)
 
     def read_lmshape(self, lmshape):
         """
@@ -288,51 +340,30 @@ class _AnShapeBasic(UserDict):
             anshape = lmshape['label']
         anshape.update(DictTool.sub(lmshape, ['label']))  # 因为原本的label被展开成字典了，这里要删掉label
 
-        # 2 中心点 center（无论任何原始形状，都转成矩形处理。这跟下游功能有关，目前只能做矩形。）
-        shape_type = lmshape['shape_type']
-        pts = lmshape['points']
-        if shape_type in ('rectangle', 'polygon', 'line'):
-            anshape['center'] = np.array(np.array(pts).mean(axis=0), dtype=int).tolist()
-        elif shape_type == 'circle':
-            anshape['center'] = pts[0]
-
-        # 3 外接矩形 rect
-        if shape_type in ('rectangle', 'polygon'):
-            pts_array = np.array(pts)
-            left = int(pts_array[:, 0].min())
-            top = int(pts_array[:, 1].min())
-            right = int(pts_array[:, 0].max())
-            bottom = int(pts_array[:, 1].max())
-            ltrb = [left, top, right, bottom]
-        elif shape_type == 'circle':
-            x, y = pts[0]
-            r = ((x - pts[1][0]) ** 2 + (y - pts[1][1]) ** 2) ** 0.5
-            ltrb = [round_int(v) for v in [x - r, y - r, x + r, y + r]]
-        # 把ltrb转换为xywh
-        anshape['xywh'] = ltrb2xywh(ltrb)
-
-        # 4 图片数据 img, etag
-        if self.parent.get('img') is not None and anshape['xywh']:
-            anshape['img'] = xlcv.get_sub(self.parent['img'], ltrb)
-            # anshape['etag'] = get_etag(anshape['img'])
-            # TODO 这里目的其实就是让相同图片对比尽量相似，所以可以用dhash而不是etag
-
-        # 5 中心点像素值 pixel
-        p = anshape['center']
-        if self.parent.get('img') is not None and p:
-            anshape['pixel'] = tuple(self.parent['img'][p[1], p[0]].tolist()[::-1])
-
+        # 2 更新图像相关数据
         self.update(anshape)
+        self.update_data(shot=False)
 
     def __2_转换与保存(self):
         pass
 
-    def convert_to_view(self, view_name=None):
-        """ 将这个shape升级为一个view对象 """
-        img = self.shot()
-        view = AnView.init_from_image(img)
-        view.parent = self
-        view['text'] = view_name
+    def convert_to_view(self, mode='inner', *, shot=False):
+        """ 将这个shape升级为一个view对象
+
+        :param mode: 初始化shapes所用的模式
+            inner，默认，将parent中几何关系被self包含的都归到子shapes中
+            empty, 空shapes
+            ocr, 使用ocr来生成初始的shapes
+        """
+        view = AnView(parent=self.parent)
+        view.data = self.data
+        view.update_data(shot=shot)
+
+        if mode == 'inner':
+            view.add_inner_shapes()
+        elif mode == 'ocr':
+            view.add_ocr_shapes()
+
         return view
 
     @classmethod
@@ -351,10 +382,8 @@ class _AnShapeBasic(UserDict):
         """ 保存当前快照图片 """
         self.raw_save_image(self.shot(), region_folder, view_name, timetag)
 
-    def save_view(self, region_folder, view_name=None, timetag=None):
-        """ 保存当前视图（即保存图片和对应的标注数据） """
-        view = self.convert_to_view(view_name)
-
+    @classmethod
+    def _save_view(cls, view, region_folder, view_name=None, timetag=None):
         timetag_ = datetime.datetime.now().strftime('%Y%m%d_%H%M%S_%f')[:-3]
         if not view_name:  # 未输入则用时间戳代替
             view_name = timetag_
@@ -363,6 +392,11 @@ class _AnShapeBasic(UserDict):
 
         impath = XlPath(region_folder) / f'{view_name}.jpg'
         view.save_labelme_file(impath)
+
+    def save_view(self, region_folder, view_name=None, timetag=None):
+        """ 保存当前视图（即保存图片和对应的标注数据） """
+        view = self if isinstance(self, AnView) else self.convert_to_view('ocr', shot=True)
+        self._save_view(view, region_folder, view_name, timetag)
 
     def __3_基础功能(self):
         pass
@@ -659,8 +693,8 @@ class AnShape(_AnShapePupil):
             # 把rects转成AnShape类型，每个rect都是[x, y, w, h]的list，不过其有numpy格式，要转成int类型
             shapes = []
             for rect in rects:
-                sp = AnShape(parent=self)
-                sp.set_shape(default_text, [int(x) for x in rect])
+                sp = AnShape({'text': default_text, 'xywh': [int(x) for x in rect]}, parent=self)
+                sp.update_data(shot=True)
                 shapes.append(sp)
             return shapes
 
@@ -725,7 +759,7 @@ class AnShape(_AnShapePupil):
         # 3 局部匹配场景
         def find_subtext():
             shapes = []
-            sub_view = self.convert_to_view()
+            sub_view = self.convert_to_view('ocr', shot=True)
             for sp in sub_view.shapes:
                 if re.search(pattern, sp['text']):
                     shapes.append(sp)
@@ -825,24 +859,14 @@ class AnView(AnShape):
 
     def __init__(self, initialdata=None, parent=None):
         """ 这个类基本都要用预设的几个特殊的init接口去初始化，实际使用中一般不直接用这个raw init
+
+        :param initialdata: 原始UserDict的字典初始化数据
         """
         super().__init__(initialdata, parent)
         self['text'] = 'view'
 
         self.impath = None  # 如果是从文件读取来的数据，存储原始图片路径，在save重写回去的时候就可以缺省保存参数
         self.shapes = []  # 以列表的形式顺序存储的anshapes
-
-    def init_from_xywh(self, xywh=None):
-        if xywh is None and 'img' in self:
-            xywh = [0, 0, self['img'].shape[1], self['img'].shape[0]]
-        if xywh is None:
-            return
-
-        self['xywh'] = xywh
-        self['center'] = [xywh[0] + xywh[2] // 2, xywh[1] + xywh[3] // 2]
-
-        if self.get('img') is not None:
-            self['pixel'] = tuple(self['img'][xywh[3] // 2, xywh[2] // 2].tolist()[::-1])
 
     def read_lmshapes(self, lmshapes):
         self.shapes = []
@@ -864,12 +888,59 @@ class AnView(AnShape):
 
         view['img'] = xlcv.read(view.impath)
         view.read_lmshapes(lmdict['shapes'])
-        view.init_from_xywh()
+        view['xywh'] = [0, 0, view['img'].shape[1], view['img'].shape[0]]
+        view.update_data(shot=False)
 
         return view
 
+    def move(self, dx, dy, *, shot=True):
+        super().move(dx, dy, shot=shot)
+        # 只要view移动坐标就行，子shape其实只是做一次图片更新
+        for sp in self.shapes:
+            sp.move(0, 0, shot=shot)
+
+    def add_inner_shapes(self):
+        # 1 找其最近的一个是AnView类型的父节点，如果没有则退出
+        parent_view = self.parent
+        dx, dy = 0, 0
+        while parent_view is not None and not isinstance(parent_view, AnView):
+            if parent_view.get('xywh'):
+                dx += parent_view['xywh'][0]  # 累加x偏移量
+                dy += parent_view['xywh'][1]  # 累加y偏移量
+            parent_view = parent_view.parent
+        if parent_view is None:
+            return
+
+        # 2 算出self相对parent_view的ltrb
+        self_ltrb = xywh2ltrb(self['xywh'])
+        self_ltrb[0] += dx  # 加上父视图的x偏移量
+        self_ltrb[1] += dy  # 加上父视图的y偏移量
+        self_ltrb[2] += dx
+        self_ltrb[3] += dy
+
+        # dx += self['xywh'][0]
+        # dy += self['xywh'][1]
+
+        # 3 遍历parent_view.shapes，把符合inner规则的shapes添加进来
+        for sp in parent_view.shapes:
+            sp_ltrb = xywh2ltrb(sp['xywh'])
+            if (sp_ltrb[0] >= self_ltrb[0] and sp_ltrb[1] >= self_ltrb[1] and
+                    sp_ltrb[2] <= self_ltrb[2] and sp_ltrb[3] <= self_ltrb[3]):
+                new_sp = AnShape({'text': sp['text']}, parent=self)
+                new_sp['xywh'] = [sp['xywh'][0] - dx - self['xywh'][0],
+                                  sp['xywh'][1] - dy - self['xywh'][1],
+                                  sp['xywh'][2],
+                                  sp['xywh'][3]]
+                new_sp.update_data(shot=True)
+                self.shapes.append(new_sp)
+
+    def add_ocr_shapes(self):
+        xlapi = get_xlapi()
+        lmdict = xlapi.common_ocr(self['img'])
+        self.read_lmshapes(lmdict['shapes'])
+
     @classmethod
-    def init_from_image(cls, image):
+    def init_from_image(cls, image, ocr=True):
         """ 从一张图片初始化
         这里默认会调用xlapi来生成labelme标注文件
         """
@@ -878,12 +949,12 @@ class AnView(AnShape):
         view['img'] = xlcv.read(image)
         if isinstance(image, (str, XlPath)):
             view.impath = image
+        view['xywh'] = [0, 0, view['img'].shape[1], view['img'].shape[0]]
+        view.update_data(shot=False)
 
         # 2 调用ocr识别
-        xlapi = get_xlapi()
-        lmdict = xlapi.common_ocr(view['img'])
-        view.read_lmshapes(lmdict['shapes'])
-        view.init_from_xywh()
+        if ocr:
+            view.add_ocr_shapes()
 
         return view
 
@@ -893,6 +964,9 @@ class AnView(AnShape):
         xlapi = get_xlapi()
         lmdict = xlapi.common_ocr(self['img'])
         self.read_lmshapes(lmdict['shapes'])
+
+    def save_view(self, region_folder, view_name=None, timetag=None):
+        self._save_view(self, region_folder, view_name, timetag)
 
     def __2_检索功能(self):
         pass
@@ -977,11 +1051,34 @@ class AnView(AnShape):
             DictTool.isub(sp, ['img'])
             shape = LabelmeDict.gen_shape(json.dumps(sp.data, ensure_ascii=False, default=str),
                                           sp['points'], sp['shape_type'],
-                                          group_id=sp['group_id'], flags=sp['flags'])
+                                          group_id=sp.get('group_id'), flags=sp.get('flags', {}))
             lmdict['shapes'].append(shape)
 
         # 3 保存
         jsonpath.write_json(lmdict, indent=2)
+
+    def create_sub_view(self, sub_view_loc, anchor_shape_loc=None, det_shape=None):
+        """ 在当前view生成一个子view对象
+
+        注意这个函数跟convert_to_view非常像，
+        主要区别在多了锚点shape，这个sub_view位置可以根据锚点进行偏移，从而实现滚动窗口中元素的动态定位
+
+        :param sub_view_loc: 目标shape
+        :param anchor_shape_loc: 锚点shape
+        :param det_shape: 检测到的动态位置sp，用来和anchor_shape对齐后，生成实际动态的sub_view整个区域
+        """
+        # 1 获取原本静态位置的sub_view，这步基本等价于 convert_to_view
+        sub_view = self[sub_view_loc].convert_to_view()
+        if anchor_shape_loc is None:
+            return sub_view
+
+        # 2 计算偏移量：检测到的动态位置与静态锚点位置的差值，这里仅以左上角为锚点，后续可以扩展center等形式的锚点
+        anchor_shape = sub_view[anchor_shape_loc]
+        dx = det_shape['xywh'][0] - anchor_shape['xywh'][0] - sub_view['xywh'][0]
+        dy = det_shape['xywh'][1] - anchor_shape['xywh'][1] - sub_view['xywh'][1]
+        sub_view.move(dx, dy)
+
+        return sub_view
 
 
 class AnRegion(AnShape):
@@ -1022,6 +1119,10 @@ class AnRegion(AnShape):
         for json_file in self.folder.rglob_files('*.json'):
             self._read_view(json_file)
 
+    def loc_view(self, item):
+        self._read_view(self.folder / f'{item}.json')
+        return self.views.get(item)
+
     def loc(self, item):
         # views的具体值，采用惰性加载机制，只有使用到时，才会读取文件
         if '/' in item:
@@ -1031,8 +1132,7 @@ class AnRegion(AnShape):
             self._read_view(self.folder / f'{view_name}.json')
             return self.views[view_name][shape_name]
         else:
-            self._read_view(self.folder / f'{item}.json')
-            return self.views.get(item)
+            return self.loc_view(item)
 
     def __getitem__(self, item):
         if item in self.data:
@@ -1099,4 +1199,3 @@ class AnWindow(AnRegion):
 
 if __name__ == '__main__':
     pass
-
