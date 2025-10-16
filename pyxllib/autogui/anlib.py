@@ -652,6 +652,7 @@ class AnShape(_AnShapePupil):
         # 1 匹配目标
         default_text = ''
         if dst is None:
+            assert part is not True, '如果要检索子图，必须用parent.find_img(children)，输入子图参数'
             dst, part = self['img'], False
             default_text = self['text']
         elif isinstance(dst, str):  # XlPath不是str类型，利用这个特性可以输入图片路径用xlcv读取
@@ -827,7 +828,7 @@ class AnShape(_AnShapePupil):
         pass
 
     def wait_img_notchange(self, *, limit=None, interval=2, **kwargs):
-        """ 一直等待到图片不再变化，以当前shot为原图，类似find_img的基础匹配 """
+        """ 一直等待到图片不再变化，以当前shot为原图，类似find_ mg的基础匹配 """
         interval = self.get_parent_argv('wait_interval', interval) or 1
         interval *= 2  # 这个等待可以久一点
 
@@ -1126,11 +1127,15 @@ class AnRegion(AnShape):
     def loc(self, item):
         # views的具体值，采用惰性加载机制，只有使用到时，才会读取文件
         if '/' in item:
-            # 注意功能效果：os.path.split('a/b/c') -> ('a/b', 'c')
-            # 注意还有种很特殊的：'a' -> ('', 'a')
-            view_name, shape_name = os.path.split(item)
-            self._read_view(self.folder / f'{view_name}.json')
-            return self.views[view_name][shape_name]
+            f1 = self.folder / f'{item}.json'
+            if f1.is_file():
+                return self.loc_view(item)
+            else:
+                # 注意功能效果：os.path.split('a/b/c') -> ('a/b', 'c')
+                # 注意还有种很特殊的：'a' -> ('', 'a')
+                view_name, shape_name = os.path.split(item)
+                self._read_view(self.folder / f'{view_name}.json')
+                return self.views[view_name][shape_name]
         else:
             return self.loc_view(item)
 
