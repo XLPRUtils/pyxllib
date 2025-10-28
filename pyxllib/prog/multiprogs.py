@@ -27,6 +27,11 @@ except ModuleNotFoundError:
     deprecated = lazy_import('deprecated', 'Deprecated')
 
 try:
+    from fastcore.basics import GetAttr
+except ModuleNotFoundError:
+    GetAttr = lazy_import('from fastcore.basics import GetAttr', 'fastcore')
+
+try:
     from loguru import logger
 except ModuleNotFoundError:
     logger = lazy_import('from loguru import logger')
@@ -47,6 +52,12 @@ try:
 except ModuleNotFoundError:
     FastAPI = lazy_import('from fastapi import FastAPI')
     PlainTextResponse = lazy_import('from fastapi.responses import PlainTextResponse')
+
+try:
+    from apscheduler import Scheduler
+except ModuleNotFoundError:
+    Scheduler = lazy_import('from apscheduler import Scheduler',
+                            'apscheduler[psycopg,sqlalchemy]==4.0.0a6')
 
 from pyxllib.prog.specialist import parse_datetime
 from pyxllib.algo.stat import print_full_dataframe
@@ -258,6 +269,36 @@ class ProgramWorker(SimpleNamespace):
     def __call__(self):
         self.launch()
 
+    def run_task(self):
+        """ 启动任务并更新状态 """
+        # todo schedule不一定都是单实例阻塞情景的需求，以后有需要可以扩展支持多实例同时存在的非阻塞模式
+        if self.is_running():
+            logger.warning(f'由于程序"{name}"在上一次周期还没运行完，新周期不重复启动')
+        else:
+            self.launch()
+
+    def run_interval_task(self):
+        wait_time = self.wait_time
+        
+        # 如果还没有启动过任务，直接启动
+        if self.last_start_time is None:
+            self.launch()
+            return
+
+        # 如果任务正在运行，则不启动新任务
+        if self.is_running():
+            return
+
+        # 计算下次启动时间
+        if wait_time < 0:  # 基于上次启动时间
+            next_run = self.last_start_time + timedelta(seconds=abs(wait_time))
+        else:  # 基于上次结束时间
+            next_run = self.last_end_time + timedelta(seconds=wait_time)
+
+        # 看现在是否需要重启
+        if datetime.now() >= next_run:
+            worker.launch()
+
     def terminate(self):
         """
         比较优雅结束进程的方法
@@ -302,11 +343,12 @@ class MultiProgramLauncher:
         """ 调度器 """
         if self._scheduler is None:
             try:
-                from apscheduler.schedulers.background import BackgroundScheduler
+                # from apscheduler.schedulers.background import BackgroundScheduler
+                from apscheduler import Scheduler
             except ModuleNotFoundError:
-                BackgroundScheduler = lazy_import('from apscheduler.schedulers.background import BackgroundScheduler')
+                Scheduler = lazy_import('from apscheduler import Scheduler')
 
-            self._scheduler = BackgroundScheduler()
+            self._scheduler = Scheduler()
 
         return self._scheduler
 
@@ -327,55 +369,29 @@ class MultiProgramLauncher:
         """
         from datetime import datetime, timedelta
 
-        def task():
-            """ 启动任务并更新状态 """
-            # todo schedule不一定都是单实例阻塞情景的需求，以后有需要可以扩展支持多实例同时存在的非阻塞模式
-            if worker.is_running():
-                logger.warning(f'由于程序"{name}"在上一次周期还没运行完，新周期不重复启动')
-            else:
-                worker.launch()
+        try:
+            from apscheduler.triggers.interval import IntervalTrigger
+            from apscheduler.triggers.date import DateTrigger
+            from apscheduler.triggers.cron import CronTrigger
+        except ModuleNotFoundError:
+            CronTrigger = lazy_import('from apscheduler.triggers.cron import CronTrigger')
 
         name = worker.name
 
         # 处理 schedule 类型
         if isinstance(schedule, (int, float)):
             # 如果是单一数值，按固定间隔执行，不考虑任务是否完成
-            self.scheduler.add_job(task, 'interval', seconds=abs(schedule))
+            self.scheduler.add_schedule(worker.run_task, IntervalTrigger(seconds=abs(schedule)))
             logger.info(f"已添加定时任务：{name}，监测频率：{schedule} 秒")
 
         elif isinstance(schedule, tuple) and len(schedule) == 2:
             wait_time, monitor_frequency = schedule
 
-            def interval_task():
-                # 如果还没有启动过任务，直接启动
-                if worker.last_start_time is None:
-                    worker.launch()
-                    return
-
-                # 如果任务正在运行，则不启动新任务
-                if worker.is_running():
-                    return
-
-                # 计算下次启动时间
-                if wait_time < 0:  # 基于上次启动时间
-                    next_run = worker.last_start_time + timedelta(seconds=abs(wait_time))
-                else:  # 基于上次结束时间
-                    next_run = worker.last_end_time + timedelta(seconds=wait_time)
-
-                # 看现在是否需要重启
-                if datetime.now() >= next_run:
-                    worker.launch()
-
             # 以 monitor_frequency 作为定时检查的间隔
-            self.scheduler.add_job(interval_task, 'interval', seconds=monitor_frequency)
+            self.scheduler.add_schedule(worker.run_interval_task, IntervalTrigger(seconds=monitor_frequency))
             logger.info(f"已添加定时任务：{name}，等待时间: {wait_time} 秒，监测频率: {monitor_frequency} 秒")
 
         elif isinstance(schedule, str):
-            try:
-                from apscheduler.triggers.cron import CronTrigger
-            except ModuleNotFoundError:
-                CronTrigger = lazy_import('from apscheduler.triggers.cron import CronTrigger')
-
             cron_parts = schedule.split()
             # 如果是 5 个字段，则补齐 "秒" 字段为 '0'
             if len(cron_parts) == 5:
@@ -389,12 +405,12 @@ class MultiProgramLauncher:
                     # 改成正则获取x每个数值减去1（遇到0则改为6）：相当于把原本1~7的周标记，改为这里0~6的标记
                     def f(m):
                         x = int(m.group(0))
-                        return '6' if x == 0 else str(x - 1)
+                        return '7' if x == 0 else str(x)
 
                     x = re.sub(r'\d+', f, x)
 
-                self.scheduler.add_job(
-                    task,
+                self.scheduler.add_schedule(
+                    worker.run_task,
                     CronTrigger(
                         second=cron_parts[0],
                         minute=cron_parts[1],
@@ -414,8 +430,7 @@ class MultiProgramLauncher:
         elif isinstance(schedule, list):
             # 支持 list[datetime] 格式
             for run_time in schedule:
-                run_time = parse_datetime(run_time)
-                self.scheduler.add_job(task, 'date', run_date=run_time)
+                self.scheduler.add_schedule(worker.run_task, DateTrigger(parse_datetime(run_time)))
             logger.info(f"已添加定时任务：{name}，触发器: dates，运行时间: {schedule}")
 
         else:
@@ -730,7 +745,7 @@ class MultiProgramLauncher:
         """ 停止所有后台程序 """
         # 关闭所有调度器
         if self.scheduler:
-            self.scheduler.shutdown()
+            self.scheduler.stop()
 
         # 停止所有单启动任务
         for worker in self.workers:
@@ -769,7 +784,7 @@ class MultiProgramLauncher:
                 如果进程异常结束，退出码通常是一个非零值，表示异常的类型或错误码。
     	"""
         if self.scheduler:  # 如果有定时任务，启动调度器
-            self.scheduler.start()
+            self.scheduler.start_in_background()
 
         port = debug_port
         if port:

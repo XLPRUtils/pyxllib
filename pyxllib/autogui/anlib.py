@@ -852,6 +852,26 @@ class AnShape(_AnShapePupil):
         # 使用xlwait等待图片不再变化
         return xlwait(check_not_change, limit=limit, interval=interval)
 
+    def is_on(self):
+        """ 判断当前开关是否为开启状态 """
+        # 如果存储的是"off"图像，但当前能匹配到这个图像，说明实际是关闭状态
+        if self['text'].startswith('off'):
+            return not self.find_img()
+        # 否则，如果能匹配到存储的图像（假设是"on"图像），说明是开启状态
+        else:
+            return self.find_img()
+
+    def turn_on(self, *args, **kwargs):
+        """ 比较个性化，click的衍生功能，对开关类的状态，进行显式确认为'开'状态 """
+        # 通过shape名称，只要不是'off'前缀，默认就是存储了一个打开状态的开关
+        if not self.is_on():
+            self.click(*args, **kwargs)
+
+    def turn_off(self, *args, **kwargs):
+        """ 进行显式确认为'关'状态 """
+        if self.is_on():
+            self.click(*args, **kwargs)
+
 
 class AnView(AnShape):
 
