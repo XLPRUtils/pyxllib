@@ -4,6 +4,7 @@
 # @Email  : 877362867@qq.com
 # @Date   : 2024/11/12
 
+import inspect
 from collections import defaultdict
 from types import SimpleNamespace
 from unittest.mock import Mock
@@ -18,6 +19,8 @@ import textwrap
 import threading
 import re
 import itertools
+from functools import partial
+import copy
 
 from pyxllib.prog.lazyimport import lazy_import
 
@@ -54,7 +57,11 @@ except ModuleNotFoundError:
     PlainTextResponse = lazy_import('from fastapi.responses import PlainTextResponse')
 
 try:
-    from apscheduler import Scheduler
+    from apscheduler import Scheduler, TaskDefaults
+    from apscheduler.abc import Trigger
+    from apscheduler.triggers.interval import IntervalTrigger
+    from apscheduler.triggers.date import DateTrigger
+    from apscheduler.triggers.cron import CronTrigger
 except ModuleNotFoundError:
     Scheduler = lazy_import('from apscheduler import Scheduler',
                             'apscheduler[psycopg,sqlalchemy]==4.0.0a6')
@@ -64,7 +71,7 @@ from pyxllib.algo.stat import print_full_dataframe
 from pyxllib.file.specialist import XlPath
 
 
-def __1_定时工具():
+def __1_定时():
     pass
 
 
@@ -165,27 +172,53 @@ class XlTrigger:
 
         cls.wait_until_time(next_time)
 
-    def __2_对象方法(self):
+    def __2_扩展触发器(self):
+        """ 用create_trigger可以标准触发器，这里还提供一些其他特殊的非标准触发器 """
         pass
 
-    def __init__(self, desc=None):
+    @classmethod
+    def create_cron_trigger(cls, desc):
+        """ 自定义扩展过的cron表达式
+        主要是第6位的星期标记，直接用1~7来表示星期一到星期日，比较直观
         """
-        :param desc: 通过一个参数，就可以描述多种触发规则
-            int/float, 每间隔多少秒运行一次，以启动时间为基准
-                可以输入负值，此时表示是在程序实际结束后等待的秒数时间
-            str，cron格式的定时器
-            None，默认值，指当前时间
-            datetime，手动指定某个运行时间点
-            list[datetime], 手动指定的多个时间段，一般用的不多
-        """
-        self.desc = desc
+        cron_parts = desc.split()
 
-    def get_next_fire_time(self):
-        """ 返回下一次应该运行的时间datetime，如果已经不需要运行，返回None """
-        pass
+        # 如果是 5 个字段，则补齐 "秒" 字段为 '0'
+        if len(cron_parts) == 5:
+            cron_parts.insert(0, '0')
+
+        # 检查是否为有效的 6 字段 cron 表达式
+        if len(cron_parts) == 6:
+            # 统一处理为 6 字段格式
+            # 把我自定义的cron的星期标记转换为aps的星期标记。前者用1234567，后者用0123456表示星期一到星期日
+            x = cron_parts[5]
+            if x != '*':  # 写0或7都表示周日
+                # 改成正则获取x每个数值减去1（遇到0则改为6）：相当于把原本1~7的周标记，改为这里0~6的标记
+                def f(m):
+                    x = int(m.group(0))
+                    return '6' if x == 0 else str(x - 1)
+
+                x = re.sub(r'\d+', f, x)
+
+            return CronTrigger(
+                second=cron_parts[0],
+                minute=cron_parts[1],
+                hour=cron_parts[2],
+                day=cron_parts[3],
+                month=cron_parts[4],
+                day_of_week=x,
+            )
+        else:
+            raise ValueError(f"无效的 cron 表达式：{desc}")
+
+    @classmethod
+    def post_execution_schedule(cls, scheduler, task, interval_seconds):
+        task()
+        next = datetime.datetime.now() + datetime.timedelta(seconds=interval_seconds)
+        scheduler.add_schedule(cls.post_execution_schedule, DateTrigger(next), args=[scheduler, task, interval_seconds])
 
 
-def __2_进程作业():
+def __2_任务():
     pass
 
 
@@ -205,6 +238,20 @@ def set_pdeathsig(sig=None):
         return callable
 
 
+def find_free_ports(count=1):
+    """ 随机获得可用端口
+
+    :param count: 需要的端口数量（会保证给出的端口号不重复）
+    :return: list
+    """
+    ports = set()
+    while len(ports) < count:
+        with socketserver.TCPServer(("localhost", 0), None) as s:
+            ports.add(s.server_address[1])
+
+    return list(ports)
+
+
 class SubprocessTask:
     """ subprocess类型的job作业
     即subprocess+apscheduler后需要的基础作业类型
@@ -214,17 +261,21 @@ class SubprocessTask:
                  args,
                  *,
                  name=None,
-                 popen_kwargs=None,
                  timeout_seconds=None,
-                 trigger=None,
+                 **popen_kwargs,
                  ):
         """
-        :param args: 要运行的指令程序
+        :param str|list args: 要运行的指令程序
         :param name: 程序昵称
-        :param popen_kwargs: popen初始化用的其他参数
         :param timeout_seconds: 超时设置，单位秒
+        :param popen_kwargs: popen初始化用的其他参数，常用的比如
+            shell，默认False不使用shell直接运行，一般用在一些不需要管道等的场景
+            stdin, stdout, stderr，标准输入、输出、错误流
         """
         self.scheduler = None
+        # aps4.0使用仿函数机制的话，必须要配置这个值，不然会运行不了
+        # 而且这个也算是唯一标识，必须不同实例值不同，才能确保aps4不会判别为同一task
+        self.__qualname__ = str(id(self))
 
         # 执行程序需要使用的参数
         self.args = args
@@ -234,97 +285,83 @@ class SubprocessTask:
         self.popen_kwargs = popen_kwargs or {}
         self.proc = None
         self.timeout_seconds = timeout_seconds
-        self.trigger = XlTrigger(trigger) if trigger else None
-
-        # 运行记录 list[dict]结构
-        # dict: time 时间点, event 事件(启动, 完成, 中断)
-        self.records = []
 
     def is_running(self):
         """ 检查程序是否在运行 """
         status = self.proc is not None and self.proc.poll() is None
         return status
 
-    def add_record(self, event, **kwargs):
-        self.records.append({'time': datetime.datetime.now().isoformat(timespec='seconds'),
-                             'event': event,  # 启动|完成|中断
-                             **kwargs,
-                             })
+    def set_arg(self, arg_name, arg_value):
+        """ 修订arg的值
 
-    def status_tag(self):
-        """ 当前程序的状态标签
+        注意self.args可能是str或list类型，不要修改args类型的情况设置arg
+        如果不存在arg，则添加，否则修改arg的值
 
-        时间戳 + "待启动|已启动|已完成|被中断"
+        使用示例：
+        >> self.set_arg('--port', 5034)
         """
+        if isinstance(self.args, str):
+            # 按空格拆分，支持简单 key=value 或 --key value 形式
+            parts = self.args.split()
+            updated = False
+            for i, part in enumerate(parts):
+                if part == arg_name:
+                    # --key value 形式，替换下一个值
+                    if i + 1 < len(parts):
+                        parts[i + 1] = str(arg_value)
+                        updated = True
+                        break
+                elif part.startswith(f'{arg_name}='):
+                    # key=value 形式，直接替换
+                    parts[i] = f'{arg_name}={arg_value}'
+                    updated = True
+                    break
+            if not updated:
+                # 不存在则追加，优先尝试 --key value 风格
+                parts.extend([arg_name, str(arg_value)])
+            self.args = ' '.join(parts)
 
-    @classmethod
-    def from_dict(cls, dict_data):
-        """ 从字典读取配置数据来创建SubprocessTask实例
+        elif isinstance(self.args, list):
+            updated = False
+            # 扫描 list，尝试找到并替换
+            for i, item in enumerate(self.args):
+                if item == arg_name:
+                    # --key value 形式
+                    if i + 1 < len(self.args):
+                        self.args[i + 1] = str(arg_value)
+                        updated = True
+                        break
+                elif item.startswith(f'{arg_name}='):
+                    # key=value 形式
+                    self.args[i] = f'{arg_name}={arg_value}'
+                    updated = True
+                    break
+            if not updated:
+                # 不存在则追加
+                self.args.extend([arg_name, str(arg_value)])
 
-        :param dict_data: 配置字典
-        :return: SubprocessTask实例
-        """
-        # 创建实例
-        instance = cls(
-            args=dict_data.get('args'),
-            name=dict_data.get('name'),
-            popen_kwargs=dict_data.get('popen_kwargs'),
-            timeout_seconds=dict_data.get('timeout_seconds')
-        )
-        instance.records = dict_data.get('records', [])
-        return instance
-
-    def to_dict(self):
-        """导出配置参数为字典，与from_dict保持对称"""
-        config = {
-            'args': self.args,
-            'name': self.name,
-            'popen_kwargs': self.popen_kwargs,
-            'timeout_seconds': self.timeout_seconds,
-            'records': self.records
-        }
-        return config
-
-    def __call__(self):
-        """ 启动程序 """
+    def run(self):
+        """ 启动程序，这个在下游子类中可以重载重新定制 """
         # 1 目前不支持重复执行，只允许有一个实例，但要扩展修改这个功能是相对容易的
+        logger.info(self.args)
         if self.is_running():
             return self.proc
 
-        # 2 记录并启动
+        # 2 启动
         self.proc = subprocess.Popen(self.args, preexec_fn=set_pdeathsig(), **self.popen_kwargs)
-        self.add_record('启动',
-                        args=self.args,
-                        pid=self.proc.pid,
-                        popen_kwargs=self.popen_kwargs,
-                        timeout_seconds=self.timeout_seconds,
-                        )
 
         # 3 等待其运行结束后标记
-        try:
-            # 但proc启动后，使用阻塞模式监控程序什么时候结束
-            stdout_data, stderr_data = self.proc.communicate(input=None, timeout=self.timeout_seconds)
-            # stdout_data只有在Popen时配置stdout=subprocess.PIPE时才能获取，否则输出是直接到主进程的命令行窗口里，这里只能得到None
-            self.add_record(
-                '中断' if self.proc.returncode else '完成',
-                pid=self.proc.pid,
-                returncode=self.proc.returncode,
-                stdout=stdout_data,
-                stderr=stderr_data,
-            )
-
-        except subprocess.TimeoutExpired:
-            self.kill()
-            stdout_data, stderr_data = self.proc.communicate()
-            self.add_record(
-                '超时',
-                pid=self.proc.pid,
-                returncode=self.proc.returncode,
-                stdout=stdout_data,
-                stderr=stderr_data,
-            )
+        # try:
+        #     # proc启动后，使用阻塞模式监控程序什么时候结束
+        #     self.proc.communicate(timeout=self.timeout_seconds)
+        # except subprocess.TimeoutExpired:
+        #     self.kill()
+        #     self.proc.communicate()
 
         return self.proc
+
+    def __call__(self):
+        return self.run()
 
     def terminate(self):
         """ 比较优雅结束进程的方法 """
@@ -343,30 +380,28 @@ class SubprocessTask:
         self.__call__()
 
 
-def __3_后端服务作业():
-    pass
-
-
-def find_free_ports(count=1):
-    """ 随机获得可用端口
-
-    :param count: 需要的端口数量（会保证给出的端口号不重复）
-    :return: list
-    """
-    ports = set()
-    while len(ports) < count:
-        with socketserver.TCPServer(("localhost", 0), None) as s:
-            ports.add(s.server_address[1])
-
-    return list(ports)
-
-
 class XlServerSubprocessTask(SubprocessTask):
-    """ xlserver后端服务所用进程作业 """
-    pass
+    def __init__(self,
+                 args,
+                 *,
+                 name=None,
+                 timeout_seconds=None,
+                 **popen_kwargs,
+                 ):
+        super().__init__(args, name=name, timeout_seconds=timeout_seconds, **popen_kwargs)
+
+        # 我用nginx需要额外补充的两个属性值
+        self.port = None
+        # list[dict]结构，dict长度只有1，类似 [{'/原url路径/a', '/目标url路径/b'}, ...]
+        # 如果k,v相同，可以简写为一个值 ['/a', '/b', ...]
+        self.locations = None
+
+    def set_port(self, port):
+        self.port = port
+        self.set_arg('--port', port)
 
 
-def __4_调度器():
+def __3_调度器():
     pass
 
 
@@ -374,42 +409,316 @@ class XlScheduler(GetAttr):
     """ 对apscheduler的Scheduler扩展版
 	"""
     _default = 'scheduler'
+    _proc_class = SubprocessTask
 
     def __init__(self):
         self._scheduler = None
-        self.jobs = []
+        # aps也可以用get_tasks获得全部tasks，但那个task更底层，不太是我需要的更高层业务的tasks管理单元，所以这里我自己扩展一个成员
+        self.tasks = []
 
     @property
     def scheduler(self):
         """ 调度器 """
         if self._scheduler is None:
             self._scheduler = Scheduler()
-
         return self._scheduler
 
-    def add_job_cmd(self, args):
+    def __1_添加schedule(self):
         pass
 
+    def add_schedule(self, task, trigger=None, **kwargs):
+        """
 
-def some_job():
-    time.sleep(10)
+        :param task:
+        :param int|float|str|datetime|callable trigger: 自定义的trigger格式
+            None，马上开始执行一次，这一般分两种应用场景
+                （1）需要马上启动，且只需要启动一次的后端，前端服务
+                （2）这里只是一个初始触发器，传入的task是一个二次开发的函数，
+                    在原始task外额外补充了一个特殊的trigger，借助scheduler对象会在运行后动态添加任务
+            Trigger, 标准触发器
+            int/float
+                >0, 每间隔多少秒执行一次，是对齐启动时间，也是IntervalTrigger的用法
+                <0, 每次程序结束后，等待多久再重复执行，这个是需要特殊机制来实现支持的
+            str, cron模式
+            datetime, 等待到目标时间启动
+            trigger(scheduler, task), 自定义函数触发器。前2个参数是强制配置要传递的，才能实现作业的动态安排，
+                但是可以添加额外的默认参数，在函数内部再去灵活扩展功能，参考post_execution_schedule的实现。
+            注：还可以用标准触发器的AndTrigger, OrTrigger来设计组合触发器
+        :param kwargs: 其他aps原本add_schedule所用参数
+            args, kwargs: 这里的参数是给task用的，注意不是给trigger用的，trigger这里的callable模式如果有需要可以使用偏函数等实现。
+        :return:
+        """
+        if trigger is None:
+            # self.scheduler.add_job(task, **kwargs)
+            self.scheduler.add_schedule(task, DateTrigger(datetime.datetime.now()), **kwargs)
+        elif isinstance(trigger, Trigger):
+            self.scheduler.add_schedule(task, trigger, **kwargs)
+        elif isinstance(trigger, (int, float)):
+            if trigger > 0:
+                self.scheduler.add_schedule(task, trigger, **kwargs)
+            elif trigger < 0:
+                if 'args' in kwargs or 'kwargs' in kwargs:
+                    task = partial(task, *kwargs.pop('args', ()), **kwargs.pop('kwargs', {}))
+                self.add_job(XlTrigger.post_execution_schedule, args=[self, task, -trigger], **kwargs)
+            else:
+                raise ValueError('IntervalTrigger模式下值必须不为0')
+        elif isinstance(trigger, str):
+            self.scheduler.add_schedule(task, XlTrigger.create_cron_trigger(trigger), **kwargs)
+        elif callable(trigger):
+            if 'args' in kwargs or 'kwargs' in kwargs:
+                task = partial(task, *kwargs.pop('args', ()), **kwargs.pop('kwargs', {}))
+            self.add_job(trigger, args=[self, task], **kwargs)
+        else:
+            raise ValueError(f'不支持的触发器类型 {type(trigger)}')
+
+    def add_cmd_basic(self, cmd, trigger=None, **kwargs):
+        """ 用命令行启动一个程序，或仅存储任务，并添加进管理列表
+
+        :param SubprocessTask|str|list cmd: 启动程序的命令args
+            简单场景可以直接传递args命令初始化一个subprocess任务
+            复杂场景可以上游先初始化好一个SubprocessTask对象后，再传递进来
+        :param trigger: 触发器
+        """
+        # 1 对kwargs参数分组
+        task_kwargs = ['name', 'shell', 'stdin', 'stdout', 'stderr']
+        # 把kwargs中的task_kwargs分离出来
+        task_kwargs = {k: kwargs.pop(k, None) for k in task_kwargs if k in kwargs}
+
+        # 2 添加任务调度
+        task = self._proc_class(cmd, **task_kwargs) if isinstance(cmd, (str, list)) else copy.deepcopy(cmd)
+        self.tasks.append(task)
+        self.add_schedule(task, trigger, **kwargs)
+        return task
+
+    def add_cmd(self, cmd, trigger=None, name=None, **kwargs):
+        return self.add_cmd_basic(cmd, trigger, name=name, **kwargs)
+
+    def add_py_file(self, py_file, args=None, trigger=None, *, executer=None, **kwargs):
+        """ 添加并启动一个Python文件作为后台程序
+
+        :param py_file: 一个python文件
+        """
+        executer = executer or sys.executable
+        cmd = [str(executer), str(py_file)]
+        if isinstance(args, str):
+            if args: cmd.append(args)
+        elif isinstance(args, (list, tuple)):
+            cmd += list(args)
+        return self.add_cmd(cmd, trigger, **kwargs)
+
+    def add_py_module(self, module, args=None, trigger=None, *, executer=None, **kwargs):
+        """
+        添加并启动一个Python模块作为后台程序
+
+        :param module: 要执行的Python模块名（python -m 后面的部分）
+        :param str|list args: 模块的参数
+        """
+        executer = executer or sys.executable
+        cmd = [f'{executer}', '-m', f'{module}']
+        if isinstance(args, str):
+            if args: cmd.append(args)
+        elif isinstance(args, (list, tuple)):
+            cmd += list(args)
+        return self.add_cmd(cmd, trigger, **kwargs)
+
+    def add_script_task(self,
+                        script_content,
+                        extension=None,
+                        trigger=None,
+                        **kwargs):
+        """ 添加一个操作系统命令或脚本（如 .bat、.sh、.ps1 等）并启动。
+
+        :param script_content: 脚本的内容（字符串）
+        :param extension: 脚本文件的扩展名（如 .bat, .sh, .ps1）；如果为 None 则根据操作系统自动选择
+        """
+        # 1 自动选择脚本文件扩展名
+        if extension is None:
+            if sys.platform == 'win32':
+                extension = '.ps1'  # Windows 默认使用 PowerShell
+            else:
+                extension = '.sh'  # Linux 和 macOS 默认使用 Bash
+
+        # 2 添加编码配置到脚本内容
+        if extension == '.bat':
+            # 为 .bat 文件添加 UTF-8 支持
+            script_content = f"chcp 65001 >nul\n{script_content}"
+        elif extension == '.ps1':
+            # 为 .ps1 文件添加 UTF-8 支持
+            script_content = f"[Console]::OutputEncoding = [System.Text.Encoding]::UTF8\n" \
+                             f"[Console]::InputEncoding = [System.Text.Encoding]::UTF8\n{script_content}"
+
+        # 3 创建临时脚本文件
+        script_file = XlPath.create_tempfile_path(extension)
+        script_file.write_text(script_content)
+
+        # 4 根据文件扩展名和操作系统选择执行命令
+        if extension == '.sh':
+            cmd = ['bash', str(script_file)]
+        elif extension == '.ps1':
+            if sys.platform == 'win32':
+                cmd = ['powershell', '-ExecutionPolicy', 'Bypass', '-File', str(script_file)]
+            else:
+                raise ValueError("PowerShell 脚本仅在 Windows 系统上受支持")
+        elif extension == '.bat':
+            cmd = [str(script_file)]  # 直接运行 .bat 文件
+        else:
+            raise ValueError(f"不支持的脚本类型: {extension}")
+
+        # 5 启动脚本
+        return self.add_cmd(cmd, trigger, **kwargs)
+
+    def __2_任务管理(self):
+        pass
+
+    def count_running(self):
+        return sum(1 for task in self.tasks if task.is_running())
+
+    def list_tasks(self):
+        """ 返回所有任务的状态 DataFrame """
+        ls = []
+        for task in self.tasks:
+            ls.append({
+                'args': task.args,
+                'pid': task.proc.pid if task.proc else None,
+                'poll': task.proc.poll() if task.proc else None,
+                'port': task.port,
+                'locations': task.locations,
+            })
+        return pd.DataFrame(ls)
+
+    def cleanup_finished(self, exit_code=None):
+        """ 清除已运行完的程序
+
+        :param exit_code:
+            None - 清除所有已结束的程序（默认行为）。
+            0 - 只清除正常结束的程序。
+            非0 - 只清除异常结束的程序。
+        """
+        new_tasks = []
+        for task in self.tasks:
+            code = task.proc.poll()
+            if code is None:  # 进程仍在运行
+                new_tasks.append(task)
+            elif exit_code is None or code == exit_code:
+                print(f'清理已结束的程序: {task.name} (pid: {task.program.pid}, exit code: {code})')
+
+        self.tasks = new_tasks
+
+    def stop_all(self):
+        """ 停止所有后台程序 """
+        # 关闭所有调度器
+        if self.scheduler:
+            self.scheduler.stop()
+
+        # 停止所有单启动任务
+        for task in self.tasks:
+            task.terminate()
+        self.tasks = []
+
+
+class XlServerScheduler(XlScheduler):
+    _proc_class = XlServerSubprocessTask
+
+    @property
+    def scheduler(self):
+        """ 调度器 """
+        if self._scheduler is None:
+            # misfire_grace_time默认是未配置，设置None表示无论错过多久，都要补跑任务
+            # max_running_jobs默认是1，一般不用配置，表示相同任务不允许重复并发跑
+            #   但会有特殊情景，不同任务被错判到相同任务，导致这一组只能串行运行的时候，可以开大这个参数
+            task_defaults = TaskDefaults(misfire_grace_time=None)
+            self._scheduler = Scheduler(task_defaults=task_defaults)
+        return self._scheduler
+
+    def __1_添加命令行工具(self):
+        pass
+
+    def _add_cmd_with_ports(self, cmd, trigger=None, *, name=None, ports=None, **kwargs):
+        """ 支持 ports 的处理
+
+        :param ports:
+            int 表示要开启的进程数，端口号随机生成
+            list 表示指定的端口号
+            None 不做特殊配置
+        """
+        # 1 处理 ports 参数，找到空闲端口或使用指定端口
+        if isinstance(ports, int):
+            ports = find_free_ports(ports)
+
+        # 2 遍历端口，依次启动进程
+        tasks = []
+        if ports:
+            name = name or ''
+            for port in ports:
+                task = self.add_cmd_basic(cmd, name=f'{name}:{port}', **kwargs)
+                task.set_port(port)
+                tasks.append(task)
+        else:
+            task = self.add_cmd_basic(cmd, trigger, name=name, **kwargs)
+            tasks = [task]
+
+        return tasks
+
+    def add_cmd(self, cmd, trigger=None, *, locations=None, **kwargs):
+        """
+        增强版 add_schedule_cmd_with_ports，支持nginx映射配置
+            以前还支持devices，现在删除了，这类参数可以.env文件中配置
+
+        :param locations: URL 映射规则
+        :return: 返回一个包含所有启动程序的 task 列表。
+        """
+        # 1 处理 ports 参数
+        tasks = self._add_cmd_with_ports(cmd, trigger, **kwargs)
+
+        # 2 处理locations
+        if locations:
+            if isinstance(locations, str):
+                locations = [locations]
+            locations2 = []
+            for x in locations:
+                if not isinstance(x, dict):
+                    locations2.append({x: x})
+            for task in tasks:
+                task.locations = locations2  # 不需要copy，因为这一组确实是同一个url映射逻辑
+
+        return tasks
+
+    def __2_导出nginx配置(self):
+        pass
+
+    def get_all_locations(self):
+        locations = defaultdict(list)
+        for task in self.tasks:
+            if not task.locations:
+                continue
+            for x in task.locations:
+                for dst, src in x.items():
+                    if task.port:  # 250126周日21:02，有端口才添加
+                        locations[dst].append(f'localhost:{task.port}{src}')
+        return locations
+
+    def configure_nginx(self, nginx_template, locations=None):
+        if locations is None:
+            locations = self.get_all_locations()
+
+        upstreams = []  # 外部的配置
+        servers = [nginx_template.rstrip()]  # 内部的配置
+
+        for dst, srcs in locations.items():
+            if len(srcs) == 1:  # 只有1个不开负载
+                server = f'location {dst} {{\n\tproxy_pass http://{srcs[0]};\n}}\n'
+            else:  # 有多个端口功能则开负载
+                hosts = '\n'.join([f'\tserver {src.split("/")[0]};' for src in srcs])
+                upstream_name = 'upstream' + str(len(upstreams) + 1)
+                upstreams.append(f'upstream {upstream_name} {{\n{hosts}\n}}\n')
+                sub_urls = [src.split('/', maxsplit=1)[1] for src in srcs]
+                assert len(set(sub_urls)) == 1, f'负载均衡的子url必须一致 {sub_urls}'
+                server = f'location {dst} {{\n\tproxy_pass http://{upstream_name}/{sub_urls[0]};\n}}\n'
+            servers.append(server)
+
+        content = '\n'.join(upstreams) + '\nserver {\n' + textwrap.indent('\n'.join(servers), '\t') + '}'
+        return content
 
 
 if __name__ == '__main__':
-    from apscheduler.triggers.date import DateTrigger
-
-    scheduler = XlScheduler()
-    # scheduler._scheduler = BlockingScheduler(pause=True)
-
-    job = SubprocessTask([sys.executable, '-c', 'import time; time.sleep(10); print(123)'], timeout_seconds=5)
-    # scheduler.add_job(some_job, trigger=DateTrigger(run_date='2025-10-02 20:00:00'))
-    scheduler.add_job(job)
-    scheduler.start()
-
-    # scheduler.print_jobs()
-
-    # time.sleep(5)
-    # job.restart()
-    time.sleep(12)
-
-    print(job.records)
+    pass
