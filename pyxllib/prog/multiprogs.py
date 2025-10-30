@@ -279,7 +279,7 @@ class ProgramWorker(SimpleNamespace):
 
     def run_interval_task(self):
         wait_time = self.wait_time
-        
+
         # 如果还没有启动过任务，直接启动
         if self.last_start_time is None:
             self.launch()
@@ -768,14 +768,13 @@ class MultiProgramLauncher:
             print_full_dataframe(df)
         return True
 
-    def run_endless(self, cmd=True, wait_seconds=1, *, debug_port=None):
+    def run_endless(self, cmd=True, wait_seconds=1):
         """
         一直运行，直到用户输入 kill 命令或 Ctrl+C
 
         :param bool cmd: 是否支持命令行input输入指令监控状态的模式
             默认支持，但在有scheduler调度的情况不建议开启，有input阻塞其他子程的风险
         :param int|float wait_seconds: 每次循环之间停顿秒数，用来给其他子程等运行时间，避免阻塞
-        :param int debug_port: 是否要开一个后端服务，支持查询程序运行状态
 
     	poll：
             如果进程仍在运行，poll()方法返回None。
@@ -785,11 +784,6 @@ class MultiProgramLauncher:
     	"""
         if self.scheduler:  # 如果有定时任务，启动调度器
             self.scheduler.start_in_background()
-
-        port = debug_port
-        if port:
-            dashboard = LauncherDashboard(self)
-            threading.Thread(target=lambda: dashboard.run(port), daemon=True).start()
 
         try:
             while True:
@@ -988,6 +982,9 @@ class LauncherDashboard:
         """启动 FastAPI 服务"""
         import uvicorn
         uvicorn.run(self.app, host="0.0.0.0", port=port, log_level="warning")
+
+    def run_background(self, *args, **kwargs):
+        threading.Thread(target=lambda: self.run(*args, **kwargs), daemon=True).start()
 
 
 def __进程管理():
