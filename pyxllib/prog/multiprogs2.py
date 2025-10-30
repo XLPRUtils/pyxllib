@@ -66,6 +66,11 @@ except ModuleNotFoundError:
     Scheduler = lazy_import('from apscheduler import Scheduler',
                             'apscheduler[psycopg,sqlalchemy]==4.0.0a6')
 
+try:
+    import uvicorn
+except ModuleNotFoundError:
+    uvicorn = lazy_import('import uvicorn')
+
 from pyxllib.prog.specialist import parse_datetime
 from pyxllib.algo.stat import print_full_dataframe
 from pyxllib.file.specialist import XlPath
@@ -273,7 +278,7 @@ class SubprocessTask:
             stdin, stdout, stderr，标准输入、输出、错误流
         """
         self.scheduler = None
-        # aps4.0使用仿函数机制的话，必须要配置这个值，不然会运行不了
+        # aps4.0.0a6使用仿函数机制的话还有些瑕疵不兼容，必须要配置这个值，不然会运行不了
         # 而且这个也算是唯一标识，必须不同实例值不同，才能确保aps4不会判别为同一task
         self.__qualname__ = str(id(self))
 
@@ -283,6 +288,7 @@ class SubprocessTask:
         # 关键参数
         self.name = name
         self.popen_kwargs = popen_kwargs or {}
+        self.popen_kwargs['stdin'] = subprocess.PIPE
         self.proc = None
         self.timeout_seconds = timeout_seconds
 
@@ -372,7 +378,11 @@ class SubprocessTask:
     def kill(self):
         """ 有时候需要强硬的kill方法来结束进程 """
         if self.is_running():
-            self.proc.kill()
+            if sys.platform == 'win32':
+                # windows里用kill不一定关的掉的，还得用专门的命令暴力点
+                subprocess.run(f"taskkill /F /T /PID {self.proc.pid}", shell=True)
+            else:
+                self.proc.kill()
             self.proc.communicate()  # 等待程序确实退出了
 
     def restart(self):
@@ -405,7 +415,7 @@ def __3_调度器():
     pass
 
 
-class XlScheduler(GetAttr):
+class XlScheduler(GetAttr, Scheduler):
     """ 对apscheduler的Scheduler扩展版
 	"""
     _default = 'scheduler'
@@ -449,8 +459,10 @@ class XlScheduler(GetAttr):
         :return:
         """
         if trigger is None:
-            # self.scheduler.add_job(task, **kwargs)
-            self.scheduler.add_schedule(task, DateTrigger(datetime.datetime.now()), **kwargs)
+            if 'id' in kwargs:
+                self.scheduler.add_schedule(task, DateTrigger(datetime.datetime.now()), **kwargs)
+            else:
+                self.scheduler.add_job(task, **kwargs)
         elif isinstance(trigger, Trigger):
             self.scheduler.add_schedule(task, trigger, **kwargs)
         elif isinstance(trigger, (int, float)):
@@ -576,33 +588,24 @@ class XlScheduler(GetAttr):
     def list_tasks(self):
         """ 返回所有任务的状态 DataFrame """
         ls = []
-        for task in self.tasks:
+        for i, task in enumerate(self.tasks, start=1):
             ls.append({
+                'order': i,
+                'name': task.name or '',
                 'args': task.args,
                 'pid': task.proc.pid if task.proc else None,
-                'poll': task.proc.poll() if task.proc else None,
+                'running': True if task.is_running() else '',
                 'port': task.port,
-                'locations': task.locations,
+                'locations': task.locations or '',
             })
-        return pd.DataFrame(ls)
+        df = pd.DataFrame(ls)
 
-    def cleanup_finished(self, exit_code=None):
-        """ 清除已运行完的程序
+        # 将可能包含空值的整数字段转换为可空整数类型
+        int_columns = ['pid', 'port']  # 以及你认为需要是整数的其他列
+        for col in int_columns:
+            df[col] = df[col].astype('Int64')  # 注意 'I' 大写
 
-        :param exit_code:
-            None - 清除所有已结束的程序（默认行为）。
-            0 - 只清除正常结束的程序。
-            非0 - 只清除异常结束的程序。
-        """
-        new_tasks = []
-        for task in self.tasks:
-            code = task.proc.poll()
-            if code is None:  # 进程仍在运行
-                new_tasks.append(task)
-            elif exit_code is None or code == exit_code:
-                print(f'清理已结束的程序: {task.name} (pid: {task.program.pid}, exit code: {code})')
-
-        self.tasks = new_tasks
+        return df
 
     def stop_all(self):
         """ 停止所有后台程序 """
@@ -612,8 +615,22 @@ class XlScheduler(GetAttr):
 
         # 停止所有单启动任务
         for task in self.tasks:
-            task.terminate()
+            task.kill()
         self.tasks = []
+
+    def run_with_cli_interaction(self):
+        """ 在后台启动程序，并开启命令行交互功能 """
+        self.start_in_background()
+        while True:
+            cmd = input('>')
+            if cmd in ['stop', 'quit']:
+                logger.info("检测到stop，正在终止所有程序...")
+                self.stop_all()  # 关闭所有正在运行中的task
+                self.stop()  # 关闭apscheduler
+                print("所有程序已终止，退出。")
+                break
+            elif cmd:
+                print(eval(cmd))
 
 
 class XlServerScheduler(XlScheduler):
@@ -716,8 +733,76 @@ class XlServerScheduler(XlScheduler):
                 server = f'location {dst} {{\n\tproxy_pass http://{upstream_name}/{sub_urls[0]};\n}}\n'
             servers.append(server)
 
-        content = '\n'.join(upstreams) + '\nserver {\n' + textwrap.indent('\n'.join(servers), '\t') + '}'
+        content = '\n'.join(upstreams) + '\nserver {\n' + textwrap.indent('\n'.join(servers), '\t') + '\n}'
         return content
+
+
+def __4_看板与交互():
+    pass
+
+
+class SchedulerDashboard:
+    def __init__(self, scheduler, *, app=None):
+        self.scheduler: XlScheduler = scheduler
+        self.app = app or FastAPI()
+
+    def setup_routes(self):
+        @self.app.get("/", response_class=HTMLResponse)
+        async def home():
+            """ 主页，以美观的HTML表格展示所有任务状态 """
+            df = self.scheduler.list_tasks()
+
+            # 这是通用的df表格渲染，不受df结构改变而需要额外修改
+
+            # 使用to_html生成基础表格，并隐藏索引
+            basic_html_table = df.to_html(index=False, classes='my-table', border=0, escape=False)
+
+            # 嵌入到完整的HTML页面中，并添加CSS样式
+            html_content = f"""
+            <html>
+            <head>
+                <title>任务调度面板</title>
+                <style>
+                    body {{ font-family: Arial, sans-serif; margin: 20px; }}
+                    h2 {{ color: #333; }}
+                    table.my-table {{
+                        width: 100%;
+                        border-collapse: collapse;
+                        margin: 10px 0;
+                    }}
+                    table.my-table th, table.my-table td {{
+                        border: 1px solid #ddd;
+                        padding: 8px;
+                        text-align: left;
+                    }}
+                    table.my-table th {{
+                        background-color: #f2f2f2;
+                        font-weight: bold;
+                    }}
+                    table.my-table tr:nth-child(even) {{
+                        background-color: #f9f9f9;
+                    }}
+                    table.my-table tr:hover {{
+                        background-color: #f1f1f1;
+                    }}
+                </style>
+            </head>
+            <body>
+                <h2>任务状态监控</h2>
+                {basic_html_table}
+            </body>
+            </html>
+            """
+            return html_content
+
+        return self
+
+    def run(self, port=8080):
+        """启动 FastAPI 服务"""
+        uvicorn.run(self.app, host="0.0.0.0", port=port, log_level="warning")
+
+    def run_background(self, *args, **kwargs):
+        threading.Thread(target=lambda: self.run(*args, **kwargs), daemon=True).start()
 
 
 if __name__ == '__main__':

@@ -1144,6 +1144,7 @@ class XlAiClient:
         options.update({'image': self._priu_read_image(image, b64encode=True)})
         r = requests.post(f'{self._priu_host}/api/common_ocr', headers=self._priu_header,
                           json=options)
+        assert r.status_code == 200, f'{r.status_code=}'
         res = json.loads(r.text)
         return res
 
