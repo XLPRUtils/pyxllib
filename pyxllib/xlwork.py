@@ -42,7 +42,7 @@ if sys.platform == 'win32':
 from pyxllib.ext.yuquelib import Yuque, LakeImage, XlLakeImage
 from pyxllib.ext.wpsapi2 import WpsOnlineBook
 
-from pyxllib.prog.multiprogs import run_python_module, support_retry_process
+from pyxllib.prog.scheduler import run_python_module, support_retry_process
 
 from pyxllib.prog.xlenv import *
 
