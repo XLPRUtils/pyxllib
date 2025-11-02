@@ -53,6 +53,8 @@ except ModuleNotFoundError:
     FastAPI = lazy_import('from fastapi import FastAPI')
     PlainTextResponse = lazy_import('from fastapi.responses import PlainTextResponse')
 
+# 这套代码目前只支持兼容aps4.0版本，但是我的实际环境为了兼容funboost已经把aps回退到3.11.1版本
+#   这个文件暂时不维护了，建议直接使用scheduler.py
 try:
     from apscheduler import Scheduler
 except ModuleNotFoundError:

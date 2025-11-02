@@ -57,14 +57,30 @@ except ModuleNotFoundError:
     PlainTextResponse = lazy_import('from fastapi.responses import PlainTextResponse')
 
 try:
-    from apscheduler import Scheduler, TaskDefaults
-    from apscheduler.abc import Trigger
+    # 我其实大部分使用场景都是后台 BackgroundScheduler
+    # from apscheduler.schedulers.blocking import BlockingScheduler
+    from apscheduler.schedulers.background import BackgroundScheduler
+
+    # 3.11版本无apscheduler.abc.Trigger，直接从triggers.base导入Trigger基类
+    # from apscheduler.triggers.base import Trigger
+
     from apscheduler.triggers.interval import IntervalTrigger
     from apscheduler.triggers.date import DateTrigger
     from apscheduler.triggers.cron import CronTrigger
 except ModuleNotFoundError:
-    Scheduler = lazy_import('from apscheduler import Scheduler',
-                            'apscheduler[psycopg,sqlalchemy]==4.0.0a6')
+    BaseScheduler = lazy_import('from apscheduler.schedulers.base import BaseScheduler',
+                                'apscheduler==3.11.1')
+
+# 为了兼容funboost，还不能把aps升级到4.x版本
+# try:
+#     from apscheduler import Scheduler, TaskDefaults
+#     from apscheduler.abc import Trigger
+#     from apscheduler.triggers.interval import IntervalTrigger
+#     from apscheduler.triggers.date import DateTrigger
+#     from apscheduler.triggers.cron import CronTrigger
+# except ModuleNotFoundError:
+#     Scheduler = lazy_import('from apscheduler import Scheduler',
+#                             'apscheduler[psycopg,sqlalchemy]==4.0.0a6')
 
 try:
     import uvicorn
@@ -215,6 +231,20 @@ class XlTrigger:
             )
         else:
             raise ValueError(f"无效的 cron 表达式：{desc}")
+
+        # 使用apscheduler4.0.0a6，可以改用下述更简洁版本
+        # # 检查是否为有效的 6 字段 cron 表达式
+        # if len(cron_parts) == 6:
+        #     return CronTrigger(
+        #         second=cron_parts[0],
+        #         minute=cron_parts[1],
+        #         hour=cron_parts[2],
+        #         day=cron_parts[3],
+        #         month=cron_parts[4],
+        #         day_of_week=cron_parts[5],  # 取值[0,7]，1~6表示周一~周六，0,7都表示周日
+        #     )
+        # else:
+        #     raise ValueError(f"无效的 cron 表达式：{desc}")
 
     @classmethod
     def post_execution_schedule(cls, scheduler, task, interval_seconds):
@@ -415,7 +445,7 @@ def __3_调度器():
     pass
 
 
-class XlScheduler(GetAttr, Scheduler):
+class XlScheduler(GetAttr, BackgroundScheduler):
     """ 对apscheduler的Scheduler扩展版
 	"""
     _default = 'scheduler'
@@ -425,12 +455,13 @@ class XlScheduler(GetAttr, Scheduler):
         self._scheduler = None
         # aps也可以用get_tasks获得全部tasks，但那个task更底层，不太是我需要的更高层业务的tasks管理单元，所以这里我自己扩展一个成员
         self.tasks = []
+        self.task_defaults = {}
 
     @property
     def scheduler(self):
         """ 调度器 """
         if self._scheduler is None:
-            self._scheduler = Scheduler()
+            self._scheduler = BackgroundScheduler()
         return self._scheduler
 
     def __1_添加schedule(self):
@@ -458,16 +489,19 @@ class XlScheduler(GetAttr, Scheduler):
             args, kwargs: 这里的参数是给task用的，注意不是给trigger用的，trigger这里的callable模式如果有需要可以使用偏函数等实现。
         :return:
         """
+        # 在self.task_defaults数据基础上，叠加kwargs的值作为新的kwargs
+        kwargs = {**self.task_defaults, **kwargs}
+
         if trigger is None:
             if 'id' in kwargs:
-                self.scheduler.add_schedule(task, DateTrigger(datetime.datetime.now()), **kwargs)
+                self.scheduler.add_job(task, DateTrigger(datetime.datetime.now()), **kwargs)
             else:
                 self.scheduler.add_job(task, **kwargs)
-        elif isinstance(trigger, Trigger):
-            self.scheduler.add_schedule(task, trigger, **kwargs)
+        # elif isinstance(trigger, Trigger):
+        #     self.scheduler.add_job(task, trigger, **kwargs)
         elif isinstance(trigger, (int, float)):
             if trigger > 0:
-                self.scheduler.add_schedule(task, trigger, **kwargs)
+                self.scheduler.add_job(task, trigger, **kwargs)
             elif trigger < 0:
                 if 'args' in kwargs or 'kwargs' in kwargs:
                     task = partial(task, *kwargs.pop('args', ()), **kwargs.pop('kwargs', {}))
@@ -475,7 +509,7 @@ class XlScheduler(GetAttr, Scheduler):
             else:
                 raise ValueError('IntervalTrigger模式下值必须不为0')
         elif isinstance(trigger, str):
-            self.scheduler.add_schedule(task, XlTrigger.create_cron_trigger(trigger), **kwargs)
+            self.scheduler.add_job(task, XlTrigger.create_cron_trigger(trigger), **kwargs)
         elif callable(trigger):
             if 'args' in kwargs or 'kwargs' in kwargs:
                 task = partial(task, *kwargs.pop('args', ()), **kwargs.pop('kwargs', {}))
@@ -505,32 +539,12 @@ class XlScheduler(GetAttr, Scheduler):
     def add_cmd(self, cmd, trigger=None, name=None, **kwargs):
         return self.add_cmd_basic(cmd, trigger, name=name, **kwargs)
 
-    def add_py_file(self, py_file, args=None, trigger=None, *, executer=None, **kwargs):
-        """ 添加并启动一个Python文件作为后台程序
-
-        :param py_file: 一个python文件
+    def add_py(self, args, trigger=None, *, executer=None, **kwargs):
+        """ 执行一个py任务
         """
         executer = executer or sys.executable
-        cmd = [str(executer), str(py_file)]
-        if isinstance(args, str):
-            if args: cmd.append(args)
-        elif isinstance(args, (list, tuple)):
-            cmd += list(args)
-        return self.add_cmd(cmd, trigger, **kwargs)
-
-    def add_py_module(self, module, args=None, trigger=None, *, executer=None, **kwargs):
-        """
-        添加并启动一个Python模块作为后台程序
-
-        :param module: 要执行的Python模块名（python -m 后面的部分）
-        :param str|list args: 模块的参数
-        """
-        executer = executer or sys.executable
-        cmd = [f'{executer}', '-m', f'{module}']
-        if isinstance(args, str):
-            if args: cmd.append(args)
-        elif isinstance(args, (list, tuple)):
-            cmd += list(args)
+        if isinstance(args, str): args = [args]
+        cmd = [executer] + args
         return self.add_cmd(cmd, trigger, **kwargs)
 
     def add_script_task(self,
@@ -620,13 +634,15 @@ class XlScheduler(GetAttr, Scheduler):
 
     def run_with_cli_interaction(self):
         """ 在后台启动程序，并开启命令行交互功能 """
-        self.start_in_background()
+        self.scheduler.start()
+        # self.start_in_background()  # 4.x写法
         while True:
             cmd = input('>')
             if cmd in ['stop', 'quit']:
                 logger.info("检测到stop，正在终止所有程序...")
-                self.stop_all()  # 关闭所有正在运行中的task
-                self.stop()  # 关闭apscheduler
+                self.scheduler.shutdown()
+                # self.stop_all()  # 关闭所有正在运行中的task
+                # self.stop()  # 关闭apscheduler
                 print("所有程序已终止，退出。")
                 break
             elif cmd:
@@ -643,8 +659,10 @@ class XlServerScheduler(XlScheduler):
             # misfire_grace_time默认是未配置，设置None表示无论错过多久，都要补跑任务
             # max_running_jobs默认是1，一般不用配置，表示相同任务不允许重复并发跑
             #   但会有特殊情景，不同任务被错判到相同任务，导致这一组只能串行运行的时候，可以开大这个参数
-            task_defaults = TaskDefaults(misfire_grace_time=None)
-            self._scheduler = Scheduler(task_defaults=task_defaults)
+            # task_defaults = TaskDefaults(misfire_grace_time=None)
+            # self._scheduler = Scheduler(task_defaults=task_defaults)
+            self._scheduler = BackgroundScheduler()
+            self.task_defaults = {'misfire_grace_time': None}
         return self._scheduler
 
     def __1_添加命令行工具(self):
@@ -803,6 +821,134 @@ class SchedulerDashboard:
 
     def run_background(self, *args, **kwargs):
         threading.Thread(target=lambda: self.run(*args, **kwargs), daemon=True).start()
+
+
+def __进程管理():
+    """ 这里的功能后续做通用后可以进入pyxllib """
+
+
+def run_python_module(*args,
+                      repeat_num=None,
+                      wait_mode=0,
+                      success_continue=False,
+                      **kwargs):
+    """
+    用于重复启动 Python 模块的函数。
+
+    :param repeat_num: 重复次数。如果为None，则无限重试。
+    :param wait_mode: 每次重试之间的等待时间（秒）
+        正值是程序运行结束(报错)后，等待的秒数
+        负值则是另一种特殊的等待机制，是以程序启动时间作为相对计算的
+
+    :param success_continue: 运行成功的情况下，是否也要重试，默认成功后就不重试了
+
+    python -m xlproject.code4101 run_python_module
+    """
+    start_time = end_time = None
+    round_num = itertools.count(1) if repeat_num is None else range(1, 1 + int(repeat_num))
+    for round_id in round_num:
+        # 0 上一轮次的等待
+        XlTrigger.smart_wait(start_time, end_time, 0 if start_time is None else wait_mode, print_mode=1)
+
+        # 1 标记当前轮次
+        logger.info(f'进程运行轮次：{round_id}')
+        start_time = datetime.datetime.now()
+
+        # 2 配置参数
+        cmds = [f'{sys.executable}', '-m']
+        cmds.extend(map(str, args))  # 添加位置参数
+        for k, v in kwargs.items():
+            cmds.append(f'--{k}')  # 添加关键字参数的键
+            cmds.append(str(v))  # 添加关键字参数的值
+
+        # 3 custom 自定义配置
+        # 第2个参数是特殊参数，一般是模块名、启动位置。支持一定的缩略写法
+        # 但是这个不太好些，就暂时不写
+        cmds[2] = cmds[2].replace('/', '.')  # 支持输入路径形式
+
+        # 4 执行程序
+        res = subprocess.run(cmds)
+        end_time = datetime.datetime.now()
+
+        # 5 执行完成
+        if res.returncode == 0:
+            logger.info('进程成功完成')
+            if not success_continue:
+                break
+        else:
+            logger.info(f'遇到错误，返回码：{res.returncode}。尝试重启进程')
+
+
+def support_retry_process(repeat_num=None, wait_mode=0, success_continue=False):
+    """ 对函数进行扩展，支持重启运行
+
+    被装饰的函数，会扩展支持重启需要的几个参数：
+    repeat_num, wait_mode, success_continue
+
+    """
+    def decorator(func):
+        def wrapper(*args, **kwargs):
+            nonlocal repeat_num, wait_mode, success_continue
+
+            retry = int(kwargs.pop('retry', False))
+
+            # 1 非重试，正常运行
+            if not retry:
+                return func(*args, **kwargs)
+
+            # 2 需要重试
+            wait_mode = int(kwargs.pop('wait_mode', wait_mode))
+            repeat_num = kwargs.pop('repeat_num', repeat_num)
+            success_continue = int(kwargs.pop('success_continue', success_continue))
+
+            start_time = end_time = None
+            round_num = itertools.count(1) if repeat_num is None else range(1, 1 + int(repeat_num))
+            for round_id in round_num:
+                # 0 上一轮次的等待
+                XlTrigger.smart_wait(start_time, end_time, 0 if start_time is None else wait_mode, print_mode=1)
+
+                # 1 标记当前轮次
+                logger.info(f'进程运行轮次：{round_id}')
+                start_time = datetime.datetime.now()
+
+                # 2 配置参数
+                cmds = [sys.executable, sys.argv[0], func.__name__]
+                cmds.extend(map(str, args))  # 添加位置参数
+                for k, v in kwargs.items():
+                    cmds.append(f'--{k}')  # 添加关键字参数的键
+                    cmds.append(str(v))  # 添加关键字参数的值
+
+                # 3 custom 自定义配置
+                # 第2个参数是特殊参数，一般是模块名、启动位置。支持一定的缩略写法
+                # 但是这个不太好些，就暂时不写
+                # cmds[2] = cmds[2].replace('/', '.')  # 支持输入路径形式
+
+                # 4 执行程序
+                print(cmds)
+                res = subprocess.run(cmds)
+
+                # todo 可以改成更高效的execv？估计有很多问题，那原本的实现如何修改避免无线嵌套执行子程序？
+                # os.execv(sys.executable, cmds)
+
+                end_time = datetime.datetime.now()
+
+                # 5 执行完成
+                if res.returncode == 0:
+                    logger.info('进程成功完成')
+                    if not success_continue:
+                        break
+                else:
+                    logger.info(f'遇到错误，返回码：{res.returncode}。尝试重启进程')
+
+        return wrapper
+
+    return decorator
+
+
+@support_retry_process(repeat_num=None, wait_mode=0)
+def healthy():
+    print('Hello')
+    exit(1)
 
 
 if __name__ == '__main__':
