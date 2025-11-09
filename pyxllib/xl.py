@@ -19,6 +19,7 @@ from pyxllib.file.packlib import *
 from pyxllib.prog.newbie import *
 from pyxllib.prog.pupil import *
 from pyxllib.prog.specialist import *
+from pyxllib.prog.xltime import *
 from deprecated import deprecated
 
 from pyxllib.algo.newbie import *

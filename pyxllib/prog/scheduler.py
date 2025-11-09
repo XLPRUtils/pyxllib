@@ -4,30 +4,35 @@
 # @Email  : 877362867@qq.com
 # @Date   : 2024/11/12
 
-import inspect
 from collections import defaultdict
-from types import SimpleNamespace
-from unittest.mock import Mock
+import copy
 import ctypes
 import datetime
-import os
+from functools import partial
+import functools
+import itertools
+import re
 import socketserver
 import subprocess
 import sys
-import time
 import textwrap
 import threading
-import re
-import itertools
-from functools import partial
-import copy
+import time
+from typing import Any, Dict, List, Tuple, Union, Optional, Callable, Type
+import typing
 
 from pyxllib.prog.lazyimport import lazy_import
+from pyxllib.prog.specialist import resolve_params
 
 try:
     from deprecated import deprecated
 except ModuleNotFoundError:
     deprecated = lazy_import('deprecated', 'Deprecated')
+
+try:
+    from pydantic import BaseModel, ConfigDict
+except ModuleNotFoundError:
+    BaseModel, ConfigDict = lazy_import('from pydantic import BaseModel, ConfigDict')
 
 try:
     from fastcore.basics import GetAttr
@@ -87,8 +92,7 @@ try:
 except ModuleNotFoundError:
     uvicorn = lazy_import('import uvicorn')
 
-from pyxllib.prog.specialist import parse_datetime
-from pyxllib.algo.stat import print_full_dataframe
+from pyxllib.prog.newbie import classproperty
 from pyxllib.file.specialist import XlPath
 
 
@@ -287,6 +291,49 @@ def find_free_ports(count=1):
     return list(ports)
 
 
+class PopenParams(BaseModel):
+    """
+    subprocess.Popen 常用到的参数的结构化封装。
+
+    这个 dataclass 旨在提供一个类型安全、有智能提示的配置对象，
+    以取代不透明的 **kwargs，让代码更清晰、更易于维护。
+    """
+
+    # 是否用shell（如bash/cmd）来执行命令。默认为False，直接执行程序。
+    # 警告：当命令来自外部输入时，使用 shell=True 可能会带来安全风险（命令注入）。
+    shell: bool = False
+
+    # 输入，输出，错误流重定向。可以是 subprocess.PIPE, DEVNULL, a file descriptor, or a file object.
+    stdin: Optional[int] = None
+    stdout: Optional[int] = None
+    stderr: Optional[int] = None
+
+    # + 允许未预设的额外参数
+    model_config = ConfigDict(extra='allow')
+
+    @classmethod
+    def parse(cls, data=None):
+        if data is None:
+            return cls()
+        else:
+            return cls.model_validate(data)
+
+
+class SubprocessTaskParams(PopenParams):
+    # 设置一个名称
+    name: str = None
+
+    # 设置超时秒数
+    timeout: Optional[int | float] = None
+
+    @property
+    def popen_params(self) -> PopenParams:
+        all_data = self.model_dump()
+        child_only_fields = set(self.__class__.model_fields) - set(PopenParams.model_fields)
+        for field in child_only_fields: all_data.pop(field, None)
+        return PopenParams(**all_data)
+
+
 class SubprocessTask:
     """ subprocess类型的job作业
     即subprocess+apscheduler后需要的基础作业类型
@@ -294,18 +341,11 @@ class SubprocessTask:
 
     def __init__(self,
                  args,
-                 *,
-                 name=None,
-                 timeout_seconds=None,
-                 **popen_kwargs,
+                 *args2,
+                 **kwargs: SubprocessTaskParams,
                  ):
         """
         :param str|list args: 要运行的指令程序
-        :param name: 程序昵称
-        :param timeout_seconds: 超时设置，单位秒
-        :param popen_kwargs: popen初始化用的其他参数，常用的比如
-            shell，默认False不使用shell直接运行，一般用在一些不需要管道等的场景
-            stdin, stdout, stderr，标准输入、输出、错误流
         """
         self.scheduler = None
         # aps4.0.0a6使用仿函数机制的话还有些瑕疵不兼容，必须要配置这个值，不然会运行不了
@@ -316,11 +356,11 @@ class SubprocessTask:
         self.args = args
 
         # 关键参数
-        self.name = name
-        self.popen_kwargs = popen_kwargs or {}
-        self.popen_kwargs['stdin'] = subprocess.PIPE
+        params = SubprocessTaskParams.parse(params)
+        self.popen_params = params.popen_params
+        self.name = params.name
+        self.timeout = params.timeout
         self.proc = None
-        self.timeout_seconds = timeout_seconds
 
     def is_running(self):
         """ 检查程序是否在运行 """
@@ -384,15 +424,16 @@ class SubprocessTask:
             return self.proc
 
         # 2 启动
-        self.proc = subprocess.Popen(self.args, preexec_fn=set_pdeathsig(), **self.popen_kwargs)
+        self.proc = subprocess.Popen(self.args, preexec_fn=set_pdeathsig(),
+                                     **self.popen_params.model_dump(exclude_unset=True))
 
         # 3 等待其运行结束后标记
-        # try:
-        #     # proc启动后，使用阻塞模式监控程序什么时候结束
-        #     self.proc.communicate(timeout=self.timeout_seconds)
-        # except subprocess.TimeoutExpired:
-        #     self.kill()
-        #     self.proc.communicate()
+        try:
+            # proc启动后，使用阻塞模式监控程序什么时候结束
+            self.proc.communicate(timeout=self.timeout)
+        except subprocess.TimeoutExpired:
+            self.kill()
+            self.proc.communicate()
 
         return self.proc
 
@@ -423,12 +464,9 @@ class SubprocessTask:
 class XlServerSubprocessTask(SubprocessTask):
     def __init__(self,
                  args,
-                 *,
-                 name=None,
-                 timeout_seconds=None,
-                 **popen_kwargs,
+                 params: SubprocessTaskParams = None,
                  ):
-        super().__init__(args, name=name, timeout_seconds=timeout_seconds, **popen_kwargs)
+        super().__init__(args, params)
 
         # 我用nginx需要额外补充的两个属性值
         self.port = None
@@ -445,7 +483,7 @@ def __3_调度器():
     pass
 
 
-class XlScheduler(GetAttr, BackgroundScheduler):
+class XlScheduler(GetAttr):
     """ 对apscheduler的Scheduler扩展版
 	"""
     _default = 'scheduler'
@@ -456,6 +494,11 @@ class XlScheduler(GetAttr, BackgroundScheduler):
         # aps也可以用get_tasks获得全部tasks，但那个task更底层，不太是我需要的更高层业务的tasks管理单元，所以这里我自己扩展一个成员
         self.tasks = []
         self.task_defaults = {}
+
+    def fix_hints(self):
+        class Hint(XlScheduler, BackgroundScheduler): pass
+
+        return typing.cast(Hint, self)
 
     @property
     def scheduler(self):
@@ -517,7 +560,9 @@ class XlScheduler(GetAttr, BackgroundScheduler):
         else:
             raise ValueError(f'不支持的触发器类型 {type(trigger)}')
 
-    def add_cmd_basic(self, cmd, trigger=None, **kwargs):
+    def add_cmd_basic(self, cmd, trigger=None, *,
+                      task_params: SubprocessTaskParams = None,
+                      **kwargs):
         """ 用命令行启动一个程序，或仅存储任务，并添加进管理列表
 
         :param SubprocessTask|str|list cmd: 启动程序的命令args
@@ -525,32 +570,30 @@ class XlScheduler(GetAttr, BackgroundScheduler):
             复杂场景可以上游先初始化好一个SubprocessTask对象后，再传递进来
         :param trigger: 触发器
         """
-        # 1 对kwargs参数分组
-        task_kwargs = ['name', 'shell', 'stdin', 'stdout', 'stderr']
-        # 把kwargs中的task_kwargs分离出来
-        task_kwargs = {k: kwargs.pop(k, None) for k in task_kwargs if k in kwargs}
-
-        # 2 添加任务调度
-        task = self._proc_class(cmd, **task_kwargs) if isinstance(cmd, (str, list)) else copy.deepcopy(cmd)
+        task = self._proc_class(cmd, task_params) if isinstance(cmd, (str, list)) else copy.deepcopy(cmd)
         self.tasks.append(task)
         self.add_schedule(task, trigger, **kwargs)
         return task
 
-    def add_cmd(self, cmd, trigger=None, name=None, **kwargs):
-        return self.add_cmd_basic(cmd, trigger, name=name, **kwargs)
+    def add_cmd(self, cmd, trigger=None, task_params: SubprocessTaskParams = None, **kwargs):
+        return self.add_cmd_basic(cmd, trigger, task_params=task_params, **kwargs)
 
-    def add_py(self, args, trigger=None, *, executer=None, **kwargs):
+    def add_py(self, args, trigger=None, *,
+               executer=None,
+               task_params: SubprocessTaskParams = None,
+               **kwargs):
         """ 执行一个py任务
         """
         executer = executer or sys.executable
         if isinstance(args, str): args = [args]
         cmd = [executer] + args
-        return self.add_cmd(cmd, trigger, **kwargs)
+        return self.add_cmd(cmd, trigger, task_params=task_params, **kwargs)
 
     def add_script_task(self,
                         script_content,
                         extension=None,
                         trigger=None,
+                        task_params: SubprocessTaskParams = None,
                         **kwargs):
         """ 添加一个操作系统命令或脚本（如 .bat、.sh、.ps1 等）并启动。
 
@@ -591,7 +634,7 @@ class XlScheduler(GetAttr, BackgroundScheduler):
             raise ValueError(f"不支持的脚本类型: {extension}")
 
         # 5 启动脚本
-        return self.add_cmd(cmd, trigger, **kwargs)
+        return self.add_cmd(cmd, trigger, task_params=task_params, **kwargs)
 
     def __2_任务管理(self):
         pass
@@ -668,7 +711,9 @@ class XlServerScheduler(XlScheduler):
     def __1_添加命令行工具(self):
         pass
 
-    def _add_cmd_with_ports(self, cmd, trigger=None, *, name=None, ports=None, **kwargs):
+    def _add_cmd_with_ports(self, cmd, trigger=None, *,
+                            task_params: SubprocessTaskParams = None,
+                            ports=None, **kwargs):
         """ 支持 ports 的处理
 
         :param ports:
@@ -683,13 +728,16 @@ class XlServerScheduler(XlScheduler):
         # 2 遍历端口，依次启动进程
         tasks = []
         if ports:
-            name = name or ''
+            task_params = SubprocessTaskParams.parse(task_params)
+            task_params.name = task_params.name or ''
             for port in ports:
-                task = self.add_cmd_basic(cmd, name=f'{name}:{port}', **kwargs)
+                task_params2 = task_params.model_copy()
+                task_params2.name = f'{task_params.name}:{port}'
+                task = self.add_cmd_basic(cmd, trigger, task_params=task_params2)
                 task.set_port(port)
                 tasks.append(task)
         else:
-            task = self.add_cmd_basic(cmd, trigger, name=name, **kwargs)
+            task = self.add_cmd_basic(cmd, trigger, task_params=task_params, **kwargs)
             tasks = [task]
 
         return tasks
@@ -886,6 +934,7 @@ def support_retry_process(repeat_num=None, wait_mode=0, success_continue=False):
     repeat_num, wait_mode, success_continue
 
     """
+
     def decorator(func):
         def wrapper(*args, **kwargs):
             nonlocal repeat_num, wait_mode, success_continue
@@ -951,5 +1000,14 @@ def healthy():
     exit(1)
 
 
+@resolve_params(PopenParams)
+def func(a, **params):
+    print(a)
+    print(params.get('PopenParams'))
+
+
 if __name__ == '__main__':
-    pass
+    # SubprocessTaskParams(name='123', shell=False)
+    # SubprocessTask([1, 2], shell=True)
+
+    func(3, PopenParams(x=4), shell=True)

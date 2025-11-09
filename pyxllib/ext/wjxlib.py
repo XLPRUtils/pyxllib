@@ -50,8 +50,8 @@ class WjxWeb(DpWebBase):
             time.sleep(2)
             tab('t:input@@name=Password').input(os.getenv('WJX_PASSWORD'), clear=True)
             time.sleep(2)
-            tab('t:label@@for=RememberMe').click()
-            time.sleep(2)
+            # tab('t:label@@for=RememberMe').click()
+            # time.sleep(2)
             tab('t:input@@type=submit').click()
             time.sleep(10)
 

@@ -354,6 +354,7 @@ class _AnShapeBasic(UserDict):
             inner，默认，将parent中几何关系被self包含的都归到子shapes中
             empty, 空shapes
             ocr, 使用ocr来生成初始的shapes
+        :param shot: 是否更新以当前动态图片的数据存储到参照图片
         """
         view = AnView(parent=self.parent)
         view.data = self.data
@@ -852,6 +853,9 @@ class AnShape(_AnShapePupil):
         # 使用xlwait等待图片不再变化
         return xlwait(check_not_change, limit=limit, interval=interval)
 
+    def __6_其他一些常见组合使用的封装(self):
+        pass
+
     def is_on(self):
         """ 判断当前开关是否为开启状态 """
         # 如果存储的是"off"图像，但当前能匹配到这个图像，说明实际是关闭状态
@@ -871,6 +875,16 @@ class AnShape(_AnShapePupil):
         """ 进行显式确认为'关'状态 """
         if self.is_on():
             self.click(*args, **kwargs)
+
+    def wait_img_click_leave(self):
+        # 等待目标图片出现，然后不断点击直到目标图片消失
+        self.wait_img()
+        while self.find_img():
+            self.click()
+
+    def if_img_click_leave(self):
+        while self.find_img():
+            self.click()
 
 
 class AnView(AnShape):

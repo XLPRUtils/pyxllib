@@ -10,7 +10,6 @@ from pyxllib.prog.specialist.xllog import *
 from pyxllib.prog.specialist.browser import *
 from pyxllib.prog.specialist.bc import *
 from pyxllib.prog.specialist.tictoc import *
-from pyxllib.prog.specialist.datetime import *
 
 import concurrent.futures
 import os
@@ -19,6 +18,8 @@ import subprocess
 import time
 from statistics import mean
 from threading import Thread
+import functools
+from typing import Type
 
 from pyxllib.prog.lazyimport import lazy_import
 
@@ -36,6 +37,11 @@ try:
     from humanfriendly import parse_size
 except ModuleNotFoundError:
     parse_size = lazy_import('from humanfriendly import parse_size')
+
+try:
+    from pydantic import BaseModel
+except ModuleNotFoundError:
+    BaseModel = lazy_import('from pydantic import BaseModel')
 
 from pyxllib.prog.newbie import human_readable_size
 from pyxllib.prog.pupil import get_installed_packages, aligned_range, percentage_and_value
@@ -359,3 +365,106 @@ def loguru_setup_jsonl_logfile(logger, log_dir, rotation_size="10 MB"):
 
     # 输出初始化成功信息
     logger.info(f"日志系统已初始化，日志文件路径：{log_path}")
+
+
+def resolve_params(*models: Type[BaseModel]):
+    """
+    一个智能参数解析与注入的装饰器。
+
+    它拦截对被装饰函数的调用，解析传入的 *args 和 **kwargs，
+    并将这些参数智能地填充到预先定义好的多个Pydantic模型中，
+    最后将实例化后的模型对象作为关键字参数注入到原始函数中。
+    """
+
+    # 1. 边界情况处理：当装饰器未接收任何模型时，直接返回一个空操作的装饰器。
+    if not models:
+        def empty_decorator(func):
+            return func
+
+        return empty_decorator
+
+    # 创建一个从模型类到其名称的映射，方便后续查找
+    model_class_to_name = {m: m.__name__ for m in models}
+    # 创建一个从模型名称到模型类的映射，用于最后实例化
+    model_name_to_class = {m.__name__: m for m in models}
+    # 将模型类转为元组，以便用于 isinstance() 的高效类型检查
+    registered_model_types = tuple(models)
+
+    def decorator(func):
+        @functools.wraps(func)
+        def wrapper(*args, **kwargs):
+            # --- 初始化阶段 ---
+            # 存储将被传递给原始函数的、非模型的 positional arugments
+            func_pos_args = []
+            # 存储为每个模型收集到的参数数据
+            collected_data = {name: {} for name in model_name_to_class.keys()}
+            # 复制一份 kwargs，用于安全地追踪和移除已被分配的参数
+            unassigned_kwargs = kwargs.copy()
+
+            # --- 解析阶段 1: 处理 *args ---
+            # 遍历所有位置参数，识别出其中的 Pydantic 模型实例
+            for arg in args:
+                if isinstance(arg, registered_model_types):
+                    # 如果是注册过的模型实例，将其数据更新到 collected_data
+                    model_name = model_class_to_name[type(arg)]
+                    # .model_dump() 将模型实例转为字典
+                    collected_data[model_name].update(arg.model_dump())
+                else:
+                    # 如果不是模型实例，则认为是原始函数自己的参数
+                    func_pos_args.append(arg)
+
+            # --- 解析阶段 2: 处理 **kwargs (优先分配给显式字段) ---
+            # 按照装饰器定义时模型的顺序（优先级）进行遍历
+            for model_cls in models:
+                model_name = model_class_to_name[model_cls]
+                # 获取该模型所有显式定义的字段名
+                model_fields = set(model_cls.model_fields)
+
+                # 找出 unassigned_kwargs 中能被当前模型认领的参数
+                kwargs_to_assign = {}
+                for key, value in unassigned_kwargs.items():
+                    if key in model_fields:
+                        kwargs_to_assign[key] = value
+
+                # 如果找到了可分配的参数，则进行分配
+                if kwargs_to_assign:
+                    collected_data[model_name].update(kwargs_to_assign)
+                    # 从 unassigned_kwargs 中移除已分配的参数
+                    for key in kwargs_to_assign:
+                        del unassigned_kwargs[key]
+
+            # --- 解析阶段 3: 处理 **kwargs (分配给 extra='allow' 的模型) ---
+            # 如果在上一阶段后仍有未分配的参数
+            if unassigned_kwargs:
+                # 再次从头按优先级遍历所有模型
+                for model_cls in models:
+                    # 检查模型配置是否允许额外的字段
+                    if model_cls.model_config.get('extra') == 'allow':
+                        model_name = model_class_to_name[model_cls]
+                        # 将所有剩余的 kwargs 都交给第一个允许 extra 的模型
+                        collected_data[model_name].update(unassigned_kwargs)
+                        # 清空 unassigned_kwargs，并立即停止寻找
+                        unassigned_kwargs.clear()
+                        break
+
+            # --- 实例化与注入阶段 ---
+            final_injected_kwargs = {}
+            for name, data in collected_data.items():
+                model_cls = model_name_to_class[name]
+                # 使用收集到的数据验证并创建模型实例
+                instance = model_cls.model_validate(data)
+                final_injected_kwargs[name] = instance
+
+            # 如果在所有阶段处理后，仍有无法分配的kwargs，则抛出异常。
+            # 这模仿了 Python 函数调用时对未知参数的标准行为。
+            if unassigned_kwargs:
+                raise TypeError(
+                    f"{func.__name__}() got unexpected keyword arguments: {list(unassigned_kwargs.keys())}"
+                )
+
+            # 使用解析后的参数调用原始函数
+            return func(*func_pos_args, **final_injected_kwargs)
+
+        return wrapper
+
+    return decorator
