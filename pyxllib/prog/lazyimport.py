@@ -45,7 +45,9 @@ class LazyImportError:
             'yaml': 'PyYAML',
         }
         base_module = module_name.split('.')[0]
-        return package_map.get(base_module, base_module)
+        res = package_map.get(base_module, base_module)
+        res = res.replace('_', '-')
+        return res
 
     def _raise_error(self, attempted_action=""):
         msg = f"No module named '{self._module_name}'"

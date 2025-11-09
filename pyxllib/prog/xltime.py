@@ -13,10 +13,28 @@ a = a - a.isoweekday() + kwargs['weekday']  # 先减去当前星期几，再加�
 
 """
 
+import typing
 import datetime
 import re
+import logging
+
+from datetime import timedelta
 
 from pyxllib.prog.lazyimport import lazy_import
+
+try:
+    from fastcore.basics import GetAttr
+except ModuleNotFoundError:
+    GetAttr = lazy_import('from fastcore.basics import GetAttr', 'fastcore')
+
+try:
+    import nb_time
+    from nb_time import NbTime
+
+    nb_time.logger.setLevel(logging.CRITICAL)  # 把官方的警告日志关掉
+    NbTime.set_default_time_zone('UTC+8')
+except ModuleNotFoundError:
+    NbTime = lazy_import('from nb_time import NbTime', 'nb-time')
 
 try:
     from fastcore.utils import GetAttr
@@ -163,7 +181,7 @@ class XlWeekTag(GetAttr):
 
     def add_days(self, days):
         """ 增加指定天数，支持负数 """
-        return self.__class__(self.dt + datetime.timedelta(days=days))
+        return self.shift(days=days)
 
     def monday(self):
         """ 移动到本周周一 """
@@ -201,3 +219,55 @@ class XlWeekTag(GetAttr):
         monday = self.monday()
         tags = [monday.add_days(i).daytag() for i in range(7)]
         return tags
+
+
+class XlTime(GetAttr, NbTime):
+    """ 基于NbTime，进一步扩展我自己的XlTime的常用功能 """
+    _default = 'datetime'
+
+    def __1_基础操作(self):
+        pass
+
+    def fix_hints(self):
+        """ 使用GetAttr的时候，是以"组合:有一个"的逻辑来模拟实现了"继承:是一个"的效果
+        这在动态运行上很好用，但静态代码分析上，pycharm等IDE就识别不了了，
+        此时可以运行这个fix_hints补丁就能修复静态提示了：self = self.fix_hints()
+
+        这个可以看作是一个调试，脚手架功能，实际运行中删掉这一层是没有任何影响的
+        所以如果在某个高频运算中用到了这个操作，真的担心这一点点性能开销，可以在生产环境中删掉
+        只需要在调试、需要跳转，查看成员的时候临时打开就好
+        """
+
+        # Hint写出期望IDE认为的类继承关系功能
+        class Hint(XlTime, datetime.datetime): pass
+
+        # typing.cast不会做任何实际功能上的变动，只是纯粹给IDE的静态分析提示这里可以当成Hint处理
+        return typing.cast(Hint, self)
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+    def __str__(self) -> str:
+        return f'<{self.__class__.__name__} [{self.datetime_str}] ({self.time_zone_str})>'
+
+    def __repr__(self) -> str:
+        return f'<{self.__class__.__name__} [{self.datetime_str}] ({self.time_zone_str})>'
+
+    def __sub__(self, other) -> datetime.timedelta:
+        assert isinstance(other, NbTime), f'类型不匹配 {type(other)}'
+        return self.datetime - other.datetime
+
+    def __2_自己常用的其他偏移(self):
+        pass
+
+    def monday(self):
+        """ 移动到本周周一 """
+        return self.shift(days=-self.datetime.weekday())
+
+    def next_week(self):
+        """ 移动到下一周 """
+        return self.shift(days=7)
+
+    def prev_week(self):
+        """ 移动到上一周 """
+        return self.shift(days=-7)

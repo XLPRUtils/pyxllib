@@ -40,7 +40,8 @@ try:
 except ModuleNotFoundError:
     pyautogui = lazy_import('pyautogui')
 
-from pyxllib.prog.specialist import browser, TicToc, parse_datetime
+from pyxllib.prog.specialist import browser, TicToc
+from pyxllib.prog.xltime import parse_datetime
 from pyxllib.file.specialist import XlPath
 from pyxllib.autogui.autogui import type_text, clipboard_decorator
 
