@@ -367,13 +367,34 @@ def loguru_setup_jsonl_logfile(logger, log_dir, rotation_size="10 MB"):
     logger.info(f"日志系统已初始化，日志文件路径：{log_path}")
 
 
+class XlBaseModel(BaseModel):
+    @classmethod
+    def init(cls, *args, **kwargs):
+        """ 支持位置参数的初始化，按field字段定义的先后顺序赋值 """
+        if args:
+            # 将位置参数按顺序映射到字段
+            field_names = list(cls.model_fields.keys())
+            args_dict = dict(zip(field_names, args))
+            kwargs.update(args_dict)
+        return cls(**kwargs)
+
+    @classmethod
+    def parse(cls, data=None):
+        """ 支持类似这样的使用方式 params = PopenParams.parse(input_params)，确保有时候默认参数是None也支持转换到model """
+        if data is None:
+            return cls()
+        else:
+            return cls.model_validate(data)
+
+
 def resolve_params(*models: Type[BaseModel]):
-    """
-    一个智能参数解析与注入的装饰器。
+    """  一个智能参数解析与注入的装饰器
 
     它拦截对被装饰函数的调用，解析传入的 *args 和 **kwargs，
     并将这些参数智能地填充到预先定义好的多个Pydantic模型中，
     最后将实例化后的模型对象作为关键字参数注入到原始函数中。
+
+    详细文档：https://www.yuque.com/xlpr/pyxllib/resolve_params
     """
 
     # 1. 边界情况处理：当装饰器未接收任何模型时，直接返回一个空操作的装饰器。

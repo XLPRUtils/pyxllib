@@ -5,24 +5,23 @@
 # @Date   : 2024/11/12
 
 from collections import defaultdict
-import copy
 import ctypes
 import datetime
 from functools import partial
-import functools
 import itertools
+import os
 import re
+import shlex
 import socketserver
 import subprocess
 import sys
 import textwrap
 import threading
 import time
-from typing import Any, Dict, List, Tuple, Union, Optional, Callable, Type
 import typing
+from typing import Any, Dict, List, Tuple, Union, Optional, Callable, Type, Literal
 
 from pyxllib.prog.lazyimport import lazy_import
-from pyxllib.prog.specialist import resolve_params
 
 try:
     from deprecated import deprecated
@@ -92,7 +91,7 @@ try:
 except ModuleNotFoundError:
     uvicorn = lazy_import('import uvicorn')
 
-from pyxllib.prog.newbie import classproperty
+from pyxllib.prog.specialist import XlBaseModel, resolve_params
 from pyxllib.file.specialist import XlPath
 
 
@@ -291,13 +290,15 @@ def find_free_ports(count=1):
     return list(ports)
 
 
-class PopenParams(BaseModel):
+class PopenParams(XlBaseModel):
     """
     subprocess.Popen 常用到的参数的结构化封装。
 
     这个 dataclass 旨在提供一个类型安全、有智能提示的配置对象，
     以取代不透明的 **kwargs，让代码更清晰、更易于维护。
     """
+    # args是必传参数，可以用位置方式的模式传递
+    args: Union[str, List[str], None] = ''
 
     # 是否用shell（如bash/cmd）来执行命令。默认为False，直接执行程序。
     # 警告：当命令来自外部输入时，使用 shell=True 可能会带来安全风险（命令注入）。
@@ -311,110 +312,144 @@ class PopenParams(BaseModel):
     # + 允许未预设的额外参数
     model_config = ConfigDict(extra='allow')
 
-    @classmethod
-    def parse(cls, data=None):
-        if data is None:
-            return cls()
-        else:
-            return cls.model_validate(data)
-
 
 class SubprocessTaskParams(PopenParams):
     # 设置一个名称
-    name: str = None
+    name: Union[str, None] = None
 
     # 设置超时秒数
     timeout: Optional[int | float] = None
 
     @property
     def popen_params(self) -> PopenParams:
-        all_data = self.model_dump()
+        all_data = self.model_dump(exclude_unset=True)
         child_only_fields = set(self.__class__.model_fields) - set(PopenParams.model_fields)
         for field in child_only_fields: all_data.pop(field, None)
         return PopenParams(**all_data)
 
 
 class SubprocessTask:
-    """ subprocess类型的job作业
-    即subprocess+apscheduler后需要的基础作业类型
-    """
+    """ subprocess类型的task任务，后续可能跟apscheduler结合使用 """
 
-    def __init__(self,
-                 args,
-                 *args2,
-                 **kwargs: SubprocessTaskParams,
-                 ):
-        """
-        :param str|list args: 要运行的指令程序
-        """
-        self.scheduler = None
+    @resolve_params(SubprocessTaskParams)
+    def __init__(self, **params):
         # aps4.0.0a6使用仿函数机制的话还有些瑕疵不兼容，必须要配置这个值，不然会运行不了
         # 而且这个也算是唯一标识，必须不同实例值不同，才能确保aps4不会判别为同一task
         self.__qualname__ = str(id(self))
 
-        # 执行程序需要使用的参数
-        self.args = args
+        params: SubprocessTaskParams = params['SubprocessTaskParams']
 
-        # 关键参数
-        params = SubprocessTaskParams.parse(params)
-        self.popen_params = params.popen_params
+        # 执行程序需要使用的参数
+        self.args = params.args
         self.name = params.name
         self.timeout = params.timeout
+        self.popen_params = params.popen_params
+
         self.proc = None
+
+    @classmethod
+    def create(cls, source, *, copy=True):
+        """ 一个灵活的工厂方法，可以从多种源创建 SubprocessTask 实例。
+
+        :param str|list|SubprocessTaskParams|SubprocessTask source: 输入源，可以是命令字符串/列表、参数对象或已有的任务实例。
+        :param bool copy: 仅当输入是 SubprocessTask 实例时生效。True (默认) 表示返回深拷贝，False 表示返回原实例。
+        """
+        import copy as cp
+
+        if isinstance(source, (str, list)):
+            task = cls(args=source)
+        elif isinstance(source, SubprocessTaskParams):
+            task = cls(source)
+        elif isinstance(source, cls):  # 注意这种写法，如果一个从SubprocessTask继承的子类，却传递一个父类对象，是不兼容报错的
+            task = cp.deepcopy(source) if copy else source
+        else:
+            raise TypeError(f"Unsupported source type for creating SubprocessTask: {type(source).__name__}")
+
+        return task
+
+    def __1_args相关处理(self):
+        pass
+
+    def _normalize_args_to_list(self, args_input: Union[str, List[str], None]) -> List[str]:
+        """ 将任何格式的参数输入规范化为列表，并兼容 Windows 和 POSIX """
+        if args_input is None:
+            return []
+        if isinstance(args_input, str):
+            # 关键修正：
+            # os.name == 'nt' 用于判断是否为 Windows 系统。
+            # 在 Windows 上，我们使用 posix=False 模式。
+            # 在其他系统（Linux, macOS等）上，使用 posix=True 模式。
+            is_windows = (os.name == 'nt')
+            return shlex.split(args_input, posix=not is_windows)
+
+        return list(args_input)
+
+    def _add_args(self, new_args: Union[str, List[str]], *, position: Literal['append', 'prepend']):
+        """【核心重构】私有辅助方法，处理所有参数添加逻辑。"""
+        original_type = type(self.args)
+
+        # 步骤1: 规范化
+        current_args_list = self._normalize_args_to_list(self.args)
+        new_args_list = self._normalize_args_to_list(new_args)
+
+        # 步骤2: 操作 (根据 position 参数决定合并顺序)
+        if position == 'prepend':
+            result_list = new_args_list + current_args_list
+        else:  # 默认为 append
+            result_list = current_args_list + new_args_list
+
+        # 步骤3: 还原
+        if original_type is str:
+            self.args = shlex.join(result_list)
+        else:
+            self.args = result_list
+
+    def append_args(self, new_args: Union[str, List[str]]):
+        """
+        在原有args上，在末尾新增args参数。
+        """
+        self._add_args(new_args, position='append')
+
+    def prepend_args(self, new_args: Union[str, List[str]]):
+        """
+        在原有args上，在开头插入args参数。
+        """
+        self._add_args(new_args, position='prepend')
+
+    def set_arg(self, arg_name: str, arg_value):
+        """ 修订或添加一个参数的值 """
+        original_type = type(self.args)
+        arg_value_str = str(arg_value)
+
+        args_list = self._normalize_args_to_list(self.args)
+
+        updated = False
+        for i, item in enumerate(args_list):
+            if item == arg_name:
+                if i + 1 < len(args_list):
+                    args_list[i + 1] = arg_value_str
+                    updated = True
+                    break
+            elif item.startswith(f'{arg_name}='):
+                args_list[i] = f'{arg_name}={arg_value_str}'
+                updated = True
+                break
+
+        if not updated:
+            args_list.extend([arg_name, arg_value_str])
+
+        if original_type is str:
+            self.args = shlex.join(args_list)
+        else:
+            self.args = args_list
+
+    def __2_进程处理(self):
+        pass
 
     def is_running(self):
         """ 检查程序是否在运行 """
         status = self.proc is not None and self.proc.poll() is None
         return status
-
-    def set_arg(self, arg_name, arg_value):
-        """ 修订arg的值
-
-        注意self.args可能是str或list类型，不要修改args类型的情况设置arg
-        如果不存在arg，则添加，否则修改arg的值
-
-        使用示例：
-        >> self.set_arg('--port', 5034)
-        """
-        if isinstance(self.args, str):
-            # 按空格拆分，支持简单 key=value 或 --key value 形式
-            parts = self.args.split()
-            updated = False
-            for i, part in enumerate(parts):
-                if part == arg_name:
-                    # --key value 形式，替换下一个值
-                    if i + 1 < len(parts):
-                        parts[i + 1] = str(arg_value)
-                        updated = True
-                        break
-                elif part.startswith(f'{arg_name}='):
-                    # key=value 形式，直接替换
-                    parts[i] = f'{arg_name}={arg_value}'
-                    updated = True
-                    break
-            if not updated:
-                # 不存在则追加，优先尝试 --key value 风格
-                parts.extend([arg_name, str(arg_value)])
-            self.args = ' '.join(parts)
-
-        elif isinstance(self.args, list):
-            updated = False
-            # 扫描 list，尝试找到并替换
-            for i, item in enumerate(self.args):
-                if item == arg_name:
-                    # --key value 形式
-                    if i + 1 < len(self.args):
-                        self.args[i + 1] = str(arg_value)
-                        updated = True
-                        break
-                elif item.startswith(f'{arg_name}='):
-                    # key=value 形式
-                    self.args[i] = f'{arg_name}={arg_value}'
-                    updated = True
-                    break
-            if not updated:
-                # 不存在则追加
-                self.args.extend([arg_name, str(arg_value)])
 
     def run(self):
         """ 启动程序，这个在下游子类中可以重载重新定制 """
@@ -425,7 +460,7 @@ class SubprocessTask:
 
         # 2 启动
         self.proc = subprocess.Popen(self.args, preexec_fn=set_pdeathsig(),
-                                     **self.popen_params.model_dump(exclude_unset=True))
+                                     **self.popen_params.model_dump(exclude_unset=True, exclude={'args'}))
 
         # 3 等待其运行结束后标记
         try:
@@ -462,11 +497,10 @@ class SubprocessTask:
 
 
 class XlServerSubprocessTask(SubprocessTask):
-    def __init__(self,
-                 args,
-                 params: SubprocessTaskParams = None,
-                 ):
-        super().__init__(args, params)
+
+    @resolve_params(SubprocessTaskParams)
+    def __init__(self, **params):
+        super().__init__(params['SubprocessTaskParams'])
 
         # 我用nginx需要额外补充的两个属性值
         self.port = None
@@ -513,7 +547,7 @@ class XlScheduler(GetAttr):
     def add_schedule(self, task, trigger=None, **kwargs):
         """
 
-        :param task:
+        :param SubprocessTask task:
         :param int|float|str|datetime|callable trigger: 自定义的trigger格式
             None，马上开始执行一次，这一般分两种应用场景
                 （1）需要马上启动，且只需要启动一次的后端，前端服务
@@ -528,7 +562,7 @@ class XlScheduler(GetAttr):
             trigger(scheduler, task), 自定义函数触发器。前2个参数是强制配置要传递的，才能实现作业的动态安排，
                 但是可以添加额外的默认参数，在函数内部再去灵活扩展功能，参考post_execution_schedule的实现。
             注：还可以用标准触发器的AndTrigger, OrTrigger来设计组合触发器
-        :param kwargs: 其他aps原本add_schedule所用参数
+        :param kwargs: 其他aps原本add_schedule、add_job所用参数
             args, kwargs: 这里的参数是给task用的，注意不是给trigger用的，trigger这里的callable模式如果有需要可以使用偏函数等实现。
         :return:
         """
@@ -560,34 +594,25 @@ class XlScheduler(GetAttr):
         else:
             raise ValueError(f'不支持的触发器类型 {type(trigger)}')
 
-    def add_cmd_basic(self, cmd, trigger=None, *,
-                      task_params: SubprocessTaskParams = None,
-                      **kwargs):
+    def add_cmd_basic(self, task, trigger=None, **kwargs):
         """ 用命令行启动一个程序，或仅存储任务，并添加进管理列表
 
-        :param SubprocessTask|str|list cmd: 启动程序的命令args
-            简单场景可以直接传递args命令初始化一个subprocess任务
-            复杂场景可以上游先初始化好一个SubprocessTask对象后，再传递进来
+        :param task: 详见SubprocessTask.init支持的初始化方式，来指代一个任务
         :param trigger: 触发器
         """
-        task = self._proc_class(cmd, task_params) if isinstance(cmd, (str, list)) else copy.deepcopy(cmd)
+        task = self._proc_class.create(task)
         self.tasks.append(task)
         self.add_schedule(task, trigger, **kwargs)
         return task
 
-    def add_cmd(self, cmd, trigger=None, task_params: SubprocessTaskParams = None, **kwargs):
-        return self.add_cmd_basic(cmd, trigger, task_params=task_params, **kwargs)
+    def add_cmd(self, task, trigger=None, **kwargs):
+        return self.add_cmd_basic(task, trigger, **kwargs)
 
-    def add_py(self, args, trigger=None, *,
-               executer=None,
-               task_params: SubprocessTaskParams = None,
-               **kwargs):
-        """ 执行一个py任务
-        """
-        executer = executer or sys.executable
-        if isinstance(args, str): args = [args]
-        cmd = [executer] + args
-        return self.add_cmd(cmd, trigger, task_params=task_params, **kwargs)
+    def add_py(self, task, trigger=None, *, executer=None, **kwargs):
+        """ 执行一个py任务 """
+        task = self._proc_class.create(task)
+        task.prepend_args(executer or sys.executable)
+        return self.add_cmd(task, trigger, **kwargs)
 
     def add_script_task(self,
                         script_content,
@@ -711,9 +736,7 @@ class XlServerScheduler(XlScheduler):
     def __1_添加命令行工具(self):
         pass
 
-    def _add_cmd_with_ports(self, cmd, trigger=None, *,
-                            task_params: SubprocessTaskParams = None,
-                            ports=None, **kwargs):
+    def _add_cmd_with_ports(self, task, trigger=None, *, ports=None, **kwargs):
         """ 支持 ports 的处理
 
         :param ports:
@@ -728,21 +751,21 @@ class XlServerScheduler(XlScheduler):
         # 2 遍历端口，依次启动进程
         tasks = []
         if ports:
-            task_params = SubprocessTaskParams.parse(task_params)
-            task_params.name = task_params.name or ''
+            task_template = self._proc_class.create(task)
+            task_template.name = task_template.name or ''
             for port in ports:
-                task_params2 = task_params.model_copy()
-                task_params2.name = f'{task_params.name}:{port}'
-                task = self.add_cmd_basic(cmd, trigger, task_params=task_params2)
+                task = self._proc_class.create(task_template)
+                task.name = f'{task.name}:{port}'
                 task.set_port(port)
+                task = self.add_cmd_basic(task, trigger)
                 tasks.append(task)
         else:
-            task = self.add_cmd_basic(cmd, trigger, task_params=task_params, **kwargs)
+            task = self.add_cmd_basic(task, trigger, **kwargs)
             tasks = [task]
 
         return tasks
 
-    def add_cmd(self, cmd, trigger=None, *, locations=None, **kwargs):
+    def add_cmd(self, task, trigger=None, *, ports=None, locations=None, **kwargs):
         """
         增强版 add_schedule_cmd_with_ports，支持nginx映射配置
             以前还支持devices，现在删除了，这类参数可以.env文件中配置
@@ -751,7 +774,7 @@ class XlServerScheduler(XlScheduler):
         :return: 返回一个包含所有启动程序的 task 列表。
         """
         # 1 处理 ports 参数
-        tasks = self._add_cmd_with_ports(cmd, trigger, **kwargs)
+        tasks = self._add_cmd_with_ports(task, trigger, ports=ports, **kwargs)
 
         # 2 处理locations
         if locations:
@@ -994,20 +1017,5 @@ def support_retry_process(repeat_num=None, wait_mode=0, success_continue=False):
     return decorator
 
 
-@support_retry_process(repeat_num=None, wait_mode=0)
-def healthy():
-    print('Hello')
-    exit(1)
-
-
-@resolve_params(PopenParams)
-def func(a, **params):
-    print(a)
-    print(params.get('PopenParams'))
-
-
 if __name__ == '__main__':
-    # SubprocessTaskParams(name='123', shell=False)
-    # SubprocessTask([1, 2], shell=True)
-
-    func(3, PopenParams(x=4), shell=True)
+    pass

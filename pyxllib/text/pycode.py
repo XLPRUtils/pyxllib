@@ -35,7 +35,7 @@ def sort_import(text):
             name = name.replace('.' + x, f'{i:02}')
 
         # 忽略大小写
-        return [name.lower(), line.startswith('import')]
+        return [name.lower(), not line.startswith('import')]
 
     def sort_part(m):
         parts = PyNestEnv(m.group()).imports().strings()
