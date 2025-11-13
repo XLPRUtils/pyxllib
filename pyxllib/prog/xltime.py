@@ -181,7 +181,8 @@ class XlWeekTag(GetAttr):
 
     def add_days(self, days):
         """ 增加指定天数，支持负数 """
-        return self.shift(days=days)
+        return self.__class__(self.dt + datetime.timedelta(days=days))
+        # return self.shift(days=days)
 
     def monday(self):
         """ 移动到本周周一 """
