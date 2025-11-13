@@ -389,7 +389,7 @@ class XlBaseModel(BaseModel):
 
 def resolve_params(*models: Type[BaseModel], mode: Literal['strict', 'extra', 'pass'] = 'strict'):
     """
-    一个智能参数解析与注入的装饰器，通过单一的 mode 参数控制未知参数的行为。
+    一个智能参数解析与注入的装饰器，通过 mode 参数控制未知参数的行为。
 
     Args:
         *models: 一个或多个 Pydantic 模型类，用于解析参数。

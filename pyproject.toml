@@ -1,6 +1,6 @@
 [project]
 name = "pyxllib"
-version = "4.12"
+version = "4.13"
 description = "厦门理工模式识别团队通用python代码工具库"
 readme = "README.md"
 license = "Apache-2.0"
