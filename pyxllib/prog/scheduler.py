@@ -678,7 +678,7 @@ class XlScheduler(GetAttr):
             raise ValueError(f'不支持的触发器类型 {type(trigger)}')
 
     @resolve_params(SubprocessTaskParams, mode='pass')
-    def add_prog(self, args='', trigger=None, /, ports=None, locations=None, **resolve_params):
+    def add_cmd(self, args: str | list = '', trigger=None, /, ports=None, locations=None, **resolve_params):
         """ 添加subprocess.Popen类型的任务
         :param ports: 数量取决于ports的配置
         """
@@ -691,20 +691,29 @@ class XlScheduler(GetAttr):
             self.add_schedule(task, trigger, **resolve_params)
 
     @resolve_params(SubprocessTaskParams, mode='pass')
-    def add_prog_py(self, args='', trigger=None, /, ports=None, locations=None, **resolve_params):
+    def add_py(self, args: str | list = '', trigger=None, /, ports=None, locations=None, **resolve_params):
         if isinstance(args, str):
             args = f'{sys.executable} {args}'
         else:
             args = [sys.executable, *args]
         params = resolve_params['SubprocessTaskParams']
         del resolve_params['SubprocessTaskParams']
-        self.add_prog(args, trigger, params, ports=ports, locations=locations, **resolve_params)
+        self.add_cmd(args, trigger, params, ports=ports, locations=locations, **resolve_params)
+
+    @resolve_params(SubprocessTaskParams, mode='pass')
+    def add_module(self, args: str | list = '', trigger=None, /, ports=None, locations=None, **resolve_params):
+        if isinstance(args, str):
+            args = f'{sys.executable} -m {args}'
+        else:
+            args = [sys.executable, '-m', *args]
+        params = resolve_params['SubprocessTaskParams']
+        del resolve_params['SubprocessTaskParams']
+        self.add_cmd(args, trigger, params, ports=ports, locations=locations, **resolve_params)
 
     def add_script_task(self,
                         script_content,
                         extension=None,
                         trigger=None,
-                        task_params: SubprocessTaskParams = None,
                         **kwargs):
         """ 添加一个操作系统命令或脚本（如 .bat、.sh、.ps1 等）并启动。
 
@@ -745,7 +754,7 @@ class XlScheduler(GetAttr):
             raise ValueError(f"不支持的脚本类型: {extension}")
 
         # 5 启动脚本
-        return self.add_cmd(cmd, trigger, task_params=task_params, **kwargs)
+        return self.add_cmd(cmd, trigger, **kwargs)
 
     def __2_任务管理(self):
         pass
