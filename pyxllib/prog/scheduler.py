@@ -19,7 +19,7 @@ import textwrap
 import threading
 import time
 import typing
-from typing import Any, Dict, List, Tuple, Union, Optional, Callable, Type, Literal
+from typing import Any, Dict, List, Tuple, Union, Optional, Callable, Type, Literal, Sequence
 
 from pyxllib.prog.lazyimport import lazy_import
 
@@ -309,8 +309,83 @@ class PopenParams(XlBaseModel):
     stdout: Optional[int] = None
     stderr: Optional[int] = None
 
-    # + 允许未预设的额外参数
-    model_config = ConfigDict(extra='allow')
+    # 指定要执行的程序。默认情况下，执行的程序是 args 列表的第一个元素。
+    # 如果设置了 executable，它会替换 args[0] 作为要执行的程序。
+    executable: Optional[str] = None
+
+    # 设置子进程的当前工作目录。
+    # 如果为 None，则子进程的工作目录将是父进程的当前工作目录。
+    cwd: Optional[str] = None
+
+    # 定义子进程的环境变量。如果为 None，子进程将继承父进程的环境变量。
+    # 如果提供一个字典，它将作为子进程的完整环境变量。
+    env: Optional[Dict[str, str]] = None
+
+    # --- 文本模式与编码 ---
+
+    # 如果为 True，stdin、stdout 和 stderr 将作为文本流处理，并使用 `encoding` 指定的编码。
+    # 这个参数在 Python 3.7+ 中是 `text` 的别名。
+    # 默认为 False，流将作为二进制字节流处理。
+    text: bool = False
+    universal_newlines: bool = False  # text 的旧别名
+
+    # 当 text=True 时，用于解码/编码 stdin, stdout, stderr 的编码格式。
+    encoding: Optional[str] = None
+
+    # 当 text=True 时，指定如何处理编码和解码错误。
+    errors: Optional[str] = None
+
+    # --- 进程创建与管理 (POSIX) ---
+
+    # （仅限 POSIX）在子进程执行前调用的可调用对象（函数）。
+    # 警告：如果在多线程程序中使用，可能会导致死锁。
+    # preexec_fn: Optional[Callable[[], Any]] = None  # 这个参数我会额外配置，所以不支持用户输入
+
+    # （仅限 POSIX）如果为 True，则在子进程中创建一个新的进程会话。
+    start_new_session: bool = False
+
+    # --- 进程创建与管理 (Windows) ---
+
+    # （仅限 Windows）用于设置子进程的 STARTUPINFO 结构。
+    startupinfo: Any = None  # 类型依赖于 `subprocess` 内部的 `STARTUPINFO` 类
+
+    # （仅限 Windows）一个整数，指定传递给 Windows CreateProcess 函数的标志。
+    # 例如 subprocess.CREATE_NEW_CONSOLE。
+    creationflags: int = 0
+
+    # --- 其他高级参数 ---
+
+    # 如果为 True，除了 0, 1, 2 之外的所有文件描述符将在子进程执行前被关闭。
+    # 在 POSIX 上默认为 True，在 Windows 上默认为 False。
+    close_fds: bool = True
+
+    # 设置I/O管道的缓冲区大小。
+    # 0 表示不缓冲（读写是单个系统调用，可能返回不完整的数据）。
+    # 1 表示行缓冲（仅在 text=True 时可用）。
+    # 任何其他正值表示使用大约该大小的缓冲区。
+    # 负值表示使用系统默认值。
+    bufsize: int = -1
+
+    # （仅限 POSIX）设置子进程的用户 ID。
+    user: Optional[Union[int, str]] = None
+
+    # （仅限 POSIX）设置子进程的组 ID。
+    group: Optional[Union[int, str]] = None
+
+    # （仅限 POSIX）设置子进程的附加组 ID。
+    extra_groups: Optional[Sequence[Union[int, str]]] = None
+
+    # （仅限 POSIX）设置子进程的 umask。
+    umask: int = -1
+
+    # （仅限 POSIX）一个文件描述符序列，在子进程中保持打开状态。
+    pass_fds: Sequence[int] = ()
+
+    # 如果为 False，则不恢复 SIGPIPE 信号的处理。默认为 True。
+    restore_signals: bool = True
+
+    # 在 Python 3.10+ 中可用，用于设置管道的大小（字节数）。仅在部分平台（如 Linux）上生效。
+    pipesize: int = -1
 
 
 class SubprocessTaskParams(PopenParams):
@@ -331,41 +406,21 @@ class SubprocessTaskParams(PopenParams):
 class SubprocessTask:
     """ subprocess类型的task任务，后续可能跟apscheduler结合使用 """
 
-    @resolve_params(SubprocessTaskParams)
-    def __init__(self, **params):
+    @resolve_params(SubprocessTaskParams, mode='pass')
+    def __init__(self, args='', /, **resolved_params):
         # aps4.0.0a6使用仿函数机制的话还有些瑕疵不兼容，必须要配置这个值，不然会运行不了
         # 而且这个也算是唯一标识，必须不同实例值不同，才能确保aps4不会判别为同一task
         self.__qualname__ = str(id(self))
 
-        params: SubprocessTaskParams = params['SubprocessTaskParams']
+        params: SubprocessTaskParams = resolved_params['SubprocessTaskParams']
 
         # 执行程序需要使用的参数
-        self.args = params.args
+        self.args = args or params.args
         self.name = params.name
         self.timeout = params.timeout
         self.popen_params = params.popen_params
 
         self.proc = None
-
-    @classmethod
-    def create(cls, source, *, copy=True):
-        """ 一个灵活的工厂方法，可以从多种源创建 SubprocessTask 实例。
-
-        :param str|list|SubprocessTaskParams|SubprocessTask source: 输入源，可以是命令字符串/列表、参数对象或已有的任务实例。
-        :param bool copy: 仅当输入是 SubprocessTask 实例时生效。True (默认) 表示返回深拷贝，False 表示返回原实例。
-        """
-        import copy as cp
-
-        if isinstance(source, (str, list)):
-            task = cls(args=source)
-        elif isinstance(source, SubprocessTaskParams):
-            task = cls(source)
-        elif isinstance(source, cls):  # 注意这种写法，如果一个从SubprocessTask继承的子类，却传递一个父类对象，是不兼容报错的
-            task = cp.deepcopy(source) if copy else source
-        else:
-            raise TypeError(f"Unsupported source type for creating SubprocessTask: {type(source).__name__}")
-
-        return task
 
     def __1_args相关处理(self):
         pass
@@ -498,19 +553,47 @@ class SubprocessTask:
 
 class XlServerSubprocessTask(SubprocessTask):
 
-    @resolve_params(SubprocessTaskParams)
-    def __init__(self, **params):
-        super().__init__(params['SubprocessTaskParams'])
+    @resolve_params(SubprocessTaskParams, mode='pass')
+    def __init__(self, args='', /, port=None, locations=None, **resolve_params):
+        super().__init__(args, resolve_params['SubprocessTaskParams'])
 
         # 我用nginx需要额外补充的两个属性值
         self.port = None
+        self.set_port(port)
+
         # list[dict]结构，dict长度只有1，类似 [{'/原url路径/a', '/目标url路径/b'}, ...]
         # 如果k,v相同，可以简写为一个值 ['/a', '/b', ...]
-        self.locations = None
+        self.locations = locations
 
     def set_port(self, port):
-        self.port = port
-        self.set_arg('--port', port)
+        if port:
+            self.port = port
+            self.set_arg('--port', port)
+
+    @classmethod
+    @resolve_params(SubprocessTaskParams, mode='pass')
+    def create_from_ports(cls, args='', /, ports=None, locations=None, **resolve_params):
+        """
+        :param ports:
+            list[int]，指定配置若干端口的程序
+            int, 配置几个端口
+        """
+        # 1 处理 ports 参数，找到空闲端口或使用指定端口
+        if isinstance(ports, int):
+            ports = find_free_ports(ports)
+        if ports is None:
+            ports = [None]
+
+        # 2 遍历端口，依次启动进程
+        tasks = []
+        for port in ports:
+            task = cls(args, resolve_params['SubprocessTaskParams'], port=port, locations=locations)
+            if port:
+                task.name = task.name or ''
+                task.name = f'{task.name}:{port}'
+            tasks.append(task)
+
+        return tasks
 
 
 def __3_调度器():
@@ -521,7 +604,6 @@ class XlScheduler(GetAttr):
     """ 对apscheduler的Scheduler扩展版
 	"""
     _default = 'scheduler'
-    _proc_class = SubprocessTask
 
     def __init__(self):
         self._scheduler = None
@@ -566,6 +648,7 @@ class XlScheduler(GetAttr):
             args, kwargs: 这里的参数是给task用的，注意不是给trigger用的，trigger这里的callable模式如果有需要可以使用偏函数等实现。
         :return:
         """
+        self.tasks.append(task)
         # 在self.task_defaults数据基础上，叠加kwargs的值作为新的kwargs
         kwargs = {**self.task_defaults, **kwargs}
 
@@ -594,25 +677,28 @@ class XlScheduler(GetAttr):
         else:
             raise ValueError(f'不支持的触发器类型 {type(trigger)}')
 
-    def add_cmd_basic(self, task, trigger=None, **kwargs):
-        """ 用命令行启动一个程序，或仅存储任务，并添加进管理列表
-
-        :param task: 详见SubprocessTask.init支持的初始化方式，来指代一个任务
-        :param trigger: 触发器
+    @resolve_params(SubprocessTaskParams, mode='pass')
+    def add_prog(self, args='', trigger=None, /, ports=None, locations=None, **resolve_params):
+        """ 添加subprocess.Popen类型的任务
+        :param ports: 数量取决于ports的配置
         """
-        task = self._proc_class.create(task)
-        self.tasks.append(task)
-        self.add_schedule(task, trigger, **kwargs)
-        return task
+        # 虽然从通用角度来说，如果没使用ports参数，这里使用SubprocessTask任务类型也是可以的
+        #   但XlServerSubprocessTask其实也兼容SubprocessTask的所有功能，问题不大
+        tasks = XlServerSubprocessTask.create_from_ports(args, resolve_params['SubprocessTaskParams'],
+                                                         ports=ports, locations=locations)
+        del resolve_params['SubprocessTaskParams']
+        for task in tasks:
+            self.add_schedule(task, trigger, **resolve_params)
 
-    def add_cmd(self, task, trigger=None, **kwargs):
-        return self.add_cmd_basic(task, trigger, **kwargs)
-
-    def add_py(self, task, trigger=None, *, executer=None, **kwargs):
-        """ 执行一个py任务 """
-        task = self._proc_class.create(task)
-        task.prepend_args(executer or sys.executable)
-        return self.add_cmd(task, trigger, **kwargs)
+    @resolve_params(SubprocessTaskParams, mode='pass')
+    def add_prog_py(self, args='', trigger=None, /, ports=None, locations=None, **resolve_params):
+        if isinstance(args, str):
+            args = f'{sys.executable} {args}'
+        else:
+            args = [sys.executable, *args]
+        params = resolve_params['SubprocessTaskParams']
+        del resolve_params['SubprocessTaskParams']
+        self.add_prog(args, trigger, params, ports=ports, locations=locations, **resolve_params)
 
     def add_script_task(self,
                         script_content,
@@ -671,6 +757,10 @@ class XlScheduler(GetAttr):
         """ 返回所有任务的状态 DataFrame """
         ls = []
         for i, task in enumerate(self.tasks, start=1):
+            # todo 要判断task类型分类处理
+            if not isinstance(task, XlServerSubprocessTask):
+                continue
+
             ls.append({
                 'order': i,
                 'name': task.name or '',
@@ -683,9 +773,10 @@ class XlScheduler(GetAttr):
         df = pd.DataFrame(ls)
 
         # 将可能包含空值的整数字段转换为可空整数类型
-        int_columns = ['pid', 'port']  # 以及你认为需要是整数的其他列
-        for col in int_columns:
-            df[col] = df[col].astype('Int64')  # 注意 'I' 大写
+        if len(df):
+            int_columns = ['pid', 'port']  # 以及你认为需要是整数的其他列
+            for col in int_columns:
+                df[col] = df[col].astype('Int64')  # 注意 'I' 大写
 
         return df
 
@@ -709,7 +800,7 @@ class XlScheduler(GetAttr):
             if cmd in ['stop', 'quit']:
                 logger.info("检测到stop，正在终止所有程序...")
                 self.scheduler.shutdown()
-                # self.stop_all()  # 关闭所有正在运行中的task
+                self.stop_all()  # 关闭所有正在运行中的task
                 # self.stop()  # 关闭apscheduler
                 print("所有程序已终止，退出。")
                 break
@@ -718,7 +809,10 @@ class XlScheduler(GetAttr):
 
 
 class XlServerScheduler(XlScheduler):
-    _proc_class = XlServerSubprocessTask
+    def fix_hints(self):
+        class Hint(XlServerScheduler, BackgroundScheduler): pass
+
+        return typing.cast(Hint, self)
 
     @property
     def scheduler(self):
@@ -733,69 +827,13 @@ class XlServerScheduler(XlScheduler):
             self.task_defaults = {'misfire_grace_time': None}
         return self._scheduler
 
-    def __1_添加命令行工具(self):
-        pass
-
-    def _add_cmd_with_ports(self, task, trigger=None, *, ports=None, **kwargs):
-        """ 支持 ports 的处理
-
-        :param ports:
-            int 表示要开启的进程数，端口号随机生成
-            list 表示指定的端口号
-            None 不做特殊配置
-        """
-        # 1 处理 ports 参数，找到空闲端口或使用指定端口
-        if isinstance(ports, int):
-            ports = find_free_ports(ports)
-
-        # 2 遍历端口，依次启动进程
-        tasks = []
-        if ports:
-            task_template = self._proc_class.create(task)
-            task_template.name = task_template.name or ''
-            for port in ports:
-                task = self._proc_class.create(task_template)
-                task.name = f'{task.name}:{port}'
-                task.set_port(port)
-                task = self.add_cmd_basic(task, trigger)
-                tasks.append(task)
-        else:
-            task = self.add_cmd_basic(task, trigger, **kwargs)
-            tasks = [task]
-
-        return tasks
-
-    def add_cmd(self, task, trigger=None, *, ports=None, locations=None, **kwargs):
-        """
-        增强版 add_schedule_cmd_with_ports，支持nginx映射配置
-            以前还支持devices，现在删除了，这类参数可以.env文件中配置
-
-        :param locations: URL 映射规则
-        :return: 返回一个包含所有启动程序的 task 列表。
-        """
-        # 1 处理 ports 参数
-        tasks = self._add_cmd_with_ports(task, trigger, ports=ports, **kwargs)
-
-        # 2 处理locations
-        if locations:
-            if isinstance(locations, str):
-                locations = [locations]
-            locations2 = []
-            for x in locations:
-                if not isinstance(x, dict):
-                    locations2.append({x: x})
-            for task in tasks:
-                task.locations = locations2  # 不需要copy，因为这一组确实是同一个url映射逻辑
-
-        return tasks
-
-    def __2_导出nginx配置(self):
+    def __x_导出nginx配置(self):
         pass
 
     def get_all_locations(self):
         locations = defaultdict(list)
         for task in self.tasks:
-            if not task.locations:
+            if not (isinstance(task, XlServerScheduler) and task.locations):
                 continue
             for x in task.locations:
                 for dst, src in x.items():
@@ -1018,4 +1056,4 @@ def support_retry_process(repeat_num=None, wait_mode=0, success_continue=False):
 
 
 if __name__ == '__main__':
-    pass
+    XlServerSubprocessTask(args=['2', '3'], shell=True)
