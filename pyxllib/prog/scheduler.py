@@ -506,26 +506,46 @@ class SubprocessTask:
         status = self.proc is not None and self.proc.poll() is None
         return status
 
-    def run(self):
+    def run(self, check=False):
         """ 启动程序，这个在下游子类中可以重载重新定制 """
         # 1 目前不支持重复执行，只允许有一个实例，但要扩展修改这个功能是相对容易的
         logger.info(self.args)
         if self.is_running():
             return self.proc
 
-        # 2 启动
-        self.proc = subprocess.Popen(self.args, preexec_fn=set_pdeathsig(),
-                                     **self.popen_params.model_dump(exclude_unset=True, exclude={'args'}))
+        # 2 根据check=False，使用popen模式，只在沙盒中报错
+        if not check:
+            self.proc = subprocess.Popen(self.args, preexec_fn=set_pdeathsig(),
+                                         **self.popen_params.model_dump(exclude_unset=True, exclude={'args'}))
 
-        # 3 等待其运行结束后标记
+            # 3 等待其运行结束后标记
+            try:
+                # proc启动后，使用阻塞模式监控程序什么时候结束
+                self.proc.communicate(timeout=self.timeout)
+            except subprocess.TimeoutExpired:
+                self.kill()
+                self.proc.communicate()
+
+            return self.proc
+
+        # 3 check=True，把subprocess的报错抛出给主进程
         try:
-            # proc启动后，使用阻塞模式监控程序什么时候结束
-            self.proc.communicate(timeout=self.timeout)
-        except subprocess.TimeoutExpired:
-            self.kill()
-            self.proc.communicate()
-
-        return self.proc
+            # subprocess.run 会等待命令完成，check=True 会在返回码非0时自动引发 CalledProcessError
+            subprocess.run(
+                self.args,
+                preexec_fn=set_pdeathsig(),
+                timeout=self.timeout,
+                check=True,
+                **self.popen_params.model_dump(exclude_unset=True, exclude={'args'}),
+            )
+            # 如果代码能执行到这里，说明子进程成功了（退出码为0）
+            return self.proc
+        except subprocess.CalledProcessError as e:
+            # 如果子进程返回非0退出码，check=True 就会引发这个异常
+            # 将子进程的异常重新在父进程中抛出，以便 funboost 捕获
+            raise RuntimeError(f"子进程执行失败: {e.stderr}") from e
+        except subprocess.TimeoutExpired as e:
+            raise RuntimeError("子进程执行超时") from e
 
     def __call__(self):
         return self.run()
@@ -689,6 +709,7 @@ class XlScheduler(GetAttr):
         del resolve_params['SubprocessTaskParams']
         for task in tasks:
             self.add_schedule(task, trigger, **resolve_params)
+        return tasks
 
     @resolve_params(SubprocessTaskParams, mode='pass')
     def add_py(self, args: str | list = '', trigger=None, /, ports=None, locations=None, **resolve_params):
@@ -698,7 +719,7 @@ class XlScheduler(GetAttr):
             args = [sys.executable, *args]
         params = resolve_params['SubprocessTaskParams']
         del resolve_params['SubprocessTaskParams']
-        self.add_cmd(args, trigger, params, ports=ports, locations=locations, **resolve_params)
+        return self.add_cmd(args, trigger, params, ports=ports, locations=locations, **resolve_params)
 
     @resolve_params(SubprocessTaskParams, mode='pass')
     def add_module(self, args: str | list = '', trigger=None, /, ports=None, locations=None, **resolve_params):
@@ -708,7 +729,7 @@ class XlScheduler(GetAttr):
             args = [sys.executable, '-m', *args]
         params = resolve_params['SubprocessTaskParams']
         del resolve_params['SubprocessTaskParams']
-        self.add_cmd(args, trigger, params, ports=ports, locations=locations, **resolve_params)
+        return self.add_cmd(args, trigger, params, ports=ports, locations=locations, **resolve_params)
 
     def add_script_task(self,
                         script_content,
