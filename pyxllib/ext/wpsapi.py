@@ -18,6 +18,11 @@ try:
 except ModuleNotFoundError:
     pd = lazy_import('pandas')
 
+try:
+    from DrissionPage import Chromium
+except ModuleNotFoundError:
+    Chromium = lazy_import('from DrissionPage import Chromium')
+
 
 class WpsOnlineBook:
     """ wps的"脚本令牌"调用模式
@@ -134,6 +139,20 @@ class WpsOnlineBook:
         elif return_mode == 'pd':
             return pd.DataFrame(data)
 
+    def __4_其他(self):
+        pass
+
+    def browser_refresh(self, duration=10):
+        """ 使用 dp 爬虫打开在线表格文件，等待指定时间后关闭，相当于通过浏览器刷新下表格
+        :param duration: 打开后等待秒数，默认 10 秒
+        """
+        browser = Chromium()
+        tab = browser.new_tab(f'https://www.kdocs.cn/l/{self.book_id}')
+        tab.wait.doc_loaded()
+        tab.wait(duration)
+        tab.close()
+
 
 if __name__ == '__main__':
-    pass
+    wb = WpsOnlineBook('chQzbASABLcN')
+    wb.browser_refresh()
