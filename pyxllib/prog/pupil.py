@@ -141,11 +141,11 @@ class EmptyPoolExecutor:
         pass
 
 
-def xlwait(func, condition=bool, *, limit=None, interval=1):
+def xlwait(func, condition=bool, *, timeout=None, interval=1):
     """ 不断重复执行func，直到得到满足condition条件的期望值
 
     :param condition: 退出等待的条件，默认为bool真值
-    :param limit: 重复执行的上限时间（单位 秒），默认一直等待
+    :param timeout: 重复执行的上限时间（单位 秒），默认一直等待
     :param interval: 重复执行间隔 （单位 秒）
 
     """
@@ -154,9 +154,10 @@ def xlwait(func, condition=bool, *, limit=None, interval=1):
         res = func()
         if condition(res):
             return res
-        elif limit and (time.time() - t > limit):
+        elif timeout and (time.time() - t > timeout):
             return res  # 超时也返回目前得到的结果
-        time.sleep(interval)
+        if interval > 0:
+            time.sleep(interval)
 
 
 class DictTool:

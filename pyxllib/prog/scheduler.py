@@ -813,8 +813,8 @@ class XlScheduler(GetAttr):
     def stop_all(self):
         """ 停止所有后台程序 """
         # 关闭所有调度器
-        if self.scheduler:
-            self.scheduler.stop()
+        # if self.scheduler:
+            # self.scheduler.shutdown()
 
         # 停止所有单启动任务
         for task in self.tasks:
@@ -829,7 +829,6 @@ class XlScheduler(GetAttr):
             cmd = input('>')
             if cmd in ['stop', 'quit']:
                 logger.info("检测到stop，正在终止所有程序...")
-                self.scheduler.shutdown()
                 self.stop_all()  # 关闭所有正在运行中的task
                 # self.stop()  # 关闭apscheduler
                 print("所有程序已终止，退出。")

@@ -16,6 +16,7 @@ import random
 import re
 import datetime
 from collections import UserDict
+from typing import Literal
 
 from pyxllib.prog.lazyimport import lazy_import
 
@@ -23,6 +24,16 @@ try:
     from loguru import logger
 except ModuleNotFoundError:
     logger = lazy_import('from loguru import logger')
+
+try:
+    from pydantic import BaseModel
+except ModuleNotFoundError:
+    BaseModel = lazy_import('from pydantic import BaseModel')
+
+try:
+    import cv2
+except ModuleNotFoundError:
+    cv2 = lazy_import('cv2')
 
 try:
     import numpy as np
@@ -48,6 +59,7 @@ except ModuleNotFoundError:
 
 from pyxllib.prog.newbie import first_nonnone, round_int
 from pyxllib.prog.pupil import xlwait, DictTool, run_once
+from pyxllib.prog.specialist import XlBaseModel, resolve_params
 from pyxllib.prog.filelock import get_autogui_lock
 from pyxllib.algo.geo import ComputeIou, ltrb2xywh, xywh2ltrb
 from pyxllib.file.specialist import XlPath
@@ -82,136 +94,158 @@ def get_xlapi():
     return xlapi
 
 
+class LocateParams(XlBaseModel):
+    """ 图像定位与匹配相关的参数配置 """
+
+    # 是否使用灰度模式进行匹配，默认为 False (彩色匹配)
+    grayscale: bool = False
+
+    # 匹配置信度阈值 (0.0 - 1.0)，值越高匹配要求越严格
+    confidence: float = 0.9
+
+    # 颜色容忍度 (0-255)，用于像素级对比时允许的 RGB 通道差值
+    # 默认 10，允许轻微的渲染色差
+    color_tolerance: int = 10
+
+    # 在返回结果前，是否根据置信度分数进行降序排序
+    # 若为 True，将强制使用 OpenCV 引擎进行匹配
+    sort_by_confidence: bool = False
+
+
 class ImageTools:
+    """ 图像处理与匹配工具类 """
 
     @classmethod
     def pixel_distance(cls, pixel1, pixel2):
-        """ 返回最大的像素值差，如果相同返回0 """
+        """ 计算两个像素点的最大通道差值
+        :return: max(abs(r1-r2), abs(g1-g2), abs(b1-b2))
+        """
         return max([abs(x - y) for x, y in zip(pixel1, pixel2)])
 
     @classmethod
-    def img_distance(cls, img1, img2, *, grayscale=None, color_tolerance=10):
-        """ 返回距离：不相同像素占的百分比，相同返回0
+    @resolve_params(LocateParams, mode='pass')
+    def img_distance(cls, img1, img2, **resolved_params):
+        """ 计算两张图片的差异程度
 
-        :param grayscale: 是否转换为灰度图进行比较，默认为None，即不转换
-        :param color_tolerance: 每个像素允许的颜色差值。RGB情况计算的是3个值分别的差的和。
+        :param img1: 图片对象1 (PIL Image, numpy array, 或文件路径)
+        :param img2: 图片对象2
+        :param resolved_params: LocateParams 参数
+            grayscale: 是否转灰度对比
+            color_tolerance: 判定像素是否不同的阈值
+        :return: 差异度 (0.0 - 1.0)，0 表示完全相同，1 表示完全不同
         """
+        params: LocateParams = resolved_params['LocateParams']
+
         img1 = np.array(img1, dtype=int)
         img2 = np.array(img2, dtype=int)
 
-        if grayscale:
-            # 如果是灰度图，将图像转换为单通道
+        if params.grayscale:
+            # 如果是灰度图比较，将图像转换为单通道
             if len(img1.shape) == 3:
                 img1 = np.mean(img1, axis=2, dtype=int)
             if len(img2.shape) == 3:
                 img2 = np.mean(img2, axis=2, dtype=int)
-            cmp = np.array(abs(img1 - img2) > color_tolerance)
+
+            # 灰度图直接比较数值差异
+            cmp = np.array(abs(img1 - img2) > params.color_tolerance)
         else:
             # 彩色图情况，计算每个通道的差值
-            cmp = np.array(abs(img1 - img2) > color_tolerance)
+            cmp = np.array(abs(img1 - img2) > params.color_tolerance)
             # 只要有一个通道的差值超过阈值，就认为该像素不同
             cmp = np.any(cmp, axis=-1)
 
         return cmp.sum() / cmp.size
 
     @classmethod
-    def base_find_img(cls, img, haystack=None, *, grayscale=None, confidence=None, sort_by_confidence=False):
-        """ 根据预存的img数据，匹配出多个内容对应的所在的rect位置
-        这函数不能取同名find_img，否则IDE不好自动识别跳转
+    @resolve_params(LocateParams, mode='pass')
+    def base_find_img(cls, img, haystack=None, **resolved_params):
+        """ 在大图中查找目标小图的所有出现位置，并进行非极大值抑制(NMS)去重
 
-        :param img: 要查找的目标的子图
-        :param haystack: 整张大图
-        :param grayscale: 是否使用灰度图像进行匹配
-        :param confidence: 匹配置信度阈值
-        :param sort_by_confidence: 是否按照置信度排序返回结果
-        :return: 会返回多个匹配结果的坐标
+        :param img: 目标子图 (Needle)
+        :param haystack: 背景大图 (Haystack)，为 None 则默认为当前屏幕截图
+        :param resolved_params: LocateParams 参数
+            grayscale: 是否灰度匹配
+            confidence: 置信度阈值
+            sort_by_confidence: 是否按匹配度排序
+        :return: 匹配结果列表，格式为 list[[x, y, w, h]]，坐标为整数
         """
-        # 若不需要按置信度排序，使用原始pyautogui方法
-        if not sort_by_confidence:
-            return cls._find_with_pyautogui(img, haystack, grayscale, confidence)
+        params: LocateParams = resolved_params['LocateParams']
+
+        # 根据是否需要排序选择底层实现引擎
+        if not params.sort_by_confidence:
+            return cls._find_with_pyautogui(img, haystack, params)
         else:
-            return cls._find_with_opencv(img, haystack, grayscale, confidence)
+            return cls._find_with_opencv(img, haystack, params)
 
     @classmethod
-    def _find_with_pyautogui(cls, img, haystack, grayscale, confidence):
-        """使用pyautogui原始方法查找匹配"""
+    def _find_with_pyautogui(cls, img, haystack, params: LocateParams):
+        """ 使用 PyAutoGUI 引擎进行图像查找 """
         try:
-            boxes = pyautogui.locateAll(img, haystack, grayscale=grayscale, confidence=confidence)
+            boxes = pyautogui.locateAll(img, haystack,
+                                        grayscale=params.grayscale,
+                                        confidence=params.confidence)
 
             try:
                 boxes = list(boxes)
             except pyscreeze.ImageNotFoundException:
                 return []
 
-            # 过滤掉重叠超过一半面积的框
+            # 过滤掉重叠超过一半面积的框 (NMS)
             rects = ComputeIou.nms_xywh(boxes)
 
-            # rects里会有numpy.int64类型的数据，需要做个转换
-            rects2 = []
-            for rect in rects:
-                rects2.append([int(x) for x in rect])
-            return rects2
+            # 统一转换为 Python int 类型 (rects 可能包含 numpy.int64)
+            return [[int(x) for x in rect] for rect in rects]
         except pyautogui.ImageNotFoundException:
-            # 捕获图像未找到异常，返回空列表
             return []
 
     @classmethod
-    def _find_with_opencv(cls, img, haystack, grayscale, confidence):
-        """使用OpenCV查找匹配并按置信度排序"""
+    def _find_with_opencv(cls, img, haystack, params: LocateParams):
+        """ 使用 OpenCV 引擎进行图像查找，支持按置信度排序 """
         try:
-            # 转换图像格式
-            template, search_img = cls._prepare_images(img, haystack, grayscale)
+            # 准备 OpenCV 格式的图像数据
+            template, search_img = cls._prepare_images(img, haystack, params.grayscale)
 
             # 获取匹配结果及置信度
-            matches_with_conf = cls._match_template_with_confidence(template, search_img, confidence)
+            matches_with_conf = cls._match_template_with_confidence(template, search_img, params.confidence)
 
-            # 按置信度排序
+            # 按置信度降序排序
             matches_with_conf.sort(key=lambda x: x[4], reverse=True)
 
-            # 提取位置信息
+            # 提取位置信息 (x, y, w, h)
             boxes = [(x, y, w, h) for x, y, w, h, _ in matches_with_conf]
 
-            # 应用NMS
             if boxes:
+                # NMS 去重
                 rects = ComputeIou.nms_xywh(boxes)
-
-                # 转换为整数类型
-                rects2 = []
-                for rect in rects:
-                    rects2.append([int(x) for x in rect])
-                return rects2
+                return [[int(x) for x in rect] for rect in rects]
             return []
         except Exception as e:
-            # 捕获异常，返回空列表
-            print(f"Error in OpenCV template matching: {e}")
+            logger.error(f"Error in OpenCV template matching: {e}")
             return []
 
     @classmethod
     def _prepare_images(cls, img, haystack, grayscale):
-        """准备图像用于OpenCV模板匹配"""
-        import cv2
-        import numpy as np
-
-        # 如果是文件路径，则读取图像
+        """ 将各种输入的图像源转换为 OpenCV 可处理的 numpy 数组格式 """
+        # 处理 Template (子图)
         if isinstance(img, str):
             template = cv2.imread(img, cv2.IMREAD_COLOR)
         elif isinstance(img, np.ndarray):
             template = img
         else:
-            # 如果是PIL图像，转换为OpenCV格式
+            # PIL Image 转 OpenCV (RGB -> BGR)
             template = np.array(img)
             template = cv2.cvtColor(template, cv2.COLOR_RGB2BGR)
 
+        # 处理 Haystack (大图)
         if isinstance(haystack, str):
             search_img = cv2.imread(haystack, cv2.IMREAD_COLOR)
         elif isinstance(haystack, np.ndarray):
             search_img = haystack
         else:
-            # 如果是PIL图像，转换为OpenCV格式
             search_img = np.array(haystack)
             search_img = cv2.cvtColor(search_img, cv2.COLOR_RGB2BGR)
 
-        # 如果需要灰度图像
+        # 灰度转换处理
         if grayscale:
             if len(template.shape) > 2:
                 template = cv2.cvtColor(template, cv2.COLOR_BGR2GRAY)
@@ -222,33 +256,101 @@ class ImageTools:
 
     @classmethod
     def _match_template_with_confidence(cls, template, search_img, confidence):
-        """使用OpenCV进行模板匹配并返回带置信度的结果"""
-        import cv2
-        import numpy as np
-
-        # 确保置信度设置
-        if confidence is None:
-            confidence = 0.8
-
-        # 执行模板匹配
+        """ 执行 OpenCV 模板匹配并筛选结果 """
+        # 使用相关系数归一化匹配 (TM_CCOEFF_NORMED)
         result = cv2.matchTemplate(search_img, template, cv2.TM_CCOEFF_NORMED)
         w, h = template.shape[1], template.shape[0]
 
-        # 找出所有超过阈值的点
+        # 筛选大于置信度阈值的位置
         locations = np.where(result >= confidence)
         matches = []
 
-        # 收集坐标和置信度
-        for pt in zip(*locations[::-1]):  # 转换为(x, y)格式
+        # 收集结果 (OpenCV 返回坐标是 y, x)
+        for pt in zip(*locations[::-1]):
             x, y = pt
-            conf = float(result[y, x])  # 获取该位置的置信度值
+            conf = float(result[y, x])
             matches.append((x, y, w, h, conf))
 
         return matches
 
 
+class DragParams(XlBaseModel):
+    """ 拖拽与滚动搜索参数
+
+    用于在当前视图未找到目标时，尝试通过拖拽/滚动屏幕来寻找目标。
+    """
+    # 单次拖拽的幅度百分比 (0-100)
+    # 基于当前 Shape 的宽高计算偏移量
+    drag_percent: float = 50.0
+
+    # 拖拽方向
+    # 可选: 'up', 'down', 'left', 'right'
+    # 注意：方向是指鼠标拖拽的方向，通常意味着内容会向反方向滚动
+    drag_direction: Literal['up', 'down', 'left', 'right'] = 'up'
+
+    # 拖拽/滚动的尝试次数
+    # 默认为 0，即仅在当前画面查找，不进行任何拖拽尝试
+    # 原参数名: drag
+    drag_count: int = 0
+
+    # 拖拽动作的持续时间 (秒)
+    # 设置合理的持续时间可以避免操作过快导致滚动惯性过大或未被识别
+    drag_duration: float = 1.0
+
+
+class MouseParams(XlBaseModel):
+    """ 鼠标交互行为参数
+
+    用于控制 move_to, click 等操作的精准度、拟人化偏移以及操作后的反馈等待。
+    """
+
+    # 目标位置 X 轴固定偏移量 (像素)
+    # 正值向右，负值向左
+    x_bias: int = 0
+
+    # 目标位置 Y 轴固定偏移量 (像素)
+    # 正值向下，负值向上
+    y_bias: int = 0
+
+    # 随机偏移半径 (像素)
+    # 在目标点周围的正方形区域内随机偏移，用于模拟人工操作，规避反作弊检测
+    random_bias: int = 0
+
+    # 操作完成后，是否将鼠标移回操作前的原始位置
+    # 适用于 click 点击后复位，或者 move_to 探测后复位
+    # 原参数名: back
+    move_back: bool = False
+
+    # 操作后是否等待画面产生变化
+    # 若为 True，会对比操作前后的截图，直到差异度超过 LocateParams.confidence 设定
+    wait_change: bool = False
+
+    # 操作后的硬性等待时间 (秒)
+    # 即使 wait_change 满足了，也会继续 sleep 这么多秒
+    wait_seconds: float = 0
+
+
+class WaitParams(XlBaseModel):
+    """ 等待与超时控制参数
+
+    用于 wait_img, wait_text 等轮询查找函数。
+    """
+
+    # 总超时时间 (秒)
+    # None 表示无限等待，直到目标出现
+    # 原参数名: limit
+    timeout: float | None = None
+
+    # 轮询检测的间隔时间 (秒)
+    # 决定了查找频率，值越小响应越快但 CPU 占用越高
+    interval: float = 1.0
+
+
 class _AnShapeBasic(UserDict):
-    """ 基本你的初始化、保存等模块 """
+    """ 形状基础类
+
+    负责底层数据结构管理、图像/像素获取、坐标转换以及核心的参数解析逻辑。
+    """
 
     def __1_构建(self):
         pass
@@ -265,22 +367,30 @@ class _AnShapeBasic(UserDict):
             pixel，中心点的像素值
 
             shot，这是特指程序运行中实时截图获取的动态快照图片
-        :param parent:
+        :param parent: 父节点对象
+            用于构建层级关系，实现参数继承 (get_parent_argv) 和 相对坐标计算。
         """
         super().__init__(initialdata)
         self.parent = parent or None
 
     def update_data(self, *, shot=False):
-        """ 更新衍生字段数据 """
-        # 1 补充 points
+        """ 更新衍生字段数据
+
+        根据核心的 xywh 或 points 数据，自动计算并更新 center, ltrb 等衍生数据。
+
+        :param shot: 是否重新截取当前区域的屏幕快照
+        """
+        # 1. 补充 points (如果只有 xywh)
         if 'xywh' in self.data and 'points' not in self.data:
             self.data['shape_type'] = 'rectangle'
             l, t, r, b = xywh2ltrb(self.data['xywh'])
             self.data['points'] = [[l, t], [r, b]]
-        # 2 外接矩形 xywh
+
+        # 2. 根据 points 反推外接矩形 xywh
         elif 'points' in self.data:
             pts = self.data['points']
             shape_type = self.data['shape_type'] or 'rectangle'
+
             if shape_type in ('rectangle', 'polygon'):
                 pts_array = np.array(pts)
                 left = int(pts_array[:, 0].min())
@@ -292,55 +402,63 @@ class _AnShapeBasic(UserDict):
                 x, y = pts[0]
                 r = ((x - pts[1][0]) ** 2 + (y - pts[1][1]) ** 2) ** 0.5
                 ltrb = [round_int(v) for v in [x - r, y - r, x + r, y + r]]
-            # 把ltrb转换为xywh
+
+            # 将 ltrb 转换为 xywh
             self.data['xywh'] = ltrb2xywh(ltrb)
 
-        # 3 中心点
+        # 3. 更新中心点 center
         if 'xywh' in self.data:
             xywh = self['xywh']
             self.data['center'] = [xywh[0] + xywh[2] // 2, xywh[1] + xywh[3] // 2]
 
-        # 4 图片数据
+        # 4. 更新图片数据 (img)
         if shot:
             self.data['img'] = self.shot()
         elif 'xywh' in self.data and self.parent and self.parent.get('img') is not None:
+            # 从父节点图片中裁剪
             ltrb = xywh2ltrb(self.data['xywh'])
             self.data['img'] = xlcv.get_sub(self.parent['img'], ltrb)
 
-        # 5 像素数据
+        # 5. 更新像素数据 (pixel)
         if 'center' in self.data and self.parent and self.parent.get('img') is not None:
-            # 更新pixel数据
             w, h = self.data['xywh'][2:]
-            self.data['pixel'] = tuple(self.data['img'][h // 2, w // 2].tolist()[::-1])
+            if w > 0 and h > 0:
+                # 获取中心点的颜色值 (BGR 转 RGB 或保持原样，视 xlcv 实现而定，这里保持原逻辑倒序)
+                self.data['pixel'] = tuple(self.data['img'][h // 2, w // 2].tolist()[::-1])
 
     def move(self, dx, dy, *, shot=True):
-        """ 移动当前位置 """
+        """ 移动当前形状的位置
+
+        :param dx: X轴偏移量
+        :param dy: Y轴偏移量
+        :param shot: 移动后是否更新快照
+        """
         if 'points' in self:
-            # 调整points中所有点的坐标
+            # 调整 points 中所有点的坐标
             for point in self['points']:
                 point[0] += dx
                 point[1] += dy
         elif 'xywh' in self:
-            # 调整xywh坐标
+            # 调整 xywh 坐标
             self['xywh'][0] += dx
             self['xywh'][1] += dy
 
-        # 移动后更新图像数据
+        # 移动后更新图像及衍生数据
         self.update_data(shot=shot)
 
     def read_lmshape(self, lmshape):
-        """
-        将labelme格式的shape字典改为该任务特有的字典结构
-        """
-        # 1 解析原label为字典
+        """ 解析 labelme 格式的 shape 字典 """
+        # 1. 解析 label 字段 (可能是 JSON 字符串)
         # 如果是来自普通的label，会把原文本自动转换为text字段。如果是来自xllabelme，则一般默认就是字典值，带text字段。
         if isinstance(lmshape['label'], str):
             anshape = DictTool.json_loads(lmshape['label'], 'text')
         else:
             anshape = lmshape['label']
-        anshape.update(DictTool.sub(lmshape, ['label']))  # 因为原本的label被展开成字典了，这里要删掉label
 
-        # 2 更新图像相关数据
+        # 2. 合并数据，移除原 label 字段
+        anshape.update(DictTool.sub(lmshape, ['label']))
+
+        # 3. 更新自身数据
         self.update(anshape)
         self.update_data(shot=False)
 
@@ -348,13 +466,12 @@ class _AnShapeBasic(UserDict):
         pass
 
     def convert_to_view(self, mode='inner', *, shot=False):
-        """ 将这个shape升级为一个view对象
+        """ 将当前 Shape 升级为 View 对象 (包含子元素)
 
-        :param mode: 初始化shapes所用的模式
-            inner，默认，将parent中几何关系被self包含的都归到子shapes中
-            empty, 空shapes
-            ocr, 使用ocr来生成初始的shapes
-        :param shot: 是否更新以当前动态图片的数据存储到参照图片
+        :param mode: 初始化模式
+            'inner': 包含几何上位于自身内部的子元素
+            'ocr': 使用 OCR 识别内部文本生成子元素
+            'empty': 空 View
         """
         view = AnView(parent=self.parent)
         view.data = self.data
@@ -380,22 +497,23 @@ class _AnShapeBasic(UserDict):
         xlcv.write(img, impath)
 
     def save_image(self, region_folder, view_name=None, timetag=None):
-        """ 保存当前快照图片 """
+        """ 保存当前形状的快照 """
         self.raw_save_image(self.shot(), region_folder, view_name, timetag)
 
     @classmethod
     def _save_view(cls, view, region_folder, view_name=None, timetag=None):
         timetag_ = datetime.datetime.now().strftime('%Y%m%d_%H%M%S_%f')[:-3]
-        if not view_name:  # 未输入则用时间戳代替
+        if not view_name:
             view_name = timetag_
-        elif timetag:  # 如果指定了时间戳参数，则强制加上时间戳前缀
+        elif timetag:
             view_name = timetag_ + view_name
 
         impath = XlPath(region_folder) / f'{view_name}.jpg'
         view.save_labelme_file(impath)
 
     def save_view(self, region_folder, view_name=None, timetag=None):
-        """ 保存当前视图（即保存图片和对应的标注数据） """
+        """ 保存当前视图 (包含图片和标注数据) """
+        # 如果自身不是 View，先转换为 OCR 模式的 View
         view = self if isinstance(self, AnView) else self.convert_to_view('ocr', shot=True)
         self._save_view(view, region_folder, view_name, timetag)
 
@@ -403,8 +521,10 @@ class _AnShapeBasic(UserDict):
         pass
 
     def get_parent_argv(self, arg_name, cur_value=None):
-        """ 查找arg_name的配置值
-        从当前节点往父节点找，找到第1个非None值作为配置
+        """ 级联查找参数配置
+
+        从当前节点开始，向上级 Parent 查找第一个非 None 的配置值。
+        这是实现 "Parent 配置继承" 的基础。
         """
         cur_shape = self
         while cur_value is None:
@@ -417,19 +537,55 @@ class _AnShapeBasic(UserDict):
                 cur_shape = cur_shape.parent
         return cur_value
 
-    def get_abs_point(self, point):
-        """
-        将相对坐标转换为绝对坐标
+    def resolve_model(self, model_instance: BaseModel) -> BaseModel:
+        """ 解析 Pydantic 模型，融合继承逻辑
 
-        :param point: 相对于当前节点的坐标，默认为None（使用自身中心点）
-        :return: 绝对坐标 [x, y]
-        """
-        point = point.copy()
+        策略优先级：
+        1. 函数调用时显式传入的参数 (检查 model_fields_set)
+        2. 父节点 (Parent) 的配置 (检查 get_parent_argv)
+        3. 模型的默认值 (Model Default)
 
-        # 向上遍历所有父节点，累加偏移量
+        :param model_instance: 由 @resolve_params 解析出的初步模型实例
+        :return: 融合了继承逻辑后的新模型实例
+        """
+        # 复制模型以避免污染原始对象
+        new_model = model_instance.model_copy()
+
+        for field_name in model_instance.model_fields.keys():
+            # 1. 如果用户显式传入了参数，直接使用用户的设定，跳过继承查找
+            if field_name in model_instance.model_fields_set:
+                continue
+
+            # 2. 尝试从父节点继承配置
+            # 注意：父节点的 key 必须与 model 的 field_name 一致才能被继承
+            parent_val = self.get_parent_argv(field_name)
+
+            # 3. 如果父节点有配置，则覆盖模型的默认值
+            if parent_val is not None:
+                setattr(new_model, field_name, parent_val)
+
+        return new_model
+
+    def get_abs_point(self, point=None):
+        """ 将相对坐标转换为屏幕绝对坐标
+
+        :param point: [x, y] 坐标点
+            默认为 None，使用当前形状的中心点 (self['center'])。
+            注意：这里的坐标系是相对于**父节点 (Parent) 左上角**的。
+            例如：self['xywh'] = [10, 10, 50, 50]，意味着当前形状位于父节点 (10, 10) 的位置。
+        :return: [abs_x, abs_y] 屏幕绝对坐标
+        """
+        if point is None:
+            # 默认为自身中心点 (已经是在 Parent 坐标系下)
+            point = self['center'].copy() if 'center' in self else [0, 0]
+        else:
+            # 确保不修改原列表
+            point = list(point)
+
+        # 向上遍历所有父节点，累加父节点的左上角偏移量
         current = self
         while current.parent and current.parent.get('xywh'):
-            # 父节点的xywh格式为[x, y, width, height]
+            # 父节点的 xywh 格式为 [x, y, width, height]
             x, y = current.parent['xywh'][:2]
             # 将父节点的偏移量添加到绝对坐标
             point[0] += x
@@ -440,7 +596,7 @@ class _AnShapeBasic(UserDict):
         return point
 
     def total_name(self):
-        """ 按父节点 text1/text2 的形式组织的完整text内容 """
+        """ 获取形状的全路径名称 (e.g., "Screen/Window/Button") """
         names = []
         cur = self
         while cur:
@@ -452,8 +608,7 @@ class _AnShapeBasic(UserDict):
         pass
 
     def shot(self):
-        """ 截取当前的快照画面 """
-        # 计算绝对坐标下的xywh
+        """ 截取当前形状区域的屏幕快照 """
         x, y = self.get_abs_point(self['xywh'][:2])  # 左上角相对坐标转绝对坐标
         w, h = self['xywh'][2:]  # 宽度和高度
         # logger.info(f'{x} {y} {w} {h}')
@@ -461,430 +616,635 @@ class _AnShapeBasic(UserDict):
         return xlpil.to_cv2_image(pil_img)
 
     def get_pixel(self):
-        """ 获得当前中心点的像素值
+        """ 获取当前形状中心点的像素值 (RGB)
 
-         官方pyautogui.pixel版本，在windows有时候会出bug
+		 官方pyautogui.pixel版本，在windows有时候会出bug
          OSError: windll.user32.ReleaseDC failed : return 0
-        """
+		"""
         w, h = self['xywh'][2:]
         shot = self.shot()
+        # 获取中心点颜色，并处理通道顺序 (BGR -> RGB)
+        # 注意：shot 是 cv2 image (BGR)，tolist()[::-1] 转换为 RGB
         return tuple(shot[h // 2, w // 2].tolist()[::-1])
 
 
 class _AnShapePupil(_AnShapeBasic):
-    """ 基础操作功能 """
+    """ 基础交互操作类
 
-    def __1_ocr识别(self):
-        pass
+    包含 OCR 识别、鼠标移动、点击、拖拽等原子操作。
+    所有操作均通过 @resolve_params 接收统一的参数模型。
+    """
+
+    # --- OCR 相关功能 ---
 
     def ocr_text(self):
+        """ 识别当前区域的单行文本 """
         text = get_xlapi().rec_singleline(self.shot())
         return text
 
     def ocr_value(self):
+        """ 识别并返回第一个数值 """
         vals = self.ocr_values()
         return vals[0] if vals else 0
 
     def ocr_values(self):
+        """ 识别当前区域内的所有数值 """
+
         def parse_val(v):
             return float(v) if '.' in v else int(v)
 
         text = self.ocr_text()
-        vals = re.findall(r'\d+', text) or []
-        vals = [parse_val(v) for v in vals]
-        return vals
+        vals = re.findall(r'\d+(?:\.\d+)?', text) or []
+        return [parse_val(v) for v in vals]
 
     def __2_基础操作(self):
         pass
 
-    def move_to(self, *, random_bias=None):
-        """ 移动鼠标到该形状的中心位置，支持随机偏移
+    @resolve_params(MouseParams, mode='pass')
+    def move_to(self, **resolved_params):
+        """ 移动鼠标到该形状的中心位置
 
-        :param int random_bias: 允许在一定范围内随机偏移目标坐标
+        :param resolved_params: 包含 MouseParams
+            - x_bias, y_bias: 目标位置的固定修正
+            - random_bias: 随机扰动范围
+            - move_back: 移动过去后是否立刻移回原位 (类似"探一下"或悬停动作)
+            - wait_seconds: 移动后的停留时间
+        :return: 移动到的目标绝对坐标 [x, y]
         """
-        # 0 检索配置参数
-        random_bias = self.get_parent_argv('random_bias', random_bias) or 0
+        # 1. 解析参数
+        params: MouseParams = self.resolve_model(resolved_params['MouseParams'])
 
-        # 1 计算出相对根节点的目标point位置
+        # 2. 计算目标位置 (含固定偏移)
         point = self.get_abs_point(self['center'])
+        point[0] += params.x_bias
+        point[1] += params.y_bias
 
-        # 2 添加随机偏移
-        if random_bias:
-            point[0] += random.randint(-random_bias, random_bias)
-            point[1] += random.randint(-random_bias, random_bias)
+        # 3. 应用随机偏移 (拟人化)
+        if params.random_bias:
+            point[0] += random.randint(-params.random_bias, params.random_bias)
+            point[1] += random.randint(-params.random_bias, params.random_bias)
 
-        # 3 执行鼠标移动
-        with get_autogui_lock():  # 全局ui锁，避免跟微信同时操作等冲突问题
-            pyautogui.moveTo(*point)
-        return point
-
-    def click(self, x_bias=0, y_bias=0, *, random_bias=None, back=None, wait_change=None, wait_seconds=None):
-        """ 点击这个shape
-
-        :param x_bias: 原本中心点击位置，增设一个偏移量
-        :param y_bias: y轴偏移量
-        :param int random_bias: 允许在一定范围内随机点击点
-        :param bool back: 是否点击后鼠标移回原坐标
-        :param wait_change: 点击后，等待画面产生变化，才结束函数
-            注意这个只是比较局部区域图片变化，不是全图的变化
-        :param wait_seconds: 点击后要继续等待若干秒再退出函数
-        """
-        # 0 检索配置参数
-        random_bias = self.get_parent_argv('random_bias', random_bias) or 0
-        back = self.get_parent_argv('back', back) or False
-        wait_change = self.get_parent_argv('wait_change', wait_change) or False
-        wait_seconds = self.get_parent_argv('wait_seconds', wait_seconds) or 0
-
-        # 1 计算出相对根节点的目标point位置
-        point = self.get_abs_point(self['center'])
-        if x_bias or y_bias:
-            point[0] += x_bias
-            point[1] += y_bias
-
-        # 2 添加随机偏移
-        if random_bias:
-            point[0] += random.randint(-random_bias, random_bias)
-            point[1] += random.randint(-random_bias, random_bias)
-
-        # 3 鼠标移动
+        # 4. 执行移动
         with get_autogui_lock():
             origin_point = pyautogui.position()
-            if wait_change:
-                before_click_shot = self.shot()
-            pyautogui.click(*point)
-            if back:
-                pyautogui.moveTo(*origin_point)  # 恢复鼠标原位置
+            pyautogui.moveTo(*point)
 
-        # 4 等待
-        if wait_change:
-            color_tolerance = self.get_parent_argv('color_tolerance', None) or 10
-            confidence = self.get_parent_argv('confidence', None) or 0.95
-            func = lambda: ImageTools.img_distance(before_click_shot, self.shot(),
-                                                   color_tolerance=color_tolerance) > confidence
-            xlwait(func)
-        if wait_seconds:
-            time.sleep(wait_seconds)
+            # 如果配置了 move_back，移动后立即归位
+            if params.move_back:
+                pyautogui.moveTo(*origin_point)
+
+        # 5. 后置硬等待
+        if params.wait_seconds:
+            time.sleep(params.wait_seconds)
 
         return point
 
-    def drag_to(self, percent=50, direction='up', duration=None, **kwargs):
-        """ 在当前shape里拖拽
+    @resolve_params(MouseParams, LocateParams, WaitParams, mode='pass')
+    def click(self, **resolved_params):
+        """ 点击当前形状
 
-        :param int percent: 拖拽比例，范围0-100，表示滚动区域的百分比
-        :param str direction: 滚动方向，可选 'up', 'down', 'left', 'right'
-        :param float duration: 拖拽动作持续时间(秒)
+        集成了多种参数模型，提供精细化的点击控制：
+        1. MouseParams: 控制点击位置偏移、随机抖动、点击后复位、是否等待变化。
+        2. LocateParams: 控制 wait_change 时的图像对比算法 (灰度、容差、置信度)。
+        3. WaitParams: 控制 wait_change 时的超时时间 (timeout) 和检测频率 (interval)。
+
+        :param resolved_params: 包含 MouseParams, LocateParams, WaitParams
         """
-        # 0 检索配置参数
-        drag_duration = self.get_parent_argv('drag_duration', duration) or 1
+        # 1. 解析核心点击参数
+        mouse_params: MouseParams = self.resolve_model(resolved_params['MouseParams'])
 
-        # 1 计算起点和终点位置
+        # 2. 计算点击坐标
+        point = self.get_abs_point(self['center'])
+
+        # 应用固定偏移
+        point[0] += mouse_params.x_bias
+        point[1] += mouse_params.y_bias
+
+        # 应用随机偏移 (拟人化)
+        if mouse_params.random_bias:
+            point[0] += random.randint(-mouse_params.random_bias, mouse_params.random_bias)
+            point[1] += random.randint(-mouse_params.random_bias, mouse_params.random_bias)
+
+        # 3. 执行点击操作 (加锁保护)
+        with get_autogui_lock():
+            origin_point = pyautogui.position()
+
+            # 如果配置了等待画面变化，需在点击前截图
+            before_click_shot = None
+            if mouse_params.wait_change:
+                before_click_shot = self.shot()
+
+            pyautogui.click(*point)
+
+            # 点击后复位 (悬停/探测模式)
+            if mouse_params.move_back:
+                pyautogui.moveTo(*origin_point)
+
+        # 4. 后置处理：等待画面变化
+        if mouse_params.wait_change and before_click_shot is not None:
+            # 解析辅助参数
+            locate_params: LocateParams = self.resolve_model(resolved_params['LocateParams'])
+            wait_params: WaitParams = self.resolve_model(resolved_params['WaitParams'])
+
+            def check_changed():
+                # 计算点击前后的差异度
+                # ImageTools.img_distance 会从 resolved_params 中提取 LocateParams
+                diff = ImageTools.img_distance(
+                    before_click_shot,
+                    self.shot(),
+                    **resolved_params
+                )
+
+                # 判定逻辑：差异度 > (1 - 相似度阈值)
+                # 例如 confidence=0.95，则 diff > 0.05 视为已变化
+                return diff > (1.0 - locate_params.confidence)
+
+            # 使用 WaitParams 控制等待的超时和频率
+            # 这样用户可以通过 timeout=10 来控制最大等待时间
+            xlwait(
+                check_changed,
+                timeout=wait_params.timeout,
+                interval=wait_params.interval
+            )
+
+        # 5. 后置处理：硬性等待
+        # 即使 wait_change 结束了，可能还需要额外 sleep 一会儿
+        if mouse_params.wait_seconds:
+            time.sleep(mouse_params.wait_seconds)
+
+        return point
+
+    @resolve_params(DragParams, mode='pass')
+    def drag_to(self, drag_percent=None, drag_direction=None, **resolved_params):
+        """ 在当前形状区域内执行拖拽操作
+
+        通常用于滚动屏幕查找目标。
+        """
+        params: DragParams = self.resolve_model(resolved_params['DragParams'])
+        if drag_percent is not None: params.drag_percent = drag_percent
+        if drag_direction is not None: params.drag_direction = drag_direction
+
+        # 1. 计算起止点
         x, y = self.get_abs_point(self['center'])
         width, height = self['xywh'][2:]
 
-        # 限制百分比在0-100之间
-        percent = max(0, min(100, percent))
-        offset = percent / 2  # 从中心点偏移的百分比
+        # 限制百分比范围
+        percent = max(0.0, min(100.0, params.drag_percent))
+        offset = percent / 2.0
 
-        # 根据方向和百分比计算起点和终点
-        if direction == 'up':
-            # 从下往上拖
+        # 根据方向计算起点和终点
+        # drag 'up' -> 鼠标向上拖 -> 内容向下滚动
+        if params.drag_direction == 'up':
             start_point = [x, y + int(height * offset / 100)]
             end_point = [x, y - int(height * offset / 100)]
-        elif direction == 'down':
-            # 从上往下拖
+        elif params.drag_direction == 'down':
             start_point = [x, y - int(height * offset / 100)]
             end_point = [x, y + int(height * offset / 100)]
-        elif direction == 'left':
-            # 从右往左拖
+        elif params.drag_direction == 'left':
             start_point = [x + int(width * offset / 100), y]
             end_point = [x - int(width * offset / 100), y]
-        elif direction == 'right':
-            # 从左往右拖
+        elif params.drag_direction == 'right':
             start_point = [x - int(width * offset / 100), y]
             end_point = [x + int(width * offset / 100), y]
         else:
-            raise ValueError("方向必须是 'up', 'down', 'left', 'right' 之一")
+            raise ValueError(f"Unknown drag direction: {params.drag_direction}")
 
-        # 2 执行拖拽操作
+        # 2. 执行拖拽
         with get_autogui_lock():
             pyautogui.moveTo(*start_point)
-            pyautogui.dragTo(*end_point, drag_duration, **kwargs)
+            # dragTo(x, y, duration, ...)
+            pyautogui.dragTo(*end_point, duration=params.drag_duration)
 
         # 本来有想过返回拖拽前后图片是否有变化，但是这个会较影响性能，还是另外设计更合理
 
 
 class AnShape(_AnShapePupil):
-    """ 高级交互功能 """
+    """ 高级交互功能类
+
+    集成了图像查找、文本查找以及基于查找结果的组合交互操作。
+    """
 
     def __1_图像类(self):
         pass
 
-    def find_img(self,
-                 dst=None,
-                 *,
-                 part=None,
-                 drag=0,
-                 drag_percent=50,
-                 drag_direction='up',
-                 drag_duration=None,
-                 color_tolerance=None,
-                 grayscale=None,
-                 confidence=None,
-                 sort_by_confidence=False,
-                 ):
+    @resolve_params(LocateParams, DragParams, mode='pass')
+    def find_img(self, dst=None, *, part=None, **resolved_params):
         """ 查找图像匹配
 
+        支持全图匹配（判定当前区域是否为目标图片）和局部查找（在当前区域内寻找目标子图）。
+        集成 DragParams 支持在查找失败时自动拖拽/滚动重试。
+
         :param dst: 匹配目标
-            None，默认自匹配，使用self['img']
-        :param part:
-            False, 全匹配模式，比如图片就是指整张图匹配，文本指整张图的文本
-            True, 局部匹配模式，比如图片是指局部匹配到图片，文本指局部文本行匹配
-            None, 根据上下文智能判断类型。
-        :param int drag: 是否支持在该区域滚动检索，以及支持的拖拽上限次数
-        :param color_tolerance: 每个像素允许的差值
-            注意以下3个图像配参数，不要在函数里设默认值，函数里优先级是高于父节点设置参数的
-            默认值只能在代码里get_parent_argv后再or默认值
-        :param grayscale: 是否转成灰度图对比，默认不转。
-        :param confidence: 置信度，距离。默认95%即要求95%区域的相同性。
+            - None: 默认模式，匹配自身存储的图片 (self['img'])，通常用于校验 "当前界面是否仍是该Shape"
+            - str (属性名): 引用自身的某个子属性 (如 self['on_image'])
+            - str (路径) / Image: 外部图片路径或对象
+            - AnShape: 另一个 Shape 对象
+        :param part: 匹配模式
+            - None: 智能判断。若目标尺寸小于当前区域，自动视为局部匹配 (True)
+            - False: 全匹配模式。计算整体相似度，返回 self 或 None
+            - True: 局部匹配模式。在当前区域内搜索子图，返回 [AnShape, ...] 列表
+        :param resolved_params:
+            - LocateParams: 控制匹配算法 (灰度、置信度、容差)
+            - DragParams: 控制查找失败时的拖拽重试策略
         :return:
-            全匹配模式返回None或self
-            局部匹配返回匹配的shapes列表
+            - 全匹配模式: 成功返回 self，失败返回 None
+            - 局部匹配模式: 返回 AnShape 对象列表 (空列表表示未找到)
         """
-        # 1 匹配目标
+        # 1. 解析参数
+        locate_params: LocateParams = self.resolve_model(resolved_params['LocateParams'])
+        drag_params: DragParams = self.resolve_model(resolved_params['DragParams'])
+
+        # 2. 归一化匹配目标 (dst) 和 模式 (part)
         default_text = ''
+        img = None  # 目标图像 (Needle)
+
+        # --- 目标解析逻辑 ---
         if dst is None:
             assert part is not True, '如果要检索子图，必须用parent.find_img(children)，输入子图参数'
             dst, part = self['img'], False
-            default_text = self['text']
-        elif isinstance(dst, str):  # XlPath不是str类型，利用这个特性可以输入图片路径用xlcv读取
-            """ 如果输入字符串，表示这是一个相对当前self的view路径名 """
-            dst = self[str]
+            default_text = self.get('text', '')
 
-        if isinstance(dst, AnShape):
-            default_text = dst['text']
+        elif isinstance(dst, str):
+            # 引用自身属性 (如 self['checked_state'])
+            dst_obj = self[dst]
+            if isinstance(dst_obj, _AnShapeBasic):
+                img = dst_obj['img']
+                default_text = dst_obj.get('text', '')
+            else:
+                img = xlcv.read(dst_obj)
+
+        elif isinstance(dst, _AnShapeBasic):
+            # 传入了另一个 AnShape 对象
             img = dst['img']
-            img_wh = dst['xywh'][:2]
+            default_text = dst.get('text', '')
+            # 智能判断 part: 如果传入的 shape 宽高与自身不一致，默认视为局部搜索
             if part is None:
-                part = self['xywh'][2:] != dst['xywh'][:2]
+                # xywh[2:] 是宽高 [w, h]
+                part = self['xywh'][2:] != dst['xywh'][2:]
+
         else:
-            # 否则当作输入自定义图片了，用xlcv读取
+            # 传入了图片路径或图片对象
             img = xlcv.read(dst)
-            img_wh = list(img.shape[1::-1])
+            if part is None:
+                # 比较图片尺寸与当前区域尺寸
+                h, w = img.shape[:2]
+                self_w, self_h = self['xywh'][2:]
+                part = (w != self_w) or (h != self_h)
 
-        if part is None:
-            # 根据wh判断part
-            part = self['xywh'][2:] != img_wh
+        # 确保 img 已加载
+        if img is None:
+            if isinstance(dst, (np.ndarray, str)):  # 二次确认
+                img = xlcv.read(dst)
+            else:
+                # 回退到使用 self['img']
+                img = self['img']
 
-        # 配置参数
-        color_tolerance = self.get_parent_argv('color_tolerance', color_tolerance) or 10
-        grayscale = self.get_parent_argv('grayscale', grayscale) or False
-        confidence = self.get_parent_argv('confidence', confidence) or 0.95
+        # 3. 执行匹配逻辑
 
-        # 2 完全匹配场景（该场景不支持drag参数）
+        # --- 场景 A: 全图/完全匹配 (不支持拖拽) ---
         if not part:
-            # 这种情况不用pyautogui的接口，用我自带的函数够了
-            conf = 1 - ImageTools.img_distance(self.shot(), img, color_tolerance=color_tolerance)
-            logger.info(f'{self.total_name()} {round(conf, 4)}')
-            return self if conf > confidence else None
+            current_shot = self.shot()
+            # 复用 ImageTools.img_distance 计算差异度
+            diff = ImageTools.img_distance(current_shot, img, locate_params)
 
-        # 3 局部匹配场景
+            # 判定：相似度 = 1 - 差异度
+            conf = 1.0 - diff
+            logger.info(f'{self.total_name()} similarity: {round(conf, 4)}'
+                        # f' confidence: {round(locate_params.confidence, 4)}'
+                        )
+
+            return self if conf > locate_params.confidence else None
+
+        # --- 场景 B: 局部匹配 (支持 DragParams 拖拽重试) ---
+
         def find_subimg():
-            # 单帧检索
-            rects = ImageTools.base_find_img(img, self.shot(), grayscale=grayscale,
-                                             confidence=confidence, sort_by_confidence=sort_by_confidence)
-            # 把rects转成AnShape类型，每个rect都是[x, y, w, h]的list，不过其有numpy格式，要转成int类型
+            """ 单次查找子图 """
+            # 调用 ImageTools.base_find_img 获取所有匹配位置
+            # rects 格式: [[x, y, w, h], ...] (相对坐标)
+            rects = ImageTools.base_find_img(img, self.shot(), locate_params)
+
+            # 将结果封装为 AnShape 对象
             shapes = []
             for rect in rects:
-                sp = AnShape({'text': default_text, 'xywh': [int(x) for x in rect]}, parent=self)
-                sp.update_data(shot=True)
+                sp = AnShape({'text': default_text, 'xywh': rect}, parent=self)
+                sp.update_data(shot=True)  # 立即生成快照
                 shapes.append(sp)
             return shapes
 
-        # 有无drag都走这套逻辑
-        k, shapes = 0, find_subimg()
-        while not shapes and k < drag:
-            self.drag_to(drag_percent, drag_direction, drag_duration)
+        # 第一次查找
+        shapes = find_subimg()
+
+        # 如果未找到，且配置了拖拽次数，则进入重试循环
+        k = 0
+        while not shapes and k < drag_params.drag_count:
+            # 执行拖拽
+            self.drag_to(drag_params)
+
+            # 拖拽后重新查找
             shapes = find_subimg()
             k += 1
 
         return shapes
 
-    def wait_img(self, dst=None, *, limit=None, interval=None, **kwargs):
-        """ 等到目标匹配图片出现 """
-        interval = self.get_parent_argv('wait_interval', interval) or 1
-        limit = self.get_parent_argv('limit', limit)
-        return xlwait(lambda: self.find_img(dst, **kwargs), limit=limit, interval=interval)
+    @resolve_params(WaitParams, LocateParams, DragParams, mode='pass')
+    def wait_img(self, dst=None, **resolved_params):
+        """ 等待目标图片出现
 
-    def waitleave_img(self, dst=None, *, limit=None, interval=None, **kwargs):
-        """ 等到目标匹配图片离开（不再出现） """
-        interval = self.get_parent_argv('wait_interval', interval) or 1
-        limit = self.get_parent_argv('limit', limit)
-        return xlwait(lambda: not self.find_img(dst, **kwargs), limit=limit, interval=interval)
+        :param dst: 匹配目标
+        :param resolved_params:
+            - WaitParams: 控制超时(timeout)和检测间隔(interval)
+            - LocateParams & DragParams: 透传给 find_img
+        :return: 成功返回 result (self 或 shapes列表)，超时抛出异常
+        """
+        wait_params: WaitParams = self.resolve_model(resolved_params['WaitParams'])
+
+        # 使用 xlwait 轮询
+        return xlwait(
+            lambda: self.find_img(dst, **resolved_params),
+            timeout=wait_params.timeout,
+            interval=wait_params.interval
+        )
+
+    @resolve_params(WaitParams, LocateParams, DragParams, mode='pass')
+    def waitleave_img(self, dst=None, **resolved_params):
+        """ 等待目标图片消失 (不再能匹配到)
+
+        参数同 wait_img
+        """
+        wait_params: WaitParams = self.resolve_model(resolved_params['WaitParams'])
+
+        # 逻辑取反：直到 find_img 返回 None 或 空列表
+        return xlwait(
+            lambda: not self.find_img(dst, **resolved_params),
+            timeout=wait_params.timeout,
+            interval=wait_params.interval
+        )
 
     def __2_文本类(self):
         """ find_系列统一返回shapes匹配列表 """
         pass
 
-    def find_text(self,
-                  dst=None,
-                  *,
-                  part=True,
-                  drag=0,
-                  drag_percent=50,
-                  drag_direction='up',
-                  drag_duration=None,
-                  ):
+    @resolve_params(DragParams, mode='pass')
+    def find_text(self, dst=None, *, part=True, **resolved_params):
         """ 查找文本匹配
 
-        :param dst: 匹配目标
-            None，默认自匹配，使用self['img']
-        :param part:
-            False, 全匹配模式，比如图片就是指整张图匹配，文本指整张图的文本
-            True, 局部匹配模式，比如图片是指局部匹配到图片，文本指局部文本行匹配
-        :param int drag: 是否支持在该区域滚动检索，以及支持的拖拽上限次数
+        :param dst: 匹配目标 (正则 Pattern)
+            - None: 默认使用 self['text'] 作为匹配规则
+            - AnShape: 使用 dst['text']
+            - str: 直接作为正则 pattern
+        :param part: 匹配模式
+            - False: 全匹配模式。识别当前 Shape 区域内的整体文本，匹配 pattern。返回 self 或 None。
+            - True: (默认) 局部匹配模式。调用 OCR 解析当前区域内的文本布局，返回匹配 pattern 的子 Shape 列表。
+        :param resolved_params: 包含 DragParams (用于局部匹配时的滚动查找)
         :return:
-            全匹配模式返回None或self
-            局部匹配返回匹配的shapes列表
+            - 全匹配模式: 成功返回 self，失败返回 None
+            - 局部匹配模式: 返回 AnShape 对象列表 (空列表表示未找到)
         """
-        # 1 匹配目标
-        if dst is None:
-            pattern = self['text']
-        elif isinstance(dst, AnShape):
-            pattern = dst['text']
-        else:
-            pattern = dst
+        # 1. 解析参数
+        drag_params: DragParams = self.resolve_model(resolved_params['DragParams'])
 
-        # 2 全图匹配
+        # 2. 确定匹配目标 (pattern)
+        if dst is None:
+            pattern = self.get('text', '')
+        elif isinstance(dst, _AnShapeBasic):
+            pattern = dst.get('text', '')
+        else:
+            pattern = str(dst)
+
+        # 3. 全匹配模式 (通常用于断言当前状态，不涉及拖拽)
         if not part:
+            # ocr_text 会截取当前 Shape 区域并调用 OCR
             return self if re.search(pattern, self.ocr_text()) else None
 
-        # 3 局部匹配场景
+        # 4. 局部匹配模式 (支持拖拽重试)
         def find_subtext():
             shapes = []
+            # convert_to_view('ocr') 会触发 OCR 识别并将文本行转换为子 Shape
             sub_view = self.convert_to_view('ocr', shot=True)
             for sp in sub_view.shapes:
-                if re.search(pattern, sp['text']):
+                if re.search(pattern, sp.get('text', '')):
                     shapes.append(sp)
             return shapes
 
-        # 有无drag都走这套逻辑
+        # 首次查找
         k, shapes = 0, find_subtext()
-        while not shapes and k < drag:
-            self.drag_to(drag_percent, drag_direction, drag_duration)
+
+        # 拖拽重试循环
+        while not shapes and k < drag_params.drag_count:
+            self.drag_to(drag_params)
             shapes = find_subtext()
             k += 1
 
         return shapes
 
-    def wait_text(self, dst=None, *, limit=None, interval=None, **kwargs):
-        """ 等到目标匹配文本出现 """
-        interval = self.get_parent_argv('wait_interval', interval) or 1
-        return xlwait(lambda: self.find_text(dst, **kwargs), limit=limit, interval=interval)
+    @resolve_params(WaitParams, DragParams, mode='pass')
+    def wait_text(self, dst=None, **resolved_params):
+        """ 等待目标文本出现
 
-    def waitleave_text(self, dst=None, *, limit=None, interval=None, **kwargs):
-        """ 等到目标匹配文本离开（不再出现） """
-        interval = self.get_parent_argv('wait_interval', interval) or 1
-        return xlwait(lambda: not self.find_text(dst, **kwargs), limit=limit, interval=interval)
+        :param dst: 匹配目标
+        :param resolved_params:
+            - WaitParams: 控制超时和检测间隔
+            - DragParams: 透传给 find_text 用于滚动查找
+        """
+        wait_params: WaitParams = self.resolve_model(resolved_params['WaitParams'])
+
+        return xlwait(
+            lambda: self.find_text(dst, **resolved_params),
+            timeout=wait_params.timeout,
+            interval=wait_params.interval
+        )
+
+    @resolve_params(WaitParams, DragParams, mode='pass')
+    def waitleave_text(self, dst=None, **resolved_params):
+        """ 等待目标文本消失 """
+        wait_params: WaitParams = self.resolve_model(resolved_params['WaitParams'])
+
+        return xlwait(
+            lambda: not self.find_text(dst, **resolved_params),
+            timeout=wait_params.timeout,
+            interval=wait_params.interval
+        )
 
     def __3_查找点击功能(self):
         """ 一些常用情况的简化名称，使用起来更快捷 """
+        pass
 
     @classmethod
-    def _split_kwargs(self, kwargs):
-        # 定义需要传递给 click 方法的参数
-        click_params = ['x_bias', 'y_bias', 'random_bias', 'back', 'wait_change', 'wait_seconds']
-        # 分离参数，click_kwargs 存储给 click 用的参数，find_img_kwargs 存储给 find_img 用的参数
-        find_img_kwargs = {k: v for k, v in kwargs.items() if k not in click_params}
-        click_kwargs = {k: v for k, v in kwargs.items() if k in click_params}
-        return find_img_kwargs, click_kwargs
+    def _try_click(cls, shapes, **resolved_params):
+        """ 辅助方法：尝试点击找到的形状
 
-    @classmethod
-    def _try_click(cls, shapes, **kwargs):
+        :param shapes: find/wait 函数返回的结果 (单个 Shape 或 Shape 列表)
+        :param resolved_params: 包含 MouseParams, LocateParams, WaitParams 等
+            直接透传给 sp.click()，后者会自动提取所需参数
+        """
         if shapes:
+            # 兼容 find_img 返回单个对象(全匹配)或列表(局部匹配)的情况
             sp = shapes[0] if isinstance(shapes, list) else shapes
-            sp.click(**kwargs)
+
+            # sp.click 是被 @resolve_params 装饰的
+            # 这里透传包含所有 Model 的字典，click 内部会自动提取 MouseParams 等
+            sp.click(**resolved_params)
             return sp
 
-    def find_img_click(self, dst=None, **kwargs):
-        find_img_kwargs, click_kwargs = self._split_kwargs(kwargs)
-        shapes = self.find_img(dst, **find_img_kwargs)
-        return self._try_click(shapes, **click_kwargs)
+    @resolve_params(LocateParams, DragParams, MouseParams, WaitParams, mode='pass')
+    def find_img_click(self, dst=None, **resolved_params):
+        """ 查找图片并点击
 
-    def wait_img_click(self, dst=None, **kwargs):
-        wait_img_kwargs, click_kwargs = self._split_kwargs(kwargs)
-        shapes = self.wait_img(dst, **wait_img_kwargs)
-        return self._try_click(shapes, **click_kwargs)
+        组合了 find_img 和 click 的功能。
 
-    def find_text_click(self, dst=None, **kwargs):
-        find_text_kwargs, click_kwargs = self._split_kwargs(kwargs)
-        shapes = self.find_text(dst, **find_text_kwargs)
-        return self._try_click(shapes, **click_kwargs)
+        :param resolved_params:
+            - LocateParams, DragParams: 用于 find_img
+            - MouseParams: 用于 click (控制偏移、复位等)
+            - LocateParams, WaitParams: 用于 click 的 wait_change (可选)
+        """
+        shapes = self.find_img(dst, **resolved_params)
+        return self._try_click(shapes, **resolved_params)
 
-    def wait_text_click(self, dst=None, **kwargs):
-        wait_text_kwargs, click_kwargs = self._split_kwargs(kwargs)
-        shapes = self.wait_text(dst, **wait_text_kwargs)
-        return self._try_click(shapes, **click_kwargs)
+    @resolve_params(WaitParams, LocateParams, DragParams, MouseParams, mode='pass')
+    def wait_img_click(self, dst=None, **resolved_params):
+        """ 等待图片出现并点击 """
+        shapes = self.wait_img(dst, **resolved_params)
+        return self._try_click(shapes, **resolved_params)
+
+    @resolve_params(DragParams, MouseParams, LocateParams, WaitParams, mode='pass')
+    def find_text_click(self, dst=None, **resolved_params):
+        """ 查找文本并点击
+
+        注意：虽然 find_text 本身只需要 DragParams，
+        但为了支持 click 中的 wait_change 功能，这里也引入了 LocateParams 和 WaitParams。
+        """
+        shapes = self.find_text(dst, **resolved_params)
+        return self._try_click(shapes, **resolved_params)
+
+    @resolve_params(WaitParams, DragParams, MouseParams, LocateParams, mode='pass')
+    def wait_text_click(self, dst=None, **resolved_params):
+        """ 等待文本出现并点击 """
+        shapes = self.wait_text(dst, **resolved_params)
+        return self._try_click(shapes, **resolved_params)
 
     def __4_其他高级功能(self):
         pass
 
-    def wait_img_notchange(self, *, limit=None, interval=2, **kwargs):
-        """ 一直等待到图片不再变化，以当前shot为原图，类似find_ mg的基础匹配 """
-        interval = self.get_parent_argv('wait_interval', interval) or 1
-        interval *= 2  # 这个等待可以久一点
+    @resolve_params(WaitParams, LocateParams, mode='pass')
+    def wait_img_notchange(self, **resolved_params):
+        """ 等待直到图片画面不再变化 (画面静止/加载完成)
 
-        # 获取颜色容差参数，默认值为20
-        color_tolerance = self.get_parent_argv('color_tolerance', kwargs.get('color_tolerance')) or 10
-        # 获取置信度参数，默认值为0.05，表示允许5%的变化
-        confidence = self.get_parent_argv('confidence', kwargs.get('confidence')) or 0.95
+        以当前截图为基准，不断对比后续截图，直到差异度小于阈值。
+        常用于等待页面加载完成、动画结束等场景。
+
+        :param resolved_params:
+            - WaitParams: 控制超时(timeout)和检测间隔(interval)
+            - LocateParams: 控制判定"未变化"的相似度阈值 (confidence)
+        """
+        wait_params: WaitParams = self.resolve_model(resolved_params['WaitParams'])
+        locate_params: LocateParams = self.resolve_model(resolved_params['LocateParams'])
+
+        # 特殊逻辑：检测画面静止通常不需要太高频，默认将间隔翻倍
+        # 例如 WaitParams 默认 interval=1.0，这里使用 2.0
+        interval = wait_params.interval * 2
 
         # 初始截图
         prev_shot = self.shot()
 
-        # 定义判断图片是否未变化的函数
         def check_not_change():
             nonlocal prev_shot
             current_shot = self.shot()
-            # 计算图片距离
-            conf = 1 - ImageTools.img_distance(prev_shot, current_shot, color_tolerance=color_tolerance)
-            prev_shot = current_shot
-            return conf >= confidence
 
-        # 使用xlwait等待图片不再变化
-        return xlwait(check_not_change, limit=limit, interval=interval)
+            # 计算前后两帧的差异度
+            # ImageTools.img_distance 支持接收 **resolved_params
+            diff = ImageTools.img_distance(prev_shot, current_shot, **resolved_params)
+
+            # 更新基准图 (滑动窗口对比)
+            prev_shot = current_shot
+
+            # 判定逻辑：
+            # 如果 差异度 < (1 - 相似度阈值)，说明变化很小，认为静止
+            # 例如 confidence=0.95，则 diff < 0.05 视为静止
+            return diff < (1.0 - locate_params.confidence)
+
+        return xlwait(
+            check_not_change,
+            timeout=wait_params.timeout,
+            interval=interval
+        )
 
     def __6_其他一些常见组合使用的封装(self):
         pass
 
-    def is_on(self):
-        """ 判断当前开关是否为开启状态 """
-        # 如果存储的是"off"图像，但当前能匹配到这个图像，说明实际是关闭状态
-        if self['text'].startswith('off'):
-            return not self.find_img()
-        # 否则，如果能匹配到存储的图像（假设是"on"图像），说明是开启状态
+    @resolve_params(LocateParams, DragParams, mode='pass')
+    def is_on(self, **resolved_params):
+        """ 判断当前开关控件是否为开启状态
+
+        逻辑：
+        1. 如果 text 属性以 'off' 开头 (如 'off_switch')：
+           - 能找到图片 -> 实际是关闭状态 -> 返回 False
+           - 找不到图片 -> 实际是开启状态 -> 返回 True
+        2. 其他情况 (默认 text 代表开启状态图片)：
+           - 能找到图片 -> 开启状态 -> 返回 True
+           - 找不到图片 -> 关闭状态 -> 返回 False
+
+        :param resolved_params: 透传给 find_img 用于图像匹配
+        """
+        # 获取自身的文本标签
+        text = self.get('text', '')
+
+        # 调用 find_img 检测当前状态
+        # 显式传递参数模型以支持 locate 和 drag 配置
+        found = self.find_img(**resolved_params)
+
+        if text.startswith('off'):
+            return not found
         else:
-            return self.find_img()
+            return bool(found)
 
-    def turn_on(self, *args, **kwargs):
-        """ 比较个性化，click的衍生功能，对开关类的状态，进行显式确认为'开'状态 """
-        # 通过shape名称，只要不是'off'前缀，默认就是存储了一个打开状态的开关
-        if not self.is_on():
-            self.click(*args, **kwargs)
+    @resolve_params(MouseParams, LocateParams, DragParams, WaitParams, mode='pass')
+    def turn_on(self, **resolved_params):
+        """ 确保开关处于开启状态
 
-    def turn_off(self, *args, **kwargs):
-        """ 进行显式确认为'关'状态 """
-        if self.is_on():
-            self.click(*args, **kwargs)
+        如果当前检测为关闭，则执行点击操作。
 
-    def wait_img_click_leave(self):
-        # 等待目标图片出现，然后不断点击直到目标图片消失
-        self.wait_img()
-        while self.find_img():
-            self.click()
+        :param resolved_params:
+            - MouseParams: 用于 click
+            - LocateParams, DragParams: 用于 is_on 中的检测
+            - WaitParams: 用于 click 的潜在等待
+        """
+        # 1. 检查状态 (复用 resolved_params 中的 Locate/Drag)
+        if not self.is_on(**resolved_params):
+            # 2. 执行点击 (复用 resolved_params 中的 Mouse/Wait)
+            self.click(**resolved_params)
 
-    def if_img_click_leave(self):
-        while self.find_img():
-            self.click()
+    @resolve_params(MouseParams, LocateParams, DragParams, WaitParams, mode='pass')
+    def turn_off(self, **resolved_params):
+        """ 确保开关处于关闭状态 """
+        if self.is_on(**resolved_params):
+            self.click(**resolved_params)
+
+    @resolve_params(WaitParams, LocateParams, DragParams, MouseParams, mode='pass')
+    def wait_img_click_leave(self, dst=None, **resolved_params):
+        """ 经典组合操作：等待出现 -> 点击 -> 直到消失
+
+        常用于处理弹窗广告、确认按钮等需要反复点击直到生效的场景。
+        """
+        # 1. 等待目标出现
+        self.wait_img(dst, **resolved_params)
+
+        # 2. 循环点击直到目标不再被检测到
+        # 注意：这里隐式依赖 find_img，如果 find_img 能找到，就点击
+        while self.find_img(dst, **resolved_params):
+            self.click(**resolved_params)
+
+            # 为了防止死循环过快，可以加一个微小的间隔，或者依赖 click 内部的 wait_seconds
+            # 如果 MouseParams 没有配置 wait_seconds，这里通常不需要额外 sleep，
+            # 因为 find_img 本身有一定耗时
+
+    @resolve_params(LocateParams, DragParams, MouseParams, WaitParams, mode='pass')
+    def if_img_click_leave(self, dst=None, **resolved_params):
+        """ 如果出现 -> 点击 -> 直到消失 (非阻塞版)
+
+        与 wait_img_click_leave 的区别在于：如果起初没找到，直接跳过，不报错不等待。
+        """
+        while self.find_img(dst, **resolved_params):
+            self.click(**resolved_params)
 
 
 class AnView(AnShape):
