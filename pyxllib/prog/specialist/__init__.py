@@ -19,7 +19,7 @@ import time
 from statistics import mean
 from threading import Thread
 import functools
-from typing import Type, Literal
+from typing import Type, Literal, Dict, Tuple
 
 from pyxllib.prog.lazyimport import lazy_import
 
@@ -389,7 +389,7 @@ class XlBaseModel(BaseModel):
 
 def resolve_params(*models: Type[BaseModel], mode: Literal['strict', 'extra', 'pass'] = 'strict'):
     """
-    一个智能参数解析与注入的装饰器，通过 mode 参数控制未知参数的行为。
+    一个智能解析与Pydantic模型的参数注入装饰器
 
     Args:
         *models: 一个或多个 Pydantic 模型类，用于解析参数。
@@ -402,68 +402,115 @@ def resolve_params(*models: Type[BaseModel], mode: Literal['strict', 'extra', 'p
 
     详细文档：https://www.yuque.com/xlpr/pyxllib/resolve_params
     """
+
+    # --- 0. 预计算阶段 (Pre-computation) ---
     if not models:
-        def empty_decorator(func):
-            return func
+        return lambda func: func
 
-        return empty_decorator
-
-    # --- 预计算阶段 ---
+    # 建立各种快速查找表
     model_class_to_name = {m: m.__name__ for m in models}
     model_name_to_class = {m.__name__: m for m in models}
     registered_model_types = tuple(models)
+
     field_to_model_map = {}
     for model_cls in models:
         for field_name in model_cls.model_fields:
-            field_to_model_map.setdefault(field_name, model_cls)
+            field_to_model_map[field_name] = model_cls
+
     extra_model_cls = next((m for m in models if m.model_config.get('extra') == 'allow'), None)
 
     def decorator(func):
+
+        # --- 定义内部辅助函数 (Sub-modules) ---
+        def _distribute_pos_args(raw_args: tuple) -> Tuple[list, Dict[str, dict]]:
+            """步骤1: 处理位置参数 (*args)"""
+            pos_args = []
+            # 初始化收集器：{'WaitParams': {}, 'LocateParams': {}}
+            collected = {name: {} for name in model_name_to_class.keys()}
+
+            for arg in raw_args:
+                if isinstance(arg, registered_model_types):
+                    # 如果是注册模型的实例，直接拆包认领
+                    name = model_class_to_name[type(arg)]
+                    collected[name].update(arg.model_dump(exclude_unset=True))
+                else:
+                    pos_args.append(arg)
+            return pos_args, collected
+
+        def _distribute_kwargs(raw_kwargs: dict, collected: Dict[str, dict]) -> dict:
+            """步骤2: 处理关键字参数 (**kwargs) - 核心分发逻辑"""
+            unassigned = {}
+
+            for key, value in raw_kwargs.items():
+                # [A] 显式模型透传 (Convention: Key == ModelName)
+                if key in model_name_to_class and isinstance(value, model_name_to_class[key]):
+                    collected[key].update(value.model_dump(exclude_unset=True))
+                    continue
+
+                # [B] 扁平字段映射 (Field -> Model)
+                target_cls = field_to_model_map.get(key)
+                if target_cls:
+                    model_name = model_class_to_name[target_cls]
+                    collected[model_name][key] = value
+                else:
+                    # [C] 暂存未知参数
+                    unassigned[key] = value
+
+            return unassigned
+
+        def _apply_mode_policy(unassigned: dict, collected: Dict[str, dict]) -> dict:
+            """步骤3: 根据 mode 处理剩余未知参数"""
+            if not unassigned:
+                return {}
+
+            # 策略：extra - 尝试塞入支持 extra 的模型
+            if mode == 'extra' and extra_model_cls:
+                target_name = model_class_to_name[extra_model_cls]
+                collected[target_name].update(unassigned)
+                return {}  # 已被完全消化
+
+            # 策略：strict - 报错
+            if mode == 'strict' or (mode == 'extra' and not extra_model_cls):
+                raise TypeError(
+                    f"{func.__name__}() got unexpected keyword arguments: {list(unassigned.keys())}"
+                )
+
+            # 策略：pass - 透传
+            return unassigned  # mode == 'pass'
+
+        def _instantiate_models(collected: Dict[str, dict]) -> dict:
+            """步骤4: 将字典数据转换为 Pydantic 实例"""
+            instances = {}
+            for name, data in collected.items():
+                try:
+                    # model_validate 负责校验和默认值填充
+                    instance = model_name_to_class[name](**data)
+                    instances[name] = instance
+                except Exception as e:
+                    raise ValueError(
+                        f"Argument validation failed for model '{name}' in '{func.__name__}': {e}"
+                    ) from e
+            return instances
+
+        # --- 主装饰器逻辑 ---
         @functools.wraps(func)
         def wrapper(*args, **kwargs):
-            # --- 初始化与解析 *args ---
-            func_pos_args, collected_data = [], {name: {} for name in model_name_to_class.keys()}
-            for arg in args:
-                if isinstance(arg, registered_model_types):
-                    model_name = model_class_to_name[type(arg)]
-                    collected_data[model_name].update(arg.model_dump())
-                else:
-                    func_pos_args.append(arg)
+            # 1. 分离：位置参数 vs 模型数据
+            func_pos_args, collected_data = _distribute_pos_args(args)
 
-            # --- 一次性高效解析 **kwargs ---
-            unassigned_kwargs = {}
-            for key, value in kwargs.items():
-                target_model_cls = field_to_model_map.get(key)
-                if target_model_cls:
-                    collected_data[model_class_to_name[target_model_cls]][key] = value
-                else:
-                    unassigned_kwargs[key] = value
+            # 2. 分发：关键字参数 -> 模型字段 / 未知参数
+            unassigned_kwargs = _distribute_kwargs(kwargs, collected_data)
 
-            # --- 根据 mode 决定如何处置 unassigned_kwargs ---
-            if unassigned_kwargs:
-                if mode == 'extra' and extra_model_cls:
-                    # 'extra' 模式：尝试分配给 extra 模型
-                    model_name = model_class_to_name[extra_model_cls]
-                    collected_data[model_name].update(unassigned_kwargs)
-                    unassigned_kwargs.clear()  # 已被认领，清空
+            # 3. 决策：处理未知参数 (报错、合并或直通)
+            final_passthrough_kwargs = _apply_mode_policy(unassigned_kwargs, collected_data)
 
-            # --- 最终检查与调用 ---
-            final_kwargs_for_func = {}
-            if unassigned_kwargs:
-                if mode == 'strict' or (mode == 'extra' and not extra_model_cls):
-                    # 'strict' 模式，或 'extra' 模式但无处安放 -> 报错
-                    raise TypeError(
-                        f"{func.__name__}() got unexpected keyword arguments: {list(unassigned_kwargs.keys())}")
-                elif mode == 'pass':
-                    # 'pass' 模式 -> 准备直通
-                    final_kwargs_for_func.update(unassigned_kwargs)
+            # 4. 构造：生成最终的模型实例
+            model_instances = _instantiate_models(collected_data)
 
-            # --- 实例化与注入 ---
-            for name, data in collected_data.items():
-                instance = model_name_to_class[name].model_validate(data)
-                final_kwargs_for_func[name] = instance
+            # 合并最终参数 (直通参数 + 模型实例)
+            final_kwargs = {**final_passthrough_kwargs, **model_instances}
 
-            return func(*func_pos_args, **final_kwargs_for_func)
+            return func(*func_pos_args, **final_kwargs)
 
         return wrapper
 
