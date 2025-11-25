@@ -83,6 +83,8 @@ window: 特指某个软件所处的区域
 从状态(时间)理解：
 view: 同一个窗口位置上，可能有不同的各种功能、菜单变化，称为不同的视图
 shape: view里的各个位置对象标记内容。上述所有类其实都是shape类
+
+详细文档：https://www.yuque.com/xlpr/pyxllib/anlib
 """
 
 
@@ -661,7 +663,7 @@ class _AnShapePupil(_AnShapeBasic):
         pass
 
     @resolve_params(MouseParams, mode='pass')
-    def move_to(self, **resolved_params):
+    def move_to(self, x_bias=None, y_bias=None, /, **resolved_params):
         """ 移动鼠标到该形状的中心位置
 
         :param resolved_params: 包含 MouseParams
@@ -673,6 +675,7 @@ class _AnShapePupil(_AnShapeBasic):
         """
         # 1. 解析参数
         params: MouseParams = self.resolve_model(resolved_params['MouseParams'])
+        params.update_valid(x_bias=x_bias, y_bias=y_bias)
 
         # 2. 计算目标位置 (含固定偏移)
         point = self.get_abs_point(self['center'])
@@ -700,7 +703,7 @@ class _AnShapePupil(_AnShapeBasic):
         return point
 
     @resolve_params(MouseParams, LocateParams, WaitParams, mode='pass')
-    def click(self, **resolved_params):
+    def click(self, x_bias=None, y_bias=None, /, **resolved_params):
         """ 点击当前形状
 
         集成了多种参数模型，提供精细化的点击控制：
@@ -711,19 +714,20 @@ class _AnShapePupil(_AnShapeBasic):
         :param resolved_params: 包含 MouseParams, LocateParams, WaitParams
         """
         # 1. 解析核心点击参数
-        mouse_params: MouseParams = self.resolve_model(resolved_params['MouseParams'])
+        params: MouseParams = self.resolve_model(resolved_params['MouseParams'])
+        params.update_valid(x_bias=x_bias, y_bias=y_bias)
 
         # 2. 计算点击坐标
         point = self.get_abs_point(self['center'])
 
         # 应用固定偏移
-        point[0] += mouse_params.x_bias
-        point[1] += mouse_params.y_bias
+        point[0] += params.x_bias
+        point[1] += params.y_bias
 
         # 应用随机偏移 (拟人化)
-        if mouse_params.random_bias:
-            point[0] += random.randint(-mouse_params.random_bias, mouse_params.random_bias)
-            point[1] += random.randint(-mouse_params.random_bias, mouse_params.random_bias)
+        if params.random_bias:
+            point[0] += random.randint(-params.random_bias, params.random_bias)
+            point[1] += random.randint(-params.random_bias, params.random_bias)
 
         # 3. 执行点击操作 (加锁保护)
         with get_autogui_lock():
@@ -731,17 +735,17 @@ class _AnShapePupil(_AnShapeBasic):
 
             # 如果配置了等待画面变化，需在点击前截图
             before_click_shot = None
-            if mouse_params.wait_change:
+            if params.wait_change:
                 before_click_shot = self.shot()
 
             pyautogui.click(*point)
 
             # 点击后复位 (悬停/探测模式)
-            if mouse_params.move_back:
+            if params.move_back:
                 pyautogui.moveTo(*origin_point)
 
         # 4. 后置处理：等待画面变化
-        if mouse_params.wait_change and before_click_shot is not None:
+        if params.wait_change and before_click_shot is not None:
             # 解析辅助参数
             locate_params: LocateParams = self.resolve_model(resolved_params['LocateParams'])
             wait_params: WaitParams = self.resolve_model(resolved_params['WaitParams'])
@@ -769,20 +773,19 @@ class _AnShapePupil(_AnShapeBasic):
 
         # 5. 后置处理：硬性等待
         # 即使 wait_change 结束了，可能还需要额外 sleep 一会儿
-        if mouse_params.wait_seconds:
-            time.sleep(mouse_params.wait_seconds)
+        if params.wait_seconds:
+            time.sleep(params.wait_seconds)
 
         return point
 
     @resolve_params(DragParams, mode='pass')
-    def drag_to(self, drag_percent=None, drag_direction=None, **resolved_params):
+    def drag_to(self, drag_percent=None, drag_direction=None, /, **resolved_params):
         """ 在当前形状区域内执行拖拽操作
 
         通常用于滚动屏幕查找目标。
         """
         params: DragParams = self.resolve_model(resolved_params['DragParams'])
-        if drag_percent is not None: params.drag_percent = drag_percent
-        if drag_direction is not None: params.drag_direction = drag_direction
+        params.update_valid(drag_percent=drag_percent, drag_direction=drag_direction)
 
         # 1. 计算起止点
         x, y = self.get_abs_point(self['center'])
@@ -909,8 +912,8 @@ class AnShape(_AnShapePupil):
 
             # 判定：相似度 = 1 - 差异度
             conf = 1.0 - diff
-            logger.info(f'{self.total_name()} similarity: {round(conf, 4)}'
-                        # f' confidence: {round(locate_params.confidence, 4)}'
+            logger.info(f'{self.total_name()} {conf:.0%}'
+                        # f' confidence: {locate_params.confidence:.0%}'
                         )
 
             return self if conf > locate_params.confidence else None
@@ -1467,10 +1470,23 @@ class AnView(AnShape):
         if anchor_shape_loc is None:
             return sub_view
 
-        # 2 计算偏移量：检测到的动态位置与静态锚点位置的差值，这里仅以左上角为锚点，后续可以扩展center等形式的锚点
+        # 2 计算偏移量：检测到的动态位置与静态锚点位置的差值
+        # 使用绝对坐标来计算相对位移，兼容 det_shape 来自深层子节点的情况
         anchor_shape = sub_view[anchor_shape_loc]
-        dx = det_shape['xywh'][0] - anchor_shape['xywh'][0] - sub_view['xywh'][0]
-        dy = det_shape['xywh'][1] - anchor_shape['xywh'][1] - sub_view['xywh'][1]
+
+        # 获取检测到的形状的【屏幕绝对坐标】
+        det_abs_pt = det_shape.get_abs_point(det_shape['xywh'][:2])
+        # 获取当前View（容器）的【屏幕绝对坐标】
+        self_abs_pt = self.get_abs_point(self['xywh'][:2])
+
+        # 计算检测形状相对于当前View左上角的真实偏移 (det_real_x, det_real_y)
+        det_real_x = det_abs_pt[0] - self_abs_pt[0]
+        det_real_y = det_abs_pt[1] - self_abs_pt[1]
+
+        # 代入公式：偏移量 = (真实相对坐标) - (静态锚点坐标) - (静态子视图原点坐标)
+        dx = det_real_x - anchor_shape['xywh'][0] - sub_view['xywh'][0]
+        dy = det_real_y - anchor_shape['xywh'][1] - sub_view['xywh'][1]
+
         sub_view.move(dx, dy)
 
         return sub_view

@@ -12,14 +12,14 @@ from pyxllib.prog.specialist.bc import *
 from pyxllib.prog.specialist.tictoc import *
 
 import concurrent.futures
+import functools
 import os
 import re
-import subprocess
-import time
 from statistics import mean
+import subprocess
 from threading import Thread
-import functools
-from typing import Type, Literal, Dict, Tuple
+import time
+from typing import Type, Literal, Dict, Tuple, Container, Any
 
 from pyxllib.prog.lazyimport import lazy_import
 
@@ -385,6 +385,55 @@ class XlBaseModel(BaseModel):
             return cls()
         else:
             return cls.model_validate(data)
+
+    def update_valid(self,
+                     data: dict = None,
+                     *,
+                     exclude_values: Container[Any] = (None,),
+                     **kwargs):
+        """ 智能更新模型字段
+
+        将 data (通常是 locals()) 和 kwargs 中的数据合并到当前模型中。
+        会自动过滤掉 exclude_values 中包含的值（默认过滤 None）。
+        会自动忽略模型中不存在的字段（安全注入）。
+
+        Args:
+            data: 字典数据源
+            exclude_values: 需要被忽略的值的集合。默认为 (None,)。
+                            如果你想允许更新 None，可以传入空元组 ()。
+            **kwargs: 显式关键字参数 (优先级高于 data)
+
+        Returns:
+            self: 支持链式调用
+        """
+        # 1. 确定数据源优先级：kwargs > data
+        if data:
+            # 这里的逻辑是：先处理 data，后处理 kwargs (覆盖前者)
+            # 为了遍历效率，我们将两者合并逻辑放在循环里
+            sources = [data, kwargs]
+        else:
+            sources = [kwargs]
+
+        # 2. 遍历合并
+        for source in sources:
+            if not source:
+                continue
+
+            # 只遍历模型定义的字段 (安全性：防止 locals() 中的 self 等变量污染)
+            for field_name in self.model_fields:
+                if field_name not in source:
+                    continue
+
+                val = source[field_name]
+
+                # 3. 核心过滤逻辑 (可配置化)
+                if val in exclude_values:
+                    continue
+
+                # 4. 赋值 (Pydantic 是对象，必须用 setattr)
+                setattr(self, field_name, val)
+
+        return self
 
 
 def resolve_params(*models: Type[BaseModel], mode: Literal['strict', 'extra', 'pass'] = 'strict'):
