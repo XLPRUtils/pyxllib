@@ -21,6 +21,8 @@ import time
 import typing
 from typing import Any, Dict, List, Tuple, Union, Optional, Callable, Type, Literal, Sequence
 
+# from apscheduler import triggers
+
 from pyxllib.prog.lazyimport import lazy_import
 
 try:
@@ -91,6 +93,7 @@ try:
 except ModuleNotFoundError:
     uvicorn = lazy_import('import uvicorn')
 
+from pyxllib.prog.xltime import XlTime
 from pyxllib.prog.specialist import XlBaseModel, resolve_params
 from pyxllib.file.specialist import XlPath
 
@@ -196,7 +199,7 @@ class XlTrigger:
 
         cls.wait_until_time(next_time)
 
-    def __2_扩展触发器(self):
+    def __2_扩展触发器工厂函数(self):
         """ 用create_trigger可以标准触发器，这里还提供一些其他特殊的非标准触发器 """
         pass
 
@@ -254,6 +257,130 @@ class XlTrigger:
         task()
         next = datetime.datetime.now() + datetime.timedelta(seconds=interval_seconds)
         scheduler.add_schedule(cls.post_execution_schedule, DateTrigger(next), args=[scheduler, task, interval_seconds])
+
+    @staticmethod
+    def parse_time_interval(interval_str: str) -> float:
+        """ 解析 10s, 5m, 1h 格式的时间为秒数 """
+        unit_map = {'s': 1, 'm': 60, 'h': 3600, 'd': 86400}
+        interval_str = interval_str.lower().strip()
+
+        # 匹配数字+单位 (例如 1.5h)
+        m = re.match(r'^(\d+(?:\.\d+)?)\s*([smhd])$', interval_str)
+        if m:
+            value = float(m.group(1))
+            unit = m.group(2)
+            return value * unit_map[unit]
+
+        # 纯数字默认为秒
+        try:
+            return float(interval_str)
+        except ValueError:
+            raise ValueError(f"无法解析时间间隔: {interval_str}")
+
+    @classmethod
+    def _parse_smart_datetime(cls, time_str: str) -> datetime.datetime:
+        """ 智能解析时间
+        1. 如果是纯时间格式 (HH:MM 或 HH:MM:SS)，自动定位到最近的未来时间点（今天或明天）。
+        2. 否则使用 XlTime 通用解析（包含日期的完整格式）。
+        """
+        # 正则匹配 HH:MM 或 HH:MM:SS，强制要求开头结尾匹配，避免匹配到 "2024-11-12 12:00"
+        # ^(\d{1,2})  : 1-2位数字的小时
+        # :(\d{1,2})  : 冒号+1-2位数字的分钟
+        # (?::(\d{1,2}))?$ : 可选的冒号+1-2位数字的秒
+        m = re.match(r'^(\d{1,2}):(\d{1,2})(?::(\d{1,2}))?$', time_str)
+
+        if m:
+            hour, minute = int(m.group(1)), int(m.group(2))
+            second = int(m.group(3)) if m.group(3) else 0
+
+            now = datetime.datetime.now()
+            # 替换当前时间的时分秒
+            target_time = now.replace(hour=hour, minute=minute, second=second, microsecond=0)
+
+            # 核心逻辑：如果时间已过，则加一天
+            if target_time <= now:
+                target_time += datetime.timedelta(days=1)
+
+            return target_time
+
+        # 否则交给通用库处理 (例如 '2024-11-12 12:00' 或 'tomorrow')
+        return XlTime(time_str).datetime
+
+    @classmethod
+    def parse_str(cls, trigger_str: str):
+        """ 智能解析字符串类型的触发器
+        对字符串的解析扩展，一方面是方便配置trigger，另一方面也是方便funboost发布任务，因为funboost要求参数可json化
+
+        支持格式：
+        1. Cron模式 (自动识别或显式前缀):
+           - "*/5 * * * *"
+           - "0 12 * * * *"
+           - "cron: 0 12 * * *"
+
+        2. 间隔模式 (Interval):
+           - "30s" / "10m" / "1h" (默认为间隔循环，等同于 int 参数)
+           - "interval: 30s"
+           - "every: 1h"
+
+        3. 延时/日期模式 (Date):
+           - "2024-11-12 12:00:00" (具体时间)
+           - "date: 2024-11-12"
+           - "in: 30s" (表示从现在起延时30秒执行一次，区别于 interval)
+        """
+        trigger_str = trigger_str.strip()
+        lower_str = trigger_str.lower()
+
+        # --- A. 显式前缀模式 (明确意图) ---
+
+        # A1. Cron 前缀
+        if lower_str.startswith(('cron:', 'cron ')):
+            return cls.create_cron_trigger(trigger_str.split(':', 1)[1].strip())
+
+        # A2. Date/At 前缀 (绝对时间)
+        if lower_str.startswith(('date:', 'at:')):
+            val = trigger_str.split(':', 1)[1].strip()
+            return DateTrigger(cls._parse_smart_datetime(val))
+
+        # A3. Interval/Every 前缀 (循环间隔)
+        if lower_str.startswith(('interval:', 'every:')):
+            val = trigger_str.split(':', 1)[1].strip()
+            return IntervalTrigger(seconds=cls.parse_time_interval(val))
+
+        # A4. In 前缀 (相对延时，执行一次)
+        # 例如 "in: 30s" -> 30秒后执行一次
+        if lower_str.startswith(('in:', 'after:')):
+            val = trigger_str.split(':', 1)[1].strip()
+            seconds = cls.parse_time_interval(val)
+            run_time = datetime.datetime.now() + datetime.timedelta(seconds=seconds)
+            return DateTrigger(run_time)
+
+        # --- B. 特征推断模式 (智能猜测) ---
+
+        # B1. Cron 特征检测
+        # 包含 '*' 或 '/' 或者是 5-6 段空格分隔的字符串
+        if '*' in trigger_str or '/' in trigger_str:
+            return cls.create_cron_trigger(trigger_str)
+
+        parts = trigger_str.split()
+        if len(parts) >= 5:
+            # 简单的启发式：如果空格分隔段数>=5，且不像时间日期格式，大概率是 cron
+            # (XlTime通常能处理带空格的日期，这里如果 create_cron_trigger 失败，
+            # 其实可以捕获异常再 fallback 到 Date，但为了效率，这里优先判定 Cron)
+            try:
+                return cls.create_cron_trigger(trigger_str)
+            except ValueError:
+                pass  # 解析 Cron 失败，可能是长格式的日期文本，继续往下走
+
+        # B2. 简写时间间隔检测 (例如 "30s", "1.5h")
+        # 这种格式默认视为 IntervalTrigger (为了跟 add_schedule(..., 30) 保持一致)
+        if re.match(r'^\d+(\.\d+)?\s*[smhd]$', lower_str):
+            return IntervalTrigger(seconds=cls.parse_time_interval(trigger_str))
+
+        # B3. 默认兜底：尝试解析为具体日期时间
+        try:
+            return DateTrigger(XlTime(trigger_str).datetime)
+        except Exception as e:
+            raise ValueError(f"无法识别的触发器格式: '{trigger_str}'") from e
 
 
 def __2_任务():
@@ -508,34 +635,17 @@ class SubprocessTask:
 
     def run(self, check=False):
         """ 启动程序，这个在下游子类中可以重载重新定制 """
-        # 1 目前不支持重复执行，只允许有一个实例，但要扩展修改这个功能是相对容易的
-        logger.info(self.args)
+        # 目前不支持重复执行，只允许有一个实例，但要扩展修改这个功能是相对容易的
         if self.is_running():
             return self.proc
 
-        # 2 根据check=False，使用popen模式，只在沙盒中报错
-        if not check:
-            self.proc = subprocess.Popen(self.args, preexec_fn=set_pdeathsig(),
-                                         **self.popen_params.model_dump(exclude_unset=True, exclude={'args'}))
-
-            # 3 等待其运行结束后标记
-            try:
-                # proc启动后，使用阻塞模式监控程序什么时候结束
-                self.proc.communicate(timeout=self.timeout)
-            except subprocess.TimeoutExpired:
-                self.kill()
-                self.proc.communicate()
-
-            return self.proc
-
-        # 3 check=True，把subprocess的报错抛出给主进程
         try:
             # subprocess.run 会等待命令完成，check=True 会在返回码非0时自动引发 CalledProcessError
             subprocess.run(
                 self.args,
                 preexec_fn=set_pdeathsig(),
                 timeout=self.timeout,
-                check=True,
+                check=check,  # check=True，把subprocess的报错抛出给主进程
                 **self.popen_params.model_dump(exclude_unset=True, exclude={'args'}),
             )
             # 如果代码能执行到这里，说明子进程成功了（退出码为0）
@@ -546,6 +656,8 @@ class SubprocessTask:
             raise RuntimeError(f"子进程执行失败: {e.stderr}") from e
         except subprocess.TimeoutExpired as e:
             raise RuntimeError("子进程执行超时") from e
+        finally:
+            self.kill()
 
     def __call__(self):
         return self.run()
@@ -583,7 +695,21 @@ class XlServerSubprocessTask(SubprocessTask):
 
         # list[dict]结构，dict长度只有1，类似 [{'/原url路径/a', '/目标url路径/b'}, ...]
         # 如果k,v相同，可以简写为一个值 ['/a', '/b', ...]
-        self.locations = locations
+        self.locations = []
+        if locations:
+            # 1. 如果传入的是单字符串（如 locations='/api'），转为列表
+            if isinstance(locations, str):
+                locations = [locations]
+
+            # 2. 遍历列表，将字符串简写转换为字典
+            for loc in locations:
+                if isinstance(loc, str):
+                    self.locations.append({loc: loc})
+                elif isinstance(loc, dict):
+                    self.locations.append(loc)
+                else:
+                    # 还可以加个报错或者日志提醒
+                    pass
 
     def set_port(self, port):
         if port:
@@ -677,8 +803,8 @@ class XlScheduler(GetAttr):
                 self.scheduler.add_job(task, DateTrigger(datetime.datetime.now()), **kwargs)
             else:
                 self.scheduler.add_job(task, **kwargs)
-        # elif isinstance(trigger, Trigger):
-        #     self.scheduler.add_job(task, trigger, **kwargs)
+        elif isinstance(trigger, (IntervalTrigger, DateTrigger, CronTrigger)):
+            self.scheduler.add_job(task, trigger, **kwargs)
         elif isinstance(trigger, (int, float)):
             if trigger > 0:
                 self.scheduler.add_job(task, trigger, **kwargs)
@@ -689,7 +815,9 @@ class XlScheduler(GetAttr):
             else:
                 raise ValueError('IntervalTrigger模式下值必须不为0')
         elif isinstance(trigger, str):
-            self.scheduler.add_job(task, XlTrigger.create_cron_trigger(trigger), **kwargs)
+            # 使用新的智能解析方法
+            real_trigger = XlTrigger.parse_str(trigger)
+            self.scheduler.add_job(task, real_trigger, **kwargs)
         elif callable(trigger):
             if 'args' in kwargs or 'kwargs' in kwargs:
                 task = partial(task, *kwargs.pop('args', ()), **kwargs.pop('kwargs', {}))
@@ -814,7 +942,7 @@ class XlScheduler(GetAttr):
         """ 停止所有后台程序 """
         # 关闭所有调度器
         # if self.scheduler:
-            # self.scheduler.shutdown()
+        # self.scheduler.shutdown()
 
         # 停止所有单启动任务
         for task in self.tasks:
@@ -862,7 +990,7 @@ class XlServerScheduler(XlScheduler):
     def get_all_locations(self):
         locations = defaultdict(list)
         for task in self.tasks:
-            if not (isinstance(task, XlServerScheduler) and task.locations):
+            if not (isinstance(task, XlServerSubprocessTask) and task.locations):
                 continue
             for x in task.locations:
                 for dst, src in x.items():
