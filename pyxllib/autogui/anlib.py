@@ -91,7 +91,6 @@ shape: view里的各个位置对象标记内容。上述所有类其实都是sha
 @run_once()
 def get_xlapi():
     xlapi = XlAiClient(auto_login=False, check=False)
-    # logger.info(f"{os.getenv('XL_API_PRIU_TOKEN')}, {os.getenv('MAIN_WEBSITE')}")
     xlapi.login_priu(os.getenv('XL_API_PRIU_TOKEN'), os.getenv('MAIN_WEBSITE'))
     return xlapi
 
@@ -305,6 +304,9 @@ class MouseParams(XlBaseModel):
 
     用于控制 move_to, click 等操作的精准度、拟人化偏移以及操作后的反馈等待。
     """
+
+    # 点击的目标名称（用于链式调用或代理点击）
+    target: str | None = None
 
     # 目标位置 X 轴固定偏移量 (像素)
     # 正值向右，负值向左
@@ -597,6 +599,38 @@ class _AnShapeBasic(UserDict):
 
         return point
 
+    def get_abs_xywh(self):
+        """ 获取当前形状在屏幕上的绝对坐标和尺寸 [abs_x, abs_y, w, h] """
+        # get_abs_point 接收的是相对于 Parent 的坐标
+        # 传入自身的 xy (即相对于 Parent 的偏移)，计算出的就是自身的绝对 Top-Left
+        abs_top_left = self.get_abs_point(self['xywh'][:2])
+        return [abs_top_left[0], abs_top_left[1], self['xywh'][2], self['xywh'][3]]
+
+    def get_xywh_in(self, scope_shape=None):
+        """ 获取当前形状相对于 scope_shape 坐标系的位置
+        即：将 self 映射到 scope_shape 的局部坐标系中
+
+        :param scope_shape: 参考系对象。
+            - 如果为 None，则返回屏幕绝对坐标 (scope 为屏幕)
+            - 如果为 AnShape 对象，则返回相对于该对象左上角的坐标
+        :return: [x, y, w, h]
+        """
+        # 1. 获取自身的绝对坐标
+        self_abs = self.get_abs_xywh()
+
+        if scope_shape is None:
+            return self_abs
+
+        # 2. 获取参考系的绝对坐标 (只关心左上角)
+        scope_abs = scope_shape.get_abs_xywh()
+
+        # 3. 计算相对坐标
+        # 向量减法：Self_Abs - Scope_Abs = Self_Rel
+        rel_x = self_abs[0] - scope_abs[0]
+        rel_y = self_abs[1] - scope_abs[1]
+
+        return [rel_x, rel_y, self_abs[2], self_abs[3]]
+
     def total_name(self):
         """ 获取形状的全路径名称 (e.g., "Screen/Window/Button") """
         names = []
@@ -703,8 +737,12 @@ class _AnShapePupil(_AnShapeBasic):
         return point
 
     @resolve_params(MouseParams, LocateParams, WaitParams, mode='pass')
-    def click(self, x_bias=None, y_bias=None, /, **resolved_params):
+    def click(self, target=None, x_bias=None, y_bias=None, /, **resolved_params):
         """ 点击当前形状
+
+        支持两种调用模式的智能点击：
+        1. 代理模式: click('子控件名', -10, 20)
+        2. 自身模式: click(-10, 20)  <-- 兼容旧代码（target是可选字段，可以不输入，支持'参数漂移'）
 
         集成了多种参数模型，提供精细化的点击控制：
         1. MouseParams: 控制点击位置偏移、随机抖动、点击后复位、是否等待变化。
@@ -714,10 +752,28 @@ class _AnShapePupil(_AnShapeBasic):
         :param resolved_params: 包含 MouseParams, LocateParams, WaitParams
         """
         # 1. 解析核心点击参数
-        params: MouseParams = self.resolve_model(resolved_params['MouseParams'])
-        params.update_valid(x_bias=x_bias, y_bias=y_bias)
+        if isinstance(target, (int, float)):
+            # 发生错位，手动归位
+            # 说明用户没传 target 字符串，直接传了坐标
+            y_bias = x_bias  # 把原来的第2个参数给 y
+            x_bias = target  # 把原来的第1个参数给 x
+            target = None    # 清空 target
 
-        # 2. 计算点击坐标
+        params: MouseParams = self.resolve_model(resolved_params['MouseParams'])
+        params.update_valid(target=target, x_bias=x_bias, y_bias=y_bias)
+
+        # 2. 代理模式分支
+        if params.target is not None:
+            # 如果指定了 target，转交控制权给子元素
+            # 注意：这里我们要把修正后的 bias 传下去
+            # 并且我们要透传 resolved_params (里面包含了 WaitParams 等其他配置)
+            return self[params.target].click(
+                x_bias=params.x_bias,
+                y_bias=params.y_bias,
+                **resolved_params
+            )
+
+        # 3. 计算点击坐标
         point = self.get_abs_point(self['center'])
 
         # 应用固定偏移
@@ -729,7 +785,7 @@ class _AnShapePupil(_AnShapeBasic):
             point[0] += random.randint(-params.random_bias, params.random_bias)
             point[1] += random.randint(-params.random_bias, params.random_bias)
 
-        # 3. 执行点击操作 (加锁保护)
+        # 4. 执行点击操作 (加锁保护)
         with get_autogui_lock():
             origin_point = pyautogui.position()
 
@@ -744,7 +800,7 @@ class _AnShapePupil(_AnShapeBasic):
             if params.move_back:
                 pyautogui.moveTo(*origin_point)
 
-        # 4. 后置处理：等待画面变化
+        # 5. 后置处理：等待画面变化
         if params.wait_change and before_click_shot is not None:
             # 解析辅助参数
             locate_params: LocateParams = self.resolve_model(resolved_params['LocateParams'])
@@ -771,7 +827,7 @@ class _AnShapePupil(_AnShapeBasic):
                 interval=wait_params.interval
             )
 
-        # 5. 后置处理：硬性等待
+        # 6. 后置处理：硬性等待
         # 即使 wait_change 结束了，可能还需要额外 sleep 一会儿
         if params.wait_seconds:
             time.sleep(params.wait_seconds)
@@ -830,124 +886,181 @@ class AnShape(_AnShapePupil):
     def __1_图像类(self):
         pass
 
-    @resolve_params(LocateParams, DragParams, mode='pass')
-    def find_img(self, dst=None, *, part=None, **resolved_params):
-        """ 查找图像匹配
+    def _resolve_img_target(self, dst):
+        """ [内部辅助] 归一化匹配目标，将 dst 解析为标准的三元组
 
-        支持全图匹配（判定当前区域是否为目标图片）和局部查找（在当前区域内寻找目标子图）。
-        集成 DragParams 支持在查找失败时自动拖拽/滚动重试。
-
-        :param dst: 匹配目标
-            - None: 默认模式，匹配自身存储的图片 (self['img'])，通常用于校验 "当前界面是否仍是该Shape"
-            - str (属性名): 引用自身的某个子属性 (如 self['on_image'])
-            - str (路径) / Image: 外部图片路径或对象
-            - AnShape: 另一个 Shape 对象
-        :param part: 匹配模式
-            - None: 智能判断。若目标尺寸小于当前区域，自动视为局部匹配 (True)
-            - False: 全匹配模式。计算整体相似度，返回 self 或 None
-            - True: 局部匹配模式。在当前区域内搜索子图，返回 [AnShape, ...] 列表
-        :param resolved_params:
-            - LocateParams: 控制匹配算法 (灰度、置信度、容差)
-            - DragParams: 控制查找失败时的拖拽重试策略
-        :return:
-            - 全匹配模式: 成功返回 self，失败返回 None
-            - 局部匹配模式: 返回 AnShape 对象列表 (空列表表示未找到)
+        :return: (target_img, target_rect, default_text)
+            - target_img: 用于匹配的标准图片数据 (Needle)
+            - target_rect: 目标相对于 self 的坐标 [x,y,w,h] (用于 Anchor 裁剪)，如果无法确定位置则为 None
+            - default_text: 生成结果时的默认文本
         """
-        # 1. 解析参数
-        locate_params: LocateParams = self.resolve_model(resolved_params['LocateParams'])
-        drag_params: DragParams = self.resolve_model(resolved_params['DragParams'])
-
-        # 2. 归一化匹配目标 (dst) 和 模式 (part)
+        target_img = None
+        target_rect = None
         default_text = ''
-        img = None  # 目标图像 (Needle)
 
-        # --- 目标解析逻辑 ---
+        # Case A: 自身校验 (Verify Self)
         if dst is None:
-            assert part is not True, '如果要检索子图，必须用parent.find_img(children)，输入子图参数'
-            dst, part = self['img'], False
+            target_img = self['img']
+            target_rect = None  # None 表示不需要裁剪子区域，直接对比全图
             default_text = self.get('text', '')
 
-        elif isinstance(dst, str):
-            # 引用自身属性 (如 self['checked_state'])
-            dst_obj = self[dst]
-            if isinstance(dst_obj, _AnShapeBasic):
-                img = dst_obj['img']
-                default_text = dst_obj.get('text', '')
-            else:
-                img = xlcv.read(dst_obj)
-
-        elif isinstance(dst, _AnShapeBasic):
-            # 传入了另一个 AnShape 对象
-            img = dst['img']
-            default_text = dst.get('text', '')
-            # 智能判断 part: 如果传入的 shape 宽高与自身不一致，默认视为局部搜索
-            if part is None:
-                # xywh[2:] 是宽高 [w, h]
-                part = self['xywh'][2:] != dst['xywh'][2:]
-
+        # Case B: 传入了具体的对象 (Child Resolution)
         else:
-            # 传入了图片路径或图片对象
-            img = xlcv.read(dst)
-            if part is None:
-                # 比较图片尺寸与当前区域尺寸
-                h, w = img.shape[:2]
-                self_w, self_h = self['xywh'][2:]
-                part = (w != self_w) or (h != self_h)
+            target_obj = None
 
-        # 确保 img 已加载
-        if img is None:
-            if isinstance(dst, (np.ndarray, str)):  # 二次确认
-                img = xlcv.read(dst)
+            # 尝试解析为 Shape 对象
+            if isinstance(dst, str):
+                # 假设是 key，尝试从自身子元素获取
+                # 注意：如果 key 不存在可能会报错，视原有逻辑是否容忍 KeyError
+                # 这里假设用户传 str 要么是 key，要么是文件路径，需要 try-catch 或者判断
+                if hasattr(self, 'find_shape_by_text') and self.find_shape_by_text(dst):
+                    target_obj = self[dst]
+                # 否则视为文件路径，将在后面处理
+            elif isinstance(dst, _AnShapeBasic):
+                target_obj = dst
+
+            if target_obj:
+                # -> 目标是 Shape 对象
+                target_img = target_obj['img']
+                default_text = target_obj.get('text', '')
+                # [关键更新] 使用通用方法获取相对坐标，不再假设是直接子节点
+                target_rect = target_obj.get_xywh_in(self)
             else:
-                # 回退到使用 self['img']
-                img = self['img']
+                # -> 目标是纯图片资源/路径
+                # 这种情况下没有“预存坐标”，target_rect 为 None
+                target_img = xlcv.read(dst)
+                default_text = str(dst)
 
-        # 3. 执行匹配逻辑
+        # 兜底：如果 target_img 加载失败（比如 dst 是路径但文件不存在），回退到自身
+        if target_img is None:
+            # 这里保持旧逻辑的容错性，也可以选择抛出异常
+            target_img = self['img']
 
-        # --- 场景 A: 全图/完全匹配 (不支持拖拽) ---
-        if not part:
-            current_shot = self.shot()
-            # 复用 ImageTools.img_distance 计算差异度
-            diff = ImageTools.img_distance(current_shot, img, locate_params)
+        return target_img, target_rect, default_text
 
-            # 判定：相似度 = 1 - 差异度
-            conf = 1.0 - diff
-            logger.info(f'{self.total_name()} {conf:.0%}'
-                        # f' confidence: {locate_params.confidence:.0%}'
-                        )
+    def _verify_anchor_mode(self, target_img, target_rect, default_text, locate_params: LocateParams):
+        """ [内部辅助] Anchor 模式：原位校验
 
-            return self if conf > locate_params.confidence else None
+        :param target_rect: 必须提供。如果为 None，表示对比 self 的全图。
+        :return:
+            - 校验子区域: 返回代表该区域的新 AnShape 对象
+            - 校验自身: 返回 self
+            - 失败: 返回 None
+        """
+        current_shot = self.shot()  # 获取当前 Self 区域截图
+        img_to_compare = current_shot
 
-        # --- 场景 B: 局部匹配 (支持 DragParams 拖拽重试) ---
+        # 如果有特定相对坐标，从当前截图中“抠图”出来对比
+        if target_rect:
+            x, y, w, h = target_rect
+            # 边界保护
+            sh, sw = current_shot.shape[:2]
+            x, y = max(0, x), max(0, y)
+            w, h = min(w, sw - x), min(h, sh - y)
+
+            if w > 0 and h > 0:
+                img_to_compare = current_shot[y:y + h, x:x + w]
+            else:
+                return None  # 坐标越界
+
+        # 执行对比
+        diff = ImageTools.img_distance(img_to_compare, target_img, LocateParams=locate_params)
+        conf = 1.0 - diff
+
+        logger.info(f'{self.total_name()} {conf:.0%}')
+
+        if conf > locate_params.confidence:
+            if target_rect:
+                # [关键修改] 返回子对象，而不是 self
+                # 构造一个新的 Shape 代表这个被校验通过的子区域
+                sp = AnShape({'text': default_text, 'xywh': target_rect}, parent=self)
+
+                # 直接复用刚才抠出来的图，性能更好
+                sp['img'] = img_to_compare
+
+                # 更新一下 center 等衍生数据，但不需要重新 shot
+                sp.update_data(shot=False)
+                return sp
+            else:
+                # 校验的是自身
+                return self
+
+        return None
+
+    def _search_full_mode(self, target_img, default_text, locate_params: LocateParams, drag_params: DragParams):
+        """ [内部辅助] Search 模式：全图搜索 + 拖拽重试
+
+        :return: List[AnShape] 找到的新形状列表
+        """
 
         def find_subimg():
-            """ 单次查找子图 """
-            # 调用 ImageTools.base_find_img 获取所有匹配位置
-            # rects 格式: [[x, y, w, h], ...] (相对坐标)
-            rects = ImageTools.base_find_img(img, self.shot(), locate_params)
+            """ 闭包：执行单次全区域搜索 """
+            current_shot = self.shot()
+            # 基础图像查找
+            rects = ImageTools.base_find_img(target_img, current_shot, LocateParams=locate_params)
 
-            # 将结果封装为 AnShape 对象
-            shapes = []
+            found_shapes = []
             for rect in rects:
+                # 构造新的 Shape，坐标是相对于 self 的
                 sp = AnShape({'text': default_text, 'xywh': rect}, parent=self)
-                sp.update_data(shot=True)  # 立即生成快照
-                shapes.append(sp)
-            return shapes
+                sp.update_data(shot=True)
+                found_shapes.append(sp)
+            return found_shapes
 
-        # 第一次查找
+        # 1. 首次查找
         shapes = find_subimg()
 
-        # 如果未找到，且配置了拖拽次数，则进入重试循环
+        # 2. 拖拽重试机制
+        # 如果没找到，且配置了拖拽次数，则尝试滚动屏幕寻找
         k = 0
         while not shapes and k < drag_params.drag_count:
-            # 执行拖拽
-            self.drag_to(drag_params)
-
-            # 拖拽后重新查找
+            self.drag_to(DragParams=drag_params)  # 透传 DragParams 模型
             shapes = find_subimg()
             k += 1
 
         return shapes
+
+    @resolve_params(LocateParams, DragParams, mode='pass')
+    def find_img(self, dst=None, *, scan=None, **resolved_params):
+        """ 查找图像匹配 (基于 Verify/Search 二元架构)
+
+        :param dst: 匹配目标 (Key / AnShape / Image Path / None)
+        :param scan: 搜索策略 (是否扫描全图)
+            - False: Anchor Mode (原位校验)。假定目标位置固定，仅在预期的坐标区域进行像素级比对。速度快，适用于位置固定的静态元素。
+            - True: Search Mode (在self范围内扫描)。假定目标位置浮动，在当前视图的全范围内进行模板匹配搜索。适用于动态移动或位置未知的元素。
+            - None: Auto Mode (智能推断)。根据目标是否包含坐标信息自动决策：有坐标则默认为 False (校验)，无坐标则默认为 True (搜索)。
+        """
+        # 1. 从 resolved_params 提取强类型的配置模型
+        #    得益于 @resolve_params，我们不需要手动处理 **kwargs
+        locate_params: LocateParams = resolved_params['LocateParams']
+        drag_params: DragParams = resolved_params['DragParams']
+
+        # 2. 归一化目标数据
+        target_img, target_rect, default_text = self._resolve_img_target(dst)
+
+        # 3. 智能决策模式 (Auto Mode Logic)
+        if scan is None:
+            # 如果有具体的相对坐标 (target_rect)，倾向于相信坐标 -> Anchor Mode
+            if target_rect is not None:
+                scan = False
+            else:
+                # 如果是纯图片资源，没有坐标，必须搜索 -> Search Mode
+                scan = True
+
+        # 4. 分发执行
+        if not scan:
+            # --- Anchor Mode ---
+            if dst is None and scan is True:
+                # 逻辑互斥检查：dst=None (校验自身) 只能是 Anchor 模式
+                raise ValueError("检测自身(dst=None)不能使用 scan=True (Search模式)")
+
+            return self._verify_anchor_mode(target_img, target_rect, default_text, locate_params)
+
+        else:
+            # --- Search Mode ---
+            # 如果强制要求 Search (scan=True) 但又依赖坐标 (Verify Logic)，这里会按 Search 处理
+            # (即忽略 target_rect，直接在全图中找 target_img)
+            return self._search_full_mode(target_img, default_text, locate_params, drag_params)
 
     @resolve_params(WaitParams, LocateParams, DragParams, mode='pass')
     def wait_img(self, dst=None, **resolved_params):
@@ -983,19 +1096,37 @@ class AnShape(_AnShapePupil):
             interval=wait_params.interval
         )
 
+    @resolve_params(WaitParams, LocateParams, DragParams, mode='pass')
+    def ensure_img(self, dst=None, **resolved_params):
+        """ 链式调用专用：等待图片出现。
+
+        与 wait_img 的区别：
+        1. wait_img 返回找到的 shape 对象（焦点转移）。
+        2. ensure_img 返回 self 自身（焦点保持），允许继续链式操作。
+        """
+        # 利用 resolve_params 的透传特性，直接将解析好的模型传给 wait_img
+        self.wait_img(dst, **resolved_params)
+        return self
+
+    @resolve_params(WaitParams, LocateParams, DragParams, mode='pass')
+    def ensure_leave_img(self, dst=None, **resolved_params):
+        """ 链式调用专用：等待图片消失，返回 self """
+        self.waitleave_img(dst, **resolved_params)
+        return self
+
     def __2_文本类(self):
         """ find_系列统一返回shapes匹配列表 """
         pass
 
     @resolve_params(DragParams, mode='pass')
-    def find_text(self, dst=None, *, part=True, **resolved_params):
+    def find_text(self, dst=None, *, scan=True, **resolved_params):
         """ 查找文本匹配
 
         :param dst: 匹配目标 (正则 Pattern)
             - None: 默认使用 self['text'] 作为匹配规则
             - AnShape: 使用 dst['text']
             - str: 直接作为正则 pattern
-        :param part: 匹配模式
+        :param scan: 匹配模式
             - False: 全匹配模式。识别当前 Shape 区域内的整体文本，匹配 pattern。返回 self 或 None。
             - True: (默认) 局部匹配模式。调用 OCR 解析当前区域内的文本布局，返回匹配 pattern 的子 Shape 列表。
         :param resolved_params: 包含 DragParams (用于局部匹配时的滚动查找)
@@ -1015,7 +1146,7 @@ class AnShape(_AnShapePupil):
             pattern = str(dst)
 
         # 3. 全匹配模式 (通常用于断言当前状态，不涉及拖拽)
-        if not part:
+        if not scan:
             # ocr_text 会截取当前 Shape 区域并调用 OCR
             return self if re.search(pattern, self.ocr_text()) else None
 
@@ -1067,6 +1198,18 @@ class AnShape(_AnShapePupil):
             timeout=wait_params.timeout,
             interval=wait_params.interval
         )
+
+    @resolve_params(WaitParams, DragParams, mode='pass')
+    def ensure_text(self, dst=None, **resolved_params):
+        """ 链式调用专用：等待文本出现，返回 self """
+        self.wait_text(dst, **resolved_params)
+        return self
+
+    @resolve_params(WaitParams, DragParams, mode='pass')
+    def ensure_leave_text(self, dst=None, **resolved_params):
+        """ 链式调用专用：等待文本消失，返回 self """
+        self.waitleave_text(dst, **resolved_params)
+        return self
 
     def __3_查找点击功能(self):
         """ 一些常用情况的简化名称，使用起来更快捷 """
@@ -1474,20 +1617,8 @@ class AnView(AnShape):
         # 使用绝对坐标来计算相对位移，兼容 det_shape 来自深层子节点的情况
         anchor_shape = sub_view[anchor_shape_loc]
 
-        # 获取检测到的形状的【屏幕绝对坐标】
-        det_abs_pt = det_shape.get_abs_point(det_shape['xywh'][:2])
-        # 获取当前View（容器）的【屏幕绝对坐标】
-        self_abs_pt = self.get_abs_point(self['xywh'][:2])
-
-        # 计算检测形状相对于当前View左上角的真实偏移 (det_real_x, det_real_y)
-        det_real_x = det_abs_pt[0] - self_abs_pt[0]
-        det_real_y = det_abs_pt[1] - self_abs_pt[1]
-
-        # 代入公式：偏移量 = (真实相对坐标) - (静态锚点坐标) - (静态子视图原点坐标)
-        dx = det_real_x - anchor_shape['xywh'][0] - sub_view['xywh'][0]
-        dy = det_real_y - anchor_shape['xywh'][1] - sub_view['xywh'][1]
-
-        sub_view.move(dx, dy)
+        diff_rect = det_shape.get_xywh_in(anchor_shape)
+        sub_view.move(diff_rect[0], diff_rect[1])
 
         return sub_view
 
