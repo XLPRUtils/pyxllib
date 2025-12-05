@@ -6,9 +6,6 @@
 
 """ 这是一套基于labelme标注来进行 """
 
-import copy
-import sys
-from collections import defaultdict
 import json
 import os
 import time
@@ -757,7 +754,7 @@ class _AnShapePupil(_AnShapeBasic):
             # 说明用户没传 target 字符串，直接传了坐标
             y_bias = x_bias  # 把原来的第2个参数给 y
             x_bias = target  # 把原来的第1个参数给 x
-            target = None    # 清空 target
+            target = None  # 清空 target
 
         params: MouseParams = self.resolve_model(resolved_params['MouseParams'])
         params.update_valid(target=target, x_bias=x_bias, y_bias=y_bias)
@@ -886,8 +883,8 @@ class AnShape(_AnShapePupil):
     def __1_图像类(self):
         pass
 
-    def _resolve_img_target(self, dst):
-        """ [内部辅助] 归一化匹配目标，将 dst 解析为标准的三元组
+    def _resolve_img_target(self, target):
+        """ [内部辅助] 归一化匹配目标，将 target 解析为标准的三元组
 
         :return: (target_img, target_rect, default_text)
             - target_img: 用于匹配的标准图片数据 (Needle)
@@ -899,7 +896,7 @@ class AnShape(_AnShapePupil):
         default_text = ''
 
         # Case A: 自身校验 (Verify Self)
-        if dst is None:
+        if target is None:
             target_img = self['img']
             target_rect = None  # None 表示不需要裁剪子区域，直接对比全图
             default_text = self.get('text', '')
@@ -909,15 +906,15 @@ class AnShape(_AnShapePupil):
             target_obj = None
 
             # 尝试解析为 Shape 对象
-            if isinstance(dst, str):
+            if isinstance(target, str):
                 # 假设是 key，尝试从自身子元素获取
                 # 注意：如果 key 不存在可能会报错，视原有逻辑是否容忍 KeyError
                 # 这里假设用户传 str 要么是 key，要么是文件路径，需要 try-catch 或者判断
-                if hasattr(self, 'find_shape_by_text') and self.find_shape_by_text(dst):
-                    target_obj = self[dst]
+                if hasattr(self, 'find_shape_by_text') and self.find_shape_by_text(target):
+                    target_obj = self[target]
                 # 否则视为文件路径，将在后面处理
-            elif isinstance(dst, _AnShapeBasic):
-                target_obj = dst
+            elif isinstance(target, _AnShapeBasic):
+                target_obj = target
 
             if target_obj:
                 # -> 目标是 Shape 对象
@@ -928,10 +925,10 @@ class AnShape(_AnShapePupil):
             else:
                 # -> 目标是纯图片资源/路径
                 # 这种情况下没有“预存坐标”，target_rect 为 None
-                target_img = xlcv.read(dst)
-                default_text = str(dst)
+                target_img = xlcv.read(target)
+                default_text = str(target)
 
-        # 兜底：如果 target_img 加载失败（比如 dst 是路径但文件不存在），回退到自身
+        # 兜底：如果 target_img 加载失败（比如 target 是路径但文件不存在），回退到自身
         if target_img is None:
             # 这里保持旧逻辑的容错性，也可以选择抛出异常
             target_img = self['img']
@@ -1021,22 +1018,26 @@ class AnShape(_AnShapePupil):
         return shapes
 
     @resolve_params(LocateParams, DragParams, mode='pass')
-    def find_img(self, dst=None, *, scan=None, **resolved_params):
+    def find_img(self, target=None, *, scope=None, scan=None, **resolved_params):
         """ 查找图像匹配 (基于 Verify/Search 二元架构)
 
-        :param dst: 匹配目标 (Key / AnShape / Image Path / None)
+        :param target: 匹配目标 (Key / AnShape / Image Path / None)
+        :param scope: 搜索范围限定 (子节点名称)，若指定则代理给子节点执行
         :param scan: 搜索策略 (是否扫描全图)
             - False: Anchor Mode (原位校验)。假定目标位置固定，仅在预期的坐标区域进行像素级比对。速度快，适用于位置固定的静态元素。
             - True: Search Mode (在self范围内扫描)。假定目标位置浮动，在当前视图的全范围内进行模板匹配搜索。适用于动态移动或位置未知的元素。
             - None: Auto Mode (智能推断)。根据目标是否包含坐标信息自动决策：有坐标则默认为 False (校验)，无坐标则默认为 True (搜索)。
         """
+        # 0. 作用域委托 (Scope Delegation)
+        if scope:
+            return self[scope].find_img(target, scan=scan, **resolved_params)
+
         # 1. 从 resolved_params 提取强类型的配置模型
-        #    得益于 @resolve_params，我们不需要手动处理 **kwargs
         locate_params: LocateParams = resolved_params['LocateParams']
         drag_params: DragParams = resolved_params['DragParams']
 
         # 2. 归一化目标数据
-        target_img, target_rect, default_text = self._resolve_img_target(dst)
+        target_img, target_rect, default_text = self._resolve_img_target(target)
 
         # 3. 智能决策模式 (Auto Mode Logic)
         if scan is None:
@@ -1050,9 +1051,9 @@ class AnShape(_AnShapePupil):
         # 4. 分发执行
         if not scan:
             # --- Anchor Mode ---
-            if dst is None and scan is True:
-                # 逻辑互斥检查：dst=None (校验自身) 只能是 Anchor 模式
-                raise ValueError("检测自身(dst=None)不能使用 scan=True (Search模式)")
+            if target is None and scan is True:
+                # 逻辑互斥检查：target=None (校验自身) 只能是 Anchor 模式
+                raise ValueError("检测自身(target=None)不能使用 scan=True (Search模式)")
 
             return self._verify_anchor_mode(target_img, target_rect, default_text, locate_params)
 
@@ -1063,7 +1064,7 @@ class AnShape(_AnShapePupil):
             return self._search_full_mode(target_img, default_text, locate_params, drag_params)
 
     @resolve_params(WaitParams, LocateParams, DragParams, mode='pass')
-    def wait_img(self, dst=None, **resolved_params):
+    def wait_img(self, target=None, **resolved_params):
         """ 等待目标图片出现
 
         :param dst: 匹配目标
@@ -1076,13 +1077,13 @@ class AnShape(_AnShapePupil):
 
         # 使用 xlwait 轮询
         return xlwait(
-            lambda: self.find_img(dst, **resolved_params),
+            lambda: self.find_img(target, **resolved_params),
             timeout=wait_params.timeout,
             interval=wait_params.interval
         )
 
     @resolve_params(WaitParams, LocateParams, DragParams, mode='pass')
-    def waitleave_img(self, dst=None, **resolved_params):
+    def waitleave_img(self, target=None, **resolved_params):
         """ 等待目标图片消失 (不再能匹配到)
 
         参数同 wait_img
@@ -1091,13 +1092,13 @@ class AnShape(_AnShapePupil):
 
         # 逻辑取反：直到 find_img 返回 None 或 空列表
         return xlwait(
-            lambda: not self.find_img(dst, **resolved_params),
+            lambda: not self.find_img(target, **resolved_params),
             timeout=wait_params.timeout,
             interval=wait_params.interval
         )
 
     @resolve_params(WaitParams, LocateParams, DragParams, mode='pass')
-    def ensure_img(self, dst=None, **resolved_params):
+    def ensure_img(self, target=None, **resolved_params):
         """ 链式调用专用：等待图片出现。
 
         与 wait_img 的区别：
@@ -1105,13 +1106,13 @@ class AnShape(_AnShapePupil):
         2. ensure_img 返回 self 自身（焦点保持），允许继续链式操作。
         """
         # 利用 resolve_params 的透传特性，直接将解析好的模型传给 wait_img
-        self.wait_img(dst, **resolved_params)
+        self.wait_img(target, **resolved_params)
         return self
 
     @resolve_params(WaitParams, LocateParams, DragParams, mode='pass')
-    def ensure_leave_img(self, dst=None, **resolved_params):
+    def ensure_leave_img(self, target=None, **resolved_params):
         """ 链式调用专用：等待图片消失，返回 self """
-        self.waitleave_img(dst, **resolved_params)
+        self.waitleave_img(target, **resolved_params)
         return self
 
     def __2_文本类(self):
@@ -1119,13 +1120,14 @@ class AnShape(_AnShapePupil):
         pass
 
     @resolve_params(DragParams, mode='pass')
-    def find_text(self, dst=None, *, scan=True, **resolved_params):
+    def find_text(self, target=None, *, scope=None, scan=True, **resolved_params):
         """ 查找文本匹配
 
-        :param dst: 匹配目标 (正则 Pattern)
-            - None: 默认使用 self['text'] 作为匹配规则
-            - AnShape: 使用 dst['text']
+        :param target: 匹配内容 (正则 Pattern / AnShape / None)
+            - None: 默认使用 self['text'] (或 scope 节点的 text) 作为匹配规则
+            - AnShape: 使用 target['text']
             - str: 直接作为正则 pattern
+        :param scope: 搜索范围限定 (子节点名称)，若指定则代理给子节点执行
         :param scan: 匹配模式
             - False: 全匹配模式。识别当前 Shape 区域内的整体文本，匹配 pattern。返回 self 或 None。
             - True: (默认) 局部匹配模式。调用 OCR 解析当前区域内的文本布局，返回匹配 pattern 的子 Shape 列表。
@@ -1134,16 +1136,20 @@ class AnShape(_AnShapePupil):
             - 全匹配模式: 成功返回 self，失败返回 None
             - 局部匹配模式: 返回 AnShape 对象列表 (空列表表示未找到)
         """
+        # 0. 作用域委托 (Scope Delegation)
+        if scope:
+            return self[scope].find_text(target, scan=scan, **resolved_params)
+
         # 1. 解析参数
         drag_params: DragParams = self.resolve_model(resolved_params['DragParams'])
 
         # 2. 确定匹配目标 (pattern)
-        if dst is None:
+        if target is None:
             pattern = self.get('text', '')
-        elif isinstance(dst, _AnShapeBasic):
-            pattern = dst.get('text', '')
+        elif isinstance(target, _AnShapeBasic):
+            pattern = target.get('text', '')
         else:
-            pattern = str(dst)
+            pattern = str(target)
 
         # 3. 全匹配模式 (通常用于断言当前状态，不涉及拖拽)
         if not scan:
@@ -1172,7 +1178,7 @@ class AnShape(_AnShapePupil):
         return shapes
 
     @resolve_params(WaitParams, DragParams, mode='pass')
-    def wait_text(self, dst=None, **resolved_params):
+    def wait_text(self, target=None, **resolved_params):
         """ 等待目标文本出现
 
         :param dst: 匹配目标
@@ -1183,32 +1189,32 @@ class AnShape(_AnShapePupil):
         wait_params: WaitParams = self.resolve_model(resolved_params['WaitParams'])
 
         return xlwait(
-            lambda: self.find_text(dst, **resolved_params),
+            lambda: self.find_text(target, **resolved_params),
             timeout=wait_params.timeout,
             interval=wait_params.interval
         )
 
     @resolve_params(WaitParams, DragParams, mode='pass')
-    def waitleave_text(self, dst=None, **resolved_params):
+    def waitleave_text(self, target=None, **resolved_params):
         """ 等待目标文本消失 """
         wait_params: WaitParams = self.resolve_model(resolved_params['WaitParams'])
 
         return xlwait(
-            lambda: not self.find_text(dst, **resolved_params),
+            lambda: not self.find_text(target, **resolved_params),
             timeout=wait_params.timeout,
             interval=wait_params.interval
         )
 
     @resolve_params(WaitParams, DragParams, mode='pass')
-    def ensure_text(self, dst=None, **resolved_params):
+    def ensure_text(self, target=None, **resolved_params):
         """ 链式调用专用：等待文本出现，返回 self """
-        self.wait_text(dst, **resolved_params)
+        self.wait_text(target, **resolved_params)
         return self
 
     @resolve_params(WaitParams, DragParams, mode='pass')
-    def ensure_leave_text(self, dst=None, **resolved_params):
+    def ensure_leave_text(self, target=None, **resolved_params):
         """ 链式调用专用：等待文本消失，返回 self """
-        self.waitleave_text(dst, **resolved_params)
+        self.waitleave_text(target, **resolved_params)
         return self
 
     def __3_查找点击功能(self):
@@ -1233,39 +1239,41 @@ class AnShape(_AnShapePupil):
             return sp
 
     @resolve_params(LocateParams, DragParams, MouseParams, WaitParams, mode='pass')
-    def find_img_click(self, dst=None, **resolved_params):
+    def find_img_click(self, target=None, *, scope=None, **resolved_params):
         """ 查找图片并点击
 
         组合了 find_img 和 click 的功能。
 
+        :param target: 匹配目标
+        :param scope: 搜索范围限定
         :param resolved_params:
             - LocateParams, DragParams: 用于 find_img
             - MouseParams: 用于 click (控制偏移、复位等)
             - LocateParams, WaitParams: 用于 click 的 wait_change (可选)
         """
-        shapes = self.find_img(dst, **resolved_params)
+        shapes = self.find_img(target, scope=scope, **resolved_params)
         return self._try_click(shapes, **resolved_params)
 
     @resolve_params(WaitParams, LocateParams, DragParams, MouseParams, mode='pass')
-    def wait_img_click(self, dst=None, **resolved_params):
+    def wait_img_click(self, target=None, *, scope=None, **resolved_params):
         """ 等待图片出现并点击 """
-        shapes = self.wait_img(dst, **resolved_params)
+        shapes = self.wait_img(target, scope=scope, **resolved_params)
         return self._try_click(shapes, **resolved_params)
 
     @resolve_params(DragParams, MouseParams, LocateParams, WaitParams, mode='pass')
-    def find_text_click(self, dst=None, **resolved_params):
+    def find_text_click(self, target=None, *, scope=None, **resolved_params):
         """ 查找文本并点击
 
         注意：虽然 find_text 本身只需要 DragParams，
         但为了支持 click 中的 wait_change 功能，这里也引入了 LocateParams 和 WaitParams。
         """
-        shapes = self.find_text(dst, **resolved_params)
+        shapes = self.find_text(target, scope=scope, **resolved_params)
         return self._try_click(shapes, **resolved_params)
 
     @resolve_params(WaitParams, DragParams, MouseParams, LocateParams, mode='pass')
-    def wait_text_click(self, dst=None, **resolved_params):
+    def wait_text_click(self, target=None, *, scope=None, **resolved_params):
         """ 等待文本出现并点击 """
-        shapes = self.wait_text(dst, **resolved_params)
+        shapes = self.wait_text(target, scope=scope, **resolved_params)
         return self._try_click(shapes, **resolved_params)
 
     def __4_其他高级功能(self):
@@ -1318,7 +1326,7 @@ class AnShape(_AnShapePupil):
         pass
 
     @resolve_params(LocateParams, DragParams, mode='pass')
-    def is_on(self, **resolved_params):
+    def is_on(self, target=None, *, scope=None, **resolved_params):
         """ 判断当前开关控件是否为开启状态
 
         逻辑：
@@ -1329,6 +1337,8 @@ class AnShape(_AnShapePupil):
            - 能找到图片 -> 开启状态 -> 返回 True
            - 找不到图片 -> 关闭状态 -> 返回 False
 
+        :param target: 显式指定用于判断状态的目标图/Pattern
+        :param scope: 显式指定搜索范围
         :param resolved_params: 透传给 find_img 用于图像匹配
         """
         # 获取自身的文本标签
@@ -1336,7 +1346,7 @@ class AnShape(_AnShapePupil):
 
         # 调用 find_img 检测当前状态
         # 显式传递参数模型以支持 locate 和 drag 配置
-        found = self.find_img(**resolved_params)
+        found = self.find_img(target, scope=scope, **resolved_params)
 
         if text.startswith('off'):
             return not found
@@ -1344,7 +1354,7 @@ class AnShape(_AnShapePupil):
             return bool(found)
 
     @resolve_params(MouseParams, LocateParams, DragParams, WaitParams, mode='pass')
-    def turn_on(self, **resolved_params):
+    def turn_on(self, target=None, *, scope=None, **resolved_params):
         """ 确保开关处于开启状态
 
         如果当前检测为关闭，则执行点击操作。
@@ -1355,28 +1365,28 @@ class AnShape(_AnShapePupil):
             - WaitParams: 用于 click 的潜在等待
         """
         # 1. 检查状态 (复用 resolved_params 中的 Locate/Drag)
-        if not self.is_on(**resolved_params):
+        if not self.is_on(target, scope=scope, **resolved_params):
             # 2. 执行点击 (复用 resolved_params 中的 Mouse/Wait)
             self.click(**resolved_params)
 
     @resolve_params(MouseParams, LocateParams, DragParams, WaitParams, mode='pass')
-    def turn_off(self, **resolved_params):
+    def turn_off(self, target=None, *, scope=None, **resolved_params):
         """ 确保开关处于关闭状态 """
-        if self.is_on(**resolved_params):
+        if self.is_on(target, scope=scope, **resolved_params):
             self.click(**resolved_params)
 
     @resolve_params(WaitParams, LocateParams, DragParams, MouseParams, mode='pass')
-    def wait_img_click_leave(self, dst=None, **resolved_params):
+    def wait_img_click_leave(self, target=None, *, scope=None, **resolved_params):
         """ 经典组合操作：等待出现 -> 点击 -> 直到消失
 
         常用于处理弹窗广告、确认按钮等需要反复点击直到生效的场景。
         """
         # 1. 等待目标出现
-        self.wait_img(dst, **resolved_params)
+        self.wait_img(target, scope=scope, **resolved_params)
 
         # 2. 循环点击直到目标不再被检测到
         # 注意：这里隐式依赖 find_img，如果 find_img 能找到，就点击
-        while self.find_img(dst, **resolved_params):
+        while self.find_img(target, scope=scope, **resolved_params):
             self.click(**resolved_params)
 
             # 为了防止死循环过快，可以加一个微小的间隔，或者依赖 click 内部的 wait_seconds
@@ -1384,12 +1394,12 @@ class AnShape(_AnShapePupil):
             # 因为 find_img 本身有一定耗时
 
     @resolve_params(LocateParams, DragParams, MouseParams, WaitParams, mode='pass')
-    def if_img_click_leave(self, dst=None, **resolved_params):
+    def if_img_click_leave(self, target=None, *, scope=None, **resolved_params):
         """ 如果出现 -> 点击 -> 直到消失 (非阻塞版)
 
         与 wait_img_click_leave 的区别在于：如果起初没找到，直接跳过，不报错不等待。
         """
-        while self.find_img(dst, **resolved_params):
+        while self.find_img(target, scope=scope, **resolved_params):
             self.click(**resolved_params)
 
 
