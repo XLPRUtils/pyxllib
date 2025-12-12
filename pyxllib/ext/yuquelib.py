@@ -11,6 +11,7 @@ import time
 from enum import Enum
 import pprint
 import json
+from urllib.parse import urljoin
 
 from pyxllib.prog.lazyimport import lazy_import
 
@@ -96,254 +97,637 @@ class Yuque(metaclass=SingletonForEveryInitArgs):
     语雀请求限制：每小时最多 5000 次请求，每秒最多 100 次请求
     """
 
-    def __init__(self, token=None, user_id=None):
-        self.base_url = "https://www.yuque.com/api/v2"
-        self.headers = {
-            "X-Auth-Token": token or os.getenv('YUQUE_TOKEN'),
-            "Content-Type": "application/json"
-        }
-        self._user_id = os.getenv('YUQUE_USER_ID') or user_id
+    def __init__(self, *, token=None, user_id=None):
+        self.base_url = "https://www.yuque.com/api/v2/"  # 注意末尾的/一定要输入
+        self.token = token or os.getenv('YUQUE_TOKEN')
+        assert self.token, "Yuque Token is required."
 
-    def get_user(self):
+        # 缓存
+        self._user = None
+        self._user_id = user_id or os.getenv('YUQUE_USER_ID')
+        self._groups = None
+
+    def __1_基础操作(self):
+        pass
+
+    def _request(self, method, endpoint, **kwargs):
+        """ 内部通用请求方法：
+        1. 自动拼接 URL
+        2. 自动处理 headers
+        3. 自动解包 response['data']
+        4. 统一错误处理
+        """
+        # 去掉 endpoint 开头的 /，防止 urljoin 覆盖 base_url 的 path
+        endpoint = endpoint.lstrip('/')
+        url = urljoin(self.base_url, endpoint)
+
+        headers = {
+            "X-Auth-Token": self.token,
+            "Content-Type": "application/json",
+            "User-Agent": "Python-Yuque-Client/1.0",
+        }
+
+        try:
+            response = requests.request(method, url, headers=headers, **kwargs)
+            response.raise_for_status()  # 检查 4xx, 5xx 错误
+
+            # 语雀 API 成功时通常返回 { "data": { ... } }
+            # 这里直接把 'data' 剥离出来，让外部调用更爽
+            res_json = response.json()
+            if isinstance(res_json, dict) and 'data' in res_json:
+                return res_json['data']
+            return res_json
+
+        except requests.exceptions.HTTPError as e:
+            # 这里可以加更详细的日志或自定义异常
+            print(f"Request Error: {e}")
+            raise
+
+    def _paginate(self, method, **kwargs):
+        """ 通用翻页生成器 (核心逻辑)
+
+        :param method: 要调用的获取单页数据的方法 (如 self.get_repos)
+        :param kwargs: 传递给 method 的参数 (如 user_id=123, public=1)
+        """
+        offset = 0
+        limit = kwargs.get('limit', 100)  # 默认100，如果在kwargs里指定了就用指定的
+
+        while True:
+            # 动态更新 offset
+            kwargs['offset'] = offset
+
+            # 调用传入的方法
+            items = method(**kwargs)
+
+            if not items:
+                break
+
+            # 逐个 yield 返回，这就变成了生成器
+            yield from items
+
+            # 如果取到的数量少于 limit，说明是最后一页了
+            if len(items) < limit:
+                break
+
+            offset += limit
+
+    def _parse_url_parts(self, text):
+        """ [纯逻辑] 从 URL/Path 中提取 (Namespace, Slug)
+
+        修复版逻辑：优先提取 user/repo/doc 三层结构
+        """
+        if not isinstance(text, str): return None, None
+
+        # 1. 预处理：如果是 URL，先提取 path 部分
+        if text.startswith('http'):
+            # 简单去除 query 和 fragment
+            clean = text.split('?')[0].split('#')[0]
+            # 移除协议头
+            clean = clean.replace('https://', '').replace('http://', '')
+            # 移除域名 (找到第一个/)
+            if '/' in clean:
+                clean = clean[clean.find('/') + 1:]
+        else:
+            clean = text.split('?')[0].split('#')[0]
+
+        clean = clean.strip('/')
+        parts = clean.split('/')
+
+        # 2. 提取逻辑
+        if len(parts) >= 3:
+            # 命中标准结构: namespace_part1 / namespace_part2 / doc_slug
+            # 例如: code4101 / journal / architecture-design
+            # 返回: ("code4101/journal", "architecture-design")
+            return f"{parts[-3]}/{parts[-2]}", parts[-1]
+
+        elif len(parts) == 2:
+            # 命中短结构: repo_slug / doc_slug
+            # 注意：这种结构在 resolve_repo_id 时可能会因为缺少用户名而产生歧义
+            # 但作为 fallback 依然保留
+            return parts[0], parts[1]
+
+        return None, None
+
+    def _is_valid_id(self, val):
+        """ [纯逻辑] 判断是否为合法的数字 ID (int 或 纯数字字符串) """
+        if isinstance(val, int):
+            return True
+        return isinstance(val, str) and val.isdigit()
+
+    def _is_valid_uuid(self, val):
+        """ [纯逻辑] 判断是否为合法的 UUID (TOC Node) """
+        # 语雀 UUID 通常较长且无特殊符号
+        return isinstance(val, str) and len(val) > 15 and '/' not in val
+
+    def _is_namespace(self, val):
+        """ [纯逻辑] 判断是否为 Namespace (User/Slug) """
+        return isinstance(val, str) and '/' in val and not val.startswith('http')
+
+    def __2_用户与搜索(self):
+        pass
+
+    @property
+    def user(self):
         """ 获取用户信息
 
-        # 获得的内容
-         {'data':
-            {'_serializer': 'v2.user',  # 数据序列化版本
-              # 用户头像URL
-              'avatar_url': 'https://cdn.nlark.com/yuque/0/2020/.../d5f8391e-2fdd-4f1b-8ea5-299be8fceecd.png',
-              'books_count': 12,  # 知识库数量
-              'created_at': '2018-11-16T07:26:27.000Z',  # 账户创建时间
-              'description': '',  # 用户描述
-              'followers_count': 54,  # 跟随者数量
-              'following_count': 6,  # 关注者数量
-              'id': 123456,  # 用户唯一标识
-              'login': 'code4101',  # 用户登录名
-              'name': '代号4101',  # 户昵称或姓名
-              'public': 1,  # 用户公开状态，1为公开
-              'public_books_count': 2,  # 公开的知识库数量
-              'type': 'User',  # 数据类型，这里为'User'
-              'updated_at': '2023-12-31T02:43:16.000Z',  # 信息最后更新时间
-              'work_id': ''}}
+        {'_serializer': 'v2.user',  # 数据序列化版本
+          # 用户头像URL
+          'avatar_url': 'https://cdn.nlark.com/yuque/0/2020/.../d5f8391e-2fdd-4f1b-8ea5-299be8fceecd.png',
+          'books_count': 12,  # 知识库数量
+          'description': '',  # 用户描述
+          'followers_count': 54,  # 跟随者数量
+          'following_count': 6,  # 关注者数量
+          'id': 123456,  # 用户唯一标识
+          'login': 'code4101',  # 用户登录名
+          'name': '代号4101',  # 户昵称或姓名
+          'public': 1,  # 用户公开状态，1为公开
+          'public_books_count': 2,  # 公开的知识库数量
+          'type': 'User',  # 数据类型，这里为'User'
+          'created_at': '2018-11-16T07:26:27.000Z',  # 账户创建时间
+          'updated_at': '2023-12-31T02:43:16.000Z',  # 信息最后更新时间
+          'work_id': ''}
         """
-        url = f"{self.base_url}/user"
-        resp = requests.get(url, headers=self.headers)
-        return resp.json()
+        if self._user is None:
+            self._user = self._request('GET', 'user')
+        return self._user
 
     @property
     def user_id(self):
-        """ 很多接口需要用到用户ID，这里缓存一下 """
         if self._user_id is None:
-            self._user_id = self.get_user()['data']['id']
+            self._user_id = self.user['id']
         return self._user_id
 
-    def __1_知识库操作(self):
-        pass
+    def get_groups(self, user_id=None, role=None, offset=0):
+        """ 获取用户加入的团队/组织列表
 
-    @run_once('id,str')  # todo 应该有更好的缓存机制，目前这样的实现，需要重启程序才会刷新
-    def get_repos(self, return_mode=0):
-        """ 获取某个用户的知识库列表
-
-        :param int|str return_mode: 返回模式
-            0（默认），返回原始json结构
-            df，df结构
-            nickname2id，获取知识库 "namespace和昵称"到ID的映射
+        :param user_id: 用户登录名或数字ID。不填则默认为当前登录用户(self.user_id)
+        :param role: 筛选角色。0:管理员, 1:普通成员。不填则返回所有。
+        :param offset: 偏移量，默认 0（每页固定返回100条）
+        :return: list[dict] 团队列表
+            [{'id': 1694077,
+              'type': 'Group',
+              'login': 'xlpr',
+              'name': '厦门理工模式识别与图像理解重点实验室',
+              'avatar_url': 'https://cdn.nlark.com/yuque/0/2020/png/209178/1593912283515-avatar/a8d20cb3-0c25-41c9-9d1b-72ead95b0a7f.png',
+              'books_count': 7,
+              'public_books_count': 2,
+              'members_count': 37,
+              'public': 1,
+              'description': '',
+              'created_at': '2020-07-05T01:24:46.000Z',
+              'updated_at': '2025-12-11T03:25:55.000Z',
+              '_serializer': 'v2.group'}
+             ]
         """
-        if return_mode == 0:
-            url = f"{self.base_url}/users/{self.user_id}/repos"
-            resp = requests.get(url, headers=self.headers)
-            return resp.json()
-        elif return_mode == 'df':
-            data = self.get_repos()
-            columns = ['id', 'name', 'items_count', 'namespace']
+        target_id = user_id or self.user_id
+        params = {"offset": offset}
+        if role is not None: params["role"] = role
+        return self._request("GET", f"users/{target_id}/groups", params=params)
 
-            ls = []
-            for d in data['data']:
-                ls.append([d[col] for col in columns])
+    def get_all_groups(self, user_id=None, role=None):
+        """ 获取所有团队 (生成器) """
+        return self._paginate(self.get_groups, user_id=user_id, role=role)
 
-            df = pd.DataFrame(ls, columns=columns)
-            return df
-        elif return_mode == 'nickname2id':  # namespace、name到id的映射（注意这里不考虑）
-            data = self.get_repos()
-            names2id = {d['name']: d['id'] for d in data['data']}
-            # 例如："日志"知识库的namespace是journal，然后 journal -> 24363220
-            namespace2id = {d['namespace'].split('/')[-1]: d['id'] for d in data['data']}
-            names2id.update(namespace2id)
-            return names2id
-        else:
-            raise ValueError(f'不支持的return_mode={return_mode}')
+    @property
+    def groups(self):
+        if self._groups is None:
+            self._groups = self.get_groups()
+        return self._groups
 
-    def get_repo_id(self, repo_id):
-        """ repo_id支持输入"昵称"来获得实际id
+    @property
+    def group_id(self):
+        # 默认获得第1组的id
+        return self.groups[0]['id']
+
+    @run_once('id,str')
+    def find_group_by_name(self, name, user_id=None):
+        """ (辅助) 根据名称查找团队
+        注意：这里只在用户加入的团队列表中查找
         """
-        if isinstance(repo_id, str) and not re.match(r'\d+$', repo_id):
-            repo_id = self.get_repos('nickname2id')[repo_id]
-        return repo_id
+        # 使用 get_all_groups 自动翻页查找
+        for group in self.get_all_groups(user_id=user_id):
+            if group['name'] == name:
+                return group
+        return None
 
-    def get_repo_docs(self, repo_id, *, offset=0, limit=100, return_mode=0):
-        """ 获取知识库的文档列表
+    def resolve_group_id(self, group_ident):
+        """ 解析团队标识 -> 返回 ID (int) 或 Login (str)
 
-        :param repo_id: 知识库的ID或Namespace（如"日志"是我改成的"journal"）
-        :param int offset: 偏移多少篇文章后再取
-        :param int limit: 展示多少篇文章，默认100篇
-        :param int|str return_mode: 返回模式
-            私人文档：https://www.yuque.com/code4101/journal/ztvg5qh5m3ga7gh7?inner=ubc5753c5
-            0（默认），返回原始json结构
-            -1（df），df结构
-        :return: 文档列表
-            底层接口获得的数据默认是按照创建时间排序的，但是我这里会重新按照更新时间重排序
+        支持输入:
+        1. 123456 (int/str) -> 直接返回 ID
+        2. "xlpr" (Login)   -> 直接返回 Login (API支持)
+        3. "实验室" (Name)  -> 触发查找 -> 返回 ID
         """
-        repo_id = self.get_repo_id(repo_id)
-        if return_mode == 0:
-            uqb = UrlQueryBuilder()
-            uqb.add_param('offset', offset)
-            uqb.add_param('limit', limit)
-            url = uqb.build_url(f"{self.base_url}/repos/{repo_id}/docs")
-            logger.info(url)
-            d = requests.get(url, headers=self.headers).json()
-            return d
-        elif return_mode in (-1, 'df'):
-            data = self.get_repo_docs(repo_id, offset=offset, limit=limit)
-            # 按照updated_at降序
-            data['data'].sort(key=lambda x: x['updated_at'], reverse=True)
-            columns = ['id', 'title', 'word_count', 'description', 'updated_at']
+        # 1. Direct ID
+        if self._is_valid_id(group_ident):
+            return int(group_ident)
 
-            ls = []
-            for d in data['data']:
-                ls.append([d.get(col) for col in columns])
+        s_ident = str(group_ident).strip()
 
-            # ls.sort(key=lambda x: x[0])  # id一般就是创建顺序
-            df = pd.DataFrame(ls, columns=columns)
-            # df['updated_at']把'2024-08-07T06:13:10.000Z'转成datetime，并改到utf8时区
-            df['updated_at'] = pd.to_datetime(df['updated_at']).dt.tz_convert('Asia/Shanghai')
-            # 不显示时区
-            df['updated_at'] = df['updated_at'].dt.strftime('%Y-%m-%d %H:%M:%S')
-            return df
-        else:
-            raise ValueError(f'不支持的return_mode={return_mode}')
+        # 2. 判断是否为 Login (英文/数字/横杠/点)
+        # 如果包含非 ASCII 字符 (如中文)，则肯定不是 Login，必须走查找
+        is_login = all(ord(c) < 128 for c in s_ident)
 
-    def __2_目录操作(self):
-        pass
+        if is_login:
+            # 即使看起来像 Login，也有可能是英文的 Name。
+            # 但语雀 API 对 Login 很宽容，通常直接传 Login 即可。
+            # 这里做一个简单策略：如果是纯英文，优先视为 Login 直接返回，
+            # 除非你极其严格，否则不建议这就去发请求验证，浪费性能。
+            return s_ident
 
-    def get_repo_toc(self, repo_id):
-        """ 获取知识库目录 """
-        repo_id = self.get_repo_id(repo_id)
-        url = f"{self.base_url}/repos/{repo_id}/toc"
-        resp = requests.get(url, headers=self.headers)
-        d = resp.json()
-        # logger.info(d)
-        return d['data']
+        # 3. Lookup Name (中文名称必走这里)
+        if group := self.find_group_by_name(s_ident):
+            return group['id']
 
-    def repo_toc_move(self, repo_id,
-                      cur_doc=None, dst_doc=None,
-                      *,
-                      insert_ahead=False,
-                      to_child=False):
-        """ 知识库/目录/移动 模式
+        # 4. 没找到
+        raise ValueError(f"Group not found: {group_ident}")
 
-        :param dst|dict cur_doc: 移动哪个当前节点
-            注意把cur移动到dst的时候，cur的子节点默认都会跟着移动
+    def get_group_members(self, group_id=None, role=None):
+        """ 获取指定团队的成员列表
 
-            这里输入的类型，一般是根据get_repo_toc，获得字典类型
-            但如果输入是str，则默认使用的是url模式，需要这个函数里再主动做一次get_repo_toc
-        :param dst|dict dst_doc: 移动到哪个目标节点
-        :param insert_ahead: 默认插入在目标后面
-            如果要插入到前面，可以启动这个参数
-        :param to_child: 作为目标节点的子节点插入
-        :return: 好像是返回新的整个目录
+        :param group_id: 团队的 ID
+        :param role: 筛选角色。0:管理员, 1:成员, 2:只读成员。不填则返回所有。
+        :return: list[dict] 成员列表
+            [{'id': 999999, 'group_id': 1234567, 'user_id': 123456, 'role': 0,
+              'created_at': '2020-07-05T01:24:46.000Z',
+              'updated_at': '2025-09-25T08:25:31.000Z',
+              'user': '格式见self.user'}, ...]
         """
-        repo_id = self.get_repo_id(f'{repo_id}')
+        params = {}
+        group_id = group_id or self.group_id
+        if role is not None: params["role"] = role
+        return self._request("GET", f"groups/{group_id}/users", params=params)
 
-        # 输入为字符串时，默认使用的url进行定位。url只要包括'/'末尾最后的文档id即可，前缀可以省略
-        if isinstance(cur_doc, str) or isinstance(dst_doc, str):
-            toc = self.get_repo_toc(repo_id)  # 知识库的整个目录
-            if isinstance(cur_doc, str):
-                cur_doc = next((d for d in toc if d['url'] == cur_doc.split('/')[-1]))
-            if isinstance(dst_doc, str):
-                dst_doc = next((d for d in toc if d['url'] == dst_doc.split('/')[-1]))
+    def update_group_member(self, group_id, user_id, role):
+        """ 更新或添加团队成员角色
 
-        url = f"{self.base_url}/repos/{repo_id}/toc"
-        cfg = {
-            'node_uuid': cur_doc['uuid'],
-            'target_uuid': dst_doc['uuid'],
-            'action': 'prependNode' if insert_ahead else 'appendNode',
-            'action_mode': 'child' if to_child else 'sibling',
+        :param group_id: 团队 ID
+        :param user_id: 目标用户的 login 或 ID
+        :param role: 目标角色。0:管理员, 1:成员, 2:只读成员
+        :return: dict 操作结果
+        """
+        endpoint = f"groups/{group_id}/users/{user_id}"
+        payload = {"role": role}
+        return self._request("PUT", endpoint, json=payload)
+
+    def remove_group_member(self, group_id, user_id):
+        """ 移除团队成员
+
+        :param group_id: 团队 ID
+        :param user_id: 目标用户的 login 或 ID
+        :return: dict 操作结果
+        """
+        endpoint = f"groups/{group_id}/users/{user_id}"
+        return self._request("DELETE", endpoint)
+
+    def search(self, q, target_type="doc", scope=None, related=True):
+        """ 全局或指定范围搜索
+
+        :param q: (必填) 搜索关键词
+        :param target_type: (必填) 搜索类型。'doc' (文档) 或 'repo' (知识库)。默认为 'doc'
+        :param scope: 搜索范围路径。
+            - 留空: 搜索所有范围
+            - 示例: 'my-group' (搜团队内), 'my-group/wiki' (搜知识库内)
+        :param bool related: 是否仅搜索与我相关的。默认 True
+        :return: list[dict] 搜索结果列表
+            [{'id': 181252454, 'type': 'doc', 'title': '语雀api',
+              'summary': 'test 当要导出多篇文章的时候，每篇文章开头都列一个标准的基础描述？...',
+              'url': '/code4101/st/otxh38ur5czslgyb', 'info': '代号4101 / 商汤科技',
+              'target': {'id': 181252454, 'type': 'Doc', 'slug': 'otxh38ur5czslgyb', 'title': '语雀api',
+                         'description': '官方文档：https://www.yuque.com/yuque/developer/openapi官方文档...',
+                         'cover': 'https://cdn.nlark.com/yuque/0/2024/png/209178/1723014323667-46a51bbe-b39d-4261-9d7c-988366bd3753.png',
+                         'user_id': 209178, 'book_id': 33323197, 'last_editor_id': 209178, 'public': 0, 'status': 1,
+                         'likes_count': 0, 'read_count': 6, 'hits': 6, 'comments_count': 0, 'word_count': 165,
+                         'created_at': '2024-08-07T05:52:09.000Z', 'updated_at': '2024-08-07T10:48:40.000Z',
+                         'content_updated_at': '2024-08-07T10:48:40.000Z', 'published_at': '2024-08-07T10:48:40.000Z',
+                         'first_published_at': '2024-08-07T05:53:23.194Z',
+                         'book': {'id': 33323197, 'type': 'Book', 'slug': 'st', 'name': '商汤科技', 'user_id': 209178,
+                                  'description': '', 'public': 0,
+                                  'content_updated_at': '2025-12-10T13:39:51.000Z',
+                                  'created_at': '2022-10-21T07:09:49.000Z',
+                                  'updated_at': '2025-12-10T13:39:51.000Z',
+                                  'user': {'...': '前面字段参考self.user', 'organization_id': 0, '_serializer': 'v2.user'},
+                                  'namespace': 'code4101/st',
+                                  '_serializer': 'v2.book'},
+                         '_serializer': 'v2.doc'},
+              '_serializer': 'v2.search_result'}, ...]
+        """
+        assert target_type in ["doc", "repo"], "target_type must be 'doc' or 'repo'"
+        params = {
+            "q": q,
+            "type": target_type,
+            "related": "true" if related else "false"
         }
-        resp = requests.put(url, json=cfg, headers=self.headers)
-        return resp.json()
+        if scope:
+            params["scope"] = scope
+        return self._request("GET", "search", params=params)
 
-    def __3_文档操作(self):
+    def __3_知识库管理(self):
+        pass
+
+    @run_once('id,str')
+    def get_repos(self, user_id=None, group_id=None, offset=0, limit=100):
+        """ 获取知识库列表
+
+        逻辑说明：
+        1. 如果指定了 group_id，则获取该团队下的知识库。
+        2. 如果没指定 group_id，但指定了 user_id，则获取该用户下的知识库。
+        3. 如果两者都没指定，默认获取当前登录用户(self.user_id)的知识库。
+
+        :param user_id: 用户 ID 或 login
+        :param group_id: 团队 ID 或 login
+        :param offset: 偏移量（默认0）
+        :param limit: 每页数量（默认100，最大100）
+        :return: list[dict]
+            示例：个人知识库
+            [{'id': 24363220, 'type': 'Book', 'slug': 'journal', 'name': '日志', 'user_id': 209178,
+              'description': '',
+              'creator_id': 209178, 'public': 0, 'items_count': 703, 'likes_count': 0, 'watches_count': 1,
+              'content_updated_at': '2025-12-10T19:00:59.943Z', 'created_at': '2022-01-03T02:24:26.000Z',
+              'updated_at': '2025-12-10T19:01:00.000Z',
+              'user': {'...': '前置字段见self.user', 'organization_id': 0, '_serializer': 'v2.user'},
+              'namespace': 'code4101/journal', '_serializer': 'v2.book'}, ...]
+
+            示例：团队知识库
+            [{'id': 1621213, 'type': 'Book', 'slug': 'pyxllib', 'name': 'pyxllib', 'user_id': 1694077,
+              'description': '公开的通用功能、工具库',
+              'creator_id': 209178, 'public': 1, 'items_count': 157, 'likes_count': 0, 'watches_count': 5,
+              'content_updated_at': '2025-12-11T03:35:24.980Z', 'created_at': '2020-08-15T07:59:13.000Z',
+              'updated_at': '2025-12-11T03:35:25.000Z',
+              'user': {'...': ..., 'organization_id': 0, '_serializer': 'v2.user'},
+              'namespace': 'xlpr/pyxllib', '_serializer': 'v2.book'}, ...]
+        """
+        params = {"offset": offset, "limit": limit}
+
+        # 优先判断是否获取团队知识库
+        if group_id:
+            endpoint = f"groups/{group_id}/repos"
+        else:
+            target_user = user_id or self.user_id
+            endpoint = f"users/{target_user}/repos"
+
+        return self._request("GET", endpoint, params=params)
+
+    def get_all_repos(self, user_id=None, group_id=None):
+        """ 获取所有知识库 (生成器) """
+        return self._paginate(self.get_repos, user_id=user_id, group_id=group_id)
+
+    def create_repo(self, name, slug, group_id=None, description="", public=0, type="Book"):
+        """ 创建知识库
+
+        :param name: (必填) 知识库名称
+        :param slug: (必填) 知识库路径，需唯一
+        :param group_id: 如果要创建在团队下，请填入团队ID；否则默认创建在当前用户下
+        :param description: 简介
+        :param public: 0:私密, 1:公开, 2:企业/团队内公开 (默认0)
+        :param type: 'Book'(文档库) 或 'Design'(画板库), 默认 Book
+            注：该参数原语雀api文档未标明，有待测试验证
+        :return: dict (新创建的知识库详情)
+        """
+        payload = {
+            "name": name,
+            "slug": slug,
+            "description": description,
+            "public": public,
+            "type": type
+        }
+
+        if group_id:
+            endpoint = f"groups/{group_id}/repos"
+        else:
+            endpoint = f"users/{self.user_id}/repos"
+
+        return self._request("POST", endpoint, json=payload)
+
+    def get_repo(self, book_id_or_namespace):
+        """ 获取知识库详情
+
+        :param book_id_or_namespace:
+            可以传数字 ID (推荐): 123456
+            也可以传路径字符串: 'user_login/book_slug' 或 'group_login/book_slug'
+        :return: dict 知识库详情
+            {'id': 24363220, 'type': 'Book', 'slug': 'journal', 'name': '日志', 'user_id': 209178, 'description': '',
+             'toc_yml': '- type: META\n  count: 700\n  display_level: 1\n  tail_type: UPDATED_AT\n  base_version_id: 643303947\n  published: true\n  max_level: 5\n  last_updated_at: 2025-12-08T10:14:24.857Z\n  version_id: 643304020\n- type: DOC\n  title: 卷一 开辟鸿蒙~2008.7\n  uuid: s0Qe3nbBpQbp4nVw\n  url: bdvp1k\n  prev_uuid: \'\'\n  sibling_uuid: IoWlb7U8TUyihUYA\n  child_uuid: sXaktev2EegzA1GA\n  parent_uuid: \'\'\n  doc_id: 89991304\n  level: 0\n  id: 89991304\n  open_window: 0\n  visible: 1\n- type: DOC\n  title: 初中\n ...',
+             'creator_id': 209178, 'public': 0, 'items_count': 703, 'likes_count': 0, 'watches_count': 1,
+             'content_updated_at': '2025-12-10T19:00:59.943Z', 'created_at': '2022-01-03T02:24:26.000Z',
+             'updated_at': '2025-12-10T19:01:00.000Z',
+             'user': {'...': ..., 'organization_id': 0, '_serializer': 'v2.user'},
+             'namespace': 'code4101/journal',
+             '_serializer': 'v2.book_detail'}
+        """
+        # 如果传入的是路径 (包含 /)，API处理路径参数通常不需要 /repos/ 前缀的特殊处理
+        # 但语雀文档指出：GET /repos/{book_id} 或 /repos/{namespace}
+        return self._request("GET", f"repos/{str(book_id_or_namespace)}")
+
+    def update_repo(self, book_id, name=None, slug=None, public=None, description=None, toc_markdown=None):
+        """ 更新知识库信息
+
+        注意：此接口功能强大，甚至可以重置目录结构。
+
+        :param book_id: 知识库 ID (必须是数字 ID，或者 namespace)
+        :param name: 新名称
+        :param slug: 新路径
+        :param public: 公开性
+        :param description: 简介
+        :param toc_markdown: (高级) 传入一段 Markdown 列表文本，直接重置整个知识库的目录结构！
+               例如: "- [Page A](slug-a)\n  - [Page B](slug-b)"
+        :return: dict 更新后的详情
+        """
+        payload = {}
+        if name is not None: payload['name'] = name
+        if slug is not None: payload['slug'] = slug
+        if public is not None: payload['public'] = public
+        if description is not None: payload['description'] = description
+        if toc_markdown is not None: payload['toc'] = toc_markdown
+
+        if not payload:
+            print("Warning: update_repo called with no fields to update.")
+            return {}
+
+        return self._request("PUT", f"repos/{book_id}", json=payload)
+
+    def delete_repo(self, book_id):
+        """ 删除知识库 (慎用)
+
+        :param book_id: 知识库 ID
+        """
+        return self._request("DELETE", f"repos/{book_id}")
+
+    @run_once('id,str')
+    def find_repo_by_name(self, name, group_id=None):
+        """ 根据名称查找知识库 ID (自动全量搜索) """
+        # 这里使用 get_all_repos，它是一个生成器
+        # 循环时它会在后台自动一页页请求，找到就停止，不浪费资源
+        for repo in self.get_all_repos(group_id=group_id):
+            if repo['name'] == name:
+                return repo
+        return None
+
+    @run_once('id,str')
+    def resolve_repo_id(self, repo_identity):
+        """ 将 知识库标识 解析为 API 可用的 ID 或 Namespace
+
+        支持输入:
+        1. 123456 (int/str) -> 直接返回 (ID)
+        2. "user/slug"      -> 直接返回 (Namespace)
+        3. "项目周报"       -> 触发查找 -> 返回 ID
+        """
+        # 1. 如果是数字 ID，直接返回
+        if self._is_valid_id(repo_identity):
+            return int(repo_identity)
+
+        # 2. 如果是 Namespace (user/slug)，API 原生支持，直接返回
+        # 这是一个重要的优化：避免了 API 调用
+        if self._is_namespace(repo_identity):
+            return repo_identity
+
+        # 3. 剩下的一律视为“名称”，需要查找
+        # 优先查个人，再查团队 (依赖 find_repo_by_name 的缓存)
+        if repo := self.find_repo_by_name(repo_identity):
+            return repo['id']
+
+        # 4. (可选) 遍历群组查找，视需求开启
+        for group in self.groups:
+            if repo := self.find_repo_by_name(repo_identity, group['id']):
+                return repo['id']
+
+        raise ValueError(f"Repository not found: {repo_identity}")
+
+    def __4_文档操作(self):
         pass
 
     def ____1_获取文档(self):
         pass
 
-    def _get_doc(self, repo_id, doc_id):
-        """ 获取单篇文档的详细信息
+    def resolve_doc_ref(self, repo_identity, doc_identity=None):
+        """ 解析文档上下文，返回 (RepoID, DocSlug/ID)
 
-        :param repo_id: 知识库的ID或Namespace
-        :param doc_id: 文档的ID
-        :return: 文档的详细信息
+        注意不要把函数名改成resolve_doc_id，这个函数返回值是元组，改名id会引起误解
+        这里是ref是引用位置的含义
+
+        支持两种调用方式:
+        1. resolve_doc_ref(repo, doc_slug)
+        2. resolve_doc_ref(full_doc_url) -> 此时 doc_identity 为 None
         """
-        repo_id = self.get_repo_id(repo_id)
-        url = f"{self.base_url}/repos/{repo_id}/docs/{doc_id}"
-        resp = requests.get(url, headers=self.headers)
-        return resp.json()
+        repo_target = repo_identity
+        doc_target = doc_identity
 
-    def get_doc(self, doc_url, return_mode='md'):
-        """ 从文档的URL中获取文档的详细信息
+        # 场景 A: 传入了完整 URL (如 "https://.../repo/doc")
+        if doc_target is None and isinstance(repo_target, str) and '/' in repo_target:
+            # 尝试拆解 URL
+            extracted_repo, extracted_doc = self._parse_url_parts(repo_target)
+            if extracted_repo and extracted_doc:
+                repo_target = extracted_repo
+                doc_target = extracted_doc
 
-        :param doc_url: 文档的URL
-            可以只输入最后知识库、文档部分的url标记
-        :param return_mode: 返回模式，
-            json, 为原始json结构
-            md, 返回文档的主体md内容
-            title_and_md, 返回文档的标题和md内容
-        :return: 文档的详细信息
+        # 1. 确保获取到了 Repo ID
+        real_repo_id = self.resolve_repo_id(repo_target)
+
+        # 2. 确保获取到了 Doc 标识
+        assert doc_target, "Could not resolve document identity."
+
+        # 注意：API 中 GET /docs/{id_or_slug} 同时支持 ID 和 Slug，
+        # 所以这里不需要像 Repo 那样强制转 ID，直接返回即可。
+        return real_repo_id, doc_target
+
+    def get_docs(self, repo_identity, offset=0, limit=100):
+        """ 获取单页文档列表
+
+        [{'id': 248359251, 'type': 'Doc', 'slug': 'aak9uvncacb9rzi7',
+          'title': '大类拆分与架构设计技术分析：以 Python SDK 封装为例',
+          'description': '版本：1.0背景：...',
+          'cover': '', 'user_id': 209178, 'book_id': 1621213, 'last_editor_id': 209178, 'public': 1, 'status': 1,
+          'likes_count': 0, 'read_count': 0, 'comments_count': 0, 'word_count': 1702,
+          'created_at': '2025-12-11T03:25:54.000Z', 'updated_at': '2025-12-11T03:35:26.000Z',
+          'content_updated_at': '2025-12-11T03:35:25.000Z', 'published_at': '2025-12-11T03:35:25.000Z',
+          'first_published_at': '2025-12-11T03:26:55.735Z',
+          'user': {'...': ..., 'organization_id': 0, '_serializer': 'v2.user'},
+          'last_editor': {'id': 209178, 'type': 'User', 'login': 'code4101', 'name': '陈坤泽(代号4101)',
+                          'avatar_url': 'https://cdn.nlark.com/yuque/0/2020/png/209178/1590664181441-avatar/d5f8391e-2fdd-4f1b-8ea5-299be8fceecd.png',
+                          'followers_count': 56, 'following_count': 6, 'public': 1, 'description': '',
+                          'created_at': '2018-11-16T07:26:27.000Z', 'updated_at': '2025-12-11T04:11:12.000Z',
+                          'work_id': '', 'organization_id': 0, '_serializer': 'v2.user'}, 'hits': 0,
+          '_serializer': 'v2.doc'}, ...]
         """
-        repo_slug, doc_slug = doc_url.split('/')[-2:]
-        data = self._get_doc(repo_slug, doc_slug)['data']
+        # 1. 智能解析 ID
+        real_id = self.resolve_repo_id(repo_identity)
+        assert real_id, f"Repository not found: {repo_identity}"
 
+        # 2. 请求
+        endpoint = f"repos/{real_id}/docs"
+        params = {"offset": offset, "limit": limit}
+        return self._request("GET", endpoint, params=params)
+
+    def get_all_docs(self, repo_identity):
+        """ 获取该知识库下所有文档 (生成器) """
+        return self._paginate(self.get_docs, repo_identity=repo_identity)
+
+    def get_doc(self, repo_ident, doc_ident=None):
+        r_id, d_slug = self.resolve_doc_ref(repo_ident, doc_ident)
+        return self._request("GET", f"repos/{r_id}/docs/{d_slug}")
+
+    def get_doc_content(self, url_or_keys, return_mode='md'):
+        """ 获取文档内容的高级封装
+
+        :param url_or_keys: 文档 URL 字符串，或者 (repo, doc) 元组
+        :param return_mode:
+            - 'json': 返回完整 API 响应字典
+            - 'md': 仅返回 Markdown 正文
+            - 'title_and_md': 返回 (title, md_body) 元组
+        """
+        # 1. 获取数据
+        if isinstance(url_or_keys, (list, tuple)):
+            data = self.get_doc(url_or_keys[0], url_or_keys[1])
+        else:
+            data = self.get_doc(url_or_keys)
+
+        # 2. 根据模式返回
         if return_mode == 'json':
             return data
         elif return_mode == 'md':
-            return data['body']
+            return data.get('body', '')
         elif return_mode == 'title_and_md':
-            return data["title"], data["body"]
+            return data.get('title', 'Untitled'), data.get('body', '')
+        else:
+            raise ValueError(f"Unknown return_mode: {return_mode}")
 
     def export_markdown(self, url, output_dir=None, post_mode=1):
-        """ 导出md格式文件
+        """ 导出 Markdown 文件
 
-        :param str|list[str] url: 文档的URL
-            可以导出单篇文档，也可以打包批量导出多篇文档的md文件
-        :param output_dir: 导出目录
-            单篇的文件名是按照文章标题自动生成的
-            多篇的可以自己指定具体文件名
-        :param post_mode: 后处理模式
-            0，不做处理
-            1，做适当的精简
+        :param url: 文档 URL
+        :param output_dir: 导出目录 (str 或 Path 对象)
+        :param post_mode: 1=清洗锚点标签, 0=原文
+        :return: body (str)
         """
-        # 1 获得内容
-        data = self.get_doc(url, return_mode='json')
-        body = data['body']
-        if post_mode == 0:
-            pass
-        elif post_mode == 1:
-            body = re.sub(r'<a\sname=".*?"></a>\n', '', body)
+        # 1. 获取内容
+        title, body = self.get_doc_content(url, return_mode='title_and_md')
 
-        # 2 写入文件
-        if output_dir is not None:
-            title2 = refinepath(data['title'])
-            f = XlPath(output_dir) / f'{title2}.md'
-            f.write_text(body)
+        # 2. 后处理 (Post Processing)
+        if post_mode == 1:
+            # 移除语雀特有的空锚点 <a name="ABCD"></a>
+            body = re.sub(r'<a\s+name=".*?"></a>\n?', '', body)
+            # 也可以在这里移除 <br /> 等其他非标准 md 标记
+
+        # 3. 写入文件
+        if output_dir:
+            out_path = XlPath(output_dir)
+            out_path.mkdir(parents=True, exist_ok=True)
+
+            # 处理文件名中的非法字符
+            safe_title = refinepath(title)
+            file_path = out_path / f"{safe_title}.md"
+
+            # 使用 utf-8 写入
+            file_path.write_text(body, encoding='utf-8')
+            # print(f"Exported: {file_path}")
 
         return body
 
     def ____2_新建文档(self):
         pass
 
-    def _to_doc_data(self, doc_data, md_cvt=True):
-        """ 将非规范文档内容统一转为标准字典格式
+    def _prepare_doc_payload(self, doc_data, md_auto_fix=True):
+        """ 预处理文档数据 (内部 Helper)
 
         :param str|dict doc_data: 文本内容（md，html，lake）或字典表达的数据
             可以直接传入要更新的新的（md | html | lake）内容，会自动转为 {'body': content}
@@ -354,9 +738,47 @@ class Yuque(metaclass=SingletonForEveryInitArgs):
                 title调整标题
                 public参数调整公开性，0:私密, 1:公开, 2:企业内公开
                 format设置导入的内容格式，markdown:Markdown 格式, html:HTML 标准格式, lake:语雀 Lake 格式
+        :param md_auto_fix: 是否自动修复 Markdown 换行问题 (语雀老编辑器特性)
+            默认的md文档格式直接放回语雀，是会丢失换行的，需要对代码块外的内容，执行\n替换
+        :return: dict 准备好发送给 API 的 payload
+        """
+        # 1. 统一转为字典
+        if isinstance(doc_data, str):
+            payload = {'body': doc_data}
+        else:
+            payload = doc_data.copy()
+
+        # 2. 只有当存在 body 时，才尝试自动推断格式
+        #    修复 Bug: 避免只更新属性(如 slug)时，错误地重置了 format 和 body
+        if 'body' in payload and 'format' not in payload:
+            body = payload.get('body', '')
+            if isinstance(body, str) and '<!doctype lake>' in body.lower():
+                payload['format'] = 'lake'
+            elif isinstance(body, str) and '<!doctype html>' in body.lower():
+                payload['format'] = 'html'
+            else:
+                payload['format'] = 'markdown'
+
+        # 3. Markdown 换行修复 (仅当格式确认为 markdown 且存在 body 时)
+        if md_auto_fix and payload.get('format') == 'markdown' and 'body' in payload:
+            body = payload.get('body', '')
+            if body:
+                ne = NestEnv(payload['body']).search(r'^```[^\n]*\n(.+?)\n^```',
+                                                     flags=re.MULTILINE | re.DOTALL).invert()
+                payload['body'] = ne.replace('\n', '\n\n')
+
+        # 4. 删除默认标题设置
+        #    修复 Bug: 避免 update 时覆盖原有标题。
+        #    Create 接口如果缺标题，语雀 API 会自动处理为“无标题”，无需 Python 侧干预。
+        # if 'title' not in payload:
+        #     payload['title'] = '无标题'
+
+        return payload
+
+    def _to_doc_data(self, doc_data, md_cvt=True):
+        """ 将非规范文档内容统一转为标准字典格式
 
         :param bool md_cvt: 是否需要转换md格式
-            默认的md文档格式直接放回语雀，是会丢失换行的，需要对代码块外的内容，执行\n替换
         """
         # 1 字符串转字典
         if isinstance(doc_data, str):
@@ -376,41 +798,58 @@ class Yuque(metaclass=SingletonForEveryInitArgs):
 
         return doc_data
 
-    def create_doc(self, repo_id, doc_data,
+    def create_doc(self, repo_identity, doc_data,
                    *,
-                   dst_doc=None, insert_ahead=False, to_child=False,  # 设置文档所在位置
-                   ):
-        """ 创建单篇文档，并放到知识库下某指定为止
+                   dst_doc=None, insert_ahead=False, to_child=False,  # 位置控制
+                   md_fix=True):  # 格式控制
+        """ 创建文档并自动挂载到指定位置
 
-        示例用法：
-        yuque.create_doc('周刊摘录',
-                    {'title': '标题', 'body': '内容', 'slug': 'custom_slug/url'},
-                    dst_doc='目标文档的slug/url', to_child=True)
+        :param repo_identity: 知识库标识
+        :param doc_data: 文档内容 (str 或 dict)
+        :param dst_doc: 挂载的目标参照文档 (Slug/URL/ID)，不填则默认挂载到根目录
+        :param insert_ahead: 插到目标前面
+        :param to_child: 插到目标内部
+        :param md_fix: 是否自动修复 Markdown 换行
+        :return: dict 新建文档的详情
+
+        yq.create_doc('周刊摘录',
+            {'title': '标题', 'body': '内容', 'slug': 'custom_slug/url'},
+            dst_doc='目标文档的slug/url', to_child=True)
         """
-        # 1 创建文档
-        repo_id = self.get_repo_id(repo_id)
-        url = f"{self.base_url}/repos/{repo_id}/docs"
+        # 1. 解析与预处理
+        repo_id = self.resolve_repo_id(repo_identity)
+        if not repo_id:
+            raise ValueError(f"Repo not found: {repo_identity}")
 
-        doc_data = self._to_doc_data(doc_data)
-        out_data = requests.post(url, json=doc_data, headers=self.headers).json()['data']
-        doc_id = out_data['id']
+        payload = self._prepare_doc_payload(doc_data, md_auto_fix=md_fix)
 
-        # 2 将文档添加到目录中
-        url2 = f"{self.base_url}/repos/{repo_id}/toc"
-        in_data2 = {
-            "action": "prependNode",  # 默认添加到知识库目录最顶上的位置
-            "action_mode": "child",
-            "doc_id": doc_id,
-        }
-        # 返回的是知识库新的目录
-        toc = requests.put(url2, json=in_data2, headers=self.headers).json()['data']
+        # 2. 【API】创建文档实体 (此时文档处于游离状态)
+        res_doc = self._request("POST", f"repos/{repo_id}/docs", json=payload)
+        new_doc_id = res_doc['id']
 
-        # 3 如果有设置目录具体位置的需求
+        # 3. 解析目标位置 UUID
+        # 只有当指定了 dst_doc 时，resolve_node_uuid 才会内部调用 get_toc 去查找
+        # 否则 target_uuid 为空字符串，无需额外的 TOC 读取请求 -> 效率优化
+        target_uuid = ""
         if dst_doc:
-            self.repo_toc_move(repo_id, toc[0], dst_doc, insert_ahead=insert_ahead, to_child=to_child)
+            target_uuid = self.resolve_node_uuid(repo_id, dst_doc)
+            # 容错：如果用户指定了目标但没找到，target_uuid 为 ""，
+            # 此时逻辑会自动降级为 "挂载到根目录"，保证文档至少能显示出来。
+            if not target_uuid:
+                print(f"[Warn] Target doc '{dst_doc}' not found. Appending to root.")
 
-        # 即使有dst_doc移动了目录位置，但这个新建文档本来就不带位置信息的，所以不用根据dst_doc再重新获得
-        return out_data
+        # 4. 【API】挂载目录
+        toc_payload = {
+            "action": "prependNode" if insert_ahead else "appendNode",
+            "action_mode": "child" if to_child else "sibling",
+            "target_uuid": target_uuid,
+            "type": "DOC",  # 明确类型为文档
+            "doc_ids": [new_doc_id]  # 新建/挂载操作核心参数
+        }
+
+        self.update_toc(repo_id, toc_payload)
+
+        return res_doc
 
     def ____3_更新文档(self):
         pass
@@ -423,65 +862,238 @@ class Yuque(metaclass=SingletonForEveryInitArgs):
         :param dict doc_data: 包含文档更新内容的字典
         :return: 更新后的文档的详细信息
         """
-        repo_id = self.get_repo_id(repo_id)
+        repo_id = self.resolve_repo_id(repo_id)
         url = f"{self.base_url}/repos/{repo_id}/docs/{doc_id}"
         resp = requests.put(url, json=doc_data, headers=self.headers)
         return resp.json()
 
-    def update_doc(self, doc_url, doc_data, *, return_mode='json', use_dp=False):
-        """ 从文档的URL中更新文档的详细信息
+    def update_doc(self, repo_identity, doc_data, doc_slug=None,
+                   *,
+                   md_fix=True,
+                   use_dp=False,
+                   return_mode='json'
+                   ):
+        """ 更新文档内容
+        【安全增强版】自动回填未修改的字段，防止内容丢失。
 
-        :param doc_url: 文档的URL
-        :param str|json doc_data: 包含文档更新内容的字典，详见_to_doc_data接口
+        :param repo_identity: 文档 URL 或 知识库标识。
+            - 推荐直接传入完整 URL (如 "https://yuque.com/user/repo/slug")
+            - 也可以传 RepoID/Name (需配合 doc_slug)
+            - 注意：开启 use_dp 时，此处最好传入 URL，否则传给爬虫的可能只是 ID
+        :param doc_data: 更新内容 (字符串 或 字典)
+        :param doc_slug: 文档 Slug/ID (如果 repo_identity 是 URL 则此项忽略)
+        :param md_fix: 是否自动修复 Markdown 换行 (默认 True)
         :param use_dp: 语雀的这个更新接口，虽然网页端可以实时刷新，但在PC端的软件并不会实时加载渲染。
             所以有需要的话，要开启这个参数，使用爬虫暴力更新下文档内容。
             使用此模式的时候，doc_url还需要至少有用户名的url地址，即类似'用户id/知识库id/文档id'
-        :param str return_mode: 返回的是更新后文档的内容，不过好像有bug，这里返回的body存储的并不是md格式
-            'md', 返回更新后文档的主体md内容
-            'json', 为原始json结构
+        :param return_mode:
+            - 'json': 返回 API 原始响应 (推荐)
+            - 'md': 返回 body 字段 (注意：API 刚更新完返回的 body 有时可能是旧的或 HTML)
 
-            不建议拿这个返回值，完全可以另外再重新取返回值，就是正常的md格式了
-        :return: 更新后的文档的详细信息
+        修改笔记url的方法：  但是注意使用update_doc都会对原本的空格排版情况产生变化
+        yq.update_doc('https://www.yuque.com/code4101/journal/w240415-', {'slug': 'w240415'})
         """
-        # 1 基础配置
-        repo_slug, doc_slug = doc_url.split('/')[-2:]
-        doc_data = self._to_doc_data(doc_data)
+        # 1. 解析身份 (获取 API 所需的 ID 和 Slug)
+        # 无论输入是 URL 还是 ID 组合，这里都能拿到准确的 repo_id 和 doc_slug
+        repo_id, real_doc_slug = self.resolve_doc_ref(repo_identity, doc_slug)
 
-        # 2 提交更新文档
-        data = self._update_doc(repo_slug, doc_slug, doc_data)['data']
+        # 2. 【核心修改】防止内容丢失：如果没传 body，先去把原文档的 body 取回来填上
+        if 'body' not in doc_data:
+            current_doc = self.get_doc(repo_id, real_doc_slug)
+            doc_data['body'] = current_doc.get('body', '')
+            md_fix = False  # 这种情况强制关闭二次转换
 
-        # 3 使用爬虫在浏览器模拟编辑，触发客户端更新通知
+        # 3. 预处理数据 (转字典 + 自动补全格式 + 修复MD换行)
+        payload = self._prepare_doc_payload(doc_data, md_auto_fix=md_fix)
+
+        # 4. 【API】提交更新
+        endpoint = f"repos/{repo_id}/docs/{real_doc_slug}"
+        res_data = self._request("PUT", endpoint, json=payload)
+
+        # 5. (可选) 爬虫强制刷新
+        # 直接复用你已有的 update_yuque_doc_by_dp 函数
         if use_dp:
-            update_yuque_doc_by_dp(doc_url)
+            # 假设 repo_identity 此时就是 url。
+            # 如果调用者传的是 ID，这里转成字符串传进去，具体由你的爬虫函数去处理或报错
+            update_yuque_doc_by_dp(str(repo_identity))
 
-        # 4 拿到返回值
+        # 6. 返回值处理 (兼容旧代码习惯)
         if return_mode == 'md':
-            return data['body']
-        elif return_mode == 'json':
-            return data
+            return res_data.get('body', '')
+
+        # 默认 return_mode == 'json'
+        return res_data
 
     def ____4_删除文档(self):
         pass
 
-    def _delete_doc(self, repo_id, doc_id):
-        """ 删除文档
+    def delete_doc(self, repo_identity, doc_slug=None):
+        """ 删除文档 (逻辑删除)
 
-        这个是真删除，不是从目录中移除的意思哦。
-        虽然可以短期内从回收站找回来。
+        注意：API 执行的是逻辑删除，文档会进入语雀的回收站，可以恢复。
 
-        :param repo_id: 知识库的ID或Namespace
-        :param doc_id: 文档的ID
+        :param repo_identity: 文档 URL 或 知识库标识 (ID/Namespace)
+        :param doc_slug: 文档 Slug/ID (如果 repo_identity 是 URL 则此项忽略)
+        :return: dict (被删除文档的详情数据)
         """
-        repo_id = self.get_repo_id(repo_id)
-        url = f"{self.base_url}/repos/{repo_id}/docs/{doc_id}"
-        resp = requests.delete(url, headers=self.headers)
-        return resp.json()
+        # 1. 统一解析身份
+        # 无论传入的是 "https://..." 还是 (123, "slug")，都能拿到准确的 ID
+        repo_id, real_doc_slug = self.resolve_doc_ref(repo_identity, doc_slug)
 
-    def delete_doc(self, doc_url):
-        repo_slug, doc_slug = doc_url.split('/')[-2:]
-        print(self._delete_doc(repo_slug, doc_slug))
+        # 2. 执行请求
+        # DELETE /repos/{book_id}/docs/{id}
+        endpoint = f"repos/{repo_id}/docs/{real_doc_slug}"
 
-    def __4_内容操作(self):
+        # _request 会自动处理 headers, base_url 和 异常检查
+        return self._request("DELETE", endpoint)
+
+    def __5_目录管理(self):
+        pass
+
+    def get_toc(self, repo_identity):
+        """ 获取知识库目录树 """
+        real_id = self.resolve_repo_id(repo_identity)
+        return self._request("GET", f"repos/{real_id}/toc")
+
+    def resolve_node_uuid(self, repo_id, node_ident, toc_list=None):
+        """ 解析目录节点 -> 返回 UUID (str)
+
+        :param node_ident: UUID / Node对象 / 文档URL / 文档Slug / **节点标题**
+        """
+        if not node_ident: return ""
+
+        # 1. Direct Object
+        if isinstance(node_ident, dict): return node_ident.get('uuid', '')
+
+        s_ident = str(node_ident).strip()
+
+        # 2. Direct UUID
+        if self._is_valid_uuid(s_ident): return s_ident
+
+        # 3. Lookup in TOC
+        # 尝试提取 Slug (为了支持传入文档 URL 来定位节点)
+        # 注意：如果 s_ident 只是普通标题 (如 "TCP/IP")，_parse_url_parts 可能会误判，
+        # 所以下面匹配时，我们会同时对比 'search_key' (解析后的) 和 's_ident' (原始输入)
+        _, derived_slug = self._parse_url_parts(s_ident)
+        search_key = derived_slug if derived_slug else s_ident
+
+        if toc_list is None:
+            toc_list = self.get_toc(repo_id)
+
+        for node in toc_list:
+            node_url = node.get('url')
+            # doc_id 可能是 int, None. 统一转字符串，None 转为空串避免匹配到字符串"None"
+            node_doc_id = str(node.get('doc_id') or '')
+            node_title = node.get('title')
+
+            # 匹配逻辑优先级：
+            # 1. 精确匹配 Slug (URL)
+            # 2. 精确匹配 DocID
+            # 3. 精确匹配 标题 (原始输入) -> 解决 "TCP/IP" 被误切分的问题
+            # 4. 精确匹配 标题 (解析后) -> 解决标题本身就是纯英文 Slug 的情况
+            if (node_url == search_key) or \
+                    (node_doc_id == search_key) or \
+                    (node_title == s_ident) or \
+                    (node_title == search_key):
+                return node['uuid']
+
+        return ""
+
+    def update_toc(self, repo_identity, action_payload):
+        """ (底层核心) 更新目录结构的通用接口
+
+        :param action_payload: 构造好的动作参数 (dict)
+        """
+        repo_id = self.resolve_repo_id(repo_identity)
+        endpoint = f"repos/{repo_id}/toc"
+        # 这里的 PUT 返回的是新的目录结构列表
+        return self._request("PUT", endpoint, json=action_payload)
+
+    def move_node(self, repo_identity, node_identity, target_identity="",
+                  *, insert_ahead=False, to_child=False):
+        """ 移动目录节点 (原 repo_toc_move 的升级版)
+
+        :param repo_identity: 知识库标识 (ID/名称/Namespace)
+        :param node_identity: 要移动的节点 (UUID/文档URL/文档Slug/文档ID)
+        :param target_identity: 目标参照节点 (同上，留空则代表根节点)
+        :param insert_ahead: 插到目标前面 (True) 还是后面 (False, 默认)
+        :param to_child: 作为目标子节点 (True) 还是同级节点 (False, 默认)
+        :return: list[dict] 更新后的目录结构
+        """
+        # 1. 解析知识库 ID
+        repo_id = self.resolve_repo_id(repo_identity)
+
+        # 2. 预取 TOC (一次请求，供后续两次查找使用，效率最高)
+        toc_list = self.get_toc(repo_id)
+
+        # 3. 解析 UUID
+        node_uuid = self.resolve_node_uuid(repo_id, node_identity, toc_list)
+        target_uuid = self.resolve_node_uuid(repo_id, target_identity, toc_list)
+
+        # 校验：源节点必须存在
+        if not node_uuid:
+            raise ValueError(f"Source node not found: {node_identity}")
+
+        # 4. 构造动作参数
+        # 语雀 API 逻辑：
+        # - action: appendNode (后/内尾), prependNode (前/内头)
+        # - action_mode: sibling (同级), child (子级)
+        payload = {
+            "action": "prependNode" if insert_ahead else "appendNode",
+            "action_mode": "child" if to_child else "sibling",
+            "target_uuid": target_uuid,
+            "node_uuid": node_uuid  # 移动操作核心参数
+        }
+
+        return self.update_toc(repo_id, payload)
+
+    def __6_数据统计(self):
+        pass
+
+    def get_statistics_summary(self, group_identity):
+        """ 获取团队汇总统计数据 """
+        # 解析：中文名 -> ID/Login
+        real_group_id = self.resolve_group_id(group_identity)
+        return self._request("GET", f"groups/{real_group_id}/statistics")
+
+    def get_statistics_docs(self, group_identity, offset=0, limit=100, **kwargs):
+        """ 获取文档统计列表 """
+        real_group_id = self.resolve_group_id(group_identity)
+        endpoint = f"groups/{real_group_id}/statistics/docs"
+        params = {"offset": offset, "limit": limit}
+        params.update(kwargs)
+        return self._request("GET", endpoint, params=params)
+
+    def get_all_statistics_docs(self, group_identity, **kwargs):
+        """ 生成器：所有文档统计 """
+        # 注意：这里传给 _paginate 的 kwargs 必须包含 group_identity
+        # 但因为 _paginate 会把参数透传给 get_statistics_docs，
+        # 所以这里不需要预先解析，让 get_statistics_docs 内部去解析即可。
+        return self._paginate(self.get_statistics_docs, group_identity=group_identity, **kwargs)
+
+    def get_statistics_books(self, group_identity, offset=0, limit=100, **kwargs):
+        """ 获取知识库统计列表 """
+        real_group_id = self.resolve_group_id(group_identity)
+        endpoint = f"groups/{real_group_id}/statistics/books"
+        params = {"offset": offset, "limit": limit}
+        params.update(kwargs)
+        return self._request("GET", endpoint, params=params)
+
+    def get_all_statistics_books(self, group_identity, **kwargs):
+        return self._paginate(self.get_statistics_books, group_identity=group_identity, **kwargs)
+
+    def get_statistics_members(self, group_identity, offset=0, limit=100, **kwargs):
+        """ 获取成员贡献统计列表 """
+        real_group_id = self.resolve_group_id(group_identity)
+        endpoint = f"groups/{real_group_id}/statistics/members"
+        params = {"offset": offset, "limit": limit}
+        params.update(kwargs)
+        return self._request("GET", endpoint, params=params)
+
+    def get_all_statistics_members(self, group_identity, **kwargs):
+        return self._paginate(self.get_statistics_members, group_identity=group_identity, **kwargs)
+
+    def __7_内容操作(self):
         pass
 
     def read_tables_from_doc(self, url, header=0):
@@ -681,13 +1293,18 @@ def __3_语雀结构化模组():
     pass
 
 
-class LakeBlock(GetAttr, XlBs4Tag):
+class LakeBlock(GetAttr):
     """ 语雀文档中的基本块类型 """
     _default = 'tag'
 
     def __init__(self, tag):  # noqa
         self.tag = tag
         self.type = check_block_type(tag)
+
+    def fix_hints(self):
+        class Hint(LakeBlock, XlBs4Tag): pass
+
+        return typing.cast(Hint, self)
 
     def is_foldable(self):
         # 默认是不可折叠块
@@ -980,8 +1597,7 @@ class LakeCollapse(LakeBlock):
         return self._get_part_number(self.summary.text)
 
 
-# GetAttr似乎必须放在前面，这样找不到的属性似乎是会优先使用GetAttr机制的，但后者又可以为IDE提供提示
-class LakeDoc(GetAttr, XlBs4Tag):
+class LakeDoc(GetAttr):
     """ 语雀文档类型 """
     _default = 'soup'
 
@@ -989,6 +1605,11 @@ class LakeDoc(GetAttr, XlBs4Tag):
         # 原始完整的html文档内容
         self.soup: XlBs4Tag = soup
         self.type = 'doc'
+
+    def fix_hints(self):
+        class Hint(LakeDoc, XlBs4Tag): pass
+
+        return typing.cast(Hint, self)
 
     def __文档导入导出(self):
         pass
@@ -1175,4 +1796,36 @@ class LakeDoc(GetAttr, XlBs4Tag):
 
 
 if __name__ == '__main__':
-    pass
+    from xlproject.code4101 import *
+
+    # 1. 初始化
+    yq = Yuque()
+    yq.update_doc('https://www.yuque.com/code4101/journal/w240415-', {'slug': 'w240415'})
+
+    # yq.export_markdown(doc_url, XlPath.desktop())
+
+#     doc_info = yq.get_doc(doc_url)
+#
+#     current_title = doc_info['title']
+#     current_slug = doc_info['slug']
+#     # 获取 Markdown 正文，截取前 2000 个字符供 AI 参考，避免太长
+#     content_preview = doc_info.get('body', '')[:2000]
+#
+#     # 4. 生成 Prompt
+#     prompt = f"""我有一篇语雀文档，信息如下：
+# 【标题】：{current_title}
+# 【当前 Slug (URL路径)】：{current_slug}
+# 【文档内容】：
+# {content_preview}
+# ...
+#
+# 请帮我分析当前的 Slug 是否合适。
+# 如果不合适（例如它是随机字符、中文拼音、或者与内容不符），请基于内容生成一个更好的英文 Slug（短横线命名法，如 architecture-design）。
+# 你可以输出多个备选方案，并分析解释，还可以跟我在后续进一步推敲探讨。
+# """
+#
+#     print("-" * 30)
+#     print("请复制以下内容发送给 AI：")
+#     print("-" * 30)
+#     print(prompt)
+#     print("-" * 30)

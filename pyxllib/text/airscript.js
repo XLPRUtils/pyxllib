@@ -305,7 +305,7 @@ function locateTableRange(ws, dataRow = [0, 0], fields = []) {
 }
 
 /**
- * 表格结构化定位工具的增强版本，在locateTableRange基础上增加了tools简化一些常用操作
+ * 表格结构化定位工具的增强版本，在locateTableRange基础上增加了tools简化一些常用操作（仅jsa2可用）
  * tools增加的工具详见内部实现的子函数注释
  * todo 250109周四14:07 这套实现并不太好，过渡封装了，后续还是研究下怎么做出ur.Cells我感觉更好。
  */
@@ -602,7 +602,15 @@ function insertNewDataWithHeaders(jsonData, headerRow = 1, dataStartRow = 2, ws 
 }
 
 function __3_py服务工具() {
+/*
+我的服务器是有很多电脑的，比如codepc_mi15专门用来处理"考勤"相关任务。
+还有codepc_aw、titan2机器等。
+jsa里是可以联网去调用我这里的python后端服务的，我一般简称jsa-py。
+也可以反过来，py-jsa就是指在py去调用jsa，但py-jsa只能使用jsa1.0版本，不支持高级的jsa2.0。
+所以py-jsa，jsa1.0的场景无法使用locateTableRange2、tools相关功能。
 
+2025年12月注：py-jsa现在已经用不了了
+*/
 }
 
 // 服务器路径，url
