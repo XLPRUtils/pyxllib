@@ -1,6 +1,6 @@
 [project]
 name = "pyxllib"
-version = "4.20"
+version = "4.21"
 description = "厦门理工模式识别团队通用python代码工具库"
 readme = "README.md"
 license = "Apache-2.0"
@@ -98,7 +98,7 @@ autogui = [
     "pynput",
     "pyautogui", # 包含pygetwindow，这个库主要也就用来比较简单获得当前激活窗口，全部窗口等信息。更综合的能力不如pywinauto
     "uiautomation; sys_platform == 'win32'", # ui窗口自动化操作
-    "wxauto; sys_platform == 'win32'", # wxauto官方另有付费vip用户可加设wxautox
+    "wxautox; sys_platform == 'win32'", # 原wxauto似乎下架了，直接改成开放的wxautox
     "pywin32; sys_platform == 'win32'", # win32com、win32api等很多win32前缀的库
 ]
 pyqt = ["PyQt6; sys_platform == 'win32'", "PySide6; sys_platform == 'win32'"]
