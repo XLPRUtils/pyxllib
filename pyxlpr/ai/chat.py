@@ -4,31 +4,554 @@
 # @Email  : 877362867@qq.com
 # @Date   : 2024/08/09
 
-import os
+import asyncio
 from types import SimpleNamespace
 from typing import Literal
+from base64 import b64encode, b64decode
 
 from loguru import logger as loguru_logger
-from tqdm import tqdm
-from joblib import Parallel, delayed
-from openai import OpenAI, AsyncOpenAI
+from openai import OpenAI
 
-from skk.openai._chat_model import chat_models
-from skk.openai._chat import AKPool
-from skk.openai import Chat as SkkChat
+from pyxllib.prog.lazyimport import lazy_import
+
+try:
+    import litellm
+except ModuleNotFoundError:
+    litellm = lazy_import('import litellm')
 
 from pyxllib.text.jinjalib import set_template
 
 
-def __1_Chat类的基础功能():
+def __1_扩展litellm支持的供应商():
     pass
 
 
-xl_chat_models = chat_models | Literal[
-    'deepseek-llm',
-    'deepseek-r1:7b',
-    'deepseek-chat',  # 官方最新对话模型
+# 1. 扩展自定义供应商
+ROUTER_CONFIG = [
+    {
+        "model_name": "302ai/*",
+        "litellm_params": {
+            "model": "openai/*",  # 映射到 OpenAI 协议
+            "api_base": "https://api.302.ai/v1",
+            # 等价于os.getenv('302AI_API_KEY')，但是这样写，litellm只会在开始使用的时候才加载
+            # 但在这里这样惰性加载其实还不够，所以后续用了_LAZY_ROUTER全局变量来缓存
+            "api_key": "os.environ/302AI_API_KEY",
+        }
+    },
+    {
+        "model_name": "aihubmix/*",
+        "litellm_params": {
+            "model": "openai/*",
+            "api_base": "https://api.aihubmix.com/v1",
+            "api_key": "os.environ/AIHUBMIX_API_KEY",
+        }
+    }
 ]
+
+_LAZY_ROUTER = None
+
+
+def get_router():
+    """惰性加载函数：只有第一次被调用时才初始化 Router"""
+    global _LAZY_ROUTER
+    if _LAZY_ROUTER is None:
+        _LAZY_ROUTER = litellm.Router(model_list=ROUTER_CONFIG)
+    return _LAZY_ROUTER
+
+
+# 提取你配置的前缀，用于自动判断 (结果是 ['302ai/', 'aihubmix/'])
+# 这样你以后加新厂商，只需要改 model_list，不用改下面的逻辑
+ROUTER_PREFIXES = tuple(item['model_name'].replace('*', '') for item in ROUTER_CONFIG)
+
+# 2. 定义需要支持的功能列表
+# 这里列出了 LiteLLM 中常用的核心方法，你想支持哪个就加哪个
+TARGET_FUNCTIONS = [
+    # 对话补全
+    "completion", "acompletion",
+    # 向量嵌入
+    "embedding", "aembedding",
+    # 图片生成
+    "image_generation", "aimage_generation",
+    # 语音转文字 (Whisper)
+    "transcription", "atranscription",
+    # 文字转语音 (TTS)
+    "speech", "aspeech",
+    # 内容审核
+    "moderation", "amoderation"
+]
+
+# 3. 动态补丁工厂 (The Better Mechanism)
+
+# 用一个字典保存原生的 litellm 方法，防止被覆盖后找不到，也防止递归死循环
+_NATIVE_FUNCS = {}
+
+
+def create_proxy_function(func_name, original_func):
+    """
+    创建一个代理函数，根据 model 前缀决定走 Router 还是 原生逻辑
+    """
+
+    # 判断是否为异步函数 (根据命名习惯以 'a' 开头，或者检查 inspect.iscoroutinefunction)
+    is_async = func_name.startswith('a') or asyncio.iscoroutinefunction(original_func)
+
+    if is_async:
+        async def async_proxy(model, **kwargs):
+            # 1. 判断是否命中自定义前缀
+            if model and str(model).startswith(ROUTER_PREFIXES):
+                router = get_router()
+                # 确保 Router 对象里也有这个方法 (比如 router.acompletion)
+                if hasattr(router, func_name):
+                    router_method = getattr(router, func_name)
+                    return await router_method(model=model, **kwargs)
+
+            # 2. 没命中或 Router 不支持该方法，回退到原生方法
+            return await original_func(model=model, **kwargs)
+
+        return async_proxy
+
+    else:
+        def sync_proxy(model, **kwargs):
+            # 1. 判断是否命中自定义前缀
+            if model and str(model).startswith(ROUTER_PREFIXES):
+                router = get_router()
+                if hasattr(router, func_name):
+                    router_method = getattr(router, func_name)
+                    return router_method(model=model, **kwargs)
+
+            # 2. 回退到原生方法
+            return original_func(model=model, **kwargs)
+
+        return sync_proxy
+
+
+# 4. 执行批量替换
+def apply_patches():
+    for name in TARGET_FUNCTIONS:
+        # 确保 litellm 库里确实有这个方法 (防止版本差异报错)
+        if not hasattr(litellm, name):
+            continue
+
+        # 获取原生方法
+        original = getattr(litellm, name)
+
+        # 存入备份字典 (只存一次，防止多次调用 apply_patches 导致嵌套)
+        if name not in _NATIVE_FUNCS:
+            _NATIVE_FUNCS[name] = original
+
+        # 生成代理函数
+        proxy_func = create_proxy_function(name, _NATIVE_FUNCS[name])
+
+        # 替换 litellm 模块下的方法
+        setattr(litellm, name, proxy_func)
+
+
+# 立即执行补丁
+apply_patches()
+
+
+def __2_SkkChat改litellm():
+    pass
+
+
+class AKPool:
+    """ 轮询获取api_key """
+
+    def __init__(self, apikeys: list):
+        self._pool = self._POOL(apikeys)
+
+    def fetch_key(self):
+        return next(self._pool)
+
+    @classmethod
+    def _POOL(cls, apikeys: list):
+        while True:
+            for x in apikeys:
+                yield x
+
+
+class MsgBase:
+    role_name: str
+    text: str
+
+    def __init__(self, text: str):
+        self.text = text
+
+    def __str__(self):
+        return self.text
+
+    def __iter__(self):
+        yield "role", self.role_name
+        yield "content", self.text
+
+
+system_msg = type("system_msg", (MsgBase,), {"role_name": "system"})
+user_msg = type("user_msg", (MsgBase,), {"role_name": "user"})
+assistant_msg = type("assistant_msg", (MsgBase,), {"role_name": "assistant"})
+
+
+class Temque:
+    """ 一个先进先出, 可设置最大容量, 可固定元素的队列 """
+
+    def __init__(self, maxlen: int = None):
+        self.core: List[dict] = []
+        self.maxlen = maxlen or float("inf")
+
+    def _trim(self):
+        core = self.core
+        if len(core) > self.maxlen:
+            dc = len(core) - self.maxlen
+            indexes = []
+            for i, x in enumerate(core):
+                if not x["pin"]:
+                    indexes.append(i)
+                if len(indexes) == dc:
+                    break
+            for i in indexes[::-1]:
+                core.pop(i)
+
+    def add_many(self, *objs):
+        for x in objs:
+            self.core.append({"obj": x, "pin": False})
+        self._trim()
+
+    def __iter__(self):
+        for x in self.core:
+            yield x["obj"]
+
+    def pin(self, *indexes):
+        for i in indexes:
+            self.core[i]["pin"] = True
+
+    def unpin(self, *indexes):
+        for i in indexes:
+            self.core[i]["pin"] = False
+
+    def copy(self):
+        que = self.__class__(maxlen=self.maxlen)
+        que.core = self.core.copy()
+        return que
+
+    def deepcopy(self):
+        ...  # 创建这个方法是为了以代码提示的方式提醒用户: copy 方法是浅拷贝
+
+    def __add__(self, obj: 'list|Temque'):
+        que = self.copy()
+        if isinstance(obj, self.__class__):
+            que.core += obj.core
+            que._trim()
+        else:
+            que.add_many(*obj)
+        return que
+
+
+class Multimodal_Part:
+    def __init__(self, part: dict):
+        self.part = part
+
+    @classmethod
+    def text(cls, _text: str):
+        return cls({'type': 'text', 'text': _text})
+
+    @classmethod
+    def jpeg(cls, _bytestring: bytes):
+        return cls({'type': 'image_url',
+                    'image_url': {'url': f"data:image/jpeg;base64,{b64encode(_bytestring).decode('utf8')}"}})
+
+    @classmethod
+    def png(cls, _bytestring: bytes):
+        return cls({'type': 'image_url',
+                    'image_url': {'url': f"data:image/png;base64,{b64encode(_bytestring).decode('utf8')}"}})
+
+
+def get_multimodal_content(*speeches: str | Multimodal_Part | dict):
+    content = []
+    for x in speeches:
+        if x:
+            if type(x) is str: x = Multimodal_Part.text(x)
+            if type(x) is Multimodal_Part: x = x.part
+            content.append(x)
+    if len(content) == 1 and content[0]['type'] == 'text':
+        content = content[0]['text']
+    return content or ''
+
+
+class SkkChat:
+    """
+    基于 LiteLLM 的多模型支持 Chat 类
+    支持: OpenAI, Azure, DeepSeek, Anthropic, Gemini, VertexAI, HuggingFace, etc.
+    文档: https://docs.litellm.ai/docs/
+    """
+
+    recently_request_data: dict  # 最近一次请求所用的参数
+
+    def __init__(self,
+                 model: str,  # 例如: "gpt-3.5-turbo", "deepseek/deepseek-chat", "claude-3-opus-20240229"
+                 api_key: str = None,
+                 base_url: str = None,
+                 timeout=None,
+                 max_retries=None,
+                 http_client=None,
+                 msg_max_count: int = None,
+                 **kwargs,
+                 ):
+        """
+        :param model: 模型名称，litellm 格式 (e.g. 'provider/model-name' or just 'model-name')
+        :param api_key: 如果不传，litellm 会尝试读取环境变量 (如 OPENAI_API_KEY, ANTHROPIC_API_KEY)
+        :param base_url: 自定义 API 地址
+        """
+        MsgMaxCount = kwargs.pop('MsgMaxCount', None)
+        msg_max_count = msg_max_count or MsgMaxCount
+
+        # 保存基础配置
+        self.model = model
+        self.api_key = api_key
+        self.base_url = base_url
+
+        # 整理 litellm 的通用参数
+        self._request_kwargs = kwargs
+        if timeout: self._request_kwargs["timeout"] = timeout
+        if max_retries: self._request_kwargs["max_retries"] = max_retries
+        if http_client: self._request_kwargs["http_client"] = http_client
+
+        # 初始化消息队列
+        self._messages = Temque(maxlen=msg_max_count)
+
+    def reset_api_key(self, api_key: str):
+        self.api_key = api_key
+
+    def _prepare_request(self, text, speeches, kwargs):
+        """通用请求准备逻辑"""
+        content = get_multimodal_content(text, *speeches)
+        new_messages = [{"role": "user", "content": content}]
+        temp_messages = (kwargs.pop('messages', None) or [])
+
+        # 记录调试信息
+        self.recently_request_data = {
+            'model': self.model,
+            'api_key': self.api_key,  # 仅作记录，实际 key 传递给 litellm
+            'base_url': self.base_url
+        }
+
+        # 合并参数: 全局参数 < 单次请求参数
+        req_params = {**self._request_kwargs, **kwargs}
+
+        # 构建完整对话历史
+        full_messages = list(self._messages + temp_messages + new_messages)
+
+        return content, new_messages, req_params, full_messages
+
+    def request(self, text: str | Multimodal_Part | dict, *speeches, **kwargs):
+        content, new_msgs, req_params, full_messages = self._prepare_request(text, speeches, kwargs)
+        if self.base_url: req_params['base_url'] = self.base_url
+        if self.api_key: req_params['api_key'] = self.api_key
+
+        response = litellm.completion(
+            model=self.model,
+            messages=full_messages,
+            stream=False,
+            **req_params
+        )
+
+        answer: str = response.choices[0].message.content or ""
+        self._messages.add_many(*new_msgs, {"role": "assistant", "content": answer})
+        return answer
+
+    def stream_request(self, text: str | Multimodal_Part | dict, *speeches, **kwargs):
+        content, new_msgs, req_params, full_messages = self._prepare_request(text, speeches, kwargs)
+        if self.base_url: req_params['base_url'] = self.base_url
+        if self.api_key: req_params['api_key'] = self.api_key
+
+        response = litellm.completion(
+            model=self.model,
+            messages=full_messages,
+            stream=True,
+            **req_params
+        )
+
+        answer: str = ""
+        for chunk in response:
+            if chunk.choices and (delta := chunk.choices[0].delta.content):
+                answer += delta
+                yield delta
+
+        self._messages.add_many(*new_msgs, {"role": "assistant", "content": answer})
+
+    async def async_request(self, text: str | Multimodal_Part | dict, *speeches, **kwargs):
+        content, new_msgs, req_params, full_messages = self._prepare_request(text, speeches, kwargs)
+        if self.base_url: req_params['base_url'] = self.base_url
+        if self.api_key: req_params['api_key'] = self.api_key
+
+        response = await litellm.acompletion(
+            model=self.model,
+            messages=full_messages,
+            stream=False,
+            **req_params
+        )
+
+        answer: str = response.choices[0].message.content or ""
+        self._messages.add_many(*new_msgs, {"role": "assistant", "content": answer})
+        return answer
+
+    async def async_stream_request(self, text: str | Multimodal_Part | dict, *speeches, **kwargs):
+        content, new_msgs, req_params, full_messages = self._prepare_request(text, speeches, kwargs)
+        if self.base_url: req_params['base_url'] = self.base_url
+        if self.api_key: req_params['api_key'] = self.api_key
+
+        response = await litellm.acompletion(
+            model=self.model,
+            messages=full_messages,
+            stream=True,
+            **req_params
+        )
+
+        answer: str = ""
+        async for chunk in response:
+            if chunk.choices and (delta := chunk.choices[0].delta.content):
+                answer += delta
+                yield delta
+
+        self._messages.add_many(*new_msgs, {"role": "assistant", "content": answer})
+
+    def rollback(self, n=1):
+        '''
+        回滚对话
+        '''
+        self._messages.core[-2 * n:] = []
+        # 简单打印最后剩下的两条消息用于确认
+        for x in self._messages.core[-2:]:
+            x = x["obj"]
+            print(f"[{x['role']}]:{x['content']}")
+
+    def pin_messages(self, *indexes):
+        '''
+        锁定历史消息
+        '''
+        self._messages.pin(*indexes)
+
+    def unpin_messages(self, *indexes):
+        '''
+        解锁历史消息
+        '''
+        self._messages.unpin(*indexes)
+
+    def fetch_messages(self):
+        return list(self._messages)
+
+    def add_dialogs(self, *ms: dict | system_msg | user_msg | assistant_msg):
+        '''
+        添加历史对话
+        '''
+        messages = [dict(x) for x in ms]
+        self._messages.add_many(*messages)
+
+    def dalle(self,
+              *speeches,
+              size: Literal["256x256", "512x512", "1024x1024", "1792x1024", "1024x1792"] = '1024x1024',
+              image_count=1,
+              quality: Literal["standard", "hd"] = 'standard',
+              return_format: Literal["url", "bytes"] = 'bytes',
+              **kwargs
+              ):
+        """
+        LiteLLM 的 image_generation 接口封装
+        注意: 并非所有 provider 都支持 size/quality 参数，需根据具体模型调整
+        """
+        self.recently_request_data = {'model': self.model, 'api_key': self.api_key}
+
+        kvs = {
+            **self._request_kwargs,
+            **kwargs,
+            'prompt': speeches[0],
+            'size': size,
+        }
+
+        # OpenAI DALL-E 参数映射，其他模型可能会被 litellm 自动适配或忽略
+        if image_count and image_count != 1: kvs['n'] = image_count
+        if quality and quality != 'standard': kvs['quality'] = quality
+
+        # 映射返回格式参数
+        resp_fmt = 'b64_json' if return_format == 'bytes' else 'url'
+        kvs['response_format'] = resp_fmt
+
+        if self.base_url: kvs['base_url'] = self.base_url
+        if self.api_key: kvs['api_key'] = self.api_key
+
+        response = litellm.image_generation(
+            model=self.model,  # 注意: 画图通常需要专门的模型名 (e.g. dall-e-3)
+            **kvs
+        )
+
+        if return_format == 'bytes':
+            return [b64decode(img.b64_json) for img in response.data]
+        else:
+            return [img.url for img in response.data]
+
+    async def async_dalle(self,
+                          *speeches,
+                          size: Literal["256x256", "512x512", "1024x1024", "1792x1024", "1024x1792"] = '1024x1024',
+                          image_count=1,
+                          quality: Literal["standard", "hd"] = 'standard',
+                          return_format: Literal["url", "bytes"] = 'bytes',
+                          **kwargs
+                          ):
+        self.recently_request_data = {'model': self.model, 'api_key': self.api_key}
+
+        kvs = {
+            **self._request_kwargs,
+            **kwargs,
+            'prompt': speeches[0],
+            'size': size,
+        }
+
+        if image_count and image_count != 1: kvs['n'] = image_count
+        if quality and quality != 'standard': kvs['quality'] = quality
+
+        resp_fmt = 'b64_json' if return_format == 'bytes' else 'url'
+        kvs['response_format'] = resp_fmt
+        if self.base_url: kvs['base_url'] = self.base_url
+        if self.api_key: kvs['api_key'] = self.api_key
+
+        # litellm 异步画图使用 aimage_generation
+        response = await litellm.aimage_generation(
+            model=self.model,
+            **kvs
+        )
+
+        if return_format == 'bytes':
+            return [b64decode(img.b64_json) for img in response.data]
+        else:
+            return [img.url for img in response.data]
+
+    def __getattr__(self, name):
+        # 兼容旧项目 API
+        match name:
+            case 'asy_request':
+                return self.async_request
+            case 'forge':
+                return self.add_dialogs
+            case 'pin':
+                return self.pin_messages
+            case 'unpin':
+                return self.unpin_messages
+            case 'dump':
+                def _dump(fpath):
+                    jt = json.dumps(self.fetch_messages(), ensure_ascii=False)
+                    Path(fpath).write_text(jt, encoding="utf8")
+                    return True
+
+                return _dump
+            case 'load':
+                def _load(fpath):
+                    jt = Path(fpath).read_text(encoding="utf8")
+                    self._messages.add_many(*json.loads(jt))
+                    return True
+
+                return _load
+        raise AttributeError(name)
+
+
+def __3_自定义Chat():
+    pass
 
 
 class Chat(SkkChat):
@@ -39,11 +562,9 @@ class Chat(SkkChat):
     * [获取链接1](https://platform.openai.com/account/api-keys)
     * [获取链接2](https://www.baidu.com/s?wd=%E8%8E%B7%E5%8F%96%20openai%20api_key)
     """
-    default_base_url = os.getenv('OPENAI_BASE_URL', 'http://localhost:11434/v1')
-    default_api_key = os.getenv('OPENAI_API_KEY', 'ollama')
 
     def __init__(self,
-                 model: xl_chat_models = "gpt-4o",
+                 model,
                  *,
                  api_key: str | AKPool = None,
                  base_url: str = None,  # base_url 参数用于修改基础URL
@@ -56,15 +577,7 @@ class Chat(SkkChat):
         """
         :param kwargs: 主要是供OpenAI初始化时使用的参数
         """
-        base_url = base_url or self.default_base_url or os.getenv("OPENAI_BASE_URL")
-        api_key = api_key or self.default_api_key or os.getenv("OPENAI_API_KEY")
-        super().__init__(api_key, base_url, timeout, max_retries, http_client, model, msg_max_count, **kwargs)
-
-    def __1_原作者提供功能(self):
-        pass
-
-    def __2_扩展功能(self):
-        pass
+        super().__init__(model, api_key, base_url, timeout, max_retries, http_client, msg_max_count, **kwargs)
 
     def add_message(self, message):
         """ 添加单条历史消息记录 """
@@ -227,58 +740,7 @@ class Chat(SkkChat):
         return image_url
 
 
-class OpenaiChat(Chat):
-    pass
-
-
-class DeepseekChat(Chat):
-    """
-    DeepSeek 专用聊天类
-    自动加载 DEEPSEEK_BASE_URL 和 DEEPSEEK_API_KEY
-    """
-    # 重写类属性，优先读取 DeepSeek 的环境变量
-    default_base_url = os.getenv('DEEPSEEK_BASE_URL', 'https://api.deepseek.com/v1')
-    default_api_key = os.getenv('DEEPSEEK_API_KEY')
-
-    def __init__(self, model="deepseek-chat", **kwargs):
-        super().__init__(model, **kwargs)
-
-
-class OllamaChat(Chat):
-    """
-    Ollama 本地专用聊天类
-    自动加载 OLLAMA_BASE_URL 和 OLLAMA_API_KEY
-    """
-    default_base_url = os.getenv('OLLAMA_BASE_URL', 'http://localhost:11434/v1')
-    default_api_key = os.getenv('OLLAMA_API_KEY', 'ollama')
-
-    def __init__(self, model, **kwargs):
-        super().__init__(model, **kwargs)
-
-
-class AI302Chat(Chat):
-    """
-    302.ai 专用聊天类
-    """
-    default_base_url = os.getenv('302_BASE_URL', 'https://api.302.ai/v1')
-    default_api_key = os.getenv('302_API_KEY')
-
-    def __init__(self, model, **kwargs):
-        super().__init__(model, **kwargs)
-
-
-class AIHubMixChat(Chat):
-    """
-    AIHubMix 专用聊天类
-    """
-    default_base_url = os.getenv('AIHUBMIX_BASE_URL', 'https://aihubmix.com/v1')
-    default_api_key = os.getenv('AIHUBMIX_API_KEY')
-
-    def __init__(self, model, **kwargs):
-        super().__init__(model, **kwargs)
-
-
-class Chat2:
+class MaqueChat:
     default_api_key = None
     default_base_url = 'https://beta.gpt4api.plus'
 
@@ -379,7 +841,7 @@ class Chat2:
         return '\n\n'.join(resp_json['contents'][-1]['message']['content']['parts'])
 
 
-def __2_信息摘要():
+def __3_信息摘要():
     pass
 
 
@@ -600,7 +1062,7 @@ class CompressContent:
                          **kwargs)
 
 
-def __3_dify工作流():
+def __4_dify工作流():
     pass
 
 
@@ -646,13 +1108,18 @@ class DifyChat:
         return resp_json['answer']
 
 
-def __4_其他各种提示词():
+def __5_其他各种提示词():
     pass
 
 
 if __name__ == '__main__':
     from xlproject.code4101 import *
 
-    chat = OllamaChat('deepseek-r1:7b')
-    # chat = DeepseekChat('deepseek-chat')
+    # chat = Chat('ollama/deepseek-llm')
+    # print(chat.request('你是谁'))
+
+    # chat = Chat('deepseek/deepseek-chat')
+    # print(chat.request('你是谁'))
+
+    chat = Chat('aihubmix/gpt-5-mini')
     print(chat.request('你是谁'))
