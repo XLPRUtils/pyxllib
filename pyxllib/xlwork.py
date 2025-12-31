@@ -31,7 +31,7 @@ import psycopg
 
 from pyxllib.ext.drissionlib import get_dp_page, get_dp_tab
 
-from pyxllib.ai.chat import Chat, CompressContent, DifyChat
+# from pyxllib.ai.chat import Chat, CompressContent, DifyChat
 from pyxllib.file.xlsyncfile import SyncFileClient, XlSyncFileClient
 
 from pyxllib.text.jscode import get_airscript_head2

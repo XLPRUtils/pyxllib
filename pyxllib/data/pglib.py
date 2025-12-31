@@ -66,6 +66,53 @@ class Connection(psycopg.Connection, SqlBase):
             sql.where(f"datname = '{datname}'")
         return self.exec2dict(sql.build_select()).fetchall()
 
+    def get_db_ownership_report(self):
+        """ 【查】获取当前实例下所有数据库的归属情况（紧凑版）
+        需连接到 postgres 库或有足够权限
+
+        # 查看数据库归属
+        >> xldb1 = get_xldb1('postgres')
+        >> print(xldb1.get_db_ownership_report())
+              所有者                数据库
+        0  chenkunze                   ckz
+        1   postgres          postgres, st
+        2         st  bltx, kq5034, stdata
+        3       xlpr                  xlpr
+        """
+        sql = """
+        SELECT u.rolname AS 所有者, d.datname AS 数据库名
+        FROM pg_database d
+        JOIN pg_authid u ON d.datdba = u.oid
+        WHERE d.datistemplate = false
+        ORDER BY 所有者, 数据库名
+        """
+        df = self.exec2df(sql)
+        # 聚合：将同一所有者的数据库合并为一行，逗号分隔
+        if not df.empty:
+            df = df.groupby('所有者')['数据库名'].apply(lambda x: ', '.join(x)).reset_index()
+        return df
+
+    def get_table_ownership_report(self, schema='public'):
+        """ 【查】获取当前连接数据库下所有表格的归属情况（紧凑版）
+
+        # 查看 xlpr 库内表格归属
+        >> xldb1 = get_xldb1('ckz', 'postgres')
+        >> print(xldb1.get_table_ownership_report())
+              所有者                           表名
+        0  chenkunze  skindata, skindata_test, test
+        1   postgres                      cloudfile
+        """
+        sql = SqlBuilder('pg_tables')
+        sql.select('tableowner AS 所有者', 'tablename AS 表名')
+        sql.where(f"schemaname = '{schema}'")
+        sql.order_by('所有者', '表名')
+
+        df = self.exec2df(sql.build_select())
+        # 聚合
+        if not df.empty:
+            df = df.groupby('所有者')['表名'].apply(lambda x: ', '.join(x)).reset_index()
+        return df
+
     def __2_表格(self):
         pass
 
@@ -1101,8 +1148,16 @@ def get_xldb1(dbname, user=None, cls=XlprDb):
 
 
 def get_xldb2(dbname, user=None, cls=XlprDb):
+    """ 历史兼容性接口，实际已经运行不了了 """
     return link_to_host_db('senseserver3', dbname, user, cls=cls)
 
 
 def get_xldb3(dbname, user=None, cls=XlprDb):
     return link_to_host_db('codepc_mi15', dbname, user, cls=cls)
+
+
+if __name__ == '__main__':
+    from xlproject.code4101 import *
+
+    xldb = get_xldb3('postgres')
+    print(xldb.get_db_ownership_report())

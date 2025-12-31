@@ -304,3 +304,105 @@ def dp_check_quit():
     elif len(tabs) == 0:
         # 如果没有标签页，也退出浏览器
         browser.quit()
+
+
+class XlChromium(Chromium):
+    def close_duplicate_tabs(self, *, auto_quit=True, close_default_tab=True):
+        """ 关闭浏览器重复标签页
+        遍历所有标签页（从前往后，dp的get_tabs拿到的tab就是从新到旧的），对每个域名仅保留第一个出现的标签页，其余同域名标签页关闭；
+
+        :param auto_quit: 如果get_tabs遇到异常，直接关闭浏览器
+        :param close_default_tab: 如果最后还剩多个标签页，则把'chrome://newtab/'也关掉。
+        """
+        # 1 获取已有标签页
+        # 250115周三21:12 这步不稳定，会报错，不知道为啥。导致dp最后经常没有清理tabs
+        # 250204周二09:21，好像是浏览器重启更新到最新版本就行了~ 这里也要加个try
+        try:
+            all_tabs = self.get_tabs()
+        except TimeoutError:
+            logger.warning(
+                'browser.get_tabs()运行报错，请清查浏览器是否已更新但没有重启。本次将browser.quit()退出整个浏览器。')
+            if auto_quit:
+                # 你不让我关tabs是吧，那我就把整个浏览器关了
+                self.quit()
+            return
+
+        seen_domains = set()
+
+        # 2 第一次遍历：保留首个出现的域名，其余重复则关闭
+        for t in all_tabs:
+            parsed_url = urlparse(t.url)
+            domain = parsed_url.netloc  # netloc 通常可拿到域名部分
+            # logger.info(f'{t.url}, {domain}')
+
+            if domain in seen_domains:
+                t.close()
+            else:
+                seen_domains.add(domain)
+
+        # 3 第二次遍历：如果剩余标签页 > 1，则关掉chrome://newtab/
+        if close_default_tab:
+            remaining_tabs = self.get_tabs()
+            if len(remaining_tabs) > 1:
+                for t in remaining_tabs:
+                    if t.url.startswith('chrome://newtab'):
+                        t.close()
+
+    def acquire_tab(self, target_url: str, match_mode='domain', *, active_if_found=True, ensure_url=True):
+        """
+        智能获取标签页：如果存在符合规则的Tab则复用，否则新建。
+
+        :param target_url: 期望访问的目标URL
+        :param match_mode: 复用匹配模式
+                           - 'exact': URL必须完全一致才复用
+                           - 'domain': 只要域名(netloc)一致就复用 (最常用)
+                           - 'keyword': 只要URL包含 target_url 字符串就复用
+        :param active_if_found: 找到后是否立即激活该Tab
+        :param ensure_url: 找到复用Tab后，是否强制跳转到 target_url
+                           True:  如果URL不一致，强制跳转（适用于“我要去首页”场景）
+                           False: 仅返回Tab对象，不改变其当前页面（适用于“接着操作”场景）
+        :return: Tab对象
+        """
+        # 1. 解析目标特征
+        target_parsed = urlparse(target_url)
+        target_domain = target_parsed.netloc
+
+        target_tab = None
+        tabs = self.get_tabs()
+
+        # 2. 遍历查找复用目标
+        for tab in tabs:
+            curr_url = tab.url
+            is_match = False
+
+            if match_mode == 'exact':
+                if curr_url == target_url:
+                    is_match = True
+
+            elif match_mode == 'domain':
+                # 提取当前Tab的域名
+                curr_domain = urlparse(curr_url).netloc
+                # 排除 chrome://newtab 这种非网络域名
+                if curr_domain and curr_domain == target_domain:
+                    is_match = True
+
+            elif match_mode == 'keyword':
+                if target_url in curr_url:  # 简单的字符串包含
+                    is_match = True
+
+            if is_match:
+                target_tab = tab
+                if active_if_found:
+                    self.activate_tab(tab.tab_id)
+                break
+
+        # 3. 决策：复用旧的 or 新建
+        if target_tab:
+            # 【关键点】如果是域名匹配，复用后必须跳转到用户指定的准确URL
+            # 因为复用的可能是 login 页面，而你想要的是 home 页面
+            if ensure_url and match_mode == 'domain' and target_tab.url != target_url:
+                target_tab.get(target_url)
+        else:
+            target_tab = self.new_tab(target_url)
+
+        return target_tab
