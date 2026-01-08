@@ -1027,6 +1027,13 @@ class AnShape(_AnShapePupil):
             - False: Anchor Mode (原位校验)。假定目标位置固定，仅在预期的坐标区域进行像素级比对。速度快，适用于位置固定的静态元素。
             - True: Search Mode (在self范围内扫描)。假定目标位置浮动，在当前视图的全范围内进行模板匹配搜索。适用于动态移动或位置未知的元素。
             - None: Auto Mode (智能推断)。根据目标是否包含坐标信息自动决策：有坐标则默认为 False (校验)，无坐标则默认为 True (搜索)。
+        :return: 根据搜索模式返回不同类型
+            - Anchor Mode (scan=False):
+                - 校验成功: 返回代表匹配区域的 `AnShape` 对象（子区域为新对象，自身校验返回 `self`）
+                - 校验失败: 返回 `None`
+            - Search Mode (scan=True):
+                - 找到匹配: 返回 `List[AnShape]`，包含所有匹配区域的 `AnShape` 对象列表
+                - 未找到: 返回空列表 `[]`
         """
         # 0. 作用域委托 (Scope Delegation)
         if scope:

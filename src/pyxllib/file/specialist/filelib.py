@@ -15,13 +15,17 @@ import re
 import shutil
 import subprocess
 import tempfile
-import ujson
 from collections import defaultdict, Counter, UserDict
 import math
 from itertools import islice
 import datetime
 
 from pyxllib.prog.lazyimport import lazy_import
+
+try:
+    import ujson
+except ModuleNotFoundError:
+    ujson = lazy_import('ujson')
 
 try:
     import charset_normalizer

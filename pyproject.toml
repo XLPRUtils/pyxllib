@@ -1,6 +1,6 @@
 [project]
 name = "pyxllib"
-version = "4.27"
+version = "4.28"
 description = "厦门理工模式识别团队通用python代码工具库"
 readme = "README.md"
 license = "Apache-2.0"
@@ -160,7 +160,7 @@ build-backend = "hatchling.build"
 exclude = [".github", ".gitignore", ".gitattributes"]
 
 [tool.hatch.build.targets.wheel]
-packages = ["pyxllib", "pyxlpr"]
+packages = ["src/pyxllib", "src/pyxlpr"]
 
 [tool.uv]
 index-url = "https://pypi.tuna.tsinghua.edu.cn/simple"
