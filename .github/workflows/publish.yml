@@ -27,9 +27,23 @@ jobs:
       
       - run: uv publish --trusted-publishing always
 
-      # 自动创建 GitHub Release 页面并上传构建文件
+      # 提取当前 tag 对应的提交信息
+      - name: Get Commit Message
+        id: commit_msg
+        run: |
+          # 获取最近一次提交的说明（首行）
+          MSG=$(git log -1 --pretty=%s)
+          echo "msg=$MSG" >> $GITHUB_OUTPUT
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/* # 把 uv build 生成的 .whl 和 .tar.gz 传上去
-          generate_release_notes: true  # 自动根据 commit 记录生成更新说明
+          # [修改] 自定义标题格式：Tag名 + 提交信息 (例如: v4.33 修复了BUG)
+          name: ${{ github.ref_name }} ${{ steps.commit_msg.outputs.msg }}
+          # [修改] 将提交信息也放入正文，同时保留自动生成的变更日志
+          body: |
+            ${{ steps.commit_msg.outputs.msg }}
+            
+            ---
+          files: dist/*
+          generate_release_notes: true
