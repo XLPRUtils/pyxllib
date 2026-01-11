@@ -27,22 +27,34 @@ jobs:
       
       - run: uv publish --trusted-publishing always
 
-      # 提取当前 tag 对应的提交信息
-      - name: Get Commit Message
-        id: commit_msg
+      # 智能处理标题，防止版本号重复
+      - name: Prepare Release Info
+        id: release_info
         run: |
-          # 获取最近一次提交的说明（首行）
+          TAG=${{ github.ref_name }}
+          # 获取提交信息
           MSG=$(git log -1 --pretty=%s)
-          echo "msg=$MSG" >> $GITHUB_OUTPUT
+          
+          # 判断：如果 MSG 已经包含了 TAG（比如以 TAG 开头），就直接用 MSG
+          # 否则，拼接 TAG + 空格 + MSG
+          if [[ "$MSG" == *"$TAG"* ]]; then
+            echo "final_title=$MSG" >> $GITHUB_OUTPUT
+          else
+            echo "final_title=$TAG $MSG" >> $GITHUB_OUTPUT
+          fi
+          
+          # 把原始消息也输出出来，放在正文里用
+          echo "body_msg=$MSG" >> $GITHUB_OUTPUT
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          # [修改] 自定义标题格式：Tag名 + 提交信息 (例如: v4.33 修复了BUG)
-          name: ${{ github.ref_name }} ${{ steps.commit_msg.outputs.msg }}
-          # [修改] 将提交信息也放入正文，同时保留自动生成的变更日志
+          # [修改] 使用上面计算好的“智能标题”
+          name: ${{ steps.release_info.outputs.final_title }}
+          
+          # [修改] 正文部分保持原样
           body: |
-            ${{ steps.commit_msg.outputs.msg }}
+            ${{ steps.release_info.outputs.body_msg }}
             
             ---
           files: dist/*
