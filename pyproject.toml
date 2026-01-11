@@ -1,7 +1,7 @@
 [project]
 name = "pyxllib"
-version = "4.28"
-description = "厦门理工模式识别团队通用python代码工具库"
+dynamic = ["version"]
+description = "code4101的python通用工具库"
 readme = "README.md"
 license = "Apache-2.0"
 authors = [{ name = "code4101", email = "877362867@qq.com" }]
@@ -161,6 +161,9 @@ exclude = [".github", ".gitignore", ".gitattributes"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/pyxllib", "src/pyxlpr"]
+
+[tool.hatch.version]
+path = "pyxllib/__init__.py"
 
 [tool.uv]
 index-url = "https://pypi.tuna.tsinghua.edu.cn/simple"
