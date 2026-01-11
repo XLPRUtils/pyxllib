@@ -13,12 +13,23 @@ jobs:
       name: release
 
     permissions:
-      id-token: write
+      contents: write # [新增] 必须加上这个权限，Action 才能创建 GitHub Release
+      id-token: write # [保留] 用于 PyPI Trusted Publisher 认证
 
     steps:
       - uses: actions/checkout@v4
+      
       - uses: astral-sh/setup-uv@v5
         with:
-          version: "0.9.22"  # 要使用的uv版本
+          version: "0.9.22"
+      
       - run: uv build
+      
       - run: uv publish --trusted-publishing always
+
+      # 自动创建 GitHub Release 页面并上传构建文件
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/* # 把 uv build 生成的 .whl 和 .tar.gz 传上去
+          generate_release_notes: true  # 自动根据 commit 记录生成更新说明
