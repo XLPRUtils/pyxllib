@@ -163,7 +163,7 @@ exclude = [".github", ".gitignore", ".gitattributes"]
 packages = ["src/pyxllib", "src/pyxlpr"]
 
 [tool.hatch.version]
-path = "pyxllib/__init__.py"
+path = "src/pyxllib/__init__.py"
 
 [tool.uv]
 index-url = "https://pypi.tuna.tsinghua.edu.cn/simple"
