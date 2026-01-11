@@ -21,6 +21,7 @@ TODO 清单
 
 import os
 import re
+from pathlib import Path
 
 from pyxllib.prog.lazyimport import lazy_import
 
@@ -31,8 +32,12 @@ except ModuleNotFoundError:
 
 try:
     import git
+    from git import Repo
 except ModuleNotFoundError:
     git = lazy_import('git', 'GitPython')
+    Repo = lazy_import('from git import Repo')
+
+from loguru import logger
 
 from pyxllib.prog.newbie import swap_rowcol
 from pyxllib.prog.pupil import dprint
@@ -312,3 +317,62 @@ class Git(git.Git):
                 df[file] = list(reversed(li))
 
         return df
+
+class XlRepo(Repo):
+    """ 自定义的Repo类，封装了一些常用操作 """
+
+    def update_version(self, version, file_rel_path=None, var_name='__version__'):
+        """ 自动更新版本号
+
+        :param str version: 新的版本号
+        :param str file_rel_path: 版本号所在文件路径，相对项目根目录。
+            未指定时，默认尝试 src/{project_name}/__init__.py
+        :param str var_name: 版本号变量名，默认为 __version__
+        """
+        if not file_rel_path:
+            project_name = Path(self.working_dir).name
+            file_rel_path = f'src/{project_name}/__init__.py'
+
+        f = Path(self.working_dir) / file_rel_path
+        assert f.exists(), f"版本文件不存在: {f}"
+
+        content = f.read_text(encoding='utf-8')
+        new_content = re.sub(fr"({var_name}\s*=\s*)(['\"])(.+?)(\2)", fr'\1\g<2>{version}\4', content)
+
+        if content != new_content:
+            f.write_text(new_content, encoding='utf-8')
+            logger.info(f"更新版本号: {f} -> {version}")
+        else:
+            logger.info(f"版本号未发生变化或替换失败: {f}")
+
+    def commit_all(self, version=None, message='', *, version_file=None, version_var='__version__', tag=False, push=False):
+        """ 提交所有更改
+
+        :param str version: 版本号，如果有值，会自动更新version_file中的version_var变量名的版本号，并在message前加v{version}
+        :param str message: 提交信息
+        :param bool tag: 是否打标签，只有在version有值时生效。
+            False表示普通提交，True表示打标签，而这个标签会触发action自动提交到pypi。
+        :param bool push: 是否推送
+        """
+        if version:
+            self.update_version(version, version_file, version_var)
+            message = f"v{version} {message}"
+
+        if self.is_dirty(untracked_files=True):
+            self.git.add('*')
+            self.git.commit('-m', message)
+            logger.info(f"Git提交成功: {message}")
+        else:
+            logger.info("工作区干净，无需提交")
+
+        if version and tag:
+            tag_name = f"v{version}"
+            if tag_name not in [t.name for t in self.tags]:
+                self.create_tag(tag_name, message=message)
+                logger.info(f"Git打标签成功: {tag_name}")
+            else:
+                logger.warning(f"Git标签已存在: {tag_name}")
+
+        if push:
+            self.git.push('--follow-tags')
+            logger.info("Git推送成功")

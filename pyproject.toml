@@ -159,11 +159,11 @@ build-backend = "hatchling.build"
 [tool.hatch.build]
 exclude = [".github", ".gitignore", ".gitattributes"]
 
-[tool.hatch.build.targets.wheel]
-packages = ["src/pyxllib", "src/pyxlpr"]
-
 [tool.hatch.version]
 path = "src/pyxllib/__init__.py"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/pyxllib", "src/pyxlpr"]
 
 [tool.uv]
 index-url = "https://pypi.tuna.tsinghua.edu.cn/simple"
