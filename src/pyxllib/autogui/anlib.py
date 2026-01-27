@@ -63,6 +63,7 @@ from pyxllib.file.specialist import XlPath
 from pyxllib.cv.expert import xlcv, xlpil
 from pyxlpr.data.labelme import LabelmeDict
 from pyxllib.autogui.uiautolib import uia, find_ctrl, UiCtrlNode
+from pyxllib.text.pstr import PStr
 
 from pyxlpr.ai.clientlib import XlAiClient
 
@@ -1040,30 +1041,22 @@ class AnShape(_AnShapePupil):
             return self[scope].find_img(target, scan=scan, **resolved_params)
 
         # 1. 从 resolved_params 提取强类型的配置模型
-        locate_params: LocateParams = resolved_params['LocateParams']
-        drag_params: DragParams = resolved_params['DragParams']
+        locate_params: LocateParams = self.resolve_model(resolved_params['LocateParams'])
+        drag_params: DragParams = self.resolve_model(resolved_params['DragParams'])
 
         # 2. 归一化目标数据
         target_img, target_rect, default_text = self._resolve_img_target(target)
 
         # 3. 智能决策模式 (Auto Mode Logic)
         if scan is None:
-            # 如果有具体的相对坐标 (target_rect)，倾向于相信坐标 -> Anchor Mode
-            if target_rect is not None:
-                scan = False
-            else:
-                # 如果是纯图片资源，没有坐标，必须搜索 -> Search Mode
-                scan = True
+            # 如果有具体的相对坐标 (target_rect)，或者是在校验自身 (target is None)，默认为 Anchor Mode (False)
+            # 否则 (纯图片资源且无坐标)，默认为 Search Mode (True)
+            scan = not (target_rect is not None or target is None)
 
         # 4. 分发执行
         if not scan:
             # --- Anchor Mode ---
-            if target is None and scan is True:
-                # 逻辑互斥检查：target=None (校验自身) 只能是 Anchor 模式
-                raise ValueError("检测自身(target=None)不能使用 scan=True (Search模式)")
-
             return self._verify_anchor_mode(target_img, target_rect, default_text, locate_params)
-
         else:
             # --- Search Mode ---
             # 如果强制要求 Search (scan=True) 但又依赖坐标 (Verify Logic)，这里会按 Search 处理
@@ -1130,10 +1123,11 @@ class AnShape(_AnShapePupil):
     def find_text(self, target=None, *, scope=None, scan=True, **resolved_params):
         """ 查找文本匹配
 
-        :param target: 匹配内容 (正则 Pattern / AnShape / None)
-            - None: 默认使用 self['text'] (或 scope 节点的 text) 作为匹配规则
-            - AnShape: 使用 target['text']
-            - str: 直接作为正则 pattern
+        :param target: 匹配内容 (PStr / 正则 Pattern / AnShape / None)
+            - PStr: 使用 PStr 对象的匹配逻辑 (Regex/Glob/Literal)
+            - None: 默认使用 self['text'] (或 scope 节点的 text) 作为正则 pattern
+            - AnShape: 使用 target['text'] 作为正则 pattern
+            - str: 直接作为正则 pattern (兼容旧有逻辑)
         :param scope: 搜索范围限定 (子节点名称)，若指定则代理给子节点执行
         :param scan: 匹配模式
             - False: 全匹配模式。识别当前 Shape 区域内的整体文本，匹配 pattern。返回 self 或 None。
@@ -1141,7 +1135,7 @@ class AnShape(_AnShapePupil):
         :param resolved_params: 包含 DragParams (用于局部匹配时的滚动查找)
         :return:
             - 全匹配模式: 成功返回 self，失败返回 None
-            - 局部匹配模式: 返回 AnShape 对象列表 (空列表表示未找到)
+            - 局部匹配模式: 返回 AnShape 对象列表 (空列表表示未找到)    
         """
         # 0. 作用域委托 (Scope Delegation)
         if scope:
@@ -1150,18 +1144,24 @@ class AnShape(_AnShapePupil):
         # 1. 解析参数
         drag_params: DragParams = self.resolve_model(resolved_params['DragParams'])
 
-        # 2. 确定匹配目标 (pattern)
-        if target is None:
-            pattern = self.get('text', '')
-        elif isinstance(target, _AnShapeBasic):
-            pattern = target.get('text', '')
+        # 2. 确定匹配目标 (matcher)
+        if isinstance(target, PStr):
+            matcher = target
         else:
-            pattern = str(target)
+            # 兼容旧逻辑：如果不是 PStr，则构建正则模式的 PStr
+            # 这样既能复用 PStr 的 search 接口，又能保持原有的正则匹配行为
+            if target is None:
+                pattern = self.get('text', '')
+            elif isinstance(target, _AnShapeBasic):
+                pattern = target.get('text', '')
+            else:
+                pattern = str(target)
+            matcher = PStr.re(pattern)
 
         # 3. 全匹配模式 (通常用于断言当前状态，不涉及拖拽)
         if not scan:
             # ocr_text 会截取当前 Shape 区域并调用 OCR
-            return self if re.search(pattern, self.ocr_text()) else None
+            return self if matcher.search(self.ocr_text()) else None
 
         # 4. 局部匹配模式 (支持拖拽重试)
         def find_subtext():
@@ -1169,7 +1169,7 @@ class AnShape(_AnShapePupil):
             # convert_to_view('ocr') 会触发 OCR 识别并将文本行转换为子 Shape
             sub_view = self.convert_to_view('ocr', shot=True)
             for sp in sub_view.shapes:
-                if re.search(pattern, sp.get('text', '')):
+                if matcher.search(sp.get('text', '')):
                     shapes.append(sp)
             return shapes
 

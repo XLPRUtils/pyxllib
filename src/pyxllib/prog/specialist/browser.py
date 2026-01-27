@@ -441,7 +441,7 @@ def showdir(c, *, to_html=None, printf=True, width=200):
     # 2 html的样式精调
     def df2str(df):
         if to_html:
-            df = df.applymap(str)  # 不转成文本经常有些特殊函数会报错
+            df = df.map(str)  # 不转成文本经常有些特殊函数会报错
             df.index += 1  # 编号从1开始
             # pd.options.display.max_colwidth = -1  # 如果临时需要显示完整内容
             t = df.to_html()
@@ -481,7 +481,10 @@ def showdir(c, *, to_html=None, printf=True, width=200):
 
     # 成员函数
     methods = filter(lambda m: callable(getattr(c, m[0])), members)
-    df = pd.DataFrame.from_records(methods, columns=['成员函数', '描述'])
+    ls = []
+    for k, v in methods:
+        ls.append([k, shorten(str(v), width=width)])
+    df = pd.DataFrame.from_records(ls, columns=['成员函数', '描述'])
     res.append(df2str(df) + newline)
     res = newline.join(res)
 

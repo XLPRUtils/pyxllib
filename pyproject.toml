@@ -5,7 +5,7 @@ description = "code4101的python通用工具库"
 readme = "README.md"
 license = "Apache-2.0"
 authors = [{ name = "code4101", email = "877362867@qq.com" }]
-requires-python = ">=3.6, <3.13" # 3.6可以兼容大部分功能，但并不保证所有功能都可用
+requires-python = ">=3.6, <=3.13" # 3.6可以兼容大部分功能，但并不保证所有功能都可用
 classifiers = [
     "Programming Language :: Python :: 3",
     "Operating System :: OS Independent",

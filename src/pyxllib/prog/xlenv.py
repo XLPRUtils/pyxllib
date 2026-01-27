@@ -152,7 +152,7 @@ def get_xl_hostname(*, reset=False):
         hostname = hostname.replace('-', '_')
         hostname = hostname.split('.')[0]
         # 3 如果环境变量有配置则进一步映射名称
-        df = XlHosts.get_df('XL_MACHINES')
+        df = XlHosts.get_df('XL_HOSTS')
         # 获得的df有raw_name、name两个字段
         # 查找df['raw_name']中，如果有等于hostname的值，需要把当前hostname映射到df中对应的df['name']的值
         matched_rows = df[df['raw_name'] == hostname]

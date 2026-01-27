@@ -274,3 +274,42 @@ class XlTime(GetAttr, NbTime):
     def prev_week(self):
         """ 移动到上一周 """
         return self.shift(days=-7)
+
+    def __3_其他功能():
+        pass
+    
+    def week_idx(self, anchor_date=None):
+        """ 计算当前日期距离 anchor_date 是第几周
+
+        :param anchor_date: 锚点日期
+            支持 str('2024-01-01') 或 datetime/XlTime 对象
+            None: 默认以 1992-01-06（周一）为锚点，且该日记为第1周
+        :return int: 连续的周索引，可以是负数
+
+        >>> XlTime('2024-01-01').week_idx('2024-01-01')
+        0
+        >>> XlTime('2023-10-23').week_idx('2024-01-01')
+        -10
+        >>> XlTime('1992-01-06').week_idx()
+        1
+        >>> XlTime('2026-01-13').week_idx()
+        1776
+        """
+        # 1. 确定锚点日期
+        offset = 0
+        if anchor_date is None:
+            anchor_date = '1992-01-06'
+            offset = 1
+
+        # 统一转换为 date 对象
+        base = self.__class__(anchor_date).datetime.date()
+
+        # 2. 获取当前日期
+        current = self.datetime.date()
+
+        # 3. 计算周数
+        return (current - base).days // 7 + offset
+
+if __name__ == '__main__':
+    from loguru import logger
+    logger.info(XlTime().weekday())
