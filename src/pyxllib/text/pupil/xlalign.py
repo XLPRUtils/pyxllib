@@ -267,8 +267,14 @@ def arr2table(arr, rowmerge=False):
 
 
 def east_asian_len(s, ambiguous_width=None):
-    import pandas.io.formats.format as fmt
-    return fmt.EastAsianTextAdjustment().len(s)
+    import unicodedata
+    length = 0
+    for char in s:
+        if unicodedata.east_asian_width(char) in ('W', 'F'):
+            length += 2
+        else:
+            length += 1
+    return length
 
 
 def east_asian_shorten(s, width=50, placeholder='...'):

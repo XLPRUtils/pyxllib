@@ -50,11 +50,14 @@ def dataframe_str(df, *args, ambiguous_as_wide=None, shorten=True):
         ambiguous_as_wide = sys.platform == 'win32'
     with pd.option_context('display.unicode.east_asian_width', True,  # 中文输出必备选项，用来控制正确的域宽
                            'display.unicode.ambiguous_as_wide', ambiguous_as_wide,
-                           'max_columns', 20,  # 最大列数设置到20列
+                           'display.max_columns', 20,  # 最大列数设置到20列
                            'display.width', 200,  # 最大宽度设置到200
                            *args):
         if shorten:  # applymap可以对所有的元素进行映射处理，并返回一个新的df
-            df = df.applymap(lambda x: east_asian_shorten(str(x), pd.options.display.max_colwidth))
+            if hasattr(df, 'map'):
+                df = df.map(lambda x: east_asian_shorten(str(x), pd.options.display.max_colwidth))
+            else:
+                df = df.applymap(lambda x: east_asian_shorten(str(x), pd.options.display.max_colwidth))
         s = str(df)
     return s
 
