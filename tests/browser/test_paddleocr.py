@@ -5,6 +5,8 @@ import os
 from paddleocr import PaddleOCR
 from pyxllib.prog.specialist.browser import inspect_object
 
+from pyxllib.xl import run_once
+
 def test_paddleocr_rendering():
     # 1. 初始化 PaddleOCR
     # lang="ch" 表示中英文混合，device="gpu" 使用 GPU 加速

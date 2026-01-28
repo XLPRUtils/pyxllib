@@ -141,7 +141,7 @@ xlpr = [
     "tiktoken", # 计算大模型token数
     "visualdl", # xlpaddle需要使用的可视化工具
 ]
-full = [# full的依赖很重，如无必要一般用advance就足够了，有其他缺失的运行中有需要再临时补
+all = [# all的依赖很重，如无必要一般用advance就足够了，有其他缺失的运行中有需要再临时补
     "pyxllib[advance]",
     "pyxllib[ext_text,ext_algo,ext_file]", # 几个大类其他一些特殊扩展库
     "pyxllib[flask,xlapi,xlserver]", # api、后端服务
