@@ -40,7 +40,7 @@ try:
 except ModuleNotFoundError:
     uiautomation = lazy_import('uiautomation')
 
-from pyxllib.prog.cachetools import xlcache
+from pyxllib.prog.uni_cache import uni_cache
 from pyxllib.cv.xlcvlib import CvImg
 from pyxlpr.ai.clientlib import XlAiClient
 
@@ -112,41 +112,55 @@ class ActiveWindowCapture(OriginalMSS):
         super().__init__()
         self.scale = scale
 
-    @xlcache(property=True)
+        self._monitors2 = None
+        self._window = None
+        self._process = None
+        self._xlapi = None
+
+    @property
     def monitors2(self):
         """ 修正后的各个屏幕坐标 """
-        monitors = self.monitors
-        if self.scale != 1:
-            monitors = adjust_monitors(monitors, self.scale)
-        return monitors
+        if self._monitors2 is None:
+            monitors = self.monitors
+            if self.scale != 1:
+                monitors = adjust_monitors(monitors, self.scale)
+            self._monitors2 = monitors
+        return self._monitors2
 
-    @xlcache(property=True)
+    @property
     def window(self):
         """ 当前激活窗口 """
         # 可以小等一会等到有效窗口
-        for i in range(4):
-            win = uiautomation.GetForegroundControl()
-            if win:
-                return win
-            else:
-                time.sleep(0.5)
-        return
+        if self._window is None:
+            for i in range(4):
+                win = uiautomation.GetForegroundControl()
+                if win:
+                    self._window = win
+                    break
+                else:
+                    time.sleep(0.5)
+        return self._window
 
-    @xlcache(property=True)
+    @property
     def process(self):
-        """ 当前激活窗口 """
-        hwnd = self.window.NativeWindowHandle
-        thread_id, process_id = win32process.GetWindowThreadProcessId(hwnd)
-        return psutil.Process(process_id)
+        """ 当前激活窗口的进程 """
+        if self._process is None:
+            hwnd = self.window.NativeWindowHandle
+            thread_id, process_id = win32process.GetWindowThreadProcessId(hwnd)
+            self._process = psutil.Process(process_id)
+        return self._process
 
-    @xlcache(property=True)
+    @property
     def xlapi(self):
-        return XlAiClient()
+        """ 当前激活窗口的进程对应的XlAiClient """
+        if self._xlapi is None:
+            self._xlapi = XlAiClient()
+        return self._xlapi
 
     def __2_截图数据(self):
         pass
 
-    @xlcache()
+    @uni_cache(mode='id,str', maxsize=16)
     def _capture_single_monitor(self, order):
         """ 缓存单个屏幕的截图 """
         if order == 0:
@@ -250,7 +264,7 @@ class ActiveWindowCapture(OriginalMSS):
 
         return screenshot
 
-    @xlcache()
+    @uni_cache(mode='id,str', maxsize=16)
     def screenshot(self, order=0, *, to_pil=False, mark_active_window=False):
         """ 截屏
 

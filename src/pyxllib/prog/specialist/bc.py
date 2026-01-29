@@ -7,7 +7,7 @@
 import copy
 
 from pyxllib.prog.pupil import dprint, prettifystr
-from pyxllib.prog.specialist.browser import Explorer
+from pyxllib.prog.browser import Explorer
 from pyxllib.algo.pupil import intersection_split
 from pyxllib.file.specialist import File, Dir, filesmatch, get_encoding, XlPath
 

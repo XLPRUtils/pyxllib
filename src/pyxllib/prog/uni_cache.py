@@ -66,7 +66,7 @@ from pyxllib.prog.lazyimport import lazy_import
 try:
     from cachebox import LRUCache, TTLCache
 except ModuleNotFoundError:
-    LRUCache, TTLCache = lazy_import("from cachetools import LRUCache, TTLCache")
+    LRUCache, TTLCache = lazy_import("from cachebox import LRUCache, TTLCache")
 
 
 def __1_缓存策略解析():

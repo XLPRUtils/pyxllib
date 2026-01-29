@@ -13,4 +13,9 @@ dist/
 *.pkl
 *.lock
 
-/pyxllib/ext/wpsapi2.py
+# 忽略所有目录下的 .env 文件
+.env
+**/.env
+
+# 但是不要忽略 .env.example 
+!*.example

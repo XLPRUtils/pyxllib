@@ -22,7 +22,7 @@ except ModuleNotFoundError:
     jsbeautifier = lazy_import('jsbeautifier')
 
 from pyxllib.file.specialist import XlPath
-from pyxllib.prog.cachetools import xlcache
+from pyxllib.prog.uni_cache import uni_cache
 
 
 def __1_删注释功能():
@@ -454,7 +454,7 @@ function isNextMonth(date) {
 """.strip()
 
 
-@xlcache()
+@uni_cache
 def get_airscript_head2(definitions=False):
     """ 原始airscript.js并不是能直接全部运行的代码，里面有些占位变量要替换掉
 

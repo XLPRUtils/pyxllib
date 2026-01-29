@@ -28,8 +28,7 @@ prog = [# 工程需要的一些特殊工具
     "pympler", # 计算对象的内存占用
     "fastcore>=1.8.1", # 有些好用的工程功能，比如from fastcore.utils import GetAttr，用于不实际继承的情况拥有类似继承的操作模式
     "fire", # 制作命令行工具
-    "cachetools", # 通用缓存工具，适用范围更广
-    "cached_property", # 类属性特用工具，相对比较简洁些
+    "cachebox", # 缓存工具，比cachetools性能更好，在我的uni_cache下速度快约10%
 ]
 algo = [# 算法库
     "anytree", # 树形结构处理
@@ -157,7 +156,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build]
-exclude = [".github", ".gitignore", ".gitattributes"]
+exclude = [".github", ".gitignore", ".gitattributes", "tests", "examples"]
 
 [tool.hatch.version]
 path = "src/pyxllib/__init__.py"

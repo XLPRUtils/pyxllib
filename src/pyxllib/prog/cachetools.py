@@ -8,14 +8,10 @@
 from functools import lru_cache
 import threading
 
-from pyxllib.prog.lazyimport import lazy_import
+from deprecated import deprecated
 
-try:
-    from cachetools import cached, LRUCache, TTLCache
-except ModuleNotFoundError:
-    cached = lazy_import('from cachetools import cached')
-    LRUCache = lazy_import('from cachetools import LRUCache')
-    TTLCache = lazy_import('from cachetools import TTLCache')
+from pyxllib.prog.lazyimport import lazy_import
+from pyxllib.prog.uni_cache import uni_cache
 
 try:
     # 官方文档：https://pypi.org/project/cached-property/
@@ -32,10 +28,9 @@ except ModuleNotFoundError:
     threaded_cached_property_with_ttl = lazy_import('from cached_property import threaded_cached_property_with_ttl')
 
 
-# todo 240609周日21:19 https://github.com/awolverp/cachebox，据说这个缓存库速度更快的多
-
 # 进一步封装的更通用、自己常用的装饰器
 
+@deprecated(reason="请使用 pyxllib.prog.uni_cache.uni_cache 代替")
 def xlcache(maxsize=128, *, ttl=None, lock=None, property=False):
     """ 那些工具接口太复杂难记，自己封装一个统一的工具
 
@@ -45,29 +40,18 @@ def xlcache(maxsize=128, *, ttl=None, lock=None, property=False):
         而是外部再加一层@property，不然IDE会识别不了这是一个property，影响开发
 
     """
-
-    def decorator(func):
-        if property:
+    if property:
+        def decorator(func):
             if ttl is not None:
                 if lock:
-                    # 使用带有时间限制和线程安全的缓存属性
                     return threaded_cached_property_with_ttl(ttl)(func)
                 else:
-                    # 使用带有时间限制但非线程安全的缓存属性
                     return cached_property_with_ttl(ttl)(func)
             else:
                 if lock:
-                    # 使用线程安全的缓存属性
                     return threaded_cached_property(func)
                 else:
-                    # 使用普通的缓存属性
                     return cached_property(func)
-        else:
-            lock2 = threading.RLock() if lock is True else lock
-            if ttl is None:
-                return cached(LRUCache(maxsize), lock=lock2)(func)
-            else:
-                cache = TTLCache(maxsize=maxsize, ttl=ttl)
-                return cached(cache, lock=lock2)(func)
-
-    return decorator
+        return decorator
+    else:
+        return uni_cache(maxsize=maxsize, ttl=ttl)

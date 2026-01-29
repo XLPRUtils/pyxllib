@@ -8,12 +8,7 @@ import builtins
 import enum
 import html
 import inspect
-import os
-import subprocess
 import sys
-import datetime
-import platform
-import re
 import types
 
 from loguru import logger
@@ -30,11 +25,13 @@ try:
 except ModuleNotFoundError:
     pd = lazy_import('pandas')
 
+
 try:
     from bs4 import BeautifulSoup
 except ModuleNotFoundError:
     BeautifulSoup = lazy_import('from bs4 import BeautifulSoup', 'beautifulsoup4')
 
+from pyxllib.prog.browser import browser, view_files
 from pyxllib.prog.newbie import typename
 from pyxllib.prog.pupil import func_input_message, is_url, is_file
 from pyxllib.prog.specialist.common import (
@@ -43,12 +40,13 @@ from pyxllib.prog.specialist.common import (
     KeyValuesCounter,
     dataframe_str,
 )
-from pyxllib.text.pupil import ensure_gbk, shorten
+from pyxllib.text.pupil import shorten
 from pyxllib.file.specialist.dirlib import File, Dir, get_etag, XlPath
 
 
-def __1_introspector_内省工具集():
-    pass
+# -----------------------------------------------------------------------------
+# 1. Introspector
+# -----------------------------------------------------------------------------
 
 
 def getasizeof(*objs, **opts):
@@ -310,13 +308,12 @@ def inspect_object(obj, mode='str', width=200):
     elif mode == 'str':
         return formatter.to_text()
     elif mode == 'html_str':
-        return formatter.to_html()
+        obj_name = type(obj).__name__
+        return formatter.to_html(title_name=obj_name)
     elif mode in ('browser', 'html'):
         obj_name = type(obj).__name__
         content = formatter.to_html(title_name=obj_name)
-        f = File(obj_name, Dir.TEMP, suffix='.html')
-        f.write(ensure_gbk(content), if_exists='replace')
-        browser(f.to_str())
+        browser(content, name=obj_name)
         return content
 
 
@@ -331,235 +328,9 @@ def showdir(c, *, mode='auto', width=200):
     return inspect_object(c, mode=mode, width=width)
 
 
-def __2_browser基础组件():
-    pass
-
-
-def viewfiles(procname, *files, **kwargs):
-    """ 调用procname相关的文件程序打开files
-
-    :param str procname: 程序名
-    :param files: 一个文件名参数清单，每一个都是文件路径，或者是字符串等可以用writefile转成文件的路径
-    :param kwargs:
-        - save: 如果True，则会按时间保存文件名；否则采用特定名称，每次运行就会把上次的覆盖掉
-        - wait:
-            - True：在同一个进程中执行子程序，即会等待bc退出后，再进入下一步
-            - False：在新的进程中执行子程序
-            - 默认 False (如果未提供)
-        - filename: 控制写入的文件名
-        - if_exists: 写入文件时的模式，默认 'error'
-    :return: 运行耗时
-
-    >>> ls = list(range(100))
-    >>> viewfiles('notepad', ls, save=True)  # doctest: +SKIP
-    """
-    # 1 生成文件名
-    ls = []  # 将最终所有绝对路径文件名存储到ls
-
-    basename = ext = None
-    if kwargs.get('filename'):
-        basename, ext = os.path.splitext(kwargs['filename'])
-
-    for i, t in enumerate(files):
-        if File(t) or is_url(t):
-            ls.append(str(t))
-        else:
-            bn = basename or ...
-            ls.append(
-                File(bn, Dir.TEMP, suffix=ext)
-                .write(t, if_exists=kwargs.get('if_exists', 'error'))
-                .to_str()
-            )
-
-    # 2 调用程序
-    try:
-        if kwargs.get('wait'):
-            subprocess.run([procname, *ls])
-        else:
-            subprocess.Popen([procname, *ls])
-    except FileNotFoundError:
-        if procname in ('chrome', 'chrome.exe'):
-            procname = 'explorer'  # 如果是谷歌浏览器找不到，尝试用系统默认浏览器
-            viewfiles(procname, *files, **kwargs)
-        else:
-            raise FileNotFoundError(
-                f'未找到程序：{procname}。请检查是否有安装及设置了环境变量。'
-            )
-
-
-class Explorer:
-    """ 资源管理器类，负责调用系统程序打开文件 """
-
-    def __init__(self, app='explorer', shell=False):
-        """ 初始化 Explorer
-
-        :param str app: 应用程序名称或路径，默认为 'explorer'
-        :param bool shell: 是否通过 shell 执行命令，默认为 False
-        """
-        self.app = app
-        self.shell = shell
-
-    def __call__(self, *args, wait=True, **kwargs):
-        """ 调用程序打开文件或执行命令
-
-        :param args: 命令行参数
-        :param bool wait: 是否等待程序运行结束再继续执行后续python命令，默认为 True
-        :param kwargs: 扩展参数，参考 subprocess 接口
-        :return: None
-        """
-        args = [self.app] + list(args)
-
-        if 'shell' not in kwargs:
-            kwargs.update({'shell': self.shell})
-        if re.match(r'open\s', self.app):
-            args = args[0] + ' ' + args[1]
-            kwargs.update({'shell': True})
-        try:
-            if wait:
-                subprocess.run(args, **kwargs)
-            else:
-                subprocess.Popen(args, **kwargs)
-        except FileNotFoundError:
-            raise FileNotFoundError(f"Application/Command not found：{' '.join(args)}")
-
-
-class Browser(Explorer):
-    """ 使用浏览器查看数据文件
-
-    标准库 webbrowser 也有一套类似的功能，那套主要用于url的查看，不支持文件
-    而我这个主要就是把各种数据转成文件来查看
-    """
-
-    def __init__(self, app=None, shell=False):
-        """ 初始化 Browser
-
-        :param str|None app: 使用的浏览器程序，例如 'msedge', 'chrome'，也可以输入程序绝对路径
-            - 默认值 None 会自动检测标准的 msedge、chrome 目录是否在环境变量，自动获取
-            - 如果要用其他浏览器，或者不在标准目录，请务必要设置 app 参数值
-            - 在找没有的情况下，默认使用 'explorer'
-        :param bool shell: 是否通过 shell 执行
-        """
-        if app is None:
-            if platform.system() == 'Windows':
-                paths = os.environ['PATH']
-                chrome_dir = r'Google\Chrome\Application'
-                msedge_dir = r'Microsoft\Edge\Application'
-                if chrome_dir in paths:
-                    app = 'chrome'
-                elif msedge_dir in paths:
-                    app = 'msedge'
-                else:  # 默认使用谷歌。之前试过explorer不行~~
-                    app = 'C:/Program Files/Google/Chrome/Application/chrome.exe'
-            elif platform.system() == 'Linux':  # Linux系统（包括Ubuntu）
-                app = 'google-chrome'
-            else:
-                app = 'open -a "Google Chrome"'
-        super().__init__(app, shell)
-
-    @classmethod
-    def _write_to_temp(cls, content, file=None, suffix='.html'):
-        """ 将内容写入临时文件，并支持 etag 重命名
-
-        :param content: 文件内容
-        :param file: 指定文件名
-        :param str suffix: 文件后缀
-        :return File: 生成的文件对象
-        """
-        if file is None:
-            # 1 生成临时文件并写入
-            f = File(..., Dir.TEMP, suffix=suffix).write(content)
-            # 2 根据内容哈希重命名，实现避重
-            f = f.rename(get_etag(str(f)) + f.suffix, if_exists='replace')
-        else:
-            f = File(file).write(content)
-        return f
-
-    @classmethod
-    def to_browser_file(cls, arg, file=None, clsmsg=True, to_html_args=None):
-        """ 将任意数值类型的arg转存到文件，转换风格会尽量适配浏览器的使用
-
-        :param arg: 任意类型的一个数据
-        :param file: 想要存储的文件名，没有输入的时候会默认生成到临时文件夹，文件名使用哈希值避重
-        :param bool clsmsg: 显示开头一段类型继承关系、对象占用空间的信息
-        :param dict to_html_args: df.to_html相关格式参数，写成字典的形式输入，常用的参数有如下
-            - escape: 默认True，将内容转移明文显示；可以设为False，这样在df存储的链接等html语法会起作用
-        :return File: 生成的文件对象
-
-        说明：其实所谓的用更适合浏览器的方式查看，在我目前的算法版本里，就是尽可能把数据转成DataFrame表格
-        """
-        # 1 如果已经是文件、url，则不处理
-        if is_file(arg) or is_url(arg) or isinstance(arg, File):
-            return arg
-
-        # 2 如果是其他类型，则根据类型获取内容和后缀
-        arg_ = TypeConvert.try2df(arg)
-        if isinstance(arg_, pd.DataFrame):  # DataFrame在网页上有更合适的显示效果
-            content = Introspector(arg).get_html_meta_info() if clsmsg else ''
-            content += arg_.to_html(**(to_html_args or {}))
-            return cls._write_to_temp(content, file, suffix='.html')
-        elif hasattr(arg, 'render'):
-            # pyecharts 等表格对象，可以用render生成html表格显示
-            try:
-                name = arg.options['title'][0]['text']
-            except (LookupError, TypeError):
-                name = datetime.datetime.now().strftime('%H%M%S_%f')
-            res_file = File(file or name, Dir.TEMP, suffix='.html')
-            arg.render(path=str(res_file))
-            return res_file
-        else:  # 不在预设格式里的数据，转成普通的txt查看
-            return cls._write_to_temp(arg, file, suffix='.txt')
-
-    def html(self, arg, **kwargs):
-        """ 将内容转为html展示
-
-        :param arg: 要展示的内容
-        :param kwargs: 传递给 __call__ 的其他参数，可以包含 'file' 参数指定文件名
-        """
-        file = kwargs.pop('file', None)
-        res_file = self._write_to_temp(arg, file, suffix='.html')
-        self.__call__(str(res_file), **kwargs)
-
-    def url(self, *args, wait=True, **kwargs):
-        """ 打开 URL
-
-        :param args: URL 列表
-        :param bool wait: 是否等待
-        :param kwargs: 其他参数
-        """
-        super().__call__(*args, wait=wait, **kwargs)
-
-    def __call__(
-        self, arg, file=None, *, wait=True, clsmsg=True, to_html_args=None, **kwargs
-    ):
-        """ 该版本会把arg转存文件重设为文件名
-
-        :param arg: 要查看的数据或文件路径
-        :param file: 默认可以不输入，会按七牛的etag哈希值生成临时文件
-            如果输入，则按照指定的名称生成文件
-        :param bool wait: 是否等待
-        :param bool clsmsg: 是否显示类信息
-        :param dict to_html_args: 转 HTML 参数
-        """
-        res_file = self.to_browser_file(
-            arg, file, clsmsg=clsmsg, to_html_args=to_html_args
-        )
-        super().__call__(str(res_file), wait=wait, **kwargs)
-
-
-browser = Browser()
-
-
-def __2_showdir():
-    pass
-
-
 # -----------------------------------------------------------------------------
-# 1. Core Logic: 对象内省器 (只负责提取数据，不负责展示)
+# 2. 其他工具
 # -----------------------------------------------------------------------------
-
-
-def __3_其他browser相关功能():
-    pass
 
 
 def browse_json(f):
