@@ -313,14 +313,5 @@ def test_type_fingerprint():
 
 
 if __name__ == "__main__":
-    test_basic_and_alignment()
-    test_class_factory()
-    test_complex_rules()
-    test_lifecycle_management()
-    test_instance_methods()
-    test_property_and_class_methods()
-    test_multithreading()
-    test_recursive_lock()
-    test_ttl_expiry()
-    test_type_fingerprint()
-    logger.success(">>> 所有测试通过！")
+    import pytest
+    pytest.main([__file__])
