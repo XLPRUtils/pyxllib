@@ -135,13 +135,14 @@ class XlEnv:
             return pd.DataFrame(data[1:], columns=data[0])
 
 
-def get_xl_homedir(host=None, *, reset=False):
+def get_xl_homedir(host=None):
     """ 获取用户工作目录 """
     from pyxllib.file.specialist import XlPath
-    if not os.getenv('XL_HOMEDIR') or reset:
-        os.environ['XL_HOMEDIR'] = XlHosts.find_homedir(host)
-    return XlPath(os.getenv('XL_HOMEDIR'))
-
+    if os.getenv('XL_HOMEDIR'):  # 如果环境变量直接配置
+        home = os.getenv('XL_HOMEDIR')
+    else:  # 否则去检索表查找
+        home = XlHosts.find_homedir(host)
+    return XlPath(home)
 
 def get_xl_hostname(*, reset=False):
     """ 特殊定制版的获取主机名 """

@@ -15,12 +15,12 @@ walker.py - Directory & File Walker Utility
 
 import os
 from typing import List, Tuple, Callable
-from datetime import datetime
 import zipfile
 
 from loguru import logger
 
 from pyxllib.text.pstr import PStr
+from pyxllib.prog.xltime import XlTime
 
 Predicate = Callable[[os.DirEntry], bool]
 
@@ -182,32 +182,6 @@ class FilterFactory:
         return lambda e: (min_size <= e.stat().st_size) and (max_size is None or e.stat().st_size <= max_size)
 
     @classmethod
-    def _parse_time(cls, t):
-        """内部辅助函数：将各种时间格式统一转为 timestamp (float)
-
-        :param t: 时间。
-            - int|float: 时间戳。
-            - datetime: datetime 对象。
-            - str: 字符串，支持 '2023-01-01' 或 '2023-01-01 12:00:00'。
-        :return float|None: 时间戳
-        """
-        if t is None:
-            return None
-        if isinstance(t, (int, float)):
-            return t
-        if isinstance(t, datetime):
-            return t.timestamp()
-        if isinstance(t, str):
-            try:
-                return datetime.fromisoformat(t).timestamp()
-            except ValueError:
-                try:
-                    return datetime.strptime(t, '%Y-%m-%d').timestamp()
-                except ValueError:
-                    pass
-        raise ValueError(f'不支持的时间格式: {t}')
-
-    @classmethod
     def match_mtime(cls, min_time=None, max_time=None):
         """匹配修改时间 (Modification Time)
 
@@ -215,8 +189,8 @@ class FilterFactory:
         :param max_time: 最晚时间
         :return: 判断函数
         """
-        min_ts = cls._parse_time(min_time)
-        max_ts = cls._parse_time(max_time)
+        min_ts = XlTime(min_time)
+        max_ts = XlTime(max_time)
 
         def _check(e):
             mtime = e.stat().st_mtime
@@ -238,8 +212,8 @@ class FilterFactory:
         :param max_time: 最晚时间
         :return: 判断函数
         """
-        min_ts = cls._parse_time(min_time)
-        max_ts = cls._parse_time(max_time)
+        min_ts = XlTime(min_time)
+        max_ts = XlTime(max_time)
 
         def _check(e):
             ctime = e.stat().st_ctime
@@ -629,7 +603,7 @@ class DirWalker:
 if __name__ == '__main__':
     dw = DirWalker(r'D:\home\chenkunze\slns\pyxllib', True)
     dw.skip_dir.match_name(['.*', '__pycache__'])  # 不进入 .git、.venv 这类子目录
-    dw.include_file.is_file()
-    dw.exclude_file.match_name('*.pyc', ignore_case=True)
+    dw.include.is_file()
+    dw.exclude_file.match_ext('*.pyc')
 
     dw.pack_zip(r'D:\home\chenkunze\slns\pyxllib.zip')
