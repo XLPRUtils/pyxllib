@@ -16,6 +16,7 @@ walker.py - Directory & File Walker Utility
 import os
 from typing import List, Tuple, Callable
 import zipfile
+import inspect
 
 from loguru import logger
 
@@ -96,6 +97,29 @@ class FilterFactory:
         return lambda e: any(p.match(e.path) for p in processed_patterns)
 
     @classmethod
+    def match_relpath(cls, patterns, ignore_case=False, *, root=None):
+        """根据相对于 root 的路径进行匹配
+
+        :param patterns: 匹配模式
+        :param bool ignore_case: 是否忽略大小写
+        :param str root: 根目录路径，必须提供
+        :return: 判断函数
+        """
+        assert root is not None, "match_relpath 必须指定 root 参数"
+
+        if isinstance(patterns, str):
+            patterns = [patterns]
+
+        processed_patterns = [PStr.auto(p, ignore_case=ignore_case) for p in patterns]
+
+        def _check(e: os.DirEntry):
+            # 核心逻辑：计算相对路径后再匹配
+            rel_path = os.path.relpath(e.path, root)
+            return any(p.match(rel_path) for p in processed_patterns)
+
+        return _check
+
+    @classmethod
     def match_ext(cls, extensions, ignore_case=True):
         """匹配文件扩展名
 
@@ -111,8 +135,8 @@ class FilterFactory:
         # 预处理：1.确保带点 2.根据忽略大小写转换
         processed = []
         for ext in extensions:
-            if not ext.startswith('.'):
-                ext = '.' + ext
+            if not ext.startswith("."):
+                ext = "." + ext
             processed.append(ext.lower() if ignore_case else ext)
         # 以此转为tuple，endswith支持传入tuple
         processed = tuple(processed)
@@ -229,26 +253,28 @@ class FilterFactory:
     # 预设的常用文件扩展名集合
     # ==========================
     EXT_IMAGES = {
-        '.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp', '.tiff', '.tif',
-        '.svg', '.ico', '.psd', '.heic', '.raw'
+        ".jpg",
+        ".jpeg",
+        ".png",
+        ".gif",
+        ".bmp",
+        ".webp",
+        ".tiff",
+        ".tif",
+        ".svg",
+        ".ico",
+        ".psd",
+        ".heic",
+        ".raw",
     }
 
-    EXT_VIDEOS = {
-        '.mp4', '.avi', '.mov', '.mkv', '.flv', '.wmv', '.webm', '.m4v',
-        '.mpeg', '.mpg', '.3gp'
-    }
+    EXT_VIDEOS = {".mp4", ".avi", ".mov", ".mkv", ".flv", ".wmv", ".webm", ".m4v", ".mpeg", ".mpg", ".3gp"}
 
-    EXT_AUDIOS = {'.mp3', '.wav', '.flac', '.aac', '.ogg', '.m4a', '.wma'}
+    EXT_AUDIOS = {".mp3", ".wav", ".flac", ".aac", ".ogg", ".m4a", ".wma"}
 
-    EXT_DOCS = {
-        '.pdf', '.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx', '.txt',
-        '.md', '.csv', '.json', '.xml'
-    }
+    EXT_DOCS = {".pdf", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx", ".txt", ".md", ".csv", ".json", ".xml"}
 
-    EXT_CODES = {
-        '.py', '.java', '.c', '.cpp', '.h', '.js', '.ts', '.html', '.css',
-        '.go', '.rs', '.php', '.sh', '.bat'
-    }
+    EXT_CODES = {".py", ".java", ".c", ".cpp", ".h", ".js", ".ts", ".html", ".css", ".go", ".rs", ".php", ".sh", ".bat"}
 
     # ==========================
     # 封装方法
@@ -304,6 +330,10 @@ class RuleBuilder:
         rule_factory = getattr(FilterFactory, method)
 
         def wrapper(*args, **kwargs):
+            sig = inspect.signature(rule_factory)
+            if "root" in sig.parameters and "root" not in kwargs:
+                kwargs["root"] = self.parent.root
+
             # 1. 生成原始的判断函数
             predicate = rule_factory(*args, **kwargs)
 
@@ -353,7 +383,7 @@ class DirWalker:
         self.select_rules: List[Tuple[Predicate, bool]] = []
 
     def __1_配置规则(self):
-        """ 用于在 IDE 大纲中标记规则配置部分 """
+        """用于在 IDE 大纲中标记规则配置部分"""
         pass
 
     @property
@@ -397,7 +427,7 @@ class DirWalker:
         return RuleBuilder(self, self.select_rules, False, base_condition=lambda e: e.is_dir())
 
     def __2_判断逻辑(self):
-        """ 用于在 IDE 大纲中标记逻辑检查部分 """
+        """用于在 IDE 大纲中标记逻辑检查部分"""
         pass
 
     def should_enter(self, entry: os.DirEntry) -> bool:
@@ -433,7 +463,7 @@ class DirWalker:
         return decision
 
     def __3_迭代遍历(self):
-        """ 用于在 IDE 大纲中标记遍历功能部分 """
+        """用于在 IDE 大纲中标记遍历功能部分"""
         pass
 
     def iter(self, path=None):
@@ -459,7 +489,7 @@ class DirWalker:
                     if entry.is_dir() and self.should_enter(entry):
                         subdirs_to_visit.append(entry.path)
         except Exception as e:
-            logger.error(f'访问 {cur_path} 失败: {e}')
+            logger.error(f"访问 {cur_path} 失败: {e}")
             return
 
         # 4. 当前层级遍历完后，再递归进入子目录
@@ -518,7 +548,7 @@ class DirWalker:
                             files.append(entry.name)
 
         except Exception as e:
-            logger.error(f'访问 {cur_path} 失败: {e}')
+            logger.error(f"访问 {cur_path} 失败: {e}")
             return
 
         # 2. Yield 当前层级结果
@@ -529,7 +559,7 @@ class DirWalker:
             yield from self.walk(subdir_path)
 
     def __4_实用工具(self):
-        """ 用于在 IDE 大纲中标记实用工具部分 """
+        """用于在 IDE 大纲中标记实用工具部分"""
         pass
 
     def pack_zip(self, save_path: str):
@@ -541,11 +571,11 @@ class DirWalker:
         os.makedirs(os.path.dirname(os.path.abspath(save_path)), exist_ok=True)
 
         count = 0
-        with zipfile.ZipFile(save_path, 'w', zipfile.ZIP_DEFLATED) as zf:
+        with zipfile.ZipFile(save_path, "w", zipfile.ZIP_DEFLATED) as zf:
             # 开启递归扫描写入
             count = self._pack_recursive(zf, self.root)
 
-        logger.info(f'已将 {count} 个项目打包至 {save_path}')
+        logger.info(f"已将 {count} 个项目打包至 {save_path}")
 
     def _pack_recursive(self, zf: zipfile.ZipFile, current_path: str) -> int:
         """内部递归打包函数
@@ -575,7 +605,7 @@ class DirWalker:
                         count += self._pack_recursive(zf, entry.path)
 
         except Exception as e:
-            logger.error(f'打包 {current_path} 失败: {e}')
+            logger.error(f"打包 {current_path} 失败: {e}")
 
         return count
 
@@ -600,10 +630,10 @@ class DirWalker:
         return count
 
 
-if __name__ == '__main__':
-    dw = DirWalker(r'D:\home\chenkunze\slns\pyxllib', True)
-    dw.skip_dir.match_name(['.*', '__pycache__'])  # 不进入 .git、.venv 这类子目录
+if __name__ == "__main__":
+    dw = DirWalker(r"D:\home\chenkunze\slns\pyxllib", True)
+    dw.skip_dir.match_name([".*", "__pycache__"])  # 不进入 .git、.venv 这类子目录
     dw.include.is_file()
-    dw.exclude_file.match_ext('*.pyc')
+    dw.exclude_file.match_ext("*.pyc")
 
-    dw.pack_zip(r'D:\home\chenkunze\slns\pyxllib.zip')
+    dw.pack_zip(r"D:\home\chenkunze\slns\pyxllib.zip")
