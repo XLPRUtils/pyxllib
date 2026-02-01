@@ -88,7 +88,7 @@ def update_yuque_doc_by_dp(doc_url):
     tab.close()
 
     # 4 退出
-    dp_check_quit()
+    # dp_check_quit()
 
 
 class Yuque(metaclass=SingletonForEveryInitArgs):
@@ -1619,7 +1619,7 @@ class LakeDoc(GetAttr):
         """ 输入语雀笔记的url
         """
         yuque = yuque or Yuque()
-        data = yuque.get_doc(url, return_mode='json')
+        data = yuque.get_doc(url)
         doc = LakeDoc.from_html(data['body_lake'])
         return doc
 

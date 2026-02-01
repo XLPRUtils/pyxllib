@@ -160,7 +160,7 @@ class ActiveWindowCapture(OriginalMSS):
     def __2_截图数据(self):
         pass
 
-    @uni_cache(mode='id,str', maxsize=16)
+    @uni_cache(mode='id,str', maxsize=16, ttl=3)
     def _capture_single_monitor(self, order):
         """ 缓存单个屏幕的截图 """
         if order == 0:

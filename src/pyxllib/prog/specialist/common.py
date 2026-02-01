@@ -24,6 +24,8 @@ except ModuleNotFoundError:
 from pyxllib.prog.newbie import typename
 from pyxllib.algo.pupil import natural_sort_key
 from pyxllib.text.pupil import shorten, east_asian_shorten
+from pyxllib.prog.converter import to_list
+from pyxllib.prog.converter.pandas import to_df
 
 
 def dataframe_str(df, *args, ambiguous_as_wide=None, shorten=True):
@@ -65,49 +67,23 @@ def dataframe_str(df, *args, ambiguous_as_wide=None, shorten=True):
 class TypeConvert:
     @classmethod
     def dict2list(cls, d: dict, *, nsort=False):
-        """ 字典转n*2的list
-
-        :param d: 字典
-        :param nsort:
-            True: 对key使用自然排序
-            False: 使用d默认的遍历顺序
-        :return:
-        """
-        ls = list(d.items())
-        if nsort:
-            ls = sorted(ls, key=lambda x: natural_sort_key(str(x[0])))
-        return ls
+        """ 字典转n*2的list """
+        return to_list(d, nsort=nsort)
 
     @classmethod
     def dict2df(cls, d):
         """dict类型转DataFrame类型"""
-        name = typename(d)
-        if isinstance(d, Counter):
-            li = d.most_common()
-        else:
-            li = cls.dict2list(d, nsort=True)
-        return pd.DataFrame.from_records(li, columns=(f'{name}-key', f'{name}-value'))
+        return to_df(d)
 
     @classmethod
     def list2df(cls, li):
-        if li and isinstance(li[0], (list, tuple)):  # 有两维时按表格显示
-            df = pd.DataFrame.from_records(li)
-        else:  # 只有一维时按一列显示
-            df = pd.DataFrame(pd.Series(li), columns=(typename(li),))
-        return df
+        """list类型转DataFrame类型"""
+        return to_df(li)
 
     @classmethod
     def try2df(cls, arg):
         """尝试将各种不同的类型转成dataframe"""
-        if isinstance(arg, dict):
-            df = cls.dict2df(arg)
-        elif isinstance(arg, (list, tuple)):
-            df = cls.list2df(arg)
-        elif isinstance(arg, pd.Series):
-            df = pd.DataFrame(arg)
-        else:
-            df = arg
-        return df
+        return to_df(arg)
 
 
 class NestedDict:

@@ -329,14 +329,14 @@ class XlTime(GetAttr, NbTime):
         """
         :return: 日标签名，例如 '250415周二'，表示当天的日期标记，一般是语雀周报中使用
         """
-        ch = "一二三四五六日"[self.dt.weekday()]
-        tag = self.dt.strftime("%y%m%d") + "周" + ch
+        ch = "一二三四五六日"[self.weekday()]
+        tag = self.strftime("%y%m%d") + "周" + ch
         return tag
 
     def week_daytags(self):
         # 循环获得本周每天的daytag
         monday = self.monday()
-        tags = [monday.add_days(i).daytag() for i in range(7)]
+        tags = [monday.shift(days=i).daytag() for i in range(7)]
         return tags
 
 

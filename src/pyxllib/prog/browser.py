@@ -1,3 +1,4 @@
+import builtins
 import os
 import subprocess
 import tempfile
@@ -213,6 +214,8 @@ def view_files(procname, *files, wait=False, **kwargs):
 # 单例对象
 browser = Browser()
 
+# 注册进builtins，可以在任意地方直接使用
+setattr(builtins, "browser", browser)
 
 if __name__ == '__main__':
     import fire
