@@ -33,6 +33,8 @@ try:
 except ModuleNotFoundError:
     BeautifulSoup = lazy_import("from bs4 import BeautifulSoup", "beautifulsoup4")
 
+from pyxllib.text.renderer.pandas import to_text, to_html
+
 
 def getasizeof(*objs, **opts):
     """获得所有类的大小，底层用pympler.asizeof实现
@@ -194,8 +196,6 @@ class ObjectFormatter:
 
         :return str: 纯文本报告
         """
-        from pyxllib.prog.specialist.common import dataframe_str
-
         memory_info = self.introspector.get_memory_info()
         df_mro = self.introspector.get_mro_dataframe()
         df_fields, df_methods = self.introspector.get_members()
@@ -206,12 +206,14 @@ class ObjectFormatter:
                 df.iloc[:, 1] = df.iloc[:, 1].apply(lambda x: shorten(x, width=self.width))
 
         res = [f"==== {memory_info} ===="]
+        res.append("[对象值]")
+        res.append(to_text(self.introspector.obj))
         res.append("[类继承关系]")
-        res.append(dataframe_str(df_mro))
+        res.append(to_text(df_mro))
         res.append("[成员变量]")
-        res.append(dataframe_str(df_fields))
+        res.append(to_text(df_fields))
         res.append("[成员函数]")
-        res.append(dataframe_str(df_methods))
+        res.append(to_text(df_methods))
         return "\n".join(res)
 
     def to_html(self, title_name="Object"):
@@ -230,6 +232,10 @@ class ObjectFormatter:
         # 1. Header
         html_parts.append(f"<h1>{title_name} 查看报告</h1>")
         html_parts.append(f"<p>{html.escape(memory_info)}</p>")
+
+        # 1.5 Object Value
+        html_parts.append("<h2>对象值</h2>")
+        html_parts.append(to_html(self.introspector.obj))
 
         # 2. Helper to style tables
         def _style_df(df, type_char, header_color="LightSkyBlue"):
@@ -273,8 +279,8 @@ def view_obj(obj, mode="str", width=200):
         - auto: 自动选择，Windows 默认 browser，其他环境默认 console
         - console|text: 打印到控制台
         - str: 返回纯文本字符串
-        - html_str: 返回 HTML 字符串
-        - browser|html: 在浏览器中打开报告
+        - html: 返回 HTML 字符串
+        - browser: 在浏览器中打开报告
     :param int width: 字符串截断宽度
     :return str: 报告内容
     """
@@ -290,10 +296,10 @@ def view_obj(obj, mode="str", width=200):
         return content
     elif mode == "str":
         return formatter.to_text()
-    elif mode == "html_str":
+    elif mode == "html":
         obj_name = type(obj).__name__
         return formatter.to_html(title_name=obj_name)
-    elif mode in ("browser", "html"):
+    elif mode == "browser":
         obj_name = type(obj).__name__
         content = formatter.to_html(title_name=obj_name)
         browser(content, name=obj_name)

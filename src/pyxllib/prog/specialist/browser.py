@@ -18,7 +18,7 @@ except ModuleNotFoundError:
 
 
 from pyxllib.prog.browser import browser, view_files
-from pyxllib.prog.viewobj import view_obj
+from pyxllib.prog.view_obj import view_obj
 from pyxllib.prog.specialist.common import (
     NestedDict,
     KeyValuesCounter,

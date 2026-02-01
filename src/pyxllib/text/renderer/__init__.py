@@ -4,7 +4,7 @@ import pprint
 
 
 @singledispatch
-def to_str(data):
+def to_text(data):
     """通用兜底：使用 pprint"""
     return pprint.pformat(data)
 
@@ -12,7 +12,7 @@ def to_str(data):
 @singledispatch
 def to_html(data, *args, **kwargs):
     """通用兜底：转义后放入 <pre>"""
-    return f"<pre>{html.escape(to_str(data))}</pre>"
+    return f"<pre>{html.escape(to_text(data))}</pre>"
 
 
 @to_html.register(dict)

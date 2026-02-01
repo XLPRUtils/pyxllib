@@ -4,10 +4,10 @@ from functools import singledispatch
 import pandas as pd
 
 from pyxllib.text.pupil import shorten, east_asian_shorten
-from pyxllib.text.renderer import to_str
+from pyxllib.text.renderer import to_text, to_html
 
 
-@to_str.register(pd.DataFrame)
+@to_text.register(pd.DataFrame)
 def _(df, *args, ambiguous_as_wide=None, shorten=True):
     """输出DataFrame
     DataFrame可以直接输出的，这里是增加了对中文字符的对齐效果支持
