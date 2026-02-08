@@ -20,7 +20,7 @@ def _(data, *args, **kwargs):
     """字典的 HTML 处理"""
     from pyxllib.prog.specialist.common import NestedDict
 
-    return NestedDict.to_html_table(data)
+    return NestedDict.to_html_table(data, max_items=kwargs.get("max_items", -1), width=kwargs.get("width", 200))
 
 
 @to_html.register(list)

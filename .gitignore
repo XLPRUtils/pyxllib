@@ -1,5 +1,5 @@
-# PyCharm config dir
 .idea/
+.trae/documents
 
 # compile files
 build/

@@ -66,15 +66,15 @@ from pyxllib.prog.lazyimport import lazy_import
 try:
     from cachebox import LRUCache, TTLCache
 except ModuleNotFoundError:
-    LRUCache, TTLCache = lazy_import("from cachebox import LRUCache, TTLCache")
+    LRUCache, TTLCache = lazy_import('from cachebox import LRUCache, TTLCache')
 
 
 def __1_缓存策略解析():
-    """ 负责将函数参数解析为可哈希的键 """
+    """负责将函数参数解析为可哈希的键"""
 
 
 def _to_tuple(obj):
-    """ 递归将 list/dict/set 转换为 tuple，实现可哈希转换
+    """递归将 list/dict/set 转换为 tuple，实现可哈希转换
 
     :param obj: 输入对象
     :return: 转换后的可哈希对象
@@ -94,7 +94,7 @@ def _to_tuple(obj):
 
 
 def process_val(val, rule='str'):
-    """ 根据规则处理单个参数值，返回可哈希的对象
+    """根据规则处理单个参数值，返回可哈希的对象
 
     :param val: 参数值
     :param str rule: 处理规则
@@ -136,7 +136,7 @@ def process_val(val, rule='str'):
 
 
 class CachePolicyParser:
-    """ 解析 mode 字符串并提供规则查询服务 """
+    """解析 mode 字符串并提供规则查询服务"""
 
     def __init__(self, mode_str='str'):
         """
@@ -164,7 +164,7 @@ class CachePolicyParser:
         self.specific_pos_len = len(self.pos_rules) - 1
 
     def get_rule(self, index, name=None):
-        """ 获取指定位置或名称的规则
+        """获取指定位置或名称的规则
 
         :param int index: 参数索引
         :param str name: 参数名称
@@ -178,11 +178,11 @@ class CachePolicyParser:
 
 
 def __2_基础工具与控制器():
-    """ 存放缓存管理相关的辅助类 """
+    """存放缓存管理相关的辅助类"""
 
 
 class CacheControl:
-    """ 缓存管理控制器，提供清理、统计、强制执行等接口 """
+    """缓存管理控制器，提供清理、统计、强制执行等接口"""
 
     def __init__(self, wrapper):
         """
@@ -191,12 +191,12 @@ class CacheControl:
         self._wrapper = wrapper
 
     def clear(self):
-        """ 清空所有缓存内容 """
+        """清空所有缓存内容"""
         with self._wrapper._lock:
             self._wrapper._cache.clear()
 
     def info(self):
-        """ 查看缓存统计信息
+        """查看缓存统计信息
 
         :return dict: 统计信息字典，包含 target, mode, backend, count, usage, ttl 等字段
         """
@@ -209,19 +209,19 @@ class CacheControl:
             'backend': type(self._wrapper._cache).__name__,
             'count': curr_size,
             'usage': f'{curr_size}/{display_max}',
-            'ttl': getattr(self._wrapper._cache, 'ttl', None)
+            'ttl': getattr(self._wrapper._cache, 'ttl', None),
         }
 
     def __call__(self, *args, **kwargs):
-        """ 调用 info() 的快捷方式 """
+        """调用 info() 的快捷方式"""
         return self.info()
 
     def new(self, *args, **kwargs):
-        """ 瞬态模式：强制执行目标函数，但不更新或读取缓存 """
+        """瞬态模式：强制执行目标函数，但不更新或读取缓存"""
         return self._wrapper._target(*args, **kwargs)
 
     def refresh(self, *args, **kwargs):
-        """ 覆盖模式：强制执行目标函数，并更新缓存结果 """
+        """覆盖模式：强制执行目标函数，并更新缓存结果"""
         key = self._wrapper._generate_key(args, kwargs)
         res = self._wrapper._target(*args, **kwargs)
         with self._wrapper._lock:
@@ -230,11 +230,11 @@ class CacheControl:
 
 
 def __3_核心包装器():
-    """ 缓存装饰器的核心逻辑实现 """
+    """缓存装饰器的核心逻辑实现"""
 
 
 class UniCacheWrapper:
-    """ 统一缓存包装器，支持多种缓存策略、TTL、最大容量 """
+    """统一缓存包装器，支持多种缓存策略、TTL、最大容量"""
 
     def __init__(self, target, mode, namespace, maxsize, ttl):
         """
@@ -274,7 +274,7 @@ class UniCacheWrapper:
         return f'<UniCacheWrapper {self._name} mode={self._mode_str}>'
 
     def __get__(self, instance, owner):
-        """ 支持描述符协议，处理实例方法绑定 """
+        """支持描述符协议，处理实例方法绑定"""
         if instance is None:
             return self
 
@@ -293,14 +293,14 @@ class UniCacheWrapper:
         return bound_call
 
     def _init_backend(self, maxsize, ttl):
-        """ 根据配置选择最佳的存储容器 """
+        """根据配置选择最佳的存储容器"""
         if ttl and ttl > 0:
             self._cache = TTLCache(maxsize=maxsize, ttl=ttl)
         else:
             self._cache = LRUCache(maxsize=maxsize)
 
     def _generate_key(self, args, kwargs):
-        """ 生成缓存键 """
+        """生成缓存键"""
         if self._sig:
             try:
                 bound = self._sig.bind(*args, **kwargs)
@@ -319,7 +319,7 @@ class UniCacheWrapper:
         return hash(tuple(key_parts))
 
     def _fallback_arguments(self, args, kwargs):
-        """ 回退的参数处理逻辑 """
+        """回退的参数处理逻辑"""
         arguments = []
         for i, arg in enumerate(args):
             arguments.append((f'arg_{i}', arg))
@@ -328,7 +328,7 @@ class UniCacheWrapper:
         return arguments
 
     def __call__(self, *args, **kwargs):
-        """ 执行缓存调用逻辑 """
+        """执行缓存调用逻辑"""
         key = self._generate_key(args, kwargs)
 
         with self._lock:
@@ -344,11 +344,11 @@ class UniCacheWrapper:
 
 
 def __4_装饰器入口():
-    """ 暴露给外部使用的装饰器函数 """
+    """暴露给外部使用的装饰器函数"""
 
 
 def uni_cache(_func=None, *, mode='str', maxsize=128, ttl=None, namespace='cache'):
-    """ 通用大一统缓存装饰器
+    """通用大一统缓存装饰器
 
     :param callable _func: 被装饰的函数
     :param str mode: 缓存策略，控制每个参数如何参与缓存键的生成。

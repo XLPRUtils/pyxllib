@@ -106,30 +106,28 @@ class NestedDict:
         return False
 
     @classmethod
-    def to_html_table(cls, data, max_items=10):
+    def to_html_table(cls, data, max_items=-1, width=200):
         """ 以html表格套表格的形式，展示一个嵌套结构数据
 
         :param data: 数据
         :param max_items: 项目显示上限，有些数据项目太多了，要精简下
-            设为假值则不设上限
+            设为 -1 则不设上限
+        :param width: 基础元素显示上限
         :return:
 
         TODO 这个速度有点慢，怎么加速？
         """
 
         def tohtml(d):
-            if max_items:
-                df = TypeConvert.try2df(d)
-                if len(df) > max_items:
-                    n = len(df)
-                    return df[:max_items].to_html(escape=False) + f'... {n - 1}'
-                else:
-                    return df.to_html(escape=False)
+            df = to_df(d)
+            if max_items is not None and max_items != -1 and len(df) > max_items:
+                n = len(df)
+                return df[:max_items].to_html(escape=False) + f'... {n}'
             else:
-                return TypeConvert.try2df(d).to_html(escape=False)
+                return df.to_html(escape=False)
 
         if not cls.has_subdict(data):
-            res = str(data)
+            res = shorten(str(data), width=width)
         elif isinstance(data, dict):
             if isinstance(data, Counter):
                 d = data
@@ -137,11 +135,18 @@ class NestedDict:
                 d = dict()
                 for k, v in data.items():
                     if cls.has_subdict(v):
-                        v = cls.to_html_table(v, max_items=max_items)
+                        v = cls.to_html_table(v, max_items=max_items, width=width)
+                    else:
+                        v = shorten(str(v), width=width)
                     d[k] = v
             res = tohtml(d)
         else:
-            li = [cls.to_html_table(x, max_items=max_items) for x in data]
+            li = []
+            for x in data:
+                if cls.has_subdict(x):
+                    li.append(cls.to_html_table(x, max_items=max_items, width=width))
+                else:
+                    li.append(shorten(str(x), width=width))
             res = tohtml(li)
 
         return res.replace('\n', ' ')
@@ -173,8 +178,8 @@ class KeyValuesCounter:
             for x in data:
                 self.add(x)
 
-    def to_html_table(self, max_items=10):
-        return NestedDict.to_html_table(self.kvs, max_items=max_items)
+    def to_html_table(self, max_items=10, width=200):
+        return NestedDict.to_html_table(self.kvs, max_items=max_items, width=width)
 
 
 class JsonStructParser:
