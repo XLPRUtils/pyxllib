@@ -32,32 +32,19 @@ import inspect
 import sys
 import types
 
-from loguru import logger
-
 from pyxllib.prog.lazyimport import lazy_import
+
+logger = lazy_import("from loguru import logger")
+format_size = lazy_import("from humanfriendly import format_size")
+pd = lazy_import("pandas")
+
 from pyxllib.prog.newbie import typename
 from pyxllib.text.pupil import shorten
-
-try:
-    from humanfriendly import format_size
-except ModuleNotFoundError:
-    format_size = lazy_import('from humanfriendly import format_size')
-
-try:
-    import pandas as pd
-except ModuleNotFoundError:
-    pd = lazy_import('pandas')
-
-try:
-    from bs4 import BeautifulSoup
-except ModuleNotFoundError:
-    BeautifulSoup = lazy_import('from bs4 import BeautifulSoup', 'beautifulsoup4')
-
-from pyxllib.text.renderer.pandas import to_text, to_html
+from pyxllib.text.document import Document
 
 
 def __1_基础工具():
-    """ 包含一些通用的辅助函数 """
+    """包含一些通用的辅助函数"""
     pass
 
 
@@ -78,7 +65,7 @@ def getasizeof(*objs, **opts):
 
 
 def __2_内省引擎():
-    """ 负责分析对象结构，提取成员变量和方法 """
+    """负责分析对象结构，提取成员变量和方法"""
     pass
 
 
@@ -99,9 +86,11 @@ class Introspector:
         """
         size = sys.getsizeof(self.obj)
         recursive_size = getasizeof(self.obj)
-        lines = [f'内存消耗：{format_size(size, binary=True)}']
-        lines.append(f"递归子类总大小：{format_size(recursive_size, binary=True) if recursive_size != -1 else 'Unknown'}")
-        return '\n'.join(lines)
+        lines = [f"内存消耗：{format_size(size, binary=True)}"]
+        lines.append(
+            f"递归子类总大小：{format_size(recursive_size, binary=True) if recursive_size != -1 else 'Unknown'}"
+        )
+        return "\n".join(lines)
 
     def get_mro_dataframe(self):
         """获取 MRO 继承链的 DataFrame
@@ -110,7 +99,7 @@ class Introspector:
         """
         mro = inspect.getmro(type(self.obj))
         data = [[str(cls)] for cls in mro]
-        df = pd.DataFrame(data, columns=['类继承层级'])
+        df = pd.DataFrame(data, columns=["类继承层级"])
         return df
 
     def get_meta_info(self):
@@ -120,14 +109,14 @@ class Introspector:
         """
         memory_info = self.get_memory_info()
         mro = inspect.getmro(type(self.obj))
-        return f'==== 类继承关系：{mro}，{memory_info} ===='
+        return f"==== 类继承关系：{mro}，{memory_info} ===="
 
     def get_html_meta_info(self):
         """获取对象的 HTML 格式元数据
 
         :return str: HTML 格式的元数据
         """
-        return '<p>' + html.escape(self.get_meta_info()) + '</p>'
+        return "<p>" + html.escape(self.get_meta_info()) + "</p>"
 
     def get_members(self):
         """获取成员列表，返回 (Fields_DataFrame, Methods_DataFrame)
@@ -142,7 +131,7 @@ class Introspector:
 
         for name, value in members:
             # 过滤掉内部特殊标记
-            if name.endswith('________'):
+            if name.endswith("________"):
                 continue
 
             # 简单的判断：可调用的是方法，不可调用的是变量
@@ -151,8 +140,8 @@ class Introspector:
             else:
                 fields_data.append([name, self._format_field_value(value)])
 
-        df_fields = pd.DataFrame(fields_data, columns=['成员变量', '描述'])
-        df_methods = pd.DataFrame(methods_data, columns=['成员函数', '描述'])
+        df_fields = pd.DataFrame(fields_data, columns=["成员变量", "描述"])
+        df_methods = pd.DataFrame(methods_data, columns=["成员函数", "描述"])
 
         return df_fields, df_methods
 
@@ -168,7 +157,7 @@ class Introspector:
         names = dir(self.obj)
 
         # 2. 补漏 (DynamicClassAttribute 等)
-        if hasattr(self.obj, '__bases__'):
+        if hasattr(self.obj, "__bases__"):
             for base in self.obj.__bases__:
                 for k, v in base.__dict__.items():
                     if isinstance(v, types.DynamicClassAttribute):
@@ -202,15 +191,15 @@ class Introspector:
         :return str: 格式化后的字符串
         """
         if isinstance(value, enum.IntFlag):
-            return f'{typename(value)}，{int(value)}，{value}'
+            return f"{typename(value)}，{int(value)}，{value}"
         try:
-            return f'{typename(value)}，{value}'
+            return f"{typename(value)}，{value}"
         except Exception:
-            return '无法转换为str'
+            return "无法转换为str"
 
 
 def __3_渲染引擎():
-    """ 负责将内省数据渲染成不同格式 """
+    """负责将内省数据渲染成不同格式"""
     pass
 
 
@@ -226,96 +215,64 @@ class ObjectFormatter:
         self.introspector = introspector
         self.width = width
 
-    def to_text(self):
-        """生成适合控制台输出的纯文本
-
-        :return str: 纯文本报告
-        """
-        memory_info = self.introspector.get_memory_info()
-        df_mro = self.introspector.get_mro_dataframe()
-        df_fields, df_methods = self.introspector.get_members()
-
-        # 截断过长的字符串
-        for df in [df_fields, df_methods]:
-            if not df.empty:
-                df.iloc[:, 1] = df.iloc[:, 1].apply(lambda x: shorten(x, width=self.width))
-
-        res = ['==== 内存信息 ====']
-        res.append(memory_info)
-        res.append('[对象值]')
-        res.append(to_text(self.introspector.obj))
-        res.append('[类继承关系]')
-        res.append(to_text(df_mro))
-        res.append('[成员变量]')
-        res.append(to_text(df_fields))
-        res.append('[成员函数]')
-        res.append(to_text(df_methods))
-        return '\n'.join(res)
-
-    def to_html(self, title_name='Object'):
-        """生成适合浏览器查看的 HTML
+    def to_document(self, title_name="Object"):
+        """生成 Document 对象
 
         :param str title_name: 报告标题
-        :return str: HTML 格式的报告
+        :return Document: 文档对象
         """
+        doc = Document(title=title_name)
+
+        # 1. Memory Info
         memory_info = self.introspector.get_memory_info()
+        doc.add_header("内存信息", level=2)
+        doc.add_text(memory_info)
+
+        # 2. Object Value
+        doc.add_header("对象值", level=2)
+        doc.add(self.introspector.obj)
+
+        # 3. Tables
         df_mro = self.introspector.get_mro_dataframe()
         df_fields, df_methods = self.introspector.get_members()
 
-        # HTML 内容构建
-        html_parts = []
-
-        # 1. Header
-        html_parts.append(f'<h1>{title_name} 查看报告</h1>')
-        html_parts.append(f'<p>{html.escape(memory_info).replace(chr(10), "<br/>")}</p>')
-
-        # 1.5 Object Value
-        html_parts.append('<h2>对象值</h2>')
-        html_parts.append(to_html(self.introspector.obj))
-
-        # 2. Helper to style tables
-        def _style_df(df, type_char, header_color='LightSkyBlue'):
+        # Helper to shorten dataframe
+        def _shorten_df(df):
             if df.empty:
-                return '<p>无成员信息</p>'
+                return
+            if df.shape[1] > 1:
+                df.iloc[:, 1] = df.iloc[:, 1].apply(lambda x: shorten(x, width=self.width))
 
-            # 转字符串防止 HTML 注入或编码错误
-            df_str = df.map(str)
-            # 截断（如果只有一列则不截断第二列，因为 MRO 只有一列）
-            if df_str.shape[1] > 1:
-                df_str.iloc[:, 1] = df_str.iloc[:, 1].apply(lambda x: shorten(x, width=self.width))
+        _shorten_df(df_fields)
+        _shorten_df(df_methods)
 
-            df_str.index += 1
-            html_content = df_str.to_html()
+        doc.add_header("类继承关系", level=2)
+        if not df_mro.empty:
+            doc.add_table(df_mro, row_index=True)
+        else:
+            doc.add_text("无")
 
-            # 使用 BS4 美化
-            soup = BeautifulSoup(html_content, 'lxml')
-            if soup.thead and soup.thead.tr:
-                soup.thead.tr['bgcolor'] = header_color
-                # 设置表头
-                th_label = f'编号{type_char}{len(df)}'
-                if soup.thead.tr.th:
-                    soup.thead.tr.th.string = th_label
-            return soup.prettify()
+        doc.add_header("成员变量", level=2)
+        if not df_fields.empty:
+            doc.add_table(df_fields)
+        else:
+            doc.add_text("无成员变量")
 
-        # 3. Append Tables
-        html_parts.append('<h2>类继承关系</h2>')
-        html_parts.append(_style_df(df_mro, 'C', header_color='Khaki'))
+        doc.add_header("成员函数", level=2)
+        if not df_methods.empty:
+            doc.add_table(df_methods)
+        else:
+            doc.add_text("无成员函数")
 
-        html_parts.append('<h2>成员变量</h2>')
-        html_parts.append(_style_df(df_fields, 'F', header_color='LightGreen'))
-
-        html_parts.append('<h2>成员函数</h2>')
-        html_parts.append(_style_df(df_methods, 'M', header_color='LightSkyBlue'))
-
-        return '\n'.join(html_parts)
+        return doc
 
 
 def __4_便捷接口():
-    """ 提供用户直接调用的入口函数 """
+    """提供用户直接调用的入口函数"""
     pass
 
 
-def view_obj(obj, mode='str', width=200):
+def view_obj(obj, mode="str", width=200):
     """查看对象信息的通用入口函数
 
     :param obj: 要查看的对象
@@ -334,30 +291,30 @@ def view_obj(obj, mode='str', width=200):
     """
     introspector = Introspector(obj)
     formatter = ObjectFormatter(introspector, width=width)
+    obj_name = type(obj).__name__
+    doc = formatter.to_document(title_name=obj_name)
 
-    if mode == 'auto':
-        mode = 'browser' if sys.platform == 'win32' else 'console'
+    if mode == "auto":
+        mode = "browser" if sys.platform == "win32" else "console"
 
-    if mode in ('console', 'text'):
-        content = formatter.to_text()
+    if mode in ("console", "text"):
+        content = doc.render_text()
         logger.info(content)
         return content
-    elif mode == 'str':
-        return formatter.to_text()
-    elif mode == 'html':
-        obj_name = type(obj).__name__
-        return formatter.to_html(title_name=obj_name)
-    elif mode == 'browser':
-        from pyxllib.prog.browser import browser, get_hash
+    elif mode == "str":
+        return doc.render_text()
+    elif mode == "html":
+        return doc.render_html()
+    elif mode == "browser":
+        from pyxllib.text.document import get_hash
 
-        obj_name = type(obj).__name__
-        content = formatter.to_html(title_name=obj_name)
-        # 使用类名作为前缀，4位内容哈希作为后缀，防止多次调研结果互相覆盖
+        content = doc.render_html()
         h = get_hash(content)[:4]
-        browser(content, name=f'{obj_name}_{h}')
+        name = f"{obj_name}_{h}"
+        doc.browser(name=name)
         return content
     else:
-        raise ValueError(f'不支持的查看模式：{mode}')
+        raise ValueError(f"不支持的查看模式：{mode}")
 
 
-setattr(builtins, 'view_obj', view_obj)
+setattr(builtins, "view_obj", view_obj)

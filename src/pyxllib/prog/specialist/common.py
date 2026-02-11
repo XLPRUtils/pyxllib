@@ -24,8 +24,6 @@ except ModuleNotFoundError:
 from pyxllib.prog.newbie import typename
 from pyxllib.algo.pupil import natural_sort_key
 from pyxllib.text.pupil import shorten, east_asian_shorten
-from pyxllib.prog.converter import to_list
-from pyxllib.prog.converter.pandas import to_df
 
 
 def dataframe_str(df, *args, ambiguous_as_wide=None, shorten=True):

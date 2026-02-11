@@ -1495,6 +1495,7 @@ class AnView(AnShape):
     def add_ocr_shapes(self):
         xlapi = get_xlapi()
         lmdict = xlapi.common_ocr(self['img'])
+        assert 'shapes' in lmdict, f"'shapes' key not found in OCR response. Response: {lmdict}"
         self.read_lmshapes(lmdict['shapes'])
 
     @classmethod
