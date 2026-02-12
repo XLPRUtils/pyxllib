@@ -1,41 +1,39 @@
-"""window_walker.py - Window Walker Utility based on pywin32
-基于 pywin32 的 Windows 窗口遍历与筛选工具
+# -*- coding: utf-8 -*-
+"""
+Windows 窗口管理与布局工具 (Window Management & Layout Tool)
+整合了 window_walker (遍历与筛选) 和 window_layout (布局检查与优化) 的功能。
 
-功能介绍：
-    模仿 pyxllib.file.walker.DirWalker 的机制，提供了一套灵活的 API 用于遍历、筛选和分析 Windows 窗口。
-    主要解决了以下痛点：
-    1. 简化 win32gui/win32api 的复杂调用。
-    2. 提供“真实可见性”判断（calculate_visible_area），能够排除被其他窗口遮挡的情况。
-    3. 支持链式调用构建筛选规则（include/exclude）。
-    4. 集成 pandas 和 Document 输出，方便生成报告。
+功能：
+1. Walker: 遍历、筛选、分析 Windows 窗口，支持链式调用和生成报告。
+2. Layout: 检查布局 (Inspect) 和 基于 BSP 的自动平铺 (Optimize)。
 
-核心用法示例：
-    # 1. 初始化 Walker (默认不选中任何窗口)
-    ww = WindowWalker(select=False)
+依赖：
+- pywin32 (win32gui, win32api, win32con, win32process)
+- fire (用于 CLI)
+- pyxllib (pstr, document, etc.)
+- pandas (可选)
 
-    # 2. 添加筛选规则：包含所有真实可见的窗口
-    ww.include.is_real_visible()
-
-    # 3. 排除特定的系统窗口（可选）
-    ww.exclude.explorer_system_window()
-
-    # 4. 遍历并获取结果
-    for entry in ww.iter():
-        print(f"[{entry.pid}] {entry.process_name}: {entry.title}")
-
-    # 5. 生成可视化报告 (会在浏览器打开)
-    ww.browse(fields=["process_name", "title", "rect", "real_visible_ratio"])
+用法：
+    python window.py           # 默认模式：Inspect
+    python window.py inspect   # 检查布局
+    python window.py optimize  # 优化布局 (模拟)
+    python window.py optimize --apply # 执行优化
 """
 
+import sys
+import math
 import inspect
-import win32gui
-import win32process
-import win32api
-import win32con
 import ctypes
 from ctypes import wintypes
+from typing import List, Tuple, Callable, Optional, Iterator, Union, Any, NamedTuple
+from enum import Enum
 
-from typing import List, Tuple, Callable, Optional, Iterator, Union, Any
+import win32api
+import win32con
+import win32gui
+import win32process
+import fire
+
 from pyxllib.text.pstr import PStr
 from pyxllib.prog.lazyimport import lazy_import
 from pyxllib.text.document import Document, DocumentableMixin
@@ -46,13 +44,22 @@ except ModuleNotFoundError:
     pd = lazy_import("pandas")
 
 
-def __1_基础工具函数():
-    """ DWM属性、显示器信息、几何计算等 """
-    pass
-
+# ==============================================================================
+# 1. 基础常量与工具
+# ==============================================================================
 
 # DWM Window Attributes
 DWMWA_CLOAKED = 14
+DWMWA_EXTENDED_FRAME_BOUNDS = 9
+
+# DPI Awareness
+try:
+    ctypes.windll.shcore.SetProcessDpiAwareness(1)  # PROCESS_SYSTEM_DPI_AWARE
+except Exception:
+    try:
+        ctypes.windll.user32.SetProcessDPIAware()
+    except Exception:
+        pass
 
 
 def is_window_cloaked(hwnd):
@@ -71,33 +78,17 @@ def is_window_cloaked(hwnd):
         return False
 
 
-def get_monitor_info():
-    """获取所有显示器的详细信息
-
-    :return list: 包含每个显示器详细信息的字典列表
-    """
-    monitors = []
+def get_extended_frame_bounds(hwnd):
     try:
-        for i, (hMonitor, hdcMonitor, pyRect) in enumerate(win32api.EnumDisplayMonitors()):
-            info = win32api.GetMonitorInfo(hMonitor)
-            # pyRect is (left, top, right, bottom)
-            width = pyRect[2] - pyRect[0]
-            height = pyRect[3] - pyRect[1]
-
-            monitors.append(
-                {
-                    "Index": i + 1,
-                    "Device": info.get("Device", ""),
-                    "size": f"{height}x{width}",
-                    "rect": str(pyRect),
-                    "Work Area": str(info.get("Work", "")),
-                    "Flags": info.get("Flags", 0),
-                    "Primary": "Yes" if info.get("Flags", 0) & win32con.MONITORINFOF_PRIMARY else "",
-                }
-            )
+        rect = wintypes.RECT()
+        ctypes.windll.dwmapi.DwmGetWindowAttribute(hwnd, DWMWA_EXTENDED_FRAME_BOUNDS, ctypes.byref(rect), ctypes.sizeof(rect))
+        return (rect.left, rect.top, rect.right, rect.bottom)
     except Exception:
-        pass
-    return monitors
+        return win32gui.GetWindowRect(hwnd)
+
+
+def get_center(rect: Tuple[int, int, int, int]) -> Tuple[int, int]:
+    return (rect[0] + rect[2]) // 2, (rect[1] + rect[3]) // 2
 
 
 def calculate_visible_area(current_rect, upper_rects):
@@ -107,13 +98,6 @@ def calculate_visible_area(current_rect, upper_rects):
     :param tuple current_rect: 当前窗口矩形 (x1, y1, x2, y2)
     :param list upper_rects: 上层遮挡窗口矩形列表 [(x1, y1, x2, y2), ...]
     :return int: 可见面积（像素数）
-
-    >>> calculate_visible_area((0, 0, 100, 100), [])  # 无遮挡
-    10000
-    >>> calculate_visible_area((0, 0, 100, 100), [(0, 0, 50, 100)])  # 左半边被遮挡
-    5000
-    >>> calculate_visible_area((0, 0, 100, 100), [(0, 0, 100, 100)])  # 完全遮挡
-    0
     """
     x1, y1, x2, y2 = current_rect
     if x1 >= x2 or y1 >= y2:
@@ -171,10 +155,35 @@ def calculate_visible_area(current_rect, upper_rects):
     return total_area
 
 
-def __2_窗口对象封装():
-    """ WindowEntry 类定义 """
-    pass
+def get_monitor_info_dicts():
+    """获取所有显示器的详细信息 (Dict format for Walker)"""
+    monitors = []
+    try:
+        for i, (hMonitor, hdcMonitor, pyRect) in enumerate(win32api.EnumDisplayMonitors()):
+            info = win32api.GetMonitorInfo(hMonitor)
+            # pyRect is (left, top, right, bottom)
+            width = pyRect[2] - pyRect[0]
+            height = pyRect[3] - pyRect[1]
 
+            monitors.append(
+                {
+                    "Index": i + 1,
+                    "Device": info.get("Device", ""),
+                    "size": f"{height}x{width}",
+                    "rect": str(pyRect),
+                    "Work Area": str(info.get("Work", "")),
+                    "Flags": info.get("Flags", 0),
+                    "Primary": "Yes" if info.get("Flags", 0) & win32con.MONITORINFOF_PRIMARY else "",
+                }
+            )
+    except Exception:
+        pass
+    return monitors
+
+
+# ==============================================================================
+# 2. 窗口对象封装 (WindowWalker Core)
+# ==============================================================================
 
 class WindowEntry:
     """窗口对象封装，类似于 os.DirEntry
@@ -193,6 +202,8 @@ class WindowEntry:
         self._is_visible = None
         self._upper_rects = None
         self._real_visible_area = None
+        self._is_cloaked = None
+        self._extended_frame_bounds = None
 
     def set_context(self, upper_rects):
         """注入上下文信息（如上层遮挡窗口），用于计算可见性
@@ -263,6 +274,13 @@ class WindowEntry:
         return self._is_visible
 
     @property
+    def is_cloaked(self) -> bool:
+        """窗口是否被 DWM Cloaked"""
+        if self._is_cloaked is None:
+            self._is_cloaked = is_window_cloaked(self.hwnd)
+        return self._is_cloaked
+
+    @property
     def rect(self) -> Tuple[int, int, int, int]:
         """窗口矩形 (left, top, right, bottom)"""
         if self._rect is None:
@@ -271,6 +289,19 @@ class WindowEntry:
             except Exception:
                 self._rect = (0, 0, 0, 0)
         return self._rect
+
+    @property
+    def extended_frame_bounds(self) -> Tuple[int, int, int, int]:
+        """窗口视觉边界 (去除阴影) (left, top, right, bottom)"""
+        if self._extended_frame_bounds is None:
+            self._extended_frame_bounds = get_extended_frame_bounds(self.hwnd)
+        return self._extended_frame_bounds
+
+    @property
+    def center(self) -> Tuple[int, int]:
+        """窗口中心坐标 (x, y)"""
+        left, top, right, bottom = self.rect
+        return (left + right) // 2, (top + bottom) // 2
 
     @property
     def width(self) -> int:
@@ -321,11 +352,6 @@ class WindowEntry:
 
 # 定义 Predicate 类型别名
 Predicate = Callable[[WindowEntry], bool]
-
-
-def __3_筛选规则工厂():
-    """ WindowFilterFactory & WindowRuleBuilder """
-    pass
 
 
 class WindowFilterFactory:
@@ -479,11 +505,6 @@ class WindowRuleBuilder:
             return self.parent
 
         return wrapper
-
-
-def __4_窗口遍历器():
-    """ WindowWalker 主类 """
-    pass
 
 
 class WindowWalker(DocumentableMixin):
@@ -726,7 +747,7 @@ class WindowWalker(DocumentableMixin):
             return pd.DataFrame(data, columns=fields)
 
         # 获取屏幕信息
-        monitors = get_monitor_info()
+        monitors = get_monitor_info_dicts()
         df_monitors = pd.DataFrame(monitors)
 
         # 使用 Document 构建报告
@@ -771,7 +792,454 @@ class WindowWalker(DocumentableMixin):
         return doc
 
 
-if __name__ == "__main__":  # 示例：查找所有可见的
+# ==============================================================================
+# 3. 布局管理核心 (Window Layout / Optimizer)
+# ==============================================================================
+
+
+class MonitorInfo(NamedTuple):
+    handle: int
+    rect: Tuple[int, int, int, int]
+    work_area: Tuple[int, int, int, int]
+    index: int
+    area_px: int
+    device_name: str
+
+
+class WindowInfo(NamedTuple):
+    hwnd: int
+    title: str
+    class_name: str
+    rect: Tuple[int, int, int, int]  # (Left, Top, Right, Bottom) - 窗口实际边界
+    visual_rect: Tuple[int, int, int, int]  # (Left, Top, Right, Bottom) - 视觉边界 (去阴影)
+    frame_padding: Tuple[int, int, int, int]  # (L, T, R, B) - 边框/阴影厚度
+    center: Tuple[int, int]  # (cx, cy)
+    width: int
+    height: int
+    monitor_index: int
+    visible_area_px: int  # 可见像素 (扣除遮挡)
+    visible_percent_screen: float  # 屏幕占比 (0-100)
+    weight: float  # 归一化权重 (0.0-1.0, 用于 BSP)
+    is_cloaked: bool  # 是否被 DWM 隐藏
+
+
+def get_monitors() -> List[MonitorInfo]:
+    monitors = []
+    try:
+        for i, (hMonitor, hdcMonitor, pyRect) in enumerate(win32api.EnumDisplayMonitors()):
+            info = win32api.GetMonitorInfo(hMonitor)
+            # info['Monitor'] is (left, top, right, bottom)
+            w = info["Monitor"][2] - info["Monitor"][0]
+            h = info["Monitor"][3] - info["Monitor"][1]
+            monitors.append(
+                MonitorInfo(
+                    handle=hMonitor,
+                    rect=info["Monitor"],
+                    work_area=info["Work"],
+                    index=i,
+                    area_px=w * h,
+                    device_name=info["Device"],
+                )
+            )
+    except Exception as e:
+        print(f"获取显示器信息失败: {e}")
+    return monitors
+
+
+def get_windows_info(monitors: List[MonitorInfo]) -> Tuple[List[WindowInfo], int]:
+    """
+    扫描所有窗口，计算可见性、归属显示器等详细信息。
+    返回: (windows_list, total_screen_area)
+    """
+    windows = []
+    total_screen_area = sum(m.area_px for m in monitors)
+
+    def find_monitor(rect):
+        cx, cy = get_center(rect)
+        for m in monitors:
+            if m.rect[0] <= cx < m.rect[2] and m.rect[1] <= cy < m.rect[3]:
+                return m
+        return None
+
+    # 初始化 WindowWalker
     ww = WindowWalker(select=False)
+
+    # 基础筛选：必须是“真实可见”的窗口
+    # 这会过滤掉完全被遮挡的窗口，以及坐标异常的窗口
     ww.include.is_real_visible()
-    ww.browse(fields=["process_name", "class_name", "title", "rect", "size"])
+
+    # 自定义筛选逻辑 (exclude 模式)
+    def exclude_filter(e):
+        # 过滤无效/背景窗口
+        if e.width <= 0 or e.height <= 0:
+            return True
+        if e.class_name in ["Progman", "WorkerW"]:
+            return True
+        if e.title == "Program Manager":  # Explicitly check title
+            return True
+        if not e.title and e.class_name == "Shell_TrayWnd":
+            return True  # 任务栏
+        if not e.title and e.width < 100 and e.height < 100:
+            return True  # 小且无标题
+        return False
+
+    ww.exclude.custom(exclude_filter)
+
+    # 遍历并转换
+    for e in ww.iter():
+        # Cloaked 检查 (WindowWalker 的 iter 内部已经计算了 visible_area，但我们需要显式处理 cloaked 状态)
+        # 注意：WindowWalker 计算 visible_area 时已经考虑了 cloaked (cloaked 窗口不算遮挡物)，
+        # 但 e.real_visible_area 是基于 upper_rects 计算的。
+        # 如果 e 本身是 cloaked，它的 visible_area 应该是 0 (layout_tool 的逻辑)。
+
+        is_cloaked_val = e.is_cloaked
+        if is_cloaked_val:
+            vis_area = 0
+        else:
+            vis_area = e.real_visible_area
+
+        # 确定显示器
+        monitor = find_monitor(e.rect)
+        mon_idx = monitor.index if monitor else -1
+
+        # 计算屏幕占比
+        vis_percent = (vis_area / total_screen_area * 100) if total_screen_area > 0 else 0
+
+        # 获取视觉边界
+        visual_rect = e.extended_frame_bounds
+        rect = e.rect
+
+        pad_l = visual_rect[0] - rect[0]
+        pad_t = visual_rect[1] - rect[1]
+        pad_r = rect[2] - visual_rect[2]
+        pad_b = rect[3] - visual_rect[3]
+
+        # 简单校验 padding
+        if pad_l < 0 or pad_r < 0 or pad_t < 0 or pad_b < 0:
+            pad_l = pad_t = pad_r = pad_b = 0
+            visual_rect = rect
+
+        windows.append(
+            WindowInfo(
+                hwnd=e.hwnd,
+                title=e.title,
+                class_name=e.class_name,
+                rect=rect,
+                visual_rect=visual_rect,
+                frame_padding=(pad_l, pad_t, pad_r, pad_b),
+                center=e.center,
+                width=e.width,
+                height=e.height,
+                monitor_index=mon_idx,
+                visible_area_px=vis_area,
+                visible_percent_screen=vis_percent,
+                weight=0.0,  # 稍后在上下文中计算
+                is_cloaked=is_cloaked_val,
+            )
+        )
+
+    return windows, total_screen_area
+
+
+def bsp_tiling(container_rect: Tuple[int, int, int, int], windows: List[WindowInfo]) -> List[Tuple[WindowInfo, Tuple[int, int, int, int]]]:
+    """
+    递归分割算法
+    container_rect: (x, y, w, h)
+    windows: List[WindowInfo] (已分配权重)
+    """
+    if not windows:
+        return []
+
+    # 基准情况：只剩一个窗口
+    if len(windows) == 1:
+        return [(windows[0], container_rect)]
+
+    cx, cy, cw, ch = container_rect
+    split_vertical = cw > ch  # 沿长边切割
+
+    # 排序
+    if split_vertical:
+        sorted_wins = sorted(windows, key=lambda w: w.center[0])  # 按 X 排序
+    else:
+        sorted_wins = sorted(windows, key=lambda w: w.center[1])  # 按 Y 排序
+
+    # 分割点策略: 二分数量 + 权重比例
+    split_idx = len(sorted_wins) // 2
+    left_group = sorted_wins[:split_idx]
+    right_group = sorted_wins[split_idx:]
+
+    weight_left = sum(w.weight for w in left_group)
+    weight_right = sum(w.weight for w in right_group)
+
+    if weight_left + weight_right == 0:
+        ratio = 0.5
+    else:
+        ratio = weight_left / (weight_left + weight_right)
+    
+    # 限制 ratio 范围，防止分割过小
+    ratio = max(0.2, min(0.8, ratio))
+
+    # 计算子区域
+    if split_vertical:
+        split_w = int(cw * ratio)
+        rect_left = (cx, cy, split_w, ch)
+        rect_right = (cx + split_w, cy, cw - split_w, ch)
+    else:
+        split_h = int(ch * ratio)
+        rect_top = (cx, cy, cw, split_h)
+        rect_bottom = (cx, cy + split_h, cw, ch - split_h)
+        rect_left = rect_top
+        rect_right = rect_bottom
+
+    results = []
+    results.extend(bsp_tiling(rect_left, left_group))
+    results.extend(bsp_tiling(rect_right, right_group))
+    return results
+
+
+class WindowAction(Enum):
+    IGNORE = "IGNORE"  # 忽略：不参与任何操作 (黑名单)
+    TILE = "TILE"  # 平铺：参与 BSP 布局优化 (默认)
+    KEEP_SIZE = "KEEP_SIZE"  # 保持尺寸：可以移动位置，但保持原有尺寸 (暂作为浮动处理或特殊平铺)
+
+
+class LayoutConfig:
+    """布局配置管理"""
+
+    def __init__(self):
+        self.rules = []
+        # 初始化默认规则
+        # 使用 PStr.literal 确保明确意图，或者直接 PStr()
+        # 注意：PStr 默认构造即为 Literal
+        self.add_rule(PStr("NVIDIA GeForce Overlay"), WindowAction.IGNORE)
+        self.add_rule(PStr("Program Manager"), WindowAction.IGNORE)
+        self.add_rule(PStr("Task Manager"), WindowAction.IGNORE) # 任务管理器通常最好不要被动
+
+    def add_rule(self, pattern, action):
+        """添加一条规则"""
+        self.rules.append((pattern, action))
+
+    def get_action(self, title):
+        """根据标题匹配规则，返回对应的动作"""
+        # 遍历规则
+        for pattern, action in self.rules:
+            # 使用 search 以支持子串匹配 (对于 Literal)
+            if pattern.search(title):
+                return action
+
+        return WindowAction.TILE
+
+
+# 全局配置实例
+global_config = LayoutConfig()
+
+
+# ==============================================================================
+# 4. CLI 接口类
+# ==============================================================================
+
+
+class WindowTool:
+    """窗口管理工具集"""
+
+    def inspect(self, limit: int = -1, monitor: Optional[int] = None):
+        """
+        [Inspect] 检查并打印当前所有窗口的布局信息。
+        :param limit: 仅显示前 N 个窗口 (默认全部)
+        :param monitor: 仅显示指定显示器的窗口索引
+        """
+        monitors = get_monitors()
+        print(f"{'=' * 20} 显示器概览 {'=' * 20}")
+        for m in monitors:
+            w = m.rect[2] - m.rect[0]
+            h = m.rect[3] - m.rect[1]
+            print(f"Monitor {m.index}: {w}x{h} | Area: {m.rect} | Device: {m.device_name}")
+
+        windows, total_screen_area = get_windows_info(monitors)
+        print(f"Total Screen Area: {total_screen_area} px^2")
+
+        # 筛选
+        display_windows = windows
+        if monitor is not None:
+            display_windows = [w for w in display_windows if w.monitor_index == monitor]
+
+        if limit > 0:
+            display_windows = display_windows[:limit]
+            print(f"\n{'=' * 20} 窗口列表 (Top {limit}, Z-Order) {'=' * 20}")
+        else:
+            print(f"\n{'=' * 20} 窗口列表 (All, Z-Order) {'=' * 20}")
+
+        print(
+            f"{'IDX':<3} | {'Mon':<3} | {'Screen%':>7} | {'RECT (L, T, R, B)':<22} | {'SIZE (WxH)':<12} | {'TITLE / CLASS'}"
+        )
+        print("-" * 110)
+
+        total_vis_percent = 0.0
+        for i, win in enumerate(display_windows):
+            mon_str = str(win.monitor_index) if win.monitor_index >= 0 else "?"
+            vis_str = f"{win.visible_percent_screen:.1f}"
+            rect_str = f"({win.rect[0]},{win.rect[1]},{win.rect[2]},{win.rect[3]})"
+            size_str = f"{win.width}x{win.height}"
+
+            name = win.title if win.title else f"<{win.class_name}>"
+            if win.is_cloaked:
+                name = f"[Cloaked] {name}"
+            if len(name) > 50:
+                name = name[:47] + "..."
+            
+            # 清理标题中的换行符等
+            name = name.replace('\n', ' ').replace('\r', '')
+
+            print(f"{i:<3} | {mon_str:<3} | {vis_str:>7} | {rect_str:<22} | {size_str:<12} | {name}")
+
+            if not win.is_cloaked and win.monitor_index >= 0:
+                total_vis_percent += win.visible_percent_screen
+
+        print("-" * 110)
+        print(f"Total Visible Area Coverage (Displayed): {total_vis_percent:.1f}%")
+
+    def optimize(self, monitor: int = 0, dry_run: bool = True, apply: bool = False, filter: Optional[str] = None, margin: int = 0, include_obscured: bool = False):
+        """
+        [Optimize] 自动优化窗口布局 (BSP 平铺)。
+        :param monitor: 目标显示器索引 (默认 0)
+        :param dry_run: 默认为 True (仅模拟)。设为 False 或使用 --apply 来实际执行。
+        :param apply: 显式指定执行优化 (相当于 dry_run=False)
+        :param filter: 窗口标题关键词过滤
+        :param margin: 窗口间距 (像素)
+        :param include_obscured: 是否包含被遮挡严重的窗口 (默认过滤掉 < 1% 可见的窗口)
+        """
+        # 参数处理
+        if apply:
+            dry_run = False
+
+        print(f"\n>>> 正在初始化优化... (显示器: {monitor}, 模式: {'模拟' if dry_run else '执行'})")
+
+        monitors = get_monitors()
+        if monitor >= len(monitors):
+            print(f"错误: 显示器索引 {monitor} 超出范围。")
+            return
+
+        target_monitor = monitors[monitor]
+        print(f"目标工作区: {target_monitor.work_area} | 间距: {margin}px")
+
+        # 获取窗口
+        all_windows, _ = get_windows_info(monitors)
+
+        # 筛选候选窗口
+        candidates = []
+        screen_total_pixels = target_monitor.area_px
+        total_candidate_area = 0
+
+        print(f"\n正在筛选显示器 {monitor} 上的窗口...")
+        print(f"{'句柄':<10} | {'占比%':<7} | {'状态':<10} | {'标题'}")
+        print("-" * 80)
+
+        for w in all_windows:
+            if w.monitor_index != monitor:
+                continue
+
+            # 标题过滤
+            if filter and filter.lower() not in w.title.lower():
+                continue
+
+            # 规则检查
+            action = global_config.get_action(w.title)
+
+            if action == WindowAction.IGNORE:
+                print(f"{w.hwnd:<10} | {w.visible_percent_screen:>6.1f}% | [黑名单]   | {w.title[:40]}")
+                continue
+            elif action == WindowAction.KEEP_SIZE:
+                # TODO: 实现“移动但不调整大小”的逻辑 (例如 Bin Packing 或 级联)
+                # 目前暂且跳过，保持原样
+                print(f"{w.hwnd:<10} | {w.visible_percent_screen:>6.1f}% | [保持尺寸] | {w.title[:40]}")
+                continue
+
+            # action == TILE, 继续后续检查
+
+            # 遮挡检查
+            window_area = w.width * w.height
+            visibility_ratio = w.visible_area_px / window_area if window_area > 0 else 0
+            is_obscured = visibility_ratio < 0.99
+
+            status = "OK"
+            should_include = True
+
+            if w.is_cloaked:
+                status = "Cloaked"
+                should_include = False
+            elif not include_obscured and is_obscured:
+                status = f"遮挡 {visibility_ratio:.0%}"
+                should_include = False
+            elif w.visible_percent_screen < 1.0:
+                status = "<1% Vis"
+                should_include = False
+
+            if should_include:
+                candidates.append(w)
+                total_candidate_area += w.visible_area_px
+                print(f"{w.hwnd:<10} | {w.visible_percent_screen:>6.1f}% | [保留]     | {w.title[:40]}")
+            else:
+                print(f"{w.hwnd:<10} | {w.visible_percent_screen:>6.1f}% | [忽略:{status:<4}] | {w.title[:40]}")
+
+        if not candidates:
+            print("没有发现可优化的窗口。")
+            return
+
+        # 计算权重
+        weighted_windows = []
+        for w in candidates:
+            # 权重基于候选窗口的总可见面积重新归一化
+            weight = w.visible_area_px / total_candidate_area if total_candidate_area > 0 else 0
+            weighted_windows.append(w._replace(weight=weight))
+
+        # 执行 BSP
+        wa = target_monitor.work_area
+        container_rect = (wa[0], wa[1], wa[2] - wa[0], wa[3] - wa[1])  # (x, y, w, h)
+
+        layout_plan = bsp_tiling(container_rect, weighted_windows)
+
+        # 输出方案
+        print(f"\n优化方案 ({len(layout_plan)} 个窗口):")
+        print(f"{'句柄':<10} | {'原位置':<20} | {'目标位置':<20} | {'标题'}")
+        print("-" * 90)
+
+        for win, target_rect in layout_plan:  # target_rect is (x, y, w, h)
+            # 计算最终 SetWindowPos 参数 (应用 margin 和 padding)
+            half_margin = margin // 2
+
+            vt_x = target_rect[0] + half_margin
+            vt_y = target_rect[1] + half_margin
+            vt_w = max(1, target_rect[2] - margin)
+            vt_h = max(1, target_rect[3] - margin)
+
+            # 补偿阴影
+            pad = win.frame_padding
+            final_x = vt_x - pad[0]
+            final_y = vt_y - pad[1]
+            final_w = vt_w + pad[0] + pad[2]
+            final_h = vt_h + pad[1] + pad[3]
+
+            # 打印展示 (目标位置显示为 L,T,R,B)
+            target_ltrb = (
+                target_rect[0],
+                target_rect[1],
+                target_rect[0] + target_rect[2],
+                target_rect[1] + target_rect[3],
+            )
+            print(f"{win.hwnd:<10} | {str(win.rect):<20} | {str(target_ltrb):<20} | {win.title[:30]}")
+
+            if not dry_run:
+                flags = win32con.SWP_NOZORDER | win32con.SWP_NOACTIVATE
+                win32gui.SetWindowPos(win.hwnd, 0, final_x, final_y, final_w, final_h, flags)
+
+        if not dry_run:
+            print("\n布局应用成功。")
+        else:
+            print("\n(模拟模式) 未应用更改。使用 --apply 参数执行。")
+
+
+if __name__ == "__main__":
+    # 如果没有提供参数，默认执行 inspect
+    if len(sys.argv) == 1:
+        sys.argv.append("inspect")
+    fire.Fire(WindowTool)
