@@ -63,7 +63,8 @@ except ModuleNotFoundError:
 from pyxllib.prog.newbie import human_readable_number
 from pyxllib.prog.pupil import (inject_members, dprint, xlmd5, shuffle_dict_keys, Timeout,
                                 safe_div, format_exception, DictTool, run_once)
-from pyxllib.prog.specialist import browser, TicToc
+from pyxllib.prog.specialist import TicToc
+from pyxllib.prog.browser import browser
 from pyxllib.algo.specialist import product
 from pyxllib.text.pupil import calc_chinese_ratio
 from pyxllib.file.specialist import XlPath

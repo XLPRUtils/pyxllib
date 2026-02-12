@@ -88,3 +88,37 @@ class JsonlTool:
 
         values_counter = Counter(dict(values_counter.most_common()))
         return values_counter
+
+
+def view_jsons_summary(fd, files="**/*.json", encoding=None, max_items=10, max_value_length=100):
+    """查看目录下json数据的键值对分布概览
+
+    :param fd: 目录
+    :param files: 匹配的文件格式
+    :param encoding: 文件编码
+    :param max_items: 项目显示上限
+    :param max_value_length: 值截断长度
+    """
+    from pyxllib.prog.specialist.common import KeyValuesCounter
+    from pyxllib.file.specialist.dirlib import Dir
+    from pyxllib.text.document import Document
+    from loguru import logger
+
+    kvc = KeyValuesCounter()
+    d = Dir(fd)
+    
+    # 统计数据
+    for p in d.select_files(files):
+        try:
+            data = p.read(encoding=encoding, mode=".json")
+            kvc.add(data, max_value_length=max_value_length)
+        except Exception as e:
+            logger.warning(f"Failed to read/parse {p}: {e}")
+
+    # 渲染展示
+    doc = Document(title=f"JSON Summary: {fd}")
+    doc.add_header("JSON Statistics", level=2)
+    doc.add_text(f"Source: {d.abspath()}")
+    doc.add_json(kvc.kvs, title="Key-Values Distribution", max_items=max_items)
+    doc.browse()
+

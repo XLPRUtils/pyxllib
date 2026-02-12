@@ -117,7 +117,13 @@ class NestedDict:
         """
 
         def tohtml(d):
-            df = to_df(d)
+            if isinstance(d, dict):
+                # 字典转 DataFrame，键作为索引
+                df = pd.DataFrame.from_dict(d, orient='index', columns=['Value'])
+            else:
+                # 列表/元组等转 DataFrame
+                df = pd.DataFrame(d, columns=['Value'])
+
             if max_items is not None and max_items != -1 and len(df) > max_items:
                 n = len(df)
                 return df[:max_items].to_html(escape=False) + f'... {n}'

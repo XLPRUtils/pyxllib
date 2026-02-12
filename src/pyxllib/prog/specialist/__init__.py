@@ -7,7 +7,7 @@
 
 from pyxllib.prog.specialist.common import *
 from pyxllib.prog.specialist.xllog import *
-from pyxllib.prog.specialist.browser import *
+# from pyxllib.prog.specialist.browser import *
 from pyxllib.prog.specialist.bc import *
 from pyxllib.prog.specialist.tictoc import *
 

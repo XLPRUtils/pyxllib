@@ -20,6 +20,7 @@ from pyxllib.prog.newbie import *
 from pyxllib.prog.pupil import *
 from pyxllib.prog.specialist import *
 from pyxllib.prog.xltime import *
+from pyxllib.prog.browser import browser
 from deprecated import deprecated
 
 from pyxllib.algo.newbie import *

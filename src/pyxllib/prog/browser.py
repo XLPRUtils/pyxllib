@@ -149,6 +149,11 @@ class Browser(Explorer):
         # 2. 否则通过 Document 生成临时文件并打开
         return Document(arg).browser(name=name, wait=wait, **kwargs)
 
+    def html(self, content, name=None, wait=False, **kwargs):
+        """ 将字符串作为 HTML 内容并在浏览器中打开 """
+        from pyxllib.text.document import Document
+        return Document().add_html(content).browse(name=name, wait=wait, **kwargs)
+
 
 def view_files(procname, *files, wait=False, **kwargs):
     """调用指定程序打开多个文件

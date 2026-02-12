@@ -39,7 +39,7 @@ except ModuleNotFoundError:
 
 from pyxllib.prog.newbie import round_int
 from pyxllib.prog.pupil import dprint, run_once, inject_members
-from pyxllib.prog.specialist import browser
+from pyxllib.prog.browser import browser
 from pyxllib.algo.pupil import SearchBase
 from pyxllib.text.newbie import xldictstr
 from pyxllib.text.pupil import shorten, ensure_gbk, BookContents, strwidth, grp_chinese_char

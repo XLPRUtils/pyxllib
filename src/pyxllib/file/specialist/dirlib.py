@@ -802,3 +802,65 @@ def reduce_dir_depth(srcdir, unwrap=999):
         for pp in XlPath(tmpdir).glob('*'):
             shutil.move(str(pp), str(root))
         shutil.rmtree(tmpdir)
+
+
+def view_repeat_filenames(dir, key="stem", link=True):
+    """检查目录下文件结构情况的功能函数
+
+    :param dir: 目录Dir类型，也可以输入路径，如果没有files成员，则默认会获取所有子文件
+    :param key: 以什么作为行分组的key名称，基本上都是用'stem'，偶尔可能用'name'
+        遇到要忽略 -eps-to-pdf.pdf 这种后缀的，也可以自定义处理规则
+        例如 key=lambda p: re.sub(r'-eps-to-pdf', '', p.stem).lower()
+    :param bool link: 默认True会生成文件超链接
+    :return pd.DataFrame: 一个df表格，行按照key的规则分组，列默认按suffix扩展名分组
+    """
+    from pyxllib.prog.lazyimport import lazy_import
+    pd = lazy_import("pandas")
+    from pyxllib.prog.browser import browser
+    
+    # 1 智能解析dir参数
+    if not isinstance(dir, Dir):
+        dir = Dir(dir)
+    if not dir.subs:
+        dir = dir.select("**/*", type_="file")
+
+    # 2 辅助函数，智能解析key参数
+    if isinstance(key, str):
+        def extract_key(p):
+            return getattr(p, key).lower()
+    elif callable(key):
+        extract_key = key
+    else:
+        raise TypeError
+
+    # 3 制作df表格数据
+    columns = ["key", "suffix", "filename"]
+    li = []
+    for f in dir.subs:
+        p = File(f)
+        li.append([extract_key(p), p.suffix.lower(), f])
+    df = pd.DataFrame.from_records(li, columns=columns)
+
+    # 4 分组
+    def joinfile(files):
+        if len(files):
+            if link:
+                return ", ".join([f"<a href='{dir / f}' target='_blank'>{f}</a>" for f in files])
+            else:
+                return ", ".join(files)
+        else:
+            return ""
+
+    groups = df.groupby(["key", "suffix"]).agg({"filename": joinfile})
+    groups.reset_index(inplace=True)
+    view_table = groups.pivot(index="key", columns="suffix", values="filename")
+    view_table.fillna("", inplace=True)
+
+    # 5 判断每个key的文件总数
+    count_df = df.groupby("key").agg({"filename": "count"})
+    view_table = pd.concat([view_table, count_df], axis=1)
+    view_table.rename({"filename": "count"}, axis=1, inplace=True)
+
+    browser(view_table, to_html_args={"escape": not link})
+    return df
+
