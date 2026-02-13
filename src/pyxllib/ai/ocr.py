@@ -1,3 +1,49 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+# @Author : 陈坤泽
+# @Email  : 877362867@qq.com
+# @Date   : 2020/08/14 22:00
+
+"""
+ocr.py - PaddleOCR 封装工具
+
+基于 PaddleOCR 封装的通用 OCR 识别工具。
+主要优化了模型加载（单例/配置化管理）、输入预处理（统一格式）、输出标准化（LabelMe 格式转换）等流程。
+
+特别注意：
+PaddleOCR v3.x 相比旧的v2.x接口已变更：
+1. 原 `ocr.ocr(img)` 接口不要使用，改用 `ocr.predict(img)`。
+2. 返回结果结构变更，`predict` 返回的是 `OCRResult` 对象列表，包含更丰富的字段。
+
+每一张图返回结果的字段说明 (fields_explanation)：
+    "input_path": 输入图片的绝对路径。
+    "page_index": 对于多页文档（如PDF），表示当前页码；普通图片通常为 null。
+    "model_settings": 模型运行时的配置参数。
+    "dt_polys": 检测到的文本行多边形坐标列表 (4点, 顺时针)。
+    "text_det_params": 文本检测超参数。
+    "text_type": 文本类型，通常为 'general'。
+    "textline_orientation_angles": 文本行旋转角度。
+    "text_rec_score_thresh": 识别分数阈值。
+    "return_word_box": 是否返回单字坐标框。
+    "rec_texts": 识别出的文本内容列表。
+    "rec_scores": 每个文本的置信度分数。
+    "rec_polys": 识别阶段确定的多边形坐标。
+    "rec_boxes": 轴向外接矩形框坐标 [xmin, ymin, xmax, ymax]。
+
+Usage::
+
+    from pyxllib.ai.ocr import ocr_text
+
+    # 1. 简单识别
+    res = ocr_text('test.jpg')
+    print(res['rec_texts'])
+
+    # 2. 批量识别
+    results = ocr_text(['1.jpg', '2.jpg'])
+    for res in results:
+        print(res['rec_texts'])
+"""
+
 import cv2
 import time
 import tempfile
@@ -15,7 +61,6 @@ from paddleocr import PaddleOCR
 
 from pyxllib.file.font import get_chinese_font_path
 from pyxllib.prog.ctor_proxy import ConstructorProxy
-
 
 
 # 基础版配置，一般都够用了
@@ -36,6 +81,18 @@ ConstructorProxy(PaddleOCR, "full").config(
     use_doc_orientation_classify=True,
     use_doc_unwarping=True,
     use_textline_orientation=True,
+)
+
+# 极低阈值配置，用于尽可能捕获所有疑似文本区域（包含大量噪声，常用于 UI 自动化中的候选区域提取）
+ConstructorProxy(PaddleOCR, "extreme_low").config(
+    lang="ch",
+    device="gpu",
+    use_doc_orientation_classify=False,
+    use_doc_unwarping=False,
+    use_textline_orientation=False,
+    det_db_thresh=0.01,
+    det_db_box_thresh=0.01,
+    det_db_unclip_ratio=1.5,
 )
 
 
@@ -104,37 +161,24 @@ def _preprocess_ocr_input(img):
 
 
 def ocr_text(img, *, model="basic", **kwargs):
-    """
-    PaddleOCR 文本识别接口。
+    """PaddleOCR 文本识别接口
 
-    :param img: 待识别的图片。可以是路径（str/Path）、PIL.Image 或 numpy 数组。
-                也可以是这些类型的列表（进行批量处理）。
-    :param model:
-        - str: 需要使用的模型名，预设了basic、full
-        - dict: 也可以传入一套自定义的想要使用的初始化参数，会自动进行全局单例管理
-    :param kwargs: 传递给 ocr_instance.predict() 的预测参数
-    :return: 识别结果。
-             - 单图输入：返回该图片的识别结果对象（通常是 OCRResult 列表）。
-             - 列表输入：返回对应的结果列表。
+    :param str|Path|Image.Image|np.ndarray|list img: 待识别的图片
+        - str/Path: 图片路径
+        - Image.Image: PIL Image对象
+        - np.ndarray: OpenCV读取的numpy数组
+        - list: 以上类型的列表，表示批量处理
+    :param str|dict model: 模型配置
+        - str: 预设的模型名，如 "basic", "full"
+        - dict: 自定义初始化参数字典
+    :param kwargs: 传递给 ocr_instance.predict() 的其他参数
+    :return dict|list: 识别结果
+        - 单图: 返回 OCRResult 字典
+        - 批量: 返回 OCRResult 字典列表
 
-    每一张图返回结果的字段：
-    fields_explanation = {
-        "input_path": "输入图片的绝对路径。",
-        "page_index": "对于多页文档（如PDF），表示当前页码；普通图片通常为 null。",
-        "model_settings": "模型运行时的配置参数，如是否开启文档预处理、文本行方向分类等。",
-        "dt_polys": "检测到的文本行多边形坐标列表。每个多边形由 4 个点 [x, y] 组成，按顺时针排列（左上、右上、右下、左下）。",
-        "text_det_params": "文本检测阶段使用的超参数，如阈值、最大边长限制等。",
-        "text_type": "文本类型，通常为 'general'。",
-        "textline_orientation_angles": "检测到的文本行旋转角度。-1 表示未分类或 0 度。",
-        "text_rec_score_thresh": "文本识别的分数阈值。",
-        "return_word_box": "布尔值，是否返回单个字符/单词级别的坐标框。",
-        "rec_texts": "识别出的文本内容列表，与 dt_polys 一一对应。",
-        "rec_scores": "每个识别文本的置信度分数（0.0 到 1.0 之间）。",
-        "rec_polys": "识别阶段确定的多边形坐标，通常与 dt_polys 一致。",
-        "rec_boxes": "轴向外接矩形框坐标，格式为 [xmin, ymin, xmax, ymax]。"
-    }
-
-    todo 增加解释详细的返回值
+    >>> res = ocr_text('test.jpg')  # doctest: +SKIP
+    >>> print(res['rec_texts'])  # doctest: +SKIP
+    ['text1', 'text2']
     """
     # 1. 获取 OCR 实例
     if isinstance(model, str):
@@ -162,18 +206,18 @@ def ocr_text(img, *, model="basic", **kwargs):
 
 
 def ocr_to_labelme(ocr_result, shape_type="polygon", image_path=None, label_fields=None, flags=None):
-    """
-    将 PaddleOCR 的识别结果转换为 LabelMe 格式的字典。
+    """将 PaddleOCR 的识别结果转换为 LabelMe 格式
 
-    :param ocr_result: PaddleOCR 的 predict 结果中单张图片的结果对象（通常是 OCRResult）。
-    :param shape_type: 标注形状类型，支持 'polygon' (多边形) 或 'rectangle' (矩形)。
-    :param flags: LabelMe 的全局 flags。
-    :param image_path: 图片路径，如果提供则写入 imagePath 字段，否则尝试从 ocr_result 中获取。
-    :param label_fields: list，指定要打包进 label 的字段名。
-        默认为 None，只保存文本。
-        可选字段如：'text', 'score', 'textline_orientation_angles' 等。
-        如果指定了多个字段，label 将被存为 json 字符串。
-    :return: dict，LabelMe 格式的标注数据。
+    :param dict|object ocr_result: PaddleOCR predict 返回的单图结果对象或字典
+    :param str shape_type: 标注形状类型
+        - 'polygon': 多边形 (默认)
+        - 'rectangle': 矩形
+    :param str image_path: 图片路径，默认优先尝试从结果中获取
+    :param list label_fields: 需要包含在 label 中的字段列表
+        - None: (默认) 只保存文本内容
+        - list: 如 ['text', 'score']，会打包成 JSON 字符串
+    :param dict flags: LabelMe 的全局 flags
+    :return dict: LabelMe 格式的字典数据
 
     todo 可以考虑集成到res的成员接口？以及增加保存功能，保存到指定dir/stem，自动生成对应的img和json
     todo 可以简化image_path的配置？

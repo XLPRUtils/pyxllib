@@ -80,6 +80,11 @@ class ConstructorProxy:
     # 全局注册表：Key -> InstanceContext
     # Key 可以是字符串(name) 或 整数(fingerprint hash)
     _registry: Dict[Union[str, int], InstanceContext] = {}
+    
+    # 配置注册表：Name (str) -> (args, kwargs)
+    # 用于存储命名单例的预设配置，以便在未提供参数时自动加载
+    _config_registry: Dict[str, Tuple[Tuple, Dict]] = {}
+    
     _lock = threading.RLock()
 
     def __init__(self, target_class: Type[T], name: Union[str, List[Optional[str]], None] = None):
@@ -94,8 +99,9 @@ class ConstructorProxy:
             self._names = [name]
 
         # 暂存初始化参数
-        self._args: Tuple = ()
-        self._kwargs: Dict = {}
+        # 初始化为 None，用于区分 "用户未传参" 和 "用户传了空参数"
+        self._args: Optional[Tuple] = None
+        self._kwargs: Optional[Dict] = None
 
     def config(self, *args, **kwargs) -> 'ConstructorProxy[T]':
         """配置初始化参数（支持链式调用）
@@ -106,6 +112,13 @@ class ConstructorProxy:
         """
         self._args = args
         self._kwargs = kwargs
+        
+        # 将配置保存到全局，供命名单例后续使用
+        with self._lock:
+            for name in self._names:
+                if isinstance(name, str):
+                    self._config_registry[name] = (args, kwargs)
+        
         return self
 
     def get(self) -> T:
@@ -114,23 +127,27 @@ class ConstructorProxy:
         :return T: 目标类的实例
 
         逻辑流程：
-        1. 根据 name 配置计算所有的查找键 (Keys)。
-        2. 在全局注册表中查找这些 Keys。
-        3. 如果找到已存在的实例：
+        1. 检查并补全参数（尝试从全局配置中恢复）。
+        2. 根据 name 配置计算所有的查找键 (Keys)。
+        3. 在全局注册表中查找这些 Keys。
+        4. 如果找到已存在的实例：
            - 检查是否冲突（不同 Key 指向不同实例）。
            - (可选) 检查参数一致性。
            - 将本次所有未注册的 Key 关联到该实例。
            - 返回旧实例。
-        4. 如果未找到：
+        5. 如果未找到：
            - 使用 config 的参数创建新实例。
            - 注册所有 Key。
            - 返回新实例。
         """
         with self._lock:
-            # 1. 计算所有实际的查找键 (Keys)
+            # 1. 参数补全 (从全局配置恢复)
+            self._ensure_params()
+            
+            # 2. 计算所有实际的查找键 (Keys)
             keys = self._resolve_keys()
 
-            # 2. 在注册表中查找这些 Key
+            # 3. 在注册表中查找这些 Key
             found_ctx: Optional[InstanceContext] = None
             found_by_key = None
 
@@ -149,7 +166,7 @@ class ConstructorProxy:
                     found_ctx = ctx
                     found_by_key = key
 
-            # 3. 命中逻辑
+            # 4. 命中逻辑
             if found_ctx:
                 # 一致性检查（可选但推荐）：
                 # 如果是通过名字找到的，但当前 config 生成的指纹与实例原本的参数不一致，
@@ -172,7 +189,7 @@ class ConstructorProxy:
 
                 return found_ctx.instance
 
-            # 4. 未命中逻辑：创建新实例
+            # 5. 未命中逻辑：创建新实例
             instance = self.target_class(*self._args, **self._kwargs)
             new_ctx = InstanceContext(instance, self._args, self._kwargs)
 
@@ -192,6 +209,9 @@ class ConstructorProxy:
         :return T: 新创建的实例
         """
         with self._lock:
+            # 确保参数就绪
+            self._ensure_params()
+            
             keys = self._resolve_keys()
 
             # 1. 移除旧引用
@@ -214,12 +234,40 @@ class ConstructorProxy:
         从注册表中移除当前 proxy 关注的所有 Key。
         """
         with self._lock:
+            # 确保参数就绪 (为了计算指纹)
+            self._ensure_params()
+            
             keys = self._resolve_keys()
             for key in keys:
                 if key in self._registry:
                     del self._registry[key]
 
     # --- 内部辅助方法 ---
+
+    def _ensure_params(self) -> None:
+        """确保 _args 和 _kwargs 已初始化（尝试从全局配置恢复）"""
+        # 如果当前实例已配置过（包括空参数），则使用当前配置
+        if self._args is not None or self._kwargs is not None:
+            if self._args is None: self._args = ()
+            if self._kwargs is None: self._kwargs = {}
+            return
+
+        # 尝试从全局配置中恢复
+        found = False
+        for name in self._names:
+            if isinstance(name, str) and name in self._config_registry:
+                self._args, self._kwargs = self._config_registry[name]
+                found = True
+                break
+        
+        # 如果未找到配置，回退到默认空参数
+        if not found:
+            self._args = ()
+            self._kwargs = {}
+        else:
+            # 确保恢复的也不是 None
+            if self._args is None: self._args = ()
+            if self._kwargs is None: self._kwargs = {}
 
     def _resolve_keys(self) -> List[Union[str, int]]:
         """将 self._names 中的 None 替换为实际计算出的指纹 Hash"""

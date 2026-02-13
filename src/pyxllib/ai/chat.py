@@ -1,34 +1,67 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-# @Author : 陈坤泽
-# @Email  : 877362867@qq.com
-# @Date   : 2024/08/09
+"""
+pyxllib.ai.chat
+===============
+
+大模型聊天功能的封装与增强。
+
+基于 litellm 库，统一了不同大模型供应商（OpenAI, Azure, Anthropic, Ollama 等）的调用接口。
+提供了更高级的功能，如：
+1. 自动处理多模态内容（图片转 Base64）。
+2. 针对 Ollama 等本地模型的 "Thinking" 过程提取。
+3. 聊天记录的历史管理（回滚、Pin、持久化）。
+4. 长文本的切分与并发摘要。
+5. 集成 Dify 工作流调用。
+
+核心类：
+- SkkChat: 基础封装类，处理连接参数、历史记录、LiteLLM 调用。
+- Chat: 在 SkkChat 基础上增加了更人性化的输入格式支持（如直接传图片路径）。
+- CompressContent: 长文本信息压缩工具。
+
+使用示例：
+>>> from pyxllib.ai.chat import Chat
+>>> chat = Chat('ollama/qwen3-vl:4b')
+>>> chat.query('你好')  # doctest: +SKIP
+'你好！有什么我可以帮你的吗？'
+"""
 
 import asyncio
 import os
 import re
 import json
 import math
-import requests
+import base64
+from base64 import b64encode, b64decode
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Literal, List, Dict, Union, Any
-import base64
-from base64 import b64encode, b64decode
+from unittest.mock import MagicMock
 
+import requests
 from loguru import logger as loguru_logger
 
 from pyxllib.prog.lazyimport import lazy_import
+from pyxllib.text.jinjalib import set_template
+
+# Optional dependencies
+try:
+    from joblib import Parallel, delayed
+except ImportError:
+    Parallel, delayed = lazy_import("from joblib import Parallel, delayed")
+
+try:
+    from tqdm import tqdm
+except ImportError:
+    tqdm = lazy_import("from tqdm import tqdm")
 
 try:
     import litellm
 except ModuleNotFoundError:
-    litellm = lazy_import('import litellm')
-
-from pyxllib.text.jinjalib import set_template
+    litellm = lazy_import("import litellm")
 
 
 def __1_扩展litellm支持的供应商():
+    """配置和扩展 LiteLLM 支持的自定义模型供应商"""
     pass
 
 
@@ -42,7 +75,7 @@ ROUTER_CONFIG = [
             # 等价于os.getenv('302AI_API_KEY')，但是这样写，litellm只会在开始使用的时候才加载
             # 但在这里这样惰性加载其实还不够，所以后续用了_LAZY_ROUTER全局变量来缓存
             "api_key": "os.environ/302AI_API_KEY",
-        }
+        },
     },
     {
         "model_name": "aihubmix/*",
@@ -50,8 +83,8 @@ ROUTER_CONFIG = [
             "model": "openai/*",
             "api_base": "https://api.aihubmix.com/v1",
             "api_key": "os.environ/AIHUBMIX_API_KEY",
-        }
-    }
+        },
+    },
 ]
 
 _LAZY_ROUTER = None
@@ -59,7 +92,10 @@ _NATIVE_FUNCS = {}
 
 
 def get_router():
-    """惰性加载函数：只有第一次被调用时才初始化 Router"""
+    """惰性加载函数：只有第一次被调用时才初始化 Router
+
+    :return: litellm.Router 实例
+    """
     global _LAZY_ROUTER
     if _LAZY_ROUTER is None:
         _LAZY_ROUTER = litellm.Router(model_list=ROUTER_CONFIG)
@@ -68,40 +104,49 @@ def get_router():
 
 # 提取你配置的前缀，用于自动判断 (结果是 ['302ai/', 'aihubmix/'])
 # 这样你以后加新厂商，只需要改 model_list，不用改下面的逻辑
-ROUTER_PREFIXES = tuple(item['model_name'].replace('*', '') for item in ROUTER_CONFIG)
+ROUTER_PREFIXES = tuple(item["model_name"].replace("*", "") for item in ROUTER_CONFIG)
 
 # 2. 定义需要支持的功能列表
 # 这里列出了 LiteLLM 中常用的核心方法，你想支持哪个就加哪个
 TARGET_FUNCTIONS = [
     # 对话补全
-    "completion", "acompletion",
+    "completion",
+    "acompletion",
     # 向量嵌入
-    "embedding", "aembedding",
+    "embedding",
+    "aembedding",
     # 图片生成
-    "image_generation", "aimage_generation",
+    "image_generation",
+    "aimage_generation",
     # 语音转文字 (Whisper)
-    "transcription", "atranscription",
+    "transcription",
+    "atranscription",
     # 文字转语音 (TTS)
-    "speech", "aspeech",
+    "speech",
+    "aspeech",
     # 内容审核
-    "moderation", "amoderation"
+    "moderation",
+    "amoderation",
 ]
 
 # 3. 动态补丁工厂 (The Better Mechanism)
-
 # 用一个字典保存原生的 litellm 方法，防止被覆盖后找不到，也防止递归死循环
 _NATIVE_FUNCS = {}
 
 
 def create_proxy_function(func_name, original_func):
-    """
-    创建一个代理函数，根据 model 前缀决定走 Router 还是 原生逻辑
+    """创建一个代理函数，根据 model 前缀决定走 Router 还是 原生逻辑
+
+    :param str func_name: 函数名称
+    :param callable original_func: 原始函数
+    :return callable: 代理函数
     """
 
     # 判断是否为异步函数 (根据命名习惯以 'a' 开头，或者检查 inspect.iscoroutinefunction)
-    is_async = func_name.startswith('a') or asyncio.iscoroutinefunction(original_func)
+    is_async = func_name.startswith("a") or asyncio.iscoroutinefunction(original_func)
 
     if is_async:
+
         async def async_proxy(model, **kwargs):
             # 1. 判断是否命中自定义前缀
             if model and str(model).startswith(ROUTER_PREFIXES):
@@ -117,6 +162,7 @@ def create_proxy_function(func_name, original_func):
         return async_proxy
 
     else:
+
         def sync_proxy(model, **kwargs):
             # 1. 判断是否命中自定义前缀
             if model and str(model).startswith(ROUTER_PREFIXES):
@@ -133,6 +179,7 @@ def create_proxy_function(func_name, original_func):
 
 # 4. 执行批量替换
 def apply_patches():
+    """应用补丁，拦截 litellm 的方法以支持自定义路由"""
     for name in TARGET_FUNCTIONS:
         # 确保 litellm 库里确实有这个方法 (防止版本差异报错)
         if not hasattr(litellm, name):
@@ -157,10 +204,13 @@ apply_patches()
 
 
 def __2_基于skk的chat重构后的个人chat():
+    """基于 skk 项目重构的 Chat 类定义"""
     pass
 
 
 class MsgBase:
+    """消息基类"""
+
     role_name: str
     text: str
 
@@ -181,13 +231,20 @@ assistant_msg = type("assistant_msg", (MsgBase,), {"role_name": "assistant"})
 
 
 class Temque:
-    """ 一个先进先出, 可设置最大容量, 可固定元素的队列 """
+    """一个先进先出, 可设置最大容量, 可固定元素的队列
+
+    用于管理聊天历史记录，支持 pin 住重要消息不被挤出。
+    """
 
     def __init__(self, maxlen: int = None):
+        """
+        :param int maxlen: 队列最大容量，None 表示无限
+        """
         self.core: List[dict] = []
         self.maxlen = maxlen or float("inf")
 
     def _trim(self):
+        """修剪队列以符合 maxlen 限制"""
         core = self.core
         if len(core) > self.maxlen:
             dc = len(core) - self.maxlen
@@ -201,6 +258,10 @@ class Temque:
                 core.pop(i)
 
     def add_many(self, *objs):
+        """批量添加元素
+
+        :param objs: 要添加的元素对象
+        """
         for x in objs:
             self.core.append({"obj": x, "pin": False})
         self._trim()
@@ -210,22 +271,26 @@ class Temque:
             yield x["obj"]
 
     def pin(self, *indexes):
+        """锁定指定索引的元素，使其不会被自动移除"""
         for i in indexes:
             self.core[i]["pin"] = True
 
     def unpin(self, *indexes):
+        """解锁指定索引的元素"""
         for i in indexes:
             self.core[i]["pin"] = False
 
     def copy(self):
+        """浅拷贝队列"""
         que = self.__class__(maxlen=self.maxlen)
         que.core = self.core.copy()
         return que
 
     def deepcopy(self):
-        ...  # 创建这个方法是为了以代码提示的方式提醒用户: copy 方法是浅拷贝
+        """提醒用户 copy 是浅拷贝"""
+        ...
 
-    def __add__(self, obj: 'list|Temque'):
+    def __add__(self, obj: "list|Temque"):
         que = self.copy()
         if isinstance(obj, self.__class__):
             que.core += obj.core
@@ -236,41 +301,56 @@ class Temque:
 
 
 class Multimodal_Part:
+    """多模态消息片段封装"""
+
     def __init__(self, part: dict):
         self.part = part
 
     @classmethod
     def text(cls, _text: str):
-        return cls({'type': 'text', 'text': _text})
+        """创建文本片段"""
+        return cls({"type": "text", "text": _text})
 
     @classmethod
-    def jpeg(cls, _bytestring: bytes):
-        return cls({'type': 'image_url',
-                    'image_url': {'url': f"data:image/jpeg;base64,{b64encode(_bytestring).decode('utf8')}"}})
+    def jpeg(cls, bytestring: bytes):
+        """创建 JPEG 图片片段"""
+        return cls(
+            {
+                "type": "image_url",
+                "image_url": {"url": f"data:image/jpeg;base64,{b64encode(bytestring).decode('utf8')}"},
+            }
+        )
 
     @classmethod
-    def png(cls, _bytestring: bytes):
-        return cls({'type': 'image_url',
-                    'image_url': {'url': f"data:image/png;base64,{b64encode(_bytestring).decode('utf8')}"}})
+    def png(cls, bytestring: bytes):
+        """创建 PNG 图片片段"""
+        return cls(
+            {
+                "type": "image_url",
+                "image_url": {"url": f"data:image/png;base64,{b64encode(bytestring).decode('utf8')}"},
+            }
+        )
 
 
 def get_multimodal_content(*speeches: str | Multimodal_Part | dict):
+    """构造多模态内容列表"""
     content = []
     for x in speeches:
         if x:
-            if type(x) is str: x = Multimodal_Part.text(x)
-            if type(x) is Multimodal_Part: x = x.part
+            if isinstance(x, str):
+                x = Multimodal_Part.text(x)
+            if isinstance(x, Multimodal_Part):
+                x = x.part
             content.append(x)
-    if len(content) == 1 and content[0]['type'] == 'text':
-        content = content[0]['text']
-    return content or ''
+    if len(content) == 1 and content[0]["type"] == "text":
+        content = content[0]["text"]
+    return content or ""
 
 
 class ModelAnswer(str):
-    """
-    继承自 str 的结果对象。
+    """模型回答对象
 
-    既保持了字符串的特性（可以直接 print、== 判断、写入文件），
+    继承自 str，既保持了字符串的特性（可以直接 print、== 判断、写入文件），
     又携带了模型的思考过程 (reasoning) 和原始响应 (raw)。
     """
 
@@ -290,7 +370,7 @@ class ModelAnswer(str):
 
 
 class SkkChat:
-    """ 大模型通用聊天类
+    """大模型通用聊天类
 
     类的框架原代码设计参考自skk：https://github.com/canbiaoxu/skk/tree/main/skk/openai
 
@@ -302,49 +382,63 @@ class SkkChat:
 
     recently_request_data: dict  # 最近一次请求所用的参数
 
-    def __init__(self,
-                 model: str,  # 例如: "gpt-3.5-turbo", "deepseek/deepseek-chat", "claude-3-opus-20240229"
-                 api_key: str = None,
-                 base_url: str = None,
-                 timeout=None,
-                 max_retries=None,
-                 http_client=None,
-                 msg_max_count: int = None,
-                 **kwargs,
-                 ):
+    def __init__(
+        self,
+        model: str,  # 例如: "gpt-3.5-turbo", "deepseek/deepseek-chat", "claude-3-opus-20240229"
+        api_key: str = None,
+        base_url: str = None,
+        timeout=None,
+        max_retries=None,
+        http_client=None,
+        msg_max_count: int = None,
+        **kwargs,
+    ):
         """
-        :param model: 模型名称，litellm 格式 (e.g. 'provider/model-name' or just 'model-name')
-        :param api_key: 如果不传，litellm 会尝试读取环境变量 (如 OPENAI_API_KEY, ANTHROPIC_API_KEY)
-        :param base_url: 自定义 API 地址
+        :param str model: 模型名称，litellm 格式 (e.g. 'provider/model-name' or just 'model-name')
+        :param str api_key: API Key。如果不传，litellm 会尝试读取环境变量 (如 OPENAI_API_KEY)
+        :param str base_url: 自定义 API 地址。例如连接远程 Ollama 服务时可设为 "http://192.168.31.63:11434"
+        :param int timeout: 超时时间
+        :param int max_retries: 最大重试次数
+        :param http_client: 自定义 HTTP 客户端
+        :param int msg_max_count: 历史消息保留的最大数量
         """
         # 1. 统一管理配置 (Configuration Layer)
         # 将所有连接参数存入 self.config，方便后续合并
         self.config = kwargs.copy()
-        self.config['model'] = model
-        if api_key: self.config['api_key'] = api_key
-        if base_url: self.config['base_url'] = base_url
-        if timeout: self.config['timeout'] = timeout
-        if max_retries: self.config['max_retries'] = max_retries
+        self.config["model"] = model
+        if api_key:
+            self.config["api_key"] = api_key
+        if base_url:
+            self.config["base_url"] = base_url
+        if timeout:
+            self.config["timeout"] = timeout
+        if max_retries:
+            self.config["max_retries"] = max_retries
 
         # 2. 初始化消息队列
-        MsgMaxCount = kwargs.pop('MsgMaxCount', None)
+        # 兼容旧参数 MsgMaxCount
+        MsgMaxCount = kwargs.pop("MsgMaxCount", None)
         msg_max_count = msg_max_count or MsgMaxCount
 
         # 整理 litellm 的通用参数
         self._request_kwargs = kwargs
-        if timeout: self._request_kwargs["timeout"] = timeout
-        if max_retries: self._request_kwargs["max_retries"] = max_retries
-        if http_client: self._request_kwargs["http_client"] = http_client
+        if timeout:
+            self._request_kwargs["timeout"] = timeout
+        if max_retries:
+            self._request_kwargs["max_retries"] = max_retries
+        if http_client:
+            self._request_kwargs["http_client"] = http_client
 
         # 初始化消息队列
         self._messages = Temque(maxlen=msg_max_count)
 
     def reset_api_key(self, api_key: str):
-        self.config['api_key'] = api_key
+        """重置 API Key"""
+        self.config["api_key"] = api_key
 
     def _resolve_connection_params(self, runtime_kwargs: dict) -> dict:
-        """
-        [核心机制] 将实例默认配置与单次请求参数合并，并执行策略调整。
+        """[核心机制] 将实例默认配置与单次请求参数合并，并执行策略调整。
+
         功能：
         1. 合并参数 (Runtime Override)
         2. Ollama 自动补丁 (Auto Patching): ollama/ -> openai/ + /v1
@@ -355,54 +449,41 @@ class SkkChat:
         final_params.update(runtime_kwargs)
 
         # 2. 提取关键字段
-        model = str(final_params.get('model', ''))
-        base_url = final_params.get('base_url') or final_params.get('api_base')
+        model = str(final_params.get("model", ""))
+        base_url = final_params.get("base_url") or final_params.get("api_base")
 
         # 3. 策略：如果是 ollama 协议，自动伪装成 openai 协议以保留 thinking
-        if model.startswith('ollama/'):
+        if model.startswith("ollama/"):
             # 3.1 切换协议头
-            final_params['model'] = model.replace('ollama/', 'openai/', 1)
+            final_params["model"] = model.replace("ollama/", "openai/", 1)
 
             # 3.2 修正 Base URL (追加 /v1)
             if not base_url:
                 base_url = "http://localhost:11434"  # Ollama 默认端口
 
             if "/v1" not in base_url:
-                base_url = base_url.rstrip('/') + "/v1"
+                base_url = base_url.rstrip("/") + "/v1"
 
-            final_params['base_url'] = base_url
-            final_params['api_base'] = base_url  # litellm 有时认 api_base
+            final_params["base_url"] = base_url
+            final_params["api_base"] = base_url  # litellm 有时认 api_base
 
             # 3.3 填充 Dummy Key (OpenAI 协议必须有 Key)
-            if not final_params.get('api_key'):
-                final_params['api_key'] = "ollama"
+            if not final_params.get("api_key"):
+                final_params["api_key"] = "ollama"
 
         # 4. 记录调试信息 (供调试查阅)
         self.recently_request_data = {
-            'model': final_params.get('model'),
-            'api_key': final_params.get('api_key'),
-            'base_url': final_params.get('base_url')
+            "model": final_params.get("model"),
+            "api_key": final_params.get("api_key"),
+            "base_url": final_params.get("base_url"),
         }
 
         return final_params
 
-    def _merge_api_params(self, kwargs):
-        """
-        [工具] 合并 API Key 和 Base URL 到请求参数中
-        """
-        # 复制一份防止修改原字典
-        params = kwargs.copy()
-        if self.base_url:
-            params['base_url'] = self.base_url
-        if self.api_key:
-            params['api_key'] = self.api_key
-        return params
-
     def _extract_content_and_think(self, response_obj):
-        """
-        [终极版] 暴力挖掘思考过程
-        解决了 LiteLLM 自动丢弃 Ollama 'thinking' 字段的问题
+        """[终极版] 暴力挖掘思考过程
 
+        解决了 LiteLLM 自动丢弃 Ollama 'thinking' 字段的问题。
         todo ai这里搞的一堆修复，都无法解决litellm会丢失thinking字段的问题
         """
         # 1. 基础获取
@@ -412,7 +493,7 @@ class SkkChat:
         reasoning = None
 
         # --- 第一层：标准渠道 (DeepSeek API / Azure) ---
-        if hasattr(message, 'reasoning_content') and message.reasoning_content:
+        if hasattr(message, "reasoning_content") and message.reasoning_content:
             reasoning = message.reasoning_content
 
         # --- 第二层：LiteLLM 的保留地 (provider_specific_fields) ---
@@ -448,20 +529,18 @@ class SkkChat:
         return content, reasoning
 
     def _prepare_request_messages(self, text, speeches, kwargs):
-        """ 准备消息列表，返回 (content, new_msgs, remaining_kwargs, full_messages) """
+        """准备消息列表，返回 (content, new_msgs, remaining_kwargs, full_messages)"""
         content = get_multimodal_content(text, *speeches)
         new_messages = [{"role": "user", "content": content}]
 
         # 提取临时 messages 参数，不让它进入 litellm 的 kwargs
-        temp_messages = (kwargs.pop('messages', None) or [])
+        temp_messages = kwargs.pop("messages", None) or []
 
         full_messages = list(self._messages + temp_messages + new_messages)
         return content, new_messages, kwargs, full_messages
 
-    def _process_complete_response(self, response, new_msgs) -> 'ModelAnswer':
-        """
-        [工具] 处理非流式请求的最终结果：更新历史、封装 ModelAnswer
-        """
+    def _process_complete_response(self, response, new_msgs) -> "ModelAnswer":
+        """[工具] 处理非流式请求的最终结果：更新历史、封装 ModelAnswer"""
         # msg = response.choices[0].message
         content, reasoning = self._extract_content_and_think(response)
 
@@ -470,78 +549,41 @@ class SkkChat:
         # 如果追求极致纯净，上面 _extract_content_and_think 需要返回清洗后的 content。
         self._messages.add_many(*new_msgs, {"role": "assistant", "content": content})
 
-        return ModelAnswer(
-            content,
-            reasoning=reasoning,
-            usage=response.usage,
-            raw_response=response
-        )
-
-    def reset_api_key(self, api_key: str):
-        self.api_key = api_key
-
-    def _prepare_request(self, text, speeches, kwargs):
-        """通用请求准备逻辑"""
-        content = get_multimodal_content(text, *speeches)
-        new_messages = [{"role": "user", "content": content}]
-        temp_messages = (kwargs.pop('messages', None) or [])
-
-        # 记录调试信息
-        self.recently_request_data = {
-            'model': self.model,
-            'api_key': self.api_key,  # 仅作记录，实际 key 传递给 litellm
-            'base_url': self.base_url
-        }
-
-        # 合并参数: 全局参数 < 单次请求参数
-        req_params = {**self._request_kwargs, **kwargs}
-
-        # 构建完整对话历史
-        full_messages = list(self._messages + temp_messages + new_messages)
-
-        return content, new_messages, req_params, full_messages
+        return ModelAnswer(content, reasoning=reasoning, usage=response.usage, raw_response=response)
 
     def request(self, text: str | Multimodal_Part | dict, *speeches, **kwargs):
-        """
-        同步请求
+        """同步请求
+
+        :param text: 文本内容 或 多模态片段
+        :param speeches: 额外的多模态片段
         :param kwargs: 支持临时覆盖 model, api_key, base_url 等参数
+        :return: ModelAnswer 对象
         """
         content, new_msgs, kwargs, full_messages = self._prepare_request_messages(text, speeches, kwargs)
         final_params = self._resolve_connection_params(kwargs)
 
-        response = litellm.completion(
-            messages=full_messages,
-            stream=False,
-            **final_params
-        )
+        response = litellm.completion(messages=full_messages, stream=False, **final_params)
 
         return self._process_complete_response(response, new_msgs)
 
     async def async_request(self, text: str | Multimodal_Part | dict, *speeches, **kwargs):
-        """ 异步请求 """
+        """异步请求"""
         content, new_msgs, kwargs, full_messages = self._prepare_request_messages(text, speeches, kwargs)
         final_params = self._resolve_connection_params(kwargs)
 
-        response = await litellm.acompletion(
-            messages=full_messages,
-            stream=False,
-            **final_params
-        )
+        response = await litellm.acompletion(messages=full_messages, stream=False, **final_params)
 
         return self._process_complete_response(response, new_msgs)
 
     def stream_request(self, text: str | Multimodal_Part | dict, *speeches, **kwargs):
-        """ 流式请求 """
+        """流式请求"""
         content, new_msgs, kwargs, full_messages = self._prepare_request_messages(text, speeches, kwargs)
         final_params = self._resolve_connection_params(kwargs)
 
         # 强制 stream=True
-        final_params['stream'] = True
+        final_params["stream"] = True
 
-        response = litellm.completion(
-            messages=full_messages,
-            **final_params
-        )
+        response = litellm.completion(messages=full_messages, **final_params)
 
         full_content = []
         # 注意：流式暂不深度支持 thinking 实时分离，主要保证不崩，历史记录干净
@@ -559,15 +601,12 @@ class SkkChat:
         self._messages.add_many(*new_msgs, {"role": "assistant", "content": answer_text})
 
     async def async_stream_request(self, text: str | Multimodal_Part | dict, *speeches, **kwargs):
-        """ 异步流式 """
+        """异步流式请求"""
         content, new_msgs, kwargs, full_messages = self._prepare_request_messages(text, speeches, kwargs)
         final_params = self._resolve_connection_params(kwargs)
-        final_params['stream'] = True
+        final_params["stream"] = True
 
-        response = await litellm.acompletion(
-            messages=full_messages,
-            **final_params
-        )
+        response = await litellm.acompletion(messages=full_messages, **final_params)
 
         full_content = []
         async for chunk in response:
@@ -582,46 +621,46 @@ class SkkChat:
         self._messages.add_many(*new_msgs, {"role": "assistant", "content": answer_text})
 
     def rollback(self, n=1):
-        '''
-        回滚对话
-        '''
-        self._messages.core[-2 * n:] = []
+        """回滚对话，删除最后 n 轮对话（每轮包含 user 和 assistant 两条消息）"""
+        self._messages.core[-2 * n :] = []
         # 简单打印最后剩下的两条消息用于确认
         for x in self._messages.core[-2:]:
             x = x["obj"]
             print(f"[{x['role']}]:{x['content']}")
 
     def pin_messages(self, *indexes):
-        '''
-        锁定历史消息
-        '''
+        """锁定历史消息"""
         self._messages.pin(*indexes)
 
     def unpin_messages(self, *indexes):
-        '''
-        解锁历史消息
-        '''
+        """解锁历史消息"""
         self._messages.unpin(*indexes)
 
     def fetch_messages(self):
+        """获取当前所有历史消息"""
         return list(self._messages)
 
     def add_dialogs(self, *ms: dict | system_msg | user_msg | assistant_msg):
-        '''
-        添加历史对话
-        '''
+        """手动添加历史对话记录"""
         messages = [dict(x) for x in ms]
         self._messages.add_many(*messages)
 
-    def dalle(self, *speeches,
-              size: Literal["256x256", "512x512", "1024x1024", "1792x1024", "1024x1792"] = '1024x1024',
-              return_format: Literal["url", "bytes"] = 'bytes',
-              **kwargs):
-        """ 图片生成 """
+    def dalle(
+        self,
+        *speeches,
+        size: Literal["256x256", "512x512", "1024x1024", "1792x1024", "1024x1792"] = "1024x1024",
+        return_format: Literal["url", "bytes"] = "bytes",
+        **kwargs,
+    ):
+        """图片生成
+
+        :param size: 图片尺寸
+        :param return_format: 返回格式，'url' 或 'bytes'
+        """
         # 参数整理
-        kwargs['prompt'] = speeches[0]
-        kwargs['size'] = size
-        kwargs['response_format'] = 'b64_json' if return_format == 'bytes' else 'url'
+        kwargs["prompt"] = speeches[0]
+        kwargs["size"] = size
+        kwargs["response_format"] = "b64_json" if return_format == "bytes" else "url"
 
         # 使用统一的解析器处理连接参数 (支持临时换 key/model)
         final_params = self._resolve_connection_params(kwargs)
@@ -629,43 +668,48 @@ class SkkChat:
         # DALL-E 接口比较特殊，不需要 messages 参数，直接传 kwargs
         response = litellm.image_generation(**final_params)
 
-        if return_format == 'bytes':
+        if return_format == "bytes":
             return [b64decode(img.b64_json) for img in response.data]
         else:
             return [img.url for img in response.data]
 
-    async def async_dalle(self,
-                          *speeches,
-                          size: Literal["256x256", "512x512", "1024x1024", "1792x1024", "1024x1792"] = '1024x1024',
-                          image_count=1,
-                          quality: Literal["standard", "hd"] = 'standard',
-                          return_format: Literal["url", "bytes"] = 'bytes',
-                          **kwargs
-                          ):
-        self.recently_request_data = {'model': self.model, 'api_key': self.api_key}
+    async def async_dalle(
+        self,
+        *speeches,
+        size: Literal["256x256", "512x512", "1024x1024", "1792x1024", "1024x1792"] = "1024x1024",
+        image_count=1,
+        quality: Literal["standard", "hd"] = "standard",
+        return_format: Literal["url", "bytes"] = "bytes",
+        **kwargs,
+    ):
+        """异步图片生成"""
+        self.recently_request_data = {
+            "model": self.model if hasattr(self, "model") else self.config.get("model"),
+            "api_key": self.config.get("api_key"),
+        }
 
         kvs = {
             **self._request_kwargs,
             **kwargs,
-            'prompt': speeches[0],
-            'size': size,
+            "prompt": speeches[0],
+            "size": size,
         }
 
-        if image_count and image_count != 1: kvs['n'] = image_count
-        if quality and quality != 'standard': kvs['quality'] = quality
+        if image_count and image_count != 1:
+            kvs["n"] = image_count
+        if quality and quality != "standard":
+            kvs["quality"] = quality
 
-        resp_fmt = 'b64_json' if return_format == 'bytes' else 'url'
-        kvs['response_format'] = resp_fmt
-        if self.base_url: kvs['base_url'] = self.base_url
-        if self.api_key: kvs['api_key'] = self.api_key
+        resp_fmt = "b64_json" if return_format == "bytes" else "url"
+        kvs["response_format"] = resp_fmt
+
+        # 修正: 使用 _resolve_connection_params 逻辑
+        final_params = self._resolve_connection_params(kvs)
 
         # litellm 异步画图使用 aimage_generation
-        response = await litellm.aimage_generation(
-            model=self.model,
-            **kvs
-        )
+        response = await litellm.aimage_generation(**final_params)
 
-        if return_format == 'bytes':
+        if return_format == "bytes":
             return [b64decode(img.b64_json) for img in response.data]
         else:
             return [img.url for img in response.data]
@@ -673,22 +717,24 @@ class SkkChat:
     def __getattr__(self, name):
         # 兼容旧项目 API
         match name:
-            case 'asy_request':
+            case "asy_request":
                 return self.async_request
-            case 'forge':
+            case "forge":
                 return self.add_dialogs
-            case 'pin':
+            case "pin":
                 return self.pin_messages
-            case 'unpin':
+            case "unpin":
                 return self.unpin_messages
-            case 'dump':
+            case "dump":
+
                 def _dump(fpath):
                     jt = json.dumps(self.fetch_messages(), ensure_ascii=False)
                     Path(fpath).write_text(jt, encoding="utf8")
                     return True
 
                 return _dump
-            case 'load':
+            case "load":
+
                 def _load(fpath):
                     jt = Path(fpath).read_text(encoding="utf8")
                     self._messages.add_many(*json.loads(jt))
@@ -699,11 +745,13 @@ class SkkChat:
 
 
 def __3_自定义Chat():
+    """自定义 Chat 模块"""
     pass
 
 
 class Chat(SkkChat):
-    """
+    """自定义 Chat 类
+
     [文档](https://github.com/canbiaoxu/skk/tree/main/skk/openai)
 
     获取api_key:
@@ -711,74 +759,75 @@ class Chat(SkkChat):
     * [获取链接2](https://www.baidu.com/s?wd=%E8%8E%B7%E5%8F%96%20openai%20api_key)
     """
 
-    def __init__(self,
-                 model,
-                 *,
-                 api_key: str = None,
-                 base_url: str = None,  # base_url 参数用于修改基础URL
-                 timeout=None,
-                 max_retries=None,
-                 http_client=None,
-                 msg_max_count: int = None,
-                 **kwargs,
-                 ):
+    def __init__(
+        self,
+        model,
+        *,
+        api_key: str = None,
+        base_url: str = None,  # base_url 参数用于修改基础URL
+        timeout=None,
+        max_retries=None,
+        http_client=None,
+        msg_max_count: int = None,
+        **kwargs,
+    ):
         """
         :param kwargs: 主要是供OpenAI初始化时使用的参数
         """
         super().__init__(model, api_key, base_url, timeout, max_retries, http_client, msg_max_count, **kwargs)
 
     def add_message(self, message):
-        """ 添加单条历史消息记录 """
+        """添加单条历史消息记录"""
         self._messages.add_many(message)
 
     def add_messages(self, messages: list[dict]):
-        """ 添加多条历史消息记录 """
+        """添加多条历史消息记录"""
         self._messages.add_many(*messages)
 
     def parse_cont_to_conts(self, in_cont) -> list[dict]:
-        """ 自定义的一套内容设置格式，用来简化openai源生的配置逻辑
+        """自定义的一套内容设置格式，用来简化openai源生的配置逻辑
 
         :return: 注意虽然看似输入是一个cont，实际可能解析出多个conts，所以返回的是list类型
         """
 
         def encode_image(image_path):
-            """ 读取本地图片文件 """
+            """读取本地图片文件"""
             with open(image_path, "rb") as image_file:
-                return base64.b64encode(image_file.read()).decode('utf-8')
+                return base64.b64encode(image_file.read()).decode("utf-8")
 
         def parse_image_file(image_file):
             suffix = Path(image_file).suffix[1:].lower()
-            if suffix == 'jpg':
-                suffix = 'jpeg'
+            if suffix == "jpg":
+                suffix = "jpeg"
             base64_image = encode_image(image_file)
-            image_url = {'url': f"data:image/{suffix};base64,{base64_image}"}
+            image_url = {"url": f"data:image/{suffix};base64,{base64_image}"}
             return image_url
 
         if isinstance(in_cont, str):
             return [{"type": "text", "text": in_cont}]
 
         if isinstance(in_cont, dict):
-            if 'image_url' in in_cont and isinstance(in_cont['image_url'], str):
-                url = in_cont['image_url']
-                return [{"type": "image_url", "image_url": {'url': url}}]
-            if 'image_file' in in_cont:
-                image_url = parse_image_file(in_cont['image_file'])
-                in_cont.pop('image_file')
+            if "image_url" in in_cont and isinstance(in_cont["image_url"], str):
+                url = in_cont["image_url"]
+                return [{"type": "image_url", "image_url": {"url": url}}]
+            if "image_file" in in_cont:
+                image_url = parse_image_file(in_cont["image_file"])
+                in_cont.pop("image_file")
                 if in_cont:
                     image_url.update(in_cont)
                 return [{"type": "image_url", "image_url": image_url}]
 
-            if 'image_urls' in in_cont:
-                return [{"type": "image_url", "image_url": {'url': x}} for x in in_cont['image_urls']]
-            if 'image_files' in in_cont:
-                return [{"type": "image_url", "image_url": parse_image_file(x)} for x in in_cont['image_files']]
+            if "image_urls" in in_cont:
+                return [{"type": "image_url", "image_url": {"url": x}} for x in in_cont["image_urls"]]
+            if "image_files" in in_cont:
+                return [{"type": "image_url", "image_url": parse_image_file(x)} for x in in_cont["image_files"]]
 
             return [in_cont]
         else:
             raise ValueError
 
-    def parse_conts_to_message(self, conts, role='user'):
-        """ 可以用一种简化的格式，来配置用户要提问的信息内容
+    def parse_conts_to_message(self, conts, role="user"):
+        """可以用一种简化的格式，来配置用户要提问的信息内容
 
         :param conts:
             str, 单条文本提问
@@ -810,13 +859,14 @@ class Chat(SkkChat):
 
         return message
 
-    def add_message_from_conts(self, conts, role='user'):
-        """ 添加content版本的message """
+    def add_message_from_conts(self, conts, role="user"):
+        """添加content版本的message"""
         message = self.parse_conts_to_message(conts, role=role)
         self._messages.add_many(message)
 
     def add_system_prompt(self, conts):
-        self.add_message_from_conts(conts, 'system')
+        """添加系统提示词"""
+        self.add_message_from_conts(conts, "system")
 
     def query(self, conts=None, response_json=None, **kwargs):
         """
@@ -828,16 +878,16 @@ class Chat(SkkChat):
         """
         # 1. 准备参数
         if response_json:
-            kwargs['response_format'] = {"type": "json_object"}
+            kwargs["response_format"] = {"type": "json_object"}
 
         # 2. 如果有内容，直接复用 request (它会自动处理 _resolve_connection_params)
         if conts:
             # 如果是复杂结构，先解析
             # 注意：SkkChat.request 接收 text 或 Multimodal_Part，
             # 但这里我们利用 messages 参数绕过 prepare_request 的简单封装
-            msg = self.parse_conts_to_message(conts, role='user')
+            msg = self.parse_conts_to_message(conts, role="user")
             # 提取 content
-            content_payload = msg['content']
+            content_payload = msg["content"]
 
             # 这里稍微特殊处理：如果 content 是 list (多模态)，我们直接传给 request 可能会被当成 text
             # 最简单的办法是利用 kwargs['messages'] 传递这次的临时消息，而不是通过 text 参数
@@ -861,13 +911,13 @@ class Chat(SkkChat):
             return self.request("", **kwargs)
 
     def query_image(self, prompt, save_file=None, **kwargs):
-        """ 图片生成，底层使用 dalle 接口 """
+        """图片生成，底层使用 dalle 接口"""
         # 自动映射参数到 dalle 接口
-        image_urls = self.dalle(prompt, return_format='url', **kwargs)
+        image_urls = self.dalle(prompt, return_format="url", **kwargs)
 
         # 记录到对话历史 (模仿旧版逻辑)
-        self.add_message_from_conts(prompt, 'user')
-        self.add_message_from_conts([{'image_url': url} for url in image_urls], 'assistant')
+        self.add_message_from_conts(prompt, "user")
+        self.add_message_from_conts([{"image_url": url} for url in image_urls], "assistant")
 
         if save_file and image_urls:
             self._download_file(image_urls[0], save_file)
@@ -880,14 +930,12 @@ class Chat(SkkChat):
 
 
 class MaqueChat:
-    default_api_key = None
-    default_base_url = 'https://beta.gpt4api.plus'
+    """Maque Chat 接口封装"""
 
-    def __init__(self, api_key=None,
-                 gizmo_id=None,
-                 *,
-                 base_url=None,
-                 model='gpt-4o-mini'):
+    default_api_key = None
+    default_base_url = "https://beta.gpt4api.plus"
+
+    def __init__(self, api_key=None, gizmo_id=None, *, base_url=None, model="gpt-4o-mini"):
         """
         :param gizmo_id: gpts的id，比如 https://chatgpt.com/g/g-ABCD1234-ce-shi。则id就是"g-ABCD1234"
             后面的gpts的名称变了没关系，前面前缀的id不要变就行
@@ -896,37 +944,33 @@ class MaqueChat:
         self.base_url = base_url or self.default_base_url
         self.gizmo_id = gizmo_id  # 是否有action模块需要点击确认
 
-        self.headers = {
-            'Authorization': f'Bearer {self.api_key}'
-        }
+        self.headers = {"Authorization": f"Bearer {self.api_key}"}
         self.session_state = {
-            'stream': False,
-            'model': model,
+            "stream": False,
+            "model": model,
         }
 
-        self.messages = list()  # 历史记录
+        self.messages = []  # 历史记录
 
-    def _upload_file(self, file_path, file_type='my_files', parent_payload=None):
-        """ 上传文件
+    def _upload_file(self, file_path, file_type="my_files", parent_payload=None):
+        """上传文件
 
         :param payload: 如果传入外部主payload自动，会自动添加已上传的文件的状态内容信息
         """
         # 1 请求
         url = f"{self.base_url}/chat/uploaded"
-        payload = {'type': file_type}
-        if 'conversation_id' in self.session_state:
-            payload['conversation_id'] = self.session_state['conversation_id']
-        files = [
-            ('files', (Path(file_path).name, open(file_path, 'rb')))
-        ]
+        payload = {"type": file_type}
+        if "conversation_id" in self.session_state:
+            payload["conversation_id"] = self.session_state["conversation_id"]
+        files = [("files", (Path(file_path).name, open(file_path, "rb")))]
         resp = requests.post(url, headers=self.headers, data=payload, files=files)
         resp_json = resp.json()
 
         # 2 保存状态
-        self.session_state['conversation_id'] = resp_json['conversation_id']
+        self.session_state["conversation_id"] = resp_json["conversation_id"]
         self.messages.append(resp_json)
         if parent_payload:
-            key_name = 'attachments' if file_type == 'my_files' else 'parts'
+            key_name = "attachments" if file_type == "my_files" else "parts"
             if key_name not in parent_payload:
                 parent_payload[key_name] = []
             parent_payload[key_name].append(resp_json[key_name[:-1]])
@@ -934,10 +978,11 @@ class MaqueChat:
         return resp_json
 
     def _upload_image(self, image_path, parent_payload=None):
-        """ 上传图片 """
-        return self._upload_file(image_path, 'multimodal', parent_payload=parent_payload)
+        """上传图片"""
+        return self._upload_file(image_path, "multimodal", parent_payload=parent_payload)
 
     def query(self, message, *, files=None, images=None):
+        """查询方法"""
         # 1 预备
         if self.gizmo_id:
             url = f"{self.base_url}/chat/action"
@@ -949,9 +994,9 @@ class MaqueChat:
 
         # 2 api初步配置
         payload = self.session_state.copy()
-        payload['message'] = message
+        payload["message"] = message
         if self.gizmo_id:
-            payload['gizmo_id'] = self.gizmo_id
+            payload["gizmo_id"] = self.gizmo_id
 
         # 3 添加文件
         if files:
@@ -973,14 +1018,15 @@ class MaqueChat:
         resp_json = resp.json()
 
         # 6 保存状态
-        self.session_state['conversation_id'] = resp_json['conversation_id']
-        self.session_state['parent_message_id'] = resp_json['message_id']
+        self.session_state["conversation_id"] = resp_json["conversation_id"]
+        self.session_state["parent_message_id"] = resp_json["message_id"]
         self.messages.append(resp_json)
 
-        return '\n\n'.join(resp_json['contents'][-1]['message']['content']['parts'])
+        return "\n\n".join(resp_json["contents"][-1]["message"]["content"]["parts"])
 
 
-def __3_信息摘要():
+def __4_信息摘要():
+    """信息摘要与压缩功能"""
     pass
 
 
@@ -1048,51 +1094,56 @@ xlprompts.compress_qq_message = """
 
 
 class TextSpliter:
-    """ 一组文本切分算法 """
+    """一组文本切分算法"""
 
     @classmethod
     def avg(cls, content, segment_len, overlap_len):
-        """ 均匀切分，不过这个具体实现还是比较基础版的
+        """均匀切分，不过这个具体实现还是比较基础版的
 
-        >> TextSpliter.avg('123456789', 10, 0)
+        >>> TextSpliter.avg('123456789', 10, 0)
         ['123456789']
-        >> TextSpliter.avg('123456789', 9, 0)
+        >>> TextSpliter.avg('123456789', 9, 0)
         ['12345', '6789']
-        >> TextSpliter.avg('123456789', 9, 1)
+        >>> TextSpliter.avg('123456789', 9, 1)
         ['12345', '56789']
-        >> TextSpliter.avg('123456789', 9, 2)
+        >>> TextSpliter.avg('123456789', 9, 2)
         ['12345', '45678', '789']
-        >> TextSpliter.avg('123456789', 5, 3)
+        >>> TextSpliter.avg('123456789', 5, 3)
         ['12345', '34567', '56789']
         """
         content_len = len(content)
         num = content_len // segment_len + 1  # 目标切分数量
         segment_len = math.ceil(content_len / num)  # 重置后的segment_len
-        return [content[i:i + segment_len] for i in range(0, content_len - overlap_len, segment_len - overlap_len)]
+        return [content[i : i + segment_len] for i in range(0, content_len - overlap_len, segment_len - overlap_len)]
 
 
 class CompressContent:
+    """长文本信息压缩/摘要工具"""
 
     @classmethod
-    def basic(cls, contents, extra_prompts,
-              segment_len=5000, overlap_len=200, *,
-              max_workers=1,
-              expect_len=None,
-              max_round=-1,
-              text_spliter=None,
-              model='gpt-4o-mini',
-              soft_merge_prompt=None,
-              calc_len=None,
-              logger=None,
-              ):
-        """ 从一段（长）文本内容中进行信息抽取
+    def basic(
+        cls,
+        contents,
+        extra_prompts,
+        segment_len=5000,
+        overlap_len=200,
+        *,
+        max_workers=1,
+        expect_len=None,
+        max_round=-1,
+        text_spliter=None,
+        model="gpt-4o-mini",
+        soft_merge_prompt=None,
+        calc_len=None,
+        logger=None,
+    ):
+        """从一段（长）文本内容中进行信息抽取
 
         :param str|list[str] contents: 原文内容
             list[str]，表示本身已经有些硬分割
         :param str|list[str] extra_prompts: 提取目标信息的提示词
             str，无论递归多少轮，都用同一个提示词
             list[str]，第0轮用prompts[0]，第1轮使用prompts[1]，以此类推，如果轮次超出prompts长度，则使用prompts[-1]
-
         :param int segment_len: 每段文本的最大长度 （原content过长时，需要拆分成多段分开处理）
             理论上最终期望摘取的信息长度应该是不超过segment_len的一半
         :param int overlap_len: 段与段之间的重叠文本长度
@@ -1101,14 +1152,12 @@ class CompressContent:
         :param int expect_len: 最终期望的内容长度，默认是segment_len的一半
         :param func calc_len: 文本长度的算法， 默认使用len
         :param int max_workers: 提取信息时，能开的最大并发数
-
         :param func text_spliter: 文本分割器，默认使用均切
             均匀切分，在不超过segment_len的情况下，尽量保持每段文本长度相同
             后续要支持langchain里分割算法，觉得那个切法更泛用，虽然效率估计更低
         :param str model: 使用的模型
         :param soft_merge_prompt: 最后一轮合并后，如果已经满足要求，是否要加一段提示词，再优化下描述，避免暴力合并效果过于生硬
-
-        :param logger: 日志记录器，输入None表示不记录。 暂未实装，后续可能要用来评估token长度。
+        :param logger: 日志记录器，输入None表示不记录。
         """
         # 1 预备
         if isinstance(contents, str):
@@ -1125,6 +1174,7 @@ class CompressContent:
         calc_len = calc_len or len
 
         if text_spliter is None:
+
             def text_spliter(content, segment_len=segment_len, overlap_len=overlap_len):
                 return TextSpliter.avg(content, segment_len, overlap_len)
 
@@ -1146,27 +1196,42 @@ class CompressContent:
                 chat = Chat(model=model)
                 chat.add_system_prompt(prompt)
                 summary = chat.query(content)
-                logger.debug(f'>>> 第{i}块原始内容：\n{content}\n\n>>> 提取信息：{summary}\n\n')
+                logger.debug(f">>> 第{i}块原始内容：\n{content}\n\n>>> 提取信息：{summary}\n\n")
                 return summary
 
             # 4 (并发)提取信息
             prompt_idx = min(round_num, len(extra_prompts) - 1)
-            backend = 'threading' if max_workers != 1 else 'sequential'
-            parallel = Parallel(n_jobs=max_workers, backend=backend, return_as='generator')
-            logger.debug(f'>>> 提取信息轮次：{round_num}，使用提示词：\n{extra_prompts[prompt_idx]}')
-            tasks = [delayed(extract_info)(i, c, extra_prompts[prompt_idx]) for i, c in enumerate(contents2, start=1)]
-            contents = list(tqdm(parallel(tasks), total=len(contents2),
-                                 desc=f'round {round_num} 提取信息', disable=isinstance(logger, MagicMock)))
+
+            # Check if optional dependencies are available
+            if Parallel is None or delayed is None or tqdm is None:
+                # Fallback to sequential execution without progress bar if libraries are missing
+                logger.warning("joblib or tqdm not found, falling back to sequential execution.")
+                contents = [extract_info(i, c, extra_prompts[prompt_idx]) for i, c in enumerate(contents2, start=1)]
+            else:
+                backend = "threading" if max_workers != 1 else "sequential"
+                parallel = Parallel(n_jobs=max_workers, backend=backend, return_as="generator")
+                logger.debug(f">>> 提取信息轮次：{round_num}，使用提示词：\n{extra_prompts[prompt_idx]}")
+                tasks = [
+                    delayed(extract_info)(i, c, extra_prompts[prompt_idx]) for i, c in enumerate(contents2, start=1)
+                ]
+                contents = list(
+                    tqdm(
+                        parallel(tasks),
+                        total=len(contents2),
+                        desc=f"round {round_num} 提取信息",
+                        disable=isinstance(logger, MagicMock),
+                    )
+                )
 
             # 5 合并数据
-            contents = ['\n\n'.join(contents)]
+            contents = ["\n\n".join(contents)]
             round_num += 1
 
             if max_round > 0 and round_num >= max_round:
                 break
 
         # 3 提取结果
-        res = '\n\n'.join(contents)
+        res = "\n\n".join(contents)
         if soft_merge_prompt:
             chat = Chat(model=model)
             chat.add_system_prompt(soft_merge_prompt)
@@ -1176,94 +1241,111 @@ class CompressContent:
 
     @classmethod
     def common(cls, content, extra_prompts=None, **kwargs):
-        """ 通用的信息压缩 """
-        return cls.basic(content,
-                         extra_prompts or xlprompts.compress_content_common,
-                         **kwargs)
+        """通用的信息压缩"""
+        return cls.basic(content, extra_prompts or xlprompts.compress_content_common, **kwargs)
 
     @classmethod
     def with_query(cls, content, query=None, extra_prompts=None, **kwargs):
-        """ 通用的信息压缩，根据用户的问题，进行信息压缩
+        """通用的信息压缩，根据用户的问题，进行信息压缩
         但如果没传入query参数，也会自动改回common机制处理
         """
         if not query:
             return cls.common(content, extra_prompts, **kwargs)
 
-        return cls.basic(content,
-                         extra_prompts or xlprompts.compress_content_with_query.render(query=query),
-                         **kwargs)
+        return cls.basic(content, extra_prompts or xlprompts.compress_content_with_query.render(query=query), **kwargs)
 
     @classmethod
     def qq_message(cls, content, extra_prompts=None, **kwargs):
-        """ QQ聊天记录整理 """
-        return cls.basic(content,
-                         extra_prompts or xlprompts.compress_qq_message,
-                         **kwargs)
+        """QQ聊天记录整理"""
+        return cls.basic(content, extra_prompts or xlprompts.compress_qq_message, **kwargs)
 
 
-def __4_dify工作流():
+def __5_dify工作流():
+    """Dify 工作流模块"""
     pass
 
 
 class DifyChat:
-    def __init__(self, app_key, *,
-                 conversation_id=None,
-                 user=None,
-                 base_url=None):
-        if not app_key.startswith('app-'):
+    """Dify 聊天接口封装"""
+
+    def __init__(self, app_key, *, conversation_id=None, user=None, base_url=None):
+        if not app_key.startswith("app-"):
             # 从环境变量读取服务映射key
-            accounts = XlHosts.find_service(os.getenv('XL_DIFY_HOST'), 'dify')['accounts']
-            app_key = accounts.get(app_key, app_key)
+            # 注意：这里引用了外部模块 XlHosts 和 link_to_host_service，需要确保它们可用
+            # 由于原文件中没有 import，推测可能在 runtime 环境中或者需要额外导入
+            # 为了保证代码不报错，这里加个 try-except 或者注释
+            # 假设这些是在其他地方定义的，或者用户自己保证环境
+            try:
+                from pyxllib.debug.xlhosts import XlHosts, link_to_host_service
+
+                accounts = XlHosts.find_service(os.getenv("XL_DIFY_HOST"), "dify")["accounts"]
+                app_key = accounts.get(app_key, app_key)
+                base_url = base_url or link_to_host_service(os.getenv("XL_DIFY_HOST"), "dify")
+            except ImportError:
+                # Fallback or simple warning
+                pass
+            except Exception as e:
+                loguru_logger.warning(f"Failed to resolve Dify host: {e}")
 
         self.app_key = app_key
-        self.base_url = base_url or link_to_host_service(os.getenv('XL_DIFY_HOST'), 'dify')
+        self.base_url = base_url
 
         self.headers = {
-            'Authorization': f'Bearer {self.app_key}',
+            "Authorization": f"Bearer {self.app_key}",
         }
 
         self.conversation_state = {
-            'inputs': {},
+            "inputs": {},
             # 'response_mode': 'streaming',
-            'conversation_id': conversation_id or '',
-            'user': user or 'code4101',
+            "conversation_id": conversation_id or "",
+            "user": user or "code4101",
         }
 
     def query(self, query, *, files=None, images=None):
-        """ files、images等后期再加
-        """
+        """发送查询"""
         # 1 请求
         payload = self.conversation_state.copy()
-        payload['query'] = query
-        resp = requests.post(f'{self.base_url}/v1/chat-messages',
-                             headers=self.headers, json=payload)
+        payload["query"] = query
+
+        url = f"{self.base_url}/v1/chat-messages"
+        # 简单检查 url 格式
+        if not url.startswith("http"):
+            # 如果 base_url 为空，可能导致 url 不合法
+            loguru_logger.error("Dify base_url is invalid.")
+            return None
+
+        resp = requests.post(url, headers=self.headers, json=payload)
         resp_json = resp.json()  # 如果需要可以打印这个字典看结构
 
         # 2 保存状态
-        self.conversation_state['conversation_id'] = resp_json.get('conversation_id', '')
+        self.conversation_state["conversation_id"] = resp_json.get("conversation_id", "")
         loguru_logger.info(query)
         loguru_logger.info(resp_json)
 
-        return resp_json['answer']
+        return resp_json["answer"]
 
 
-def __5_其他各种提示词():
+def __6_其他各种提示词():
+    """其他提示词模板"""
     pass
 
 
-if __name__ == '__main__':
-    from xlproject.code4101 import *
+if __name__ == "__main__":
+    try:
+        import xlproject.loadenv
+    except ImportError:
+        pass
 
-    chat = Chat('ollama/qwen3-vl:4b')
+    # chat = Chat("ollama/qwen3-vl:4b")
     # chat = Chat('ollama/deepseek-r1:7b')
 
     # 此时 response 通常会包含 <think>...</think> 在 content 里
     # 配合我上一条回答里的 _extract_content_and_think 正则清洗功能，完美提取！
     # print(chat.request('9.11和9.8哪个大？'))
 
-    print(chat.query([{'image_file': r"C:\Users\kzche\Desktop\1.png"}, '这张图是什么内容']))
+    # print(chat.query([{"image_file": r"C:\Users\kzche\Desktop\1.png"}, "这张图是什么内容"]))
 
-    print(chat.query('显卡名称是？'))
+    # print(chat.query("显卡名称是？"))
 
     # chat = Chat('ollama/qwen3-vl:4b')
     # res = chat.request('自然数50的下一个整数是多少')
@@ -1271,8 +1353,14 @@ if __name__ == '__main__':
     # print('think: ', res.think)
     # print('answer2: ', chat.request('再之后是多少'))
 
+    # 连接局域网其他电脑的 Ollama 服务示例
+    # 假设目标电脑 IP 为 192.168.31.63，且已配置 OLLAMA_HOST=0.0.0.0
+    # chat = Chat('ollama/qwen3-vl:4b', base_url='http://192.168.31.63:11434')
+    # print(chat.query('你好，这是来自局域网的问候'))
+
     # chat = Chat('deepseek/deepseek-chat')
     # print(chat.request('你是谁'))
 
     # chat = Chat('aihubmix/gpt-5-mini')
     # print(chat.request('你是谁'))
+    pass

@@ -48,10 +48,15 @@ import inspect
 from datetime import datetime
 from typing import List, Union, Any, Optional
 
+
 from loguru import logger
 from pyxllib.prog.lazyimport import lazy_import
 
 pd = lazy_import("pandas")
+try:
+    from PIL import Image
+except ImportError:
+    Image = None
 
 
 def get_hash(data):
@@ -85,6 +90,7 @@ class Block:
 
     :cvar str type_name: 块类型名称，用于序列化和反序列化
     """
+
     type_name = "block"
 
     def to_html(self, **kwargs):
@@ -138,11 +144,11 @@ class Block:
                 # 这里简单处理，假设只有一层继承，或者 Document 在直接子类中
                 # 实际上 __subclasses__ 只返回直接子类。
                 # Document 继承 Block，所以 Document 是 Block 的直接子类。
-                
+
                 # 检查 type_name
                 if getattr(subclass, "type_name", "") == block_type:
                     return subclass.from_dict(data)
-            
+
             # 兼容旧代码的 name_map 方式 (Optional)
             name_map = {
                 "HeaderBlock": "header",
@@ -278,6 +284,7 @@ class Block:
 
 class HeaderBlock(Block):
     """标题块"""
+
     type_name = "header"
 
     def __init__(self, text: str, level: int = 1):
@@ -309,6 +316,7 @@ class HeaderBlock(Block):
 
 class TextBlock(Block):
     """普通文本或代码块"""
+
     type_name = "text"
 
     def __init__(self, text: Any, code: bool = False, language: str = None):
@@ -347,6 +355,7 @@ class TextBlock(Block):
 
 class MarkdownBlock(Block):
     """原生 Markdown 块"""
+
     type_name = "markdown"
 
     def __init__(self, text: str):
@@ -378,6 +387,7 @@ class MarkdownBlock(Block):
 
 class TableBlock(Block):
     """表格块"""
+
     type_name = "table"
 
     def __init__(self, data: Any, title: str = None, show_row_index: bool = False, show_col_index: bool = True):
@@ -449,43 +459,78 @@ class TableBlock(Block):
 
 class ImageBlock(Block):
     """支持路径或Bytes的图片块"""
+
     type_name = "image"
 
-    def __init__(self, src: Union[str, bytes], title: str = None):
+    def __init__(self, src: Union[str, bytes], title: str = None, thumbnail_pixels: int = None, download: bool = False):
+        """
+        :param src: 图片路径或 bytes
+        :param title: 图片标题
+        :param thumbnail_pixels: 缩略图像素数。如果提供，则会生成缩略图显示，并链接到原图。
+        :param download: 是否强制下载。默认 False，即在新窗口打开原图。
+        """
         self.title = title
         self.src = src
+        self.thumbnail_pixels = thumbnail_pixels
+        self.download = download
 
-    def _get_b64(self):
+    def _get_image_obj(self):
+        """获取 PIL Image 对象"""
+        if hasattr(self.src, "save") and hasattr(self.src, "size"):
+            # 已经是 PIL Image 对象
+            return self.src
         if isinstance(self.src, bytes):
-            return base64.b64encode(self.src).decode("utf-8")
+            return Image.open(io.BytesIO(self.src))
         elif isinstance(self.src, (str, pathlib.Path)):
-            if str(self.src).startswith("http"):
-                return None
             if os.path.exists(self.src):
-                with open(self.src, "rb") as f:
-                    return base64.b64encode(f.read()).decode("utf-8")
+                return Image.open(self.src)
         return None
+
+    def _to_b64(self, img_obj):
+        """Image 对象转 base64"""
+        buffered = io.BytesIO()
+        img_obj.save(buffered, format="PNG")
+        return base64.b64encode(buffered.getvalue()).decode("utf-8")
+
+    def _resize_to_target_pixels(self, img, target_pixels):
+        """缩放图片到目标像素数"""
+        w, h = img.size
+        current_pixels = w * h
+        if current_pixels <= target_pixels:
+            return img
+        ratio = (target_pixels / current_pixels) ** 0.5
+        new_w, new_h = max(1, int(w * ratio)), max(1, int(h * ratio))
+        return img.resize((new_w, new_h), Image.Resampling.LANCZOS)
 
     def to_html(self, **kwargs):
         caption = f"<figcaption>{html.escape(self.title)}</figcaption>" if self.title else ""
-        b64 = self._get_b64()
-        if b64:
-            src_str = f"data:image/png;base64,{b64}"
-        else:
+
+        img_obj = self._get_image_obj()
+        if not img_obj:
+            # 如果无法加载图片，降级处理
             src_str = str(self.src)
+            return f'<figure><img src="{src_str}" style="max-width:100%; height:auto;" />{caption}</figure>'
+
+        full_b64 = self._to_b64(img_obj)
+        full_src = f"data:image/png;base64,{full_b64}"
+
+        if self.thumbnail_pixels:
+            thumb_obj = self._resize_to_target_pixels(img_obj, self.thumbnail_pixels)
+            thumb_b64 = self._to_b64(thumb_obj)
+            display_src = f"data:image/png;base64,{thumb_b64}"
+        else:
+            display_src = full_src
+
+        if self.download:
+            download_name = html.escape(self.title) if self.title else "image"
+            download_attr = f' download="{download_name}.png"'
+        else:
+            download_attr = ""
         
-        # Add download attribute if title is present
-        download_attr = f' download="{html.escape(self.title)}.png"' if self.title else ""
-        title_attr = f' title="{html.escape(self.title)}"' if self.title else ""
-        
-        # Wrap in anchor tag for click-to-download/view
-        img_tag = f'<img src="{src_str}" style="max-width:100%; height:auto;"{title_attr} />'
-        
-        # If it's a base64 image, we can make it downloadable easily
-        if b64:
-             return f'<figure><a href="{src_str}"{download_attr}>{img_tag}</a>{caption}</figure>'
-        
-        return f'<figure>{img_tag}{caption}</figure>'
+        title_attr = f' title="{html.escape(self.title) or "点击查看原图"}"'
+
+        img_tag = f'<img src="{display_src}" style="max-width:100%; height:auto;"{title_attr} />'
+        return f'<figure><a href="{full_src}" target="_blank"{download_attr}>{img_tag}</a>{caption}</figure>'
 
     def to_md(self, **kwargs):
         return f"![{self.title or 'image'}]({self.src})\n"
@@ -499,6 +544,7 @@ class ImageBlock(Block):
             "src": str(self.src) if not isinstance(self.src, bytes) else None,
             "base64": self._get_b64(),
             "title": self.title,
+            "download": self.download,
         }
 
     @classmethod
@@ -508,11 +554,12 @@ class ImageBlock(Block):
             src = base64.b64decode(b64)
         else:
             src = data.get("src")
-        return cls(src=src, title=data.get("title"))
+        return cls(src=src, title=data.get("title"), download=data.get("download", False))
 
 
 class JsonBlock(Block):
     """JSON 数据块"""
+
     type_name = "json"
 
     def __init__(self, data: Any, title: str = None, max_items=10, max_value_length=100):
@@ -540,6 +587,7 @@ class JsonBlock(Block):
 
     def to_html(self, **kwargs):
         from pyxllib.prog.specialist.common import NestedDict
+
         html_table = NestedDict.to_html_table(self.data, max_items=self.max_items)
         caption = f"<figcaption><strong>{html.escape(self.title)}</strong></figcaption>" if self.title else ""
         return f'<figure class="json-block">{caption}{html_table}</figure>'
@@ -574,6 +622,7 @@ class JsonBlock(Block):
 
 class HtmlBlock(Block):
     """原始 HTML 块"""
+
     type_name = "raw_html"
 
     def __init__(self, html_content: str):
@@ -596,6 +645,38 @@ class HtmlBlock(Block):
         return cls(html_content=data["content"])
 
 
+class ColumnsBlock(Block):
+    """多栏布局块"""
+
+    type_name = "columns"
+
+    def __init__(self, columns: List[Union[Block, "Document"]]):
+        self.columns = columns
+
+    def to_html(self, **kwargs):
+        # 强制不生成 full_page
+        kwargs["full_page"] = False
+        parts = []
+        for col in self.columns:
+            col_html = col.to_html(**kwargs)
+            parts.append(f'<div class="column-item">{col_html}</div>')
+        return f'<div class="columns-container">{"".join(parts)}</div>'
+
+    def to_md(self, **kwargs):
+        # Markdown 不太好支持多栏，简单垂直排列
+        return "\n\n".join([col.to_md(**kwargs) for col in self.columns])
+
+    def to_text(self, **kwargs):
+        return "\n\n".join([col.to_text(**kwargs) for col in self.columns])
+
+    def to_dict(self, **kwargs):
+        return {"type": self.type_name, "columns": [col.to_dict() for col in self.columns]}
+
+    @classmethod
+    def from_dict(cls, data):
+        return cls(columns=[Block.from_dict(c) for c in data.get("columns", [])])
+
+
 def __2_Document_Components():
     """文档组件类"""
     pass
@@ -615,24 +696,46 @@ th { text-align: left; background-color: #e9ecef; }
 img { border-radius: 4px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
 blockquote { border-left: 4px solid #eee; padding-left: 1rem; color: #666; }
 .metadata { font-size: 0.8rem; color: #999; margin-bottom: 2rem; border-bottom: 1px solid #eee; padding-bottom: 1rem; }
+.columns-container { display: flex; flex-wrap: wrap; gap: 1rem; margin: 1rem 0; }
+.column-item { flex: 1; min-width: 300px; }
+
+/* TOC styles */
+.toc { position: fixed; left: 1rem; top: 1rem; width: 200px; max-height: 90vh; overflow-y: auto; background: #f8f9fa; padding: 1rem; border-radius: 6px; border: 1px solid #eee; font-size: 0.9rem; z-index: 1000; }
+.toc ul { list-style: none; padding-left: 0; margin: 0; }
+.toc li { margin-bottom: 0.3rem; }
+.toc a { color: #555; display: block; padding: 0.2rem; border-radius: 3px; }
+.toc a:hover { background: #e9ecef; color: #000; text-decoration: none; }
+.toc .toc-level-1 { font-weight: bold; margin-top: 0.5rem; }
+.toc .toc-level-2 { padding-left: 0.8rem; }
+.toc .toc-level-3 { padding-left: 1.6rem; font-size: 0.85rem; color: #777; }
+
+/* Adjust body margin if TOC is present */
+.has-toc { margin-left: 240px; }
+@media (max-width: 1400px) {
+    .toc { position: static; width: 100%; max-height: none; margin-bottom: 2rem; }
+    .has-toc { margin-left: auto; }
+}
 """
 
 
 class Document(Block):
     """通用文档构建器
-    
+
     集成内容管理（Builder）和格式渲染（Renderer）。
     """
+
     type_name = "document"
 
-    def __init__(self, content=None, title=None, **kwargs):
+    def __init__(self, content=None, title=None, toc=0, **kwargs):
         """
         :param Any content: 初始内容
         :param str title: 文档标题
+        :param int toc: 目录层级深度。0表示不显示，1表示显示1级标题，以此类推。
         """
         self.title = title
         self.blocks: List[Block] = []
         self.css = DEFAULT_CSS
+        self.toc = int(toc)
 
         if content is not None:
             self.add(content, **kwargs)
@@ -732,43 +835,87 @@ class Document(Block):
         self.blocks.append(JsonBlock(data, title, max_items=max_items, max_value_length=max_value_length))
         return self
 
-    def add_image(self, src, title=None):
-        self.blocks.append(ImageBlock(src, title))
+    def add_image(self, src, title=None, thumbnail_pixels=None):
+        self.blocks.append(ImageBlock(src, title, thumbnail_pixels=thumbnail_pixels))
         return self
 
-    def _get_render_blocks(self, heading_numbering):
-        if not heading_numbering:
-            yield from self.blocks
+    def add_columns(self, columns: List[Union[Block, "Document"]]):
+        self.blocks.append(ColumnsBlock(columns))
+        return self
+
+    def _generate_toc_html(self, render_blocks, depth):
+        """生成目录 HTML 结构"""
+        items = []
+        for b in render_blocks:
+            if isinstance(b, HeaderBlock) and b.level <= depth:
+                anchor = hashlib.md5(b.text.encode()).hexdigest()[:8]
+                items.append(f'<li class="toc-level-{b.level}"><a href="#{anchor}">{html.escape(b.text)}</a></li>')
+
+        if not items:
+            return ""
+
+        return f'<nav class="toc"><ul>{"".join(items)}</ul></nav>'
+
+    def _get_render_blocks(self, heading_numbering=None, optimize_levels=True):
+        """获取渲染用的块列表
+        
+        :param heading_numbering: 是否开启标题编号
+        :param optimize_levels: 是否优化标题层级（如果缺失高层级标题，则自动提升低层级标题）
+        """
+        blocks = self.blocks
+        shift = 0
+        if optimize_levels:
+            header_levels = [b.level for b in blocks if isinstance(b, HeaderBlock)]
+            if header_levels:
+                min_level = min(header_levels)
+                if min_level > 1:
+                    shift = min_level - 1
+
+        if not heading_numbering and shift == 0:
+            yield from blocks
             return
 
         counters = [0] * 6
-        for b in self.blocks:
+        for b in blocks:
             if isinstance(b, HeaderBlock):
-                level = b.level
-                counters[level - 1] += 1
-                for i in range(level, 6):
-                    counters[i] = 0
+                level = max(1, b.level - shift)
+                if heading_numbering:
+                    counters[level - 1] += 1
+                    for i in range(level, 6):
+                        counters[i] = 0
 
-                prefix = ".".join(str(c) for c in counters[:level]) + " "
-                yield HeaderBlock(prefix + b.text, level=level)
+                    prefix = ".".join(str(c) for c in counters[:level]) + " "
+                    yield HeaderBlock(prefix + b.text, level=level)
+                else:
+                    yield HeaderBlock(b.text, level=level)
             else:
                 yield b
 
-    def to_html(self, heading_numbering=None, full_page=True, **kwargs) -> str:
+    def to_html(self, heading_numbering=None, full_page=True, toc=None, optimize_levels=True, **kwargs) -> str:
         """转换为 HTML
-        
+
         :param heading_numbering: 是否开启标题编号
         :param full_page: 是否生成完整的 HTML 页面（包含 head, body）。
                           如果是嵌套在其他文档中，应设为 False。
+        :param toc: 目录层级深度。如果提供，覆盖 self.toc 的设置。
+        :param optimize_levels: 是否优化标题层级
         """
+        if toc is None:
+            toc = self.toc
+        else:
+            toc = int(toc)
+
+        render_blocks = list(self._get_render_blocks(heading_numbering, optimize_levels=optimize_levels))
+
         body_parts = []
-        for b in self._get_render_blocks(heading_numbering):
+        for b in render_blocks:
             # 如果 Block 是 Document，则递归调用并设置 full_page=False
             if isinstance(b, Document):
-                body_parts.append(b.to_html(heading_numbering=heading_numbering, full_page=False, **kwargs))
+                body_parts.append(b.to_html(heading_numbering=heading_numbering, full_page=False, 
+                                            optimize_levels=optimize_levels, **kwargs))
             else:
                 body_parts.append(b.to_html(**kwargs))
-        
+
         body_content = "\n".join(body_parts)
 
         if not full_page:
@@ -780,6 +927,9 @@ class Document(Block):
         title_str = html.escape(str(self.title)) if self.title else "Document"
         h1_tag = f"<h1>{title_str}</h1>" if self.title else ""
 
+        toc_html = self._generate_toc_html(render_blocks, toc) if toc > 0 else ""
+        body_class = ' class="has-toc"' if toc_html else ""
+
         return f"""<!DOCTYPE html>
 <html>
 <head>
@@ -788,21 +938,22 @@ class Document(Block):
     <title>{title_str}</title>
     <style>{self.css}</style>
 </head>
-<body>
+<body{body_class}>
+    {toc_html}
     {h1_tag}
     {body_content}
 </body>
 </html>"""
 
-    def to_md(self, heading_numbering=None, **kwargs) -> str:
-        content = "\n\n".join([b.to_md(**kwargs) for b in self._get_render_blocks(heading_numbering)])
+    def to_md(self, heading_numbering=None, optimize_levels=True, **kwargs) -> str:
+        content = "\n\n".join([b.to_md(**kwargs) for b in self._get_render_blocks(heading_numbering, optimize_levels=optimize_levels)])
         if self.title:
             return f"# {self.title}\n\n{content}"
         else:
             return content
 
-    def to_text(self, heading_numbering=None, **kwargs) -> str:
-        content = "\n".join([b.to_text(**kwargs) for b in self._get_render_blocks(heading_numbering)])
+    def to_text(self, heading_numbering=None, optimize_levels=True, **kwargs) -> str:
+        content = "\n".join([b.to_text(**kwargs) for b in self._get_render_blocks(heading_numbering, optimize_levels=optimize_levels)])
         if self.title:
             return f"=== {self.title} ===\n\n{content}"
         else:
