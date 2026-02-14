@@ -521,16 +521,16 @@ class ImageBlock(Block):
         else:
             display_src = full_src
 
+        title_attr = f' title="{html.escape(self.title) or "点击查看原图"}"'
+        img_tag = f'<img src="{display_src}" style="max-width:100%; height:auto;"{title_attr} />'
+
         if self.download:
             download_name = html.escape(self.title) if self.title else "image"
-            download_attr = f' download="{download_name}.png"'
+            return f'<figure><a href="{full_src}" download="{download_name}.png" target="_blank">{img_tag}</a>{caption}</figure>'
         else:
-            download_attr = ""
-        
-        title_attr = f' title="{html.escape(self.title) or "点击查看原图"}"'
-
-        img_tag = f'<img src="{display_src}" style="max-width:100%; height:auto;"{title_attr} />'
-        return f'<figure><a href="{full_src}" target="_blank"{download_attr}>{img_tag}</a>{caption}</figure>'
+            # Chrome 等浏览器限制了直接在顶级窗口打开 data URL，因此使用 JS 打开新窗口写入内容
+            onclick = "let w=window.open();w.document.write('<img src=\\''+this.href+'\\' style=\\'max-width:100%\\'/>');w.document.close();return false;"
+            return f'<figure><a href="{full_src}" onclick="{onclick}">{img_tag}</a>{caption}</figure>'
 
     def to_md(self, **kwargs):
         return f"![{self.title or 'image'}]({self.src})\n"
@@ -700,7 +700,7 @@ blockquote { border-left: 4px solid #eee; padding-left: 1rem; color: #666; }
 .column-item { flex: 1; min-width: 300px; }
 
 /* TOC styles */
-.toc { position: fixed; left: 1rem; top: 1rem; width: 200px; max-height: 90vh; overflow-y: auto; background: #f8f9fa; padding: 1rem; border-radius: 6px; border: 1px solid #eee; font-size: 0.9rem; z-index: 1000; }
+.toc { position: fixed; right: 1rem; top: 1rem; width: 200px; max-height: 90vh; overflow-y: auto; background: #f8f9fa; padding: 1rem; border-radius: 6px; border: 1px solid #eee; font-size: 0.9rem; z-index: 1000; }
 .toc ul { list-style: none; padding-left: 0; margin: 0; }
 .toc li { margin-bottom: 0.3rem; }
 .toc a { color: #555; display: block; padding: 0.2rem; border-radius: 3px; }
@@ -710,10 +710,20 @@ blockquote { border-left: 4px solid #eee; padding-left: 1rem; color: #666; }
 .toc .toc-level-3 { padding-left: 1.6rem; font-size: 0.85rem; color: #777; }
 
 /* Adjust body margin if TOC is present */
-.has-toc { margin-left: 240px; }
+.has-toc { margin-right: 240px; }
 @media (max-width: 1400px) {
     .toc { position: static; width: 100%; max-height: none; margin-bottom: 2rem; }
-    .has-toc { margin-left: auto; }
+    .has-toc { margin-right: auto; }
+}
+
+@media (min-width: 1700px) {
+    .toc {
+        left: calc(50% + 650px);
+        right: auto;
+    }
+    .has-toc {
+        margin-right: auto;
+    }
 }
 """
 

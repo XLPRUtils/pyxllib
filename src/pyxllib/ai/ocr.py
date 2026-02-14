@@ -84,7 +84,7 @@ ConstructorProxy(PaddleOCR, "full").config(
 )
 
 # 极低阈值配置，用于尽可能捕获所有疑似文本区域（包含大量噪声，常用于 UI 自动化中的候选区域提取）
-ConstructorProxy(PaddleOCR, "extreme_low").config(
+ConstructorProxy(PaddleOCR, "high_recall").config(
     lang="ch",
     device="gpu",
     use_doc_orientation_classify=False,

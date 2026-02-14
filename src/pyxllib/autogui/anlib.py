@@ -494,7 +494,8 @@ class _AnShapeBasic(UserDict):
 
         impath = XlPath(region_folder) / f"{view_name}.jpg"
         os.makedirs(os.path.dirname(impath), exist_ok=True)
-        xlcv.write(img, impath)
+        if img is not None:
+            xlcv.write(img, impath)
 
     def save_image(self, region_folder, view_name=None, timetag=None):
         """保存当前形状的快照"""
@@ -1588,7 +1589,7 @@ class AnView(AnShape):
         os.makedirs(os.path.dirname(jsonpath), exist_ok=True)
 
         # 2 生成格式
-        if save_image:
+        if save_image and self["img"] is not None:
             xlcv.write(self["img"], impath)  # 图片有概率也发生的变动
         lmdict = LabelmeDict.gen_data(impath)
         for sp in self.shapes:
