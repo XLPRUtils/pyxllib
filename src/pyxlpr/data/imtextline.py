@@ -10,6 +10,7 @@
 from pyxllib.xlcv import *
 
 from functools import reduce
+from pathlib import Path
 
 from shapely.geometry import MultiPolygon
 
@@ -361,16 +362,18 @@ class TextlineSpliter:
     @classmethod
     def relabel_labelfile(cls, p, maxsplit=None, minwidth=3, imgdir='images'):
         """ 对一份文件里标注的所有图片，批量进行转换，并加入一列新的坐标数据 """
-        lines = p.read().splitlines()
+        p = Path(p)
+        lines = p.read_text(encoding='utf-8', errors='ignore').splitlines()
         res = []
         for line in lines:
             line = line.split(maxsplit=1)
-            im = xlcv.read(p.parent / f'{imgdir}/{line[0]}', 0)
+            im = xlcv.read(p.parent / imgdir / line[0], 0)
             cols = cls.spliter(im, maxsplit, minwidth)
             line.append(' '.join(map(str, np.array(cols, dtype=int).reshape(-1))))
             res.append('\t'.join(line))
         content = '\n'.join(res)
-        p.with_stem(p.stem + f'+text_interval-minw={minwidth}').write(content, if_exists='replace')
+        out = p.with_name(p.stem + f'+text_interval-minw={minwidth}' + p.suffix)
+        out.write_text(content, encoding='utf-8', errors='ignore')
 
     @classmethod
     def relabel_labelfiles(cls, root, maxsplit=None, minwidth=3, imgdir='images'):
@@ -379,7 +382,7 @@ class TextlineSpliter:
         :param imgdir: 图片所在子目录名称
         :return:
         """
-        root = Dir(root)
+        root = Path(root)
         cls.relabel_labelfile(root / 'val.txt', maxsplit, minwidth, imgdir)
         cls.relabel_labelfile(root / 'test.txt', maxsplit, minwidth, imgdir)
         cls.relabel_labelfile(root / 'train.txt', maxsplit, minwidth, imgdir)
@@ -395,35 +398,40 @@ class TextlineSpliter:
             q_im  切割后的图片路径
 
             """
-            p, q = File(name, src), File(name, dst)
-            if not p: return
-            lines = p.read().splitlines()
+            srcp, dstp = Path(src), Path(dst)
+            p, q = srcp / name, dstp / name
+            if not p.is_file():
+                return
+            lines = p.read_text(encoding='utf-8', errors='ignore').splitlines()
             res = []
             for line in lines:
                 # 获得图片文件，切分的单词
                 line = line.split(maxsplit=1)
                 if len(line) < 2: continue
 
-                p_im = File(p.parent / f'{imgdir}/{line[0]}')
+                p_im = p.parent / imgdir / line[0]
                 # print(p_im)
                 words = line[1].split()
 
                 if len(words) < 2:
-                    q_im = File(f'{imgdir}/{p_im.name}', dst)
-                    p_im.copy(q_im)
+                    q_im = dstp / imgdir / p_im.name
+                    q_im.parent.mkdir(parents=True, exist_ok=True)
+                    q_im.write_bytes(p_im.read_bytes())
                     res.append(f'{q_im.name}\t{words[0]}')
                 else:
                     # 切分图片
                     imgs = cls.split_img(p_im, len(words), minwidth)
                     # 重新生成标注
                     for k, im in enumerate(imgs):
-                        q_im = File(f'{imgdir}/{p_im.stem}_{k}', dst, suffix=p_im.suffix)
-                        xlcv.write(im, q_im, if_exists='replace')
+                        q_im = dstp / imgdir / f'{p_im.stem}_{k}{p_im.suffix}'
+                        q_im.parent.mkdir(parents=True, exist_ok=True)
+                        xlcv.write(im, str(q_im))
                         res.append(f'{q_im.name}\t{words[k]}')
             content = '\n'.join(res)
-            q.write(content, if_exists='replace')
+            q.parent.mkdir(parents=True, exist_ok=True)
+            q.write_text(content, encoding='utf-8', errors='ignore')
 
-        src, dst = Dir(src), Dir(dst)
+        src, dst = Path(src), Path(dst)
         for name in ['val.txt', 'test.txt', 'train.txt']:
             # for name in ['append.txt']:
             # for name in ['val.txt']:
@@ -461,11 +469,13 @@ class TLSMain:
         EnglishWordTLS.relabel_labelfiles(r'D:\datasets\english-word', minwidth=10, imgdir='total')
 
     def sroie(self):
-        path = Dir('SROIE2019/task1train_626p_repo/task1train_626p_patch/')
-        root = Dir(path, '/home/datasets/textGroup')
-        TextlineSpliter.show_spliter_imgs(root.select('images/*.png').sample(10),
-                                          save=File(path / 'temp', '/home/datasets/textGroup'),
-                                          show=False)
+        path = Path('SROIE2019/task1train_626p_repo/task1train_626p_patch')
+        root = Path('/home/datasets/textGroup') / path
+        imgs = list((root / 'images').glob('*.png'))
+        if not imgs:
+            return
+        samples = random.sample(imgs, min(10, len(imgs)))
+        TextlineSpliter.show_spliter_imgs(samples, save=(root / 'temp'), show=False)
 
 
 if __name__ == '__main__':

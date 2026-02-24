@@ -4,7 +4,12 @@
 # @Email  : 877362867@qq.com
 # @Date   : 2025/06/05
 
-""" 惰性加载依赖包
+""" 惰性加载依赖包（Safe/Optional Import）
+
+机制说明：
+1. 若包存在：直接返回原生 module/object，无任何中间层 Proxy，后续调用性能与原生 import 完全一致。
+2. 若包不存在：返回一个 LazyImportError 代理对象。
+   该对象在被访问属性或调用时才会抛出友好的错误提示（指导用户安装）。
 
 写法一：
 pd = lazy_import('pandas')

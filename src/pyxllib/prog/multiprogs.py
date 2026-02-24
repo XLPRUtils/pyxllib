@@ -18,52 +18,28 @@ import textwrap
 import threading
 import re
 import itertools
+from pathlib import Path
+import tempfile
+
 
 from pyxllib.prog.lazyimport import lazy_import
 
-try:
-    from deprecated import deprecated
-except ModuleNotFoundError:
-    deprecated = lazy_import('deprecated', 'Deprecated')
-
-try:
-    from fastcore.basics import GetAttr
-except ModuleNotFoundError:
-    GetAttr = lazy_import('from fastcore.basics import GetAttr', 'fastcore')
-
-try:
-    from loguru import logger
-except ModuleNotFoundError:
-    logger = lazy_import('from loguru import logger')
-
-try:
-    from croniter import croniter
-except ModuleNotFoundError:
-    croniter = lazy_import('from croniter import croniter')
-
-try:
-    import pandas as pd
-except ModuleNotFoundError:
-    pd = lazy_import('pandas')
-
-try:
-    from fastapi import FastAPI
-    from fastapi.responses import PlainTextResponse, HTMLResponse
-except ModuleNotFoundError:
-    FastAPI = lazy_import('from fastapi import FastAPI')
-    PlainTextResponse = lazy_import('from fastapi.responses import PlainTextResponse')
+deprecated = lazy_import("from deprecated import deprecated", "Deprecated")
+GetAttr = lazy_import("from fastcore.basics import GetAttr", "fastcore")
+logger = lazy_import("from loguru import logger")
+croniter = lazy_import("from croniter import croniter")
+pd = lazy_import("import pandas")
+FastAPI = lazy_import("from fastapi import FastAPI")
+PlainTextResponse = lazy_import("from fastapi.responses import PlainTextResponse")
 
 # 这套代码目前只支持兼容aps4.0版本，但是我的实际环境为了兼容funboost已经把aps回退到3.11.1版本
 #   这个文件暂时不维护了，建议直接使用scheduler.py
 try:
     from apscheduler import Scheduler
 except ModuleNotFoundError:
-    Scheduler = lazy_import('from apscheduler import Scheduler',
-                            'apscheduler[psycopg,sqlalchemy]==4.0.0a6')
+    Scheduler = lazy_import("from apscheduler import Scheduler", "apscheduler[psycopg,sqlalchemy]==4.0.0a6")
 
-from pyxllib.prog.specialist import parse_datetime
-from pyxllib.algo.stat import print_full_dataframe
-from pyxllib.file.specialist import XlPath
+from pyxllib.prog.xltime import parse_datetime
 
 
 def __1_定时工具():
@@ -73,7 +49,7 @@ def __1_定时工具():
 class XlTrigger:
     @classmethod
     def calculate_future_time(cls, start_time, wait_seconds):
-        """ 计算延迟时间
+        """计算延迟时间
 
         :param datetime start_time: 开始时间
         :param int wait_seconds: 等待秒数
@@ -83,7 +59,7 @@ class XlTrigger:
 
     @classmethod
     def calculate_next_cron_time(cls, cron_tag, base_time=None):
-        """ 使用crontab标记的运行周期，然后计算相对当前时间，下一次要启动运行的时间
+        """使用crontab标记的运行周期，然后计算相对当前时间，下一次要启动运行的时间
 
         :param str cron_tag: 自定义的cron标记，跟asp的差不多，但星期几部分做了调整
             30 2 * * 1: 这部分是时间和日期的设定，具体含义如下：
@@ -120,7 +96,7 @@ class XlTrigger:
 
     @classmethod
     def smart_wait(cls, start_time, end_time, wait_tag, print_mode=0):
-        """ 智能等待，一般用在对进程的管理重启上
+        """智能等待，一般用在对进程的管理重启上
 
         :param datetime start_time: 程序启动的时间
         :param datetime end_time: 程序结束的时间
@@ -158,7 +134,7 @@ class XlTrigger:
             raise ValueError
 
         if print_mode:
-            print(f'等待到时间{next_time}...')
+            print(f"等待到时间{next_time}...")
 
         cls.wait_until_time(next_time)
 
@@ -168,7 +144,7 @@ def __2_程序管理():
 
 
 def find_free_ports(count=1):
-    """ 随机获得可用端口
+    """随机获得可用端口
 
     :param count: 需要的端口数量（会保证给出的端口号不重复）
     :return: list
@@ -186,15 +162,7 @@ class ProgramWorker(SimpleNamespace):
     代表一个单独的程序（进程），基于 SimpleNamespace 实现。
     """
 
-    def __init__(self,
-                 name,
-                 cmd,
-                 shell=False,
-                 run=True,
-                 port=None,
-                 locations=None,
-                 raw_cmd=None,
-                 **attrs):
+    def __init__(self, name, cmd, shell=False, run=True, port=None, locations=None, raw_cmd=None, **attrs):
         """
         :param name: 程序昵称
         :param program: 程序对象
@@ -224,22 +192,23 @@ class ProgramWorker(SimpleNamespace):
         self.last_end_time = None
 
     def _set_pdeathsig(self, sig=None):
-        """ 在主服务退出时，这些程序也会全部自动关闭 """
+        """在主服务退出时，这些程序也会全部自动关闭"""
 
         def callable():
             import signal
+
             sig2 = signal.SIGTERM if sig is None else sig
             libc = ctypes.CDLL("libc.so.6")
             return libc.prctl(1, sig2)
 
-        if sys.platform == 'win32':
+        if sys.platform == "win32":
             # windows系统暂设为空
             return None
         else:
             return callable
 
     def launch(self):
-        """ 启动程序 """
+        """启动程序"""
         # 1 重置时间
         self.last_start_time = datetime.datetime.now()
         self.last_end_time = None
@@ -249,22 +218,21 @@ class ProgramWorker(SimpleNamespace):
             # 如果不需要立即启动，则返回一个 Mock 对象
             proc = Mock()
             proc.pid = None
-            proc.poll.return_value = 'tag'
+            proc.poll.return_value = "tag"
             self.program = proc
             return self.program
 
         # 3 实际运行，需要从self里提取相关的参数
         kwargs = {}
-        for name in ['stdin', 'stdout', 'stderr']:
+        for name in ["stdin", "stdout", "stderr"]:
             if hasattr(self, name):
                 kwargs[name] = getattr(self, name)
 
         # 4 启动
-        if sys.platform == 'win32':
+        if sys.platform == "win32":
             self.program = subprocess.Popen(self.cmd, shell=self.shell, **kwargs)
         else:
-            self.program = subprocess.Popen(self.cmd, shell=self.shell, **kwargs,
-                                            preexec_fn=self._set_pdeathsig())
+            self.program = subprocess.Popen(self.cmd, shell=self.shell, **kwargs, preexec_fn=self._set_pdeathsig())
 
         return self.program
 
@@ -272,7 +240,7 @@ class ProgramWorker(SimpleNamespace):
         self.launch()
 
     def run_task(self):
-        """ 启动任务并更新状态 """
+        """启动任务并更新状态"""
         # todo schedule不一定都是单实例阻塞情景的需求，以后有需要可以扩展支持多实例同时存在的非阻塞模式
         if self.is_running():
             logger.warning(f'由于程序"{name}"在上一次周期还没运行完，新周期不重复启动')
@@ -320,7 +288,7 @@ class ProgramWorker(SimpleNamespace):
             self.last_end_time = datetime.datetime.now()
 
     def is_running(self):
-        """ 检查程序是否在运行 """
+        """检查程序是否在运行"""
         status = self.program is not None and self.program.poll() is None
         if not status and self.last_end_time is None:  # 检测到程序运行结束，则标记下
             self.last_end_time = datetime.datetime.now()
@@ -329,8 +297,8 @@ class ProgramWorker(SimpleNamespace):
 
 class MultiProgramLauncher:
     """
-	管理多个程序的启动与终止
-	"""
+    管理多个程序的启动与终止
+    """
 
     def __init__(self):
         self.workers = []
@@ -342,20 +310,20 @@ class MultiProgramLauncher:
 
     @property
     def scheduler(self):
-        """ 调度器 """
+        """调度器"""
         if self._scheduler is None:
             try:
                 # from apscheduler.schedulers.background import BackgroundScheduler
                 from apscheduler import Scheduler
             except ModuleNotFoundError:
-                Scheduler = lazy_import('from apscheduler import Scheduler')
+                Scheduler = lazy_import("from apscheduler import Scheduler")
 
             self._scheduler = Scheduler()
 
         return self._scheduler
 
     def worker_set_schedule(self, worker, schedule=None, misfire_grace_time=None):
-        """ 将程序添加为定时任务
+        """将程序添加为定时任务
 
         :param int|float|str|list schedule: 定时任务配置，如果提供则添加到 APScheduler 调度器
             int/float: 每隔多少秒执行一次，可能同时有多个实例存在
@@ -376,7 +344,7 @@ class MultiProgramLauncher:
             from apscheduler.triggers.date import DateTrigger
             from apscheduler.triggers.cron import CronTrigger
         except ModuleNotFoundError:
-            CronTrigger = lazy_import('from apscheduler.triggers.cron import CronTrigger')
+            CronTrigger = lazy_import("from apscheduler.triggers.cron import CronTrigger")
 
         name = worker.name
 
@@ -397,19 +365,19 @@ class MultiProgramLauncher:
             cron_parts = schedule.split()
             # 如果是 5 个字段，则补齐 "秒" 字段为 '0'
             if len(cron_parts) == 5:
-                cron_parts.insert(0, '0')
+                cron_parts.insert(0, "0")
             # 检查是否为有效的 6 字段 cron 表达式
             if len(cron_parts) == 6:
                 # 统一处理为 6 字段格式
                 # 把我自定义的cron的星期标记转换为aps的星期标记。前者用1234567，后者用0123456表示星期一到星期日
                 x = cron_parts[5]
-                if x != '*':  # 写0或7都表示周日
+                if x != "*":  # 写0或7都表示周日
                     # 改成正则获取x每个数值减去1（遇到0则改为6）：相当于把原本1~7的周标记，改为这里0~6的标记
                     def f(m):
                         x = int(m.group(0))
-                        return '7' if x == 0 else str(x)
+                        return "7" if x == 0 else str(x)
 
-                    x = re.sub(r'\d+', f, x)
+                    x = re.sub(r"\d+", f, x)
 
                 self.scheduler.add_schedule(
                     worker.run_task,
@@ -421,7 +389,6 @@ class MultiProgramLauncher:
                         month=cron_parts[4],
                         day_of_week=x,
                     ),
-
                     # 检测的时候有概率错过了精确时间点。但一般不论延迟了多久，都要补运行上。
                     misfire_grace_time=misfire_grace_time,
                 )
@@ -438,15 +405,8 @@ class MultiProgramLauncher:
         else:
             logger.warning(f"无效的调度格式，跳过任务：{name}")
 
-    def _add_cmd_basic(self,
-                       cmd,
-                       name=None,
-                       shell=False,
-                       run=True,
-                       schedule=None,
-                       misfire_grace_time=None,
-                       **attrs):
-        """ 用命令行启动一个程序，或仅存储任务，并添加进管理列表
+    def _add_cmd_basic(self, cmd, name=None, shell=False, run=True, schedule=None, misfire_grace_time=None, **attrs):
+        """用命令行启动一个程序，或仅存储任务，并添加进管理列表
 
         :param cmd: 启动程序的命令
         :param name: 程序名称，如果未提供则从cmd中自动获取
@@ -478,7 +438,7 @@ class MultiProgramLauncher:
         return worker
 
     def _add_cmd_with_ports(self, cmd, *, ports=1, name=None, **kwargs):
-        """ 支持 ports 的处理
+        """支持 ports 的处理
 
         :param ports:
             int 表示要开启的进程数，端口号随机生成
@@ -498,9 +458,9 @@ class MultiProgramLauncher:
         workers = []
         if ports:
             for port in ports:
-                cmd_with_port = cmd + [f'--port', str(port)]
-                kwargs['port'] = port
-                worker = self._add_cmd_basic(cmd_with_port, name=f'{name}:{port}', **kwargs)
+                cmd_with_port = cmd + [f"--port", str(port)]
+                kwargs["port"] = port
+                worker = self._add_cmd_basic(cmd_with_port, name=f"{name}:{port}", **kwargs)
                 workers.append(worker)
         else:
             workers = [self._add_cmd_basic(cmd, name=name, **kwargs)]
@@ -523,13 +483,13 @@ class MultiProgramLauncher:
             for i, x in enumerate(locations):
                 if not isinstance(x, dict):
                     locations[i] = {x: x}
-            kwargs['locations'] = locations
+            kwargs["locations"] = locations
 
         # 2 处理 devices 参数，设置显卡编号或使用 CPU
         if devices is not None:
-            os.environ['CUDA_VISIBLE_DEVICES'] = str(devices)
-        elif 'CUDA_VISIBLE_DEVICES' in os.environ:
-            del os.environ['CUDA_VISIBLE_DEVICES']  # 如果没设置 devices，就清除环境变量，使用 CPU
+            os.environ["CUDA_VISIBLE_DEVICES"] = str(devices)
+        elif "CUDA_VISIBLE_DEVICES" in os.environ:
+            del os.environ["CUDA_VISIBLE_DEVICES"]  # 如果没设置 devices，就清除环境变量，使用 CPU
 
         # 3 处理 ports 参数
         workers = self._add_cmd_with_ports(cmd, ports=ports, **kwargs)
@@ -542,11 +502,8 @@ class MultiProgramLauncher:
     def __2_各种添加进程的机制(self):
         pass
 
-    def add_py(self, py_file, args='',
-               ports=None, locations=None,
-               name=None, shell=False, executer=None,
-               **kwargs):
-        """ 添加并启动一个Python文件作为后台程序
+    def add_py(self, py_file, args="", ports=None, locations=None, name=None, shell=False, executer=None, **kwargs):
+        """添加并启动一个Python文件作为后台程序
 
         :param str|list args:
         """
@@ -559,20 +516,19 @@ class MultiProgramLauncher:
             cmd += list(args)
         return self.add_cmd(cmd, name, ports=ports, locations=locations, shell=shell, **kwargs)
 
-    def add_py_module(self, module, args='',
-                      ports=None, locations=None,
-                      name=None, shell=False, executer=None,
-                      **kwargs):
+    def add_py_module(
+        self, module, args="", ports=None, locations=None, name=None, shell=False, executer=None, **kwargs
+    ):
         """
         添加并启动一个Python模块作为后台程序
 
-		:param module: 要执行的Python模块名（python -m 后面的部分）
+                :param module: 要执行的Python模块名（python -m 后面的部分）
         :param str|list args: 模块的参数
         :param name: 进程的名称，默认为模块名
-		"""
+        """
         if executer is None:
             executer = sys.executable
-        cmd = [f'{executer}', '-m', f'{module}']
+        cmd = [f"{executer}", "-m", f"{module}"]
         if isinstance(args, str):
             cmd.append(args)
         else:
@@ -581,40 +537,44 @@ class MultiProgramLauncher:
             name = module
         return self.add_cmd(cmd, ports=ports, name=name, locations=locations, shell=shell, **kwargs)
 
-    def add_prog(self, prog, extcmds='',
-                 ports=None, locations=None, *,
-                 name=None, devices=None,
-                 executer=None,
-                 run=True,
-                 schedule=None,
-                 ):
+    def add_prog(
+        self,
+        prog,
+        extcmds="",
+        ports=None,
+        locations=None,
+        *,
+        name=None,
+        devices=None,
+        executer=None,
+        run=True,
+        schedule=None,
+    ):
         """
         :param int|list ports:
         :param str|list extcmds:
         """
         if locations is None:
-            locations = f'/api/{prog.split(".")[-1]}'
-        self.add_py_module(prog,
-                           extcmds,
-                           ports=ports, locations=locations,
-                           name=name, devices=devices,
-                           executer=executer,
-                           run=run,
-                           schedule=schedule,
-                           )
+            locations = f"/api/{prog.split('.')[-1]}"
+        self.add_py_module(
+            prog,
+            extcmds,
+            ports=ports,
+            locations=locations,
+            name=name,
+            devices=devices,
+            executer=executer,
+            run=run,
+            schedule=schedule,
+        )
 
     def add_server(self, prog, ports=None, locations=None, *args, **kwargs):
-        """ 我自己部署的服务，基本都有特定的start_server启动函数 """
-        self.add_prog(prog, extcmds='start_server', ports=ports, locations=locations, *args, **kwargs)
+        """我自己部署的服务，基本都有特定的start_server启动函数"""
+        self.add_prog(prog, extcmds="start_server", ports=ports, locations=locations, *args, **kwargs)
 
-    def add_script_task(self,
-                        script_content,
-                        extension=None,
-                        shell=False,
-                        run=True,
-                        name=None,
-                        schedule=None,
-                        **kwargs):
+    def add_script_task(
+        self, script_content, extension=None, shell=False, run=True, name=None, schedule=None, **kwargs
+    ):
         """
         添加一个操作系统命令或脚本（如 .bat、.sh、.ps1 等）并启动。
 
@@ -627,45 +587,44 @@ class MultiProgramLauncher:
         """
         # 1 自动选择脚本文件扩展名
         if extension is None:
-            if sys.platform == 'win32':
-                extension = '.ps1'  # Windows 默认使用 PowerShell
+            if sys.platform == "win32":
+                extension = ".ps1"  # Windows 默认使用 PowerShell
             else:
-                extension = '.sh'  # Linux 和 macOS 默认使用 Bash
+                extension = ".sh"  # Linux 和 macOS 默认使用 Bash
 
         # 2 添加编码配置到脚本内容
-        if extension == '.bat':
+        if extension == ".bat":
             # 为 .bat 文件添加 UTF-8 支持
             script_content = f"chcp 65001 >nul\n{script_content}"
-        elif extension == '.ps1':
+        elif extension == ".ps1":
             # 为 .ps1 文件添加 UTF-8 支持
-            script_content = f"[Console]::OutputEncoding = [System.Text.Encoding]::UTF8\n" \
-                             f"[Console]::InputEncoding = [System.Text.Encoding]::UTF8\n{script_content}"
+            script_content = (
+                f"[Console]::OutputEncoding = [System.Text.Encoding]::UTF8\n"
+                f"[Console]::InputEncoding = [System.Text.Encoding]::UTF8\n{script_content}"
+            )
 
         # 3 创建临时脚本文件
-        script_file = XlPath.create_tempfile_path(extension)
-        script_file.write_text(script_content)
+        fd, path_str = tempfile.mkstemp(suffix=extension, text=True)
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(script_content)
+        script_file = Path(path_str)
 
         # 4 根据文件扩展名和操作系统选择执行命令
-        if extension == '.sh':
-            cmd = ['bash', str(script_file)]
-        elif extension == '.ps1':
-            if sys.platform == 'win32':
-                cmd = ['powershell', '-ExecutionPolicy', 'Bypass', '-File', str(script_file)]
+        if extension == ".sh":
+            cmd = ["bash", str(script_file)]
+        elif extension == ".ps1":
+            if sys.platform == "win32":
+                cmd = ["powershell", "-ExecutionPolicy", "Bypass", "-File", str(script_file)]
             else:
                 raise ValueError("PowerShell 脚本仅在 Windows 系统上受支持")
-        elif extension == '.bat':
+        elif extension == ".bat":
             cmd = [str(script_file)]  # 直接运行 .bat 文件
         else:
             raise ValueError(f"不支持的脚本类型: {extension}")
 
         # 5 使用 _add_cmd_with_nginx 启动脚本
         return self.add_cmd(
-            cmd=cmd,
-            name=name or f"command_{script_file.stem}",
-            shell=shell,
-            run=run,
-            schedule=schedule,
-            **kwargs
+            cmd=cmd, name=name or f"command_{script_file.stem}", shell=shell, run=run, schedule=schedule, **kwargs
         )
 
     def __3_nginx相关(self):
@@ -679,7 +638,7 @@ class MultiProgramLauncher:
             for x in worker.locations:
                 for dst, src in x.items():
                     if worker.port:  # 250126周日21:02，有端口才添加
-                        locations[dst].append(f'localhost:{worker.port}{src}')
+                        locations[dst].append(f"localhost:{worker.port}{src}")
         return locations
 
     def configure_nginx(self, nginx_template, locations=None):
@@ -691,17 +650,17 @@ class MultiProgramLauncher:
 
         for dst, srcs in locations.items():
             if len(srcs) == 1:  # 只有1个不开负载
-                server = f'location {dst} {{\n\tproxy_pass http://{srcs[0]};\n}}\n'
+                server = f"location {dst} {{\n\tproxy_pass http://{srcs[0]};\n}}\n"
             else:  # 有多个端口功能则开负载
-                hosts = '\n'.join([f'\tserver {src.split("/")[0]};' for src in srcs])
-                upstream_name = 'upstream' + str(len(upstreams) + 1)
-                upstreams.append(f'upstream {upstream_name} {{\n{hosts}\n}}\n')
-                sub_urls = [src.split('/', maxsplit=1)[1] for src in srcs]
-                assert len(set(sub_urls)) == 1, f'负载均衡的子url必须一致 {sub_urls}'
-                server = f'location {dst} {{\n\tproxy_pass http://{upstream_name}/{sub_urls[0]};\n}}\n'
+                hosts = "\n".join([f"\tserver {src.split('/')[0]};" for src in srcs])
+                upstream_name = "upstream" + str(len(upstreams) + 1)
+                upstreams.append(f"upstream {upstream_name} {{\n{hosts}\n}}\n")
+                sub_urls = [src.split("/", maxsplit=1)[1] for src in srcs]
+                assert len(set(sub_urls)) == 1, f"负载均衡的子url必须一致 {sub_urls}"
+                server = f"location {dst} {{\n\tproxy_pass http://{upstream_name}/{sub_urls[0]};\n}}\n"
             servers.append(server)
 
-        content = '\n'.join(upstreams) + '\nserver {\n' + textwrap.indent('\n'.join(servers), '\t') + '}'
+        content = "\n".join(upstreams) + "\nserver {\n" + textwrap.indent("\n".join(servers), "\t") + "}"
         return content
 
     def __4_多程序管理(self):
@@ -714,14 +673,16 @@ class MultiProgramLauncher:
         """返回所有任务的状态 DataFrame"""
         ls = []
         for worker in self.workers:
-            ls.append({
-                'name': worker.name,
-                'pid': worker.program.pid if worker.program else None,
-                'poll': worker.program.poll() if worker.program else None,
-                'args': worker.raw_cmd,
-                'port': worker.port,
-                'locations': worker.locations,
-            })
+            ls.append(
+                {
+                    "name": worker.name,
+                    "pid": worker.program.pid if worker.program else None,
+                    "poll": worker.program.poll() if worker.program else None,
+                    "args": worker.raw_cmd,
+                    "port": worker.port,
+                    "locations": worker.locations,
+                }
+            )
         return pd.DataFrame(ls)
 
     def cleanup_finished(self, exit_code=None):
@@ -739,12 +700,12 @@ class MultiProgramLauncher:
             if code is None:  # 进程仍在运行
                 new_workers.append(worker)
             elif exit_code is None or code == exit_code:
-                print(f'清理已结束的程序: {worker.name} (pid: {worker.program.pid}, exit code: {code})')
+                print(f"清理已结束的程序: {worker.name} (pid: {worker.program.pid}, exit code: {code})")
 
         self.workers = new_workers
 
     def stop_all(self):
-        """ 停止所有后台程序 """
+        """停止所有后台程序"""
         # 关闭所有调度器
         if self.scheduler:
             self.scheduler.stop()
@@ -755,19 +716,19 @@ class MultiProgramLauncher:
         self.workers = []
 
     def proc_cmd(self, cmd):
-        if cmd == 'kill':
+        if cmd == "kill":
             self.stop_all()
             return False
-        elif cmd == 'count':
-            print(f'有{self.count_running()}个程序正在运行')
-        elif cmd.startswith('cleanup'):
+        elif cmd == "count":
+            print(f"有{self.count_running()}个程序正在运行")
+        elif cmd.startswith("cleanup"):
             args = cmd.split()
             exit_code = int(args[1]) if len(args) > 1 else None
             self.cleanup_finished(exit_code)
             print("清理完成")
-        elif cmd == 'list':  # 列出所有程序（转df查看）
+        elif cmd == "list":  # 列出所有程序（转df查看）
             df = self.list_workers()
-            print_full_dataframe(df)
+            print(df.to_string())
         return True
 
     def run_endless(self, cmd=True, wait_seconds=1):
@@ -778,12 +739,12 @@ class MultiProgramLauncher:
             默认支持，但在有scheduler调度的情况不建议开启，有input阻塞其他子程的风险
         :param int|float wait_seconds: 每次循环之间停顿秒数，用来给其他子程等运行时间，避免阻塞
 
-    	poll：
+        poll：
             如果进程仍在运行，poll()方法返回None。
             如果进程已经结束，poll()方法返回进程的退出码（exit code）。
                 如果进程正常结束，退出码通常为0。
                 如果进程异常结束，退出码通常是一个非零值，表示异常的类型或错误码。
-    	"""
+        """
         if self.scheduler:  # 如果有定时任务，启动调度器
             self.scheduler.start_in_background()
 
@@ -843,23 +804,23 @@ class LauncherDashboard:
         output.append("-" * 120)
 
         for idx, (_, row) in enumerate(df.iterrows(), start=1):
-            name = row['name']
+            name = row["name"]
 
             # 更鲁棒地处理 pid，考虑 NaN 情况
-            pid = "N/A" if pd.isna(row['pid']) else int(row['pid'])
+            pid = "N/A" if pd.isna(row["pid"]) else int(row["pid"])
 
             # 获取任务状态
-            status = "运行中" if row['poll'] is None else "已结束"
+            status = "运行中" if row["poll"] is None else "已结束"
 
             # 处理 args，确保路径展示更清晰
-            args = [a for a in row['args'] if a] if isinstance(row['args'], list) else []
-            args_str = "[" + ", ".join(
-                repr(arg).replace("\\\\", "\\") if '\\' in arg else repr(arg) for arg in args
-            ) + "]"
+            args = [a for a in row["args"] if a] if isinstance(row["args"], list) else []
+            args_str = (
+                "[" + ", ".join(repr(arg).replace("\\\\", "\\") if "\\" in arg else repr(arg) for arg in args) + "]"
+            )
 
             # 处理 port 和 locations
-            port = row['port'] if not pd.isna(row['port']) else "N/A"
-            locations = str(row['locations'])
+            port = row["port"] if not pd.isna(row["port"]) else "N/A"
+            locations = str(row["locations"])
 
             # 格式化输出
             output.append(f"{idx:<5} {name:<15} {pid:<10} {status:<10} {port:<10} {locations:<20} {args_str}")
@@ -880,30 +841,41 @@ class LauncherDashboard:
         display_df = pd.DataFrame()
 
         # 添加编号列
-        display_df['编号'] = range(1, len(df) + 1)
+        display_df["编号"] = range(1, len(df) + 1)
 
         # 添加基本信息列
-        display_df['任务名称'] = df['name']
-        display_df['进程ID'] = df['pid'].apply(
-            lambda x: f'<span style="font-family: monospace;">{int(x)}</span>' if pd.notna(
-                x) else '<span style="color: #999;">N/A</span>')
+        display_df["任务名称"] = df["name"]
+        display_df["进程ID"] = df["pid"].apply(
+            lambda x: (
+                f'<span style="font-family: monospace;">{int(x)}</span>'
+                if pd.notna(x)
+                else '<span style="color: #999;">N/A</span>'
+            )
+        )
 
         # 状态列，使用颜色标识
-        display_df['状态'] = df['poll'].apply(
-            lambda x: '<span style="color: #28a745; font-weight: bold;">● 运行中</span>' if x is None
-            else '<span style="color: #dc3545; font-weight: bold;">● 已结束</span>'
+        display_df["状态"] = df["poll"].apply(
+            lambda x: (
+                '<span style="color: #28a745; font-weight: bold;">● 运行中</span>'
+                if x is None
+                else '<span style="color: #dc3545; font-weight: bold;">● 已结束</span>'
+            )
         )
 
         # 端口列
-        display_df['端口'] = df['port'].apply(
-            lambda x: f'<span style="font-family: monospace; color: #007bff;">{int(x)}</span>' if pd.notna(x) and x != 0
-            else '<span style="color: #999;">-</span>'
+        display_df["端口"] = df["port"].apply(
+            lambda x: (
+                f'<span style="font-family: monospace; color: #007bff;">{int(x)}</span>'
+                if pd.notna(x) and x != 0
+                else '<span style="color: #999;">-</span>'
+            )
         )
 
         # 位置列，处理长路径
-        display_df['位置'] = df['locations'].apply(
-            lambda
-                x: f'<span title="{x}" style="max-width: 300px; display: inline-block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">{x}</span>'
+        display_df["位置"] = df["locations"].apply(
+            lambda x: (
+                f'<span title="{x}" style="max-width: 300px; display: inline-block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">{x}</span>'
+            )
         )
 
         # 命令列，格式化显示
@@ -917,24 +889,24 @@ class LauncherDashboard:
 
             # 第一个参数（通常是命令）用粗体
             if len(args) > 0:
-                cmd = f'<strong>{args[0]}</strong>'
-                params = ' '.join(args[1:]) if len(args) > 1 else ''
-                full_cmd = f'{cmd} {params}'.strip()
+                cmd = f"<strong>{args[0]}</strong>"
+                params = " ".join(args[1:]) if len(args) > 1 else ""
+                full_cmd = f"{cmd} {params}".strip()
 
                 # 如果命令太长，添加悬停提示
-                if len(' '.join(args)) > 50:
+                if len(" ".join(args)) > 50:
                     return f'<span title="{" ".join(args)}" style="cursor: help;">{full_cmd[:50]}...</span>'
                 return full_cmd
             return '<span style="color: #999;">N/A</span>'
 
-        display_df['命令'] = df['args'].apply(format_command)
+        display_df["命令"] = df["args"].apply(format_command)
 
         # 生成HTML表格
         html = f"""
         <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; padding: 20px;">
             <h2 style="color: #333; margin-bottom: 20px;">任务状态报表</h2>
             <div style="background: #f8f9fa; padding: 10px; border-radius: 5px; margin-bottom: 15px;">
-                <span style="color: #666;">生成时间: {pd.Timestamp.now().strftime('%Y-%m-%d %H:%M:%S')}</span>
+                <span style="color: #666;">生成时间: {pd.Timestamp.now().strftime("%Y-%m-%d %H:%M:%S")}</span>
                 <span style="float: right; color: #666;">总任务数: {len(df)}</span>
             </div>
             <table style="width: 100%; border-collapse: collapse; background: white; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
@@ -957,13 +929,13 @@ class LauncherDashboard:
             row_style = "background: #fff;" if idx % 2 == 0 else "background: #f8f9fa;"
             html += f"""
                     <tr style="{row_style} border-bottom: 1px solid #dee2e6;">
-                        <td style="padding: 12px; color: #666;">{row['编号']}</td>
-                        <td style="padding: 12px; font-weight: 500;">{row['任务名称']}</td>
-                        <td style="padding: 12px;">{row['进程ID']}</td>
-                        <td style="padding: 12px;">{row['状态']}</td>
-                        <td style="padding: 12px;">{row['端口']}</td>
-                        <td style="padding: 12px; font-size: 0.9em; color: #666;">{row['位置']}</td>
-                        <td style="padding: 12px; font-family: 'Consolas', 'Monaco', monospace; font-size: 0.9em;">{row['命令']}</td>
+                        <td style="padding: 12px; color: #666;">{row["编号"]}</td>
+                        <td style="padding: 12px; font-weight: 500;">{row["任务名称"]}</td>
+                        <td style="padding: 12px;">{row["进程ID"]}</td>
+                        <td style="padding: 12px;">{row["状态"]}</td>
+                        <td style="padding: 12px;">{row["端口"]}</td>
+                        <td style="padding: 12px; font-size: 0.9em; color: #666;">{row["位置"]}</td>
+                        <td style="padding: 12px; font-family: 'Consolas', 'Monaco', monospace; font-size: 0.9em;">{row["命令"]}</td>
                     </tr>
             """
 
@@ -983,6 +955,7 @@ class LauncherDashboard:
     def run(self, port=8080):
         """启动 FastAPI 服务"""
         import uvicorn
+
         uvicorn.run(self.app, host="0.0.0.0", port=port, log_level="warning")
 
     def run_background(self, *args, **kwargs):
@@ -990,14 +963,10 @@ class LauncherDashboard:
 
 
 def __进程管理():
-    """ 这里的功能后续做通用后可以进入pyxllib """
+    """这里的功能后续做通用后可以进入pyxllib"""
 
 
-def run_python_module(*args,
-                      repeat_num=None,
-                      wait_mode=0,
-                      success_continue=False,
-                      **kwargs):
+def run_python_module(*args, repeat_num=None, wait_mode=0, success_continue=False, **kwargs):
     """
     用于重复启动 Python 模块的函数。
 
@@ -1019,20 +988,20 @@ def run_python_module(*args,
         XlTrigger.smart_wait(start_time, end_time, 0 if start_time is None else wait_mode, print_mode=1)
 
         # 1 标记当前轮次
-        logger.info(f'进程运行轮次：{round_id}')
+        logger.info(f"进程运行轮次：{round_id}")
         start_time = datetime.datetime.now()
 
         # 2 配置参数
-        cmds = [f'{sys.executable}', '-m']
+        cmds = [f"{sys.executable}", "-m"]
         cmds.extend(map(str, args))  # 添加位置参数
         for k, v in kwargs.items():
-            cmds.append(f'--{k}')  # 添加关键字参数的键
+            cmds.append(f"--{k}")  # 添加关键字参数的键
             cmds.append(str(v))  # 添加关键字参数的值
 
         # 3 custom 自定义配置
         # 第2个参数是特殊参数，一般是模块名、启动位置。支持一定的缩略写法
         # 但是这个不太好些，就暂时不写
-        cmds[2] = cmds[2].replace('/', '.')  # 支持输入路径形式
+        cmds[2] = cmds[2].replace("/", ".")  # 支持输入路径形式
 
         # 4 执行程序
         res = subprocess.run(cmds)
@@ -1040,15 +1009,15 @@ def run_python_module(*args,
 
         # 5 执行完成
         if res.returncode == 0:
-            logger.info('进程成功完成')
+            logger.info("进程成功完成")
             if not success_continue:
                 break
         else:
-            logger.info(f'遇到错误，返回码：{res.returncode}。尝试重启进程')
+            logger.info(f"遇到错误，返回码：{res.returncode}。尝试重启进程")
 
 
 def support_retry_process(repeat_num=None, wait_mode=0, success_continue=False):
-    """ 对函数进行扩展，支持重启运行
+    """对函数进行扩展，支持重启运行
 
     被装饰的函数，会扩展支持重启需要的几个参数：
     repeat_num, wait_mode, success_continue
@@ -1060,16 +1029,16 @@ def support_retry_process(repeat_num=None, wait_mode=0, success_continue=False):
         def wrapper(*args, **kwargs):
             nonlocal repeat_num, wait_mode, success_continue
 
-            retry = int(kwargs.pop('retry', False))
+            retry = int(kwargs.pop("retry", False))
 
             # 1 非重试，正常运行
             if not retry:
                 return func(*args, **kwargs)
 
             # 2 需要重试
-            wait_mode = int(kwargs.pop('wait_mode', wait_mode))
-            repeat_num = kwargs.pop('repeat_num', repeat_num)
-            success_continue = int(kwargs.pop('success_continue', success_continue))
+            wait_mode = int(kwargs.pop("wait_mode", wait_mode))
+            repeat_num = kwargs.pop("repeat_num", repeat_num)
+            success_continue = int(kwargs.pop("success_continue", success_continue))
 
             start_time = end_time = None
             round_num = itertools.count(1) if repeat_num is None else range(1, 1 + int(repeat_num))
@@ -1078,14 +1047,14 @@ def support_retry_process(repeat_num=None, wait_mode=0, success_continue=False):
                 XlTrigger.smart_wait(start_time, end_time, 0 if start_time is None else wait_mode, print_mode=1)
 
                 # 1 标记当前轮次
-                logger.info(f'进程运行轮次：{round_id}')
+                logger.info(f"进程运行轮次：{round_id}")
                 start_time = datetime.datetime.now()
 
                 # 2 配置参数
                 cmds = [sys.executable, sys.argv[0], func.__name__]
                 cmds.extend(map(str, args))  # 添加位置参数
                 for k, v in kwargs.items():
-                    cmds.append(f'--{k}')  # 添加关键字参数的键
+                    cmds.append(f"--{k}")  # 添加关键字参数的键
                     cmds.append(str(v))  # 添加关键字参数的值
 
                 # 3 custom 自定义配置
@@ -1104,11 +1073,11 @@ def support_retry_process(repeat_num=None, wait_mode=0, success_continue=False):
 
                 # 5 执行完成
                 if res.returncode == 0:
-                    logger.info('进程成功完成')
+                    logger.info("进程成功完成")
                     if not success_continue:
                         break
                 else:
-                    logger.info(f'遇到错误，返回码：{res.returncode}。尝试重启进程')
+                    logger.info(f"遇到错误，返回码：{res.returncode}。尝试重启进程")
 
         return wrapper
 
@@ -1117,12 +1086,12 @@ def support_retry_process(repeat_num=None, wait_mode=0, success_continue=False):
 
 @support_retry_process(repeat_num=None, wait_mode=0)
 def healthy():
-    print('Hello')
+    print("Hello")
     exit(1)
 
 
 def support_multi_processes_hyx(default_processes=1):
-    """ 对函数进行扩展，支持并发多进程运行
+    """对函数进行扩展，支持并发多进程运行
     增加重跑
     注意被装饰的函数，需要支持 process_count、process_id 两个参数，来获得总进程数，当前进程id的信息
     """
@@ -1130,9 +1099,9 @@ def support_multi_processes_hyx(default_processes=1):
     def decorator(func):
 
         def wrapper(*args, **kwargs):
-            process_count = int(kwargs.pop('process_count', default_processes))
-            process_id = kwargs.pop('process_id', None)
-            shell = kwargs.pop('shell', False)
+            process_count = int(kwargs.pop("process_count", default_processes))
+            process_id = kwargs.pop("process_id", None)
+            shell = kwargs.pop("shell", False)
 
             if process_count == 1 or process_id is not None:
                 if process_id is None:
@@ -1145,13 +1114,13 @@ def support_multi_processes_hyx(default_processes=1):
                     if isinstance(process_id, int) and i != process_id:
                         continue
 
-                    '''
+                    """
                     sys.argv[0] 为 /Users/youx/NutstoreCloudBridge/slns/xlproject/xlproject/m2404ragdata/b清洗/hyx240806统计图表数.py
                     将其转化为 xlproject.m2404ragdata.b清洗.hyx240806统计图表数 
-                    '''
-                    header = 'xlproject.code4101'
+                    """
+                    header = "xlproject.code4101"
 
-                    root_directory_name = 'xlproject'
+                    root_directory_name = "xlproject"
                     occurrence = 2
                     path = sys.argv[0]
 
@@ -1159,25 +1128,28 @@ def support_multi_processes_hyx(default_processes=1):
                     positions = [i for i in range(len(path)) if path.startswith(root_directory_name, i)]
                     if len(positions) < occurrence:
                         raise ValueError(
-                            f"Path does not contain {occurrence} occurrences of the root directory name: {root_directory_name}")
+                            f"Path does not contain {occurrence} occurrences of the root directory name: {root_directory_name}"
+                        )
 
                     # 提取并转换为模块名称
                     index = positions[occurrence - 1]
-                    module_name = os.path.splitext(path[index:])[0].replace(os.path.sep, '.')
+                    module_name = os.path.splitext(path[index:])[0].replace(os.path.sep, ".")
 
                     # todo 这样使用有个坑，process_count、process_id都是以str类型传入的，开发者下游使用容易出问题
                     cmds = [
-                        'run_python_module',
-                        '--wait_mode',
-                        '60',
+                        "run_python_module",
+                        "--wait_mode",
+                        "60",
                         module_name,
                         func.__name__,
-                        '--process_count', str(process_count),
-                        '--process_id', str(i)
+                        "--process_count",
+                        str(process_count),
+                        "--process_id",
+                        str(i),
                     ]
                     cmds.extend(map(str, args))  # 添加位置参数
                     for k, v in kwargs.items():
-                        cmds.append(f'--{k}')  # 添加关键字参数的键
+                        cmds.append(f"--{k}")  # 添加关键字参数的键
                         cmds.append(str(v))  # 添加关键字参数的值
 
                     mpl.add_py_module(header, cmds, shell=shell)
@@ -1189,7 +1161,7 @@ def support_multi_processes_hyx(default_processes=1):
 
 
 def support_multi_processes(default_processes=1):
-    """ 对函数进行扩展，支持并发多进程运行
+    """对函数进行扩展，支持并发多进程运行
 
     注意被装饰的函数，需要支持 process_count、process_id 两个参数，来获得总进程数，当前进程id的信息
     """
@@ -1197,9 +1169,9 @@ def support_multi_processes(default_processes=1):
     def decorator(func):
 
         def wrapper(*args, **kwargs):
-            process_count = int(kwargs.pop('process_count', default_processes))
-            process_id = kwargs.pop('process_id', None)
-            shell = kwargs.pop('shell', False)
+            process_count = int(kwargs.pop("process_count", default_processes))
+            process_id = kwargs.pop("process_id", None)
+            shell = kwargs.pop("shell", False)
 
             if process_count == 1 or process_id is not None:
                 if process_id is None:
@@ -1213,13 +1185,10 @@ def support_multi_processes(default_processes=1):
                         continue
 
                     # todo 这样使用有个坑，process_count、process_id都是以str类型传入的，开发者下游使用容易出问题
-                    cmds = [func.__name__,
-                            '--process_count', str(process_count),
-                            '--process_id', str(i)
-                            ]
+                    cmds = [func.__name__, "--process_count", str(process_count), "--process_id", str(i)]
                     cmds.extend(map(str, args))  # 添加位置参数
                     for k, v in kwargs.items():
-                        cmds.append(f'--{k}')  # 添加关键字参数的键
+                        cmds.append(f"--{k}")  # 添加关键字参数的键
                         cmds.append(str(v))  # 添加关键字参数的值
 
                     mpl.add_py(sys.argv[1], cmds, shell=shell)
@@ -1230,5 +1199,5 @@ def support_multi_processes(default_processes=1):
     return decorator
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     pass

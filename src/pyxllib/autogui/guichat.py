@@ -173,7 +173,7 @@ class GUIChat(Chat):
         result_boxes: Optional[List[List[int]]] = None,
         ocr_res: Optional[Any] = None,
         start_time: Optional[datetime.datetime] = None,
-        end_time: Optional[datetime.datetime] = None
+        end_time: Optional[datetime.datetime] = None,
     ):
         """记录交互过程到 Document"""
         if not self.doc:
@@ -201,12 +201,12 @@ class GUIChat(Chat):
         # 4. Visualization (如果有结果)
         if result_boxes:
             vis_img = None
-            
+
             # 尝试使用 OCR 结果进行可视化底图生成
-            if ocr_res and hasattr(ocr_res, 'save_to_img'):
+            if ocr_res and hasattr(ocr_res, "save_to_img"):
                 with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as tmp:
                     vis_path = tmp.name
-                
+
                 try:
                     ocr_res.save_to_img(vis_path)
                     # 必须 copy 一份，否则 close 后文件被删可能导致 lazy load 失败
@@ -227,17 +227,17 @@ class GUIChat(Chat):
             draw = ImageDraw.Draw(vis_img)
             w, h = img.size
             vw, vh = vis_img.size
-            
+
             # 判断是否为双栏布局（OCR可视化通常是原图+识别结果图，宽度约为原图2倍）
             # 允许一定的误差
-            is_double_width = (vw > w * 1.5)
+            is_double_width = vw > w * 1.5
 
             for i, box in enumerate(result_boxes):
                 # box is pixel coords [x1, y1, x2, y2]
                 # Draw on left side (original)
                 draw.rectangle(box, outline="red", width=5)
                 draw.text((box[0], box[1]), str(i + 1), fill="red")
-                
+
                 # Draw on right side if double width
                 if is_double_width:
                     # 假设右侧是简单的水平拼接，偏移量为 w
@@ -270,7 +270,7 @@ class GUIChat(Chat):
                 for i, p in enumerate(parts):
                     if isinstance(p, dict):
                         if "image_file" in p:
-                            img_file = str(p['image_file'])
+                            img_file = str(p["image_file"])
                             self.doc.add_text(f"**[Part {i}] Image**: {img_file}")
                         elif not p:
                             continue
@@ -292,7 +292,9 @@ class GUIChat(Chat):
 
         return response
 
-    def query_rects(self, image_input: Union[str, Path, Image.Image], target_description: str, **kwargs) -> List[List[int]]:
+    def query_rects(
+        self, image_input: Union[str, Path, Image.Image], target_description: str, **kwargs
+    ) -> List[List[int]]:
         """获取所有匹配目标的坐标列表。
 
         :param image_input: 图片路径或 PIL Image 对象
@@ -320,7 +322,7 @@ class GUIChat(Chat):
         # 构造 pyxllib Chat 接受的格式
         temp_img_path = None
         actual_img_path = img_path
-        
+
         # 如果是内存图片，需要保存临时文件给 Chat
         if not isinstance(image_input, (str, Path)):
             with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
@@ -366,7 +368,9 @@ class GUIChat(Chat):
 
         return pixel_boxes
 
-    def query_rect(self, image_input: Union[str, Path, Image.Image], target_description: str, **kwargs) -> Optional[List[int]]:
+    def query_rect(
+        self, image_input: Union[str, Path, Image.Image], target_description: str, **kwargs
+    ) -> Optional[List[int]]:
         """获取单个目标（第一个匹配项）。
 
         :param image_input: 图片路径或 PIL Image
@@ -386,15 +390,40 @@ class GUIChat(Chat):
             print("Debug mode is off.")
 
 
-def main(image=r"C:\Users\kzche\Desktop\2.png", target="点击关闭弹窗", model="ollama/qwen3-vl:8b-instruct"):
+def create_test_image(path):
+    """生成测试图片"""
+    # Create a 400x300 white image
+    img = Image.new("RGB", (400, 300), color="white")
+    d = ImageDraw.Draw(img)
+
+    # Draw a "Settings" button-like shape
+    # Rectangle at (300, 20, 380, 50)
+    d.rectangle([300, 20, 380, 50], outline="black", width=2)
+    d.text((310, 25), "Settings", fill="black")
+
+    # Draw a "Close" button
+    d.rectangle([350, 250, 390, 290], outline="red", width=2)
+    d.text((355, 260), "Close", fill="red")
+
+    img.save(path)
+    print(f"Created test image at {path}")
+    return path
+
+
+def main(image=None, target="点击 Settings 按钮", model="ollama/qwen3-vl:8b-instruct"):
     """测试 GUIChat 功能。
 
-    :param image: 图片路径
+    :param image: 图片路径。如果不指定，会自动生成一张包含 Settings 和 Close 按钮的测试图。
     :param target: 目标描述
     :param model: 模型名称
-
-    todo 怎么避开本地测试图，可以自动生成？
     """
+    temp_img_path = None
+    if image is None:
+        # 使用临时文件
+        with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
+            temp_img_path = tmp.name
+        image = create_test_image(temp_img_path)
+
     if os.path.exists(image):
         print(f"Initializing GUIChat with model: {model}")
         bot = GUIChat(model_name=model, debug=True)
@@ -413,10 +442,27 @@ def main(image=r"C:\Users\kzche\Desktop\2.png", target="点击关闭弹窗", mod
 
         # 打开调试报告
         bot.browse()
+
+        # Save report for reference
+        try:
+            report_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "guichat_report.html")
+            if bot.doc:
+                bot.doc.to_file(report_path)
+                print(f"Debug report saved to: {report_path}")
+        except Exception as e:
+            print(f"Failed to save report: {e}")
+
+        # Clean up temp file
+        if temp_img_path and os.path.exists(temp_img_path):
+            try:
+                os.remove(temp_img_path)
+            except OSError:
+                pass
     else:
         print(f"Image not found: {image}")
 
 
 if __name__ == "__main__":
     import fire
+
     fire.Fire(main)

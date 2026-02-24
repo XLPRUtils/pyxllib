@@ -5,6 +5,11 @@
 # @Date   : 2021/06/25 09:34
 
 import pathlib
+import json
+import os
+import re
+import sys
+from pathlib import Path
 
 from pyxllib.xl import *
 from fvcore.common.registry import Registry
@@ -22,7 +27,9 @@ class CommonPathBase:
                 prefix = os.getenv('PYXLPR_COMMONDIR')
             else:
                 prefix = 'D:/' if sys.platform == 'win32' else '/'
-            prefix = XlPath(prefix)  # 默认是当前操作系统的文件类型；也可以显示输入PosixPath格式的prefix
+            prefix = Path(prefix)
+        elif not isinstance(prefix, pathlib.PurePath):
+            prefix = Path(prefix)
 
         self.datasets = prefix / 'home/datasets'
         self.huangzhicai = prefix / 'home/huangzhicai'
@@ -62,7 +69,7 @@ if sys.platform == 'win32':
     common_path = CommonPathBase()
     tp10_common_path = CommonPathBase(pathlib.PurePosixPath('/'))  # 十卡服务器的常用目录
 else:
-    common_path = CommonPathBase(XlPath('/'))
+    common_path = CommonPathBase(Path('/'))
     tp10_common_path = common_path
 
 ____coco = """
@@ -131,15 +138,20 @@ class RegisterData:
         from detectron2.data.datasets import register_coco_instances
 
         # 1 标注文件
-        files = Dir(andir).select(patter).subfiles()
+        andir = Path(andir)
+        if isinstance(patter, str):
+            pat = re.compile(patter)
+        else:
+            pat = patter
+        files = [p for p in andir.glob('*.json') if pat.fullmatch(p.name)]
 
         # 2 注册每一个json文件
         for f in files:
             if classes:
                 cats = classes
             else:
-                cats = f.read(encoding='utf8')['categories']
-                cats = [x['name'] for x in cats]
+                data = json.loads(f.read_text(encoding='utf8', errors='ignore'))
+                cats = [x['name'] for x in data['categories']]
             register_coco_instances(f.stem, {'thing_classes': cats}, str(f), str(imdir))
 
 

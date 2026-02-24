@@ -12,6 +12,8 @@ import collections
 from collections import Counter, defaultdict
 import re
 import os
+import tempfile
+from pathlib import Path
 
 from pyxllib.prog.lazyimport import lazy_import
 
@@ -43,7 +45,7 @@ from pyxllib.prog.browser import browser
 from pyxllib.algo.pupil import SearchBase
 from pyxllib.text.newbie import xldictstr
 from pyxllib.text.pupil import shorten, ensure_gbk, BookContents, strwidth, grp_chinese_char
-from pyxllib.file.specialist import File, Dir, get_etag
+from pyxllib.file.specialist import get_etag
 from pyxllib.text.jinjalib import get_jinja_template
 
 
@@ -627,8 +629,8 @@ class MakeHtmlNavigation:
     @classmethod
     def from_file(cls, file, **kwargs):
         """ 输入本地一个html文件的路径，加上导航栏打开 """
-        file = File(file)
-        content = file.read()
+        file = Path(file)
+        content = file.read_text(encoding='utf-8', errors='ignore')
         # 输入文件的情况，生成的_content等html要在同目录
         return cls.from_content(content, os.path.splitext(str(file))[0], **kwargs)
 
@@ -661,7 +663,9 @@ class MakeHtmlNavigation:
                 f'href="https://code4101.github.io/css/navigation{int(number)}.css">',
                 '</head><body>']
 
-        f2 = File(title + '_content', Dir.TEMP, suffix='.html')
+        safe_title = re.sub(r'[\\/:*?"<>|]+', '_', str(title))
+        tmpdir = Path(tempfile.gettempdir())
+        f2 = tmpdir / f'{safe_title}_content.html'
 
         def func(m):
             nonlocal cnt
@@ -669,12 +673,12 @@ class MakeHtmlNavigation:
             name, content = m.group('name'), m.group('inner')
             content = BeautifulSoup(content, 'lxml').get_text()
             # 要写<h><a></a></h>，不能写<a><h></h></a>，否则css中设置的计数器重置不会起作用
-            refs.append(f'<{name}><a href="{f2}#navigation{cnt}" target="showframe">{content}</a></{name}>')
+            refs.append(f'<{name}><a href="{f2.as_uri()}#navigation{cnt}" target="showframe">{content}</a></{name}>')
             return f'<a name="navigation{cnt}"/>' + m.group()
 
         html_content = re.sub(r'<(?P<name>h\d+)(?:>|\s.*?>)(?P<body>\s*(?P<inner>.*?)\s*)</\1>',
                               func, html_content, flags=re.DOTALL)
-        f2 = f2.write(html_content, encoding=encoding, if_exists='replace')
+        f2.write_text(html_content, encoding=encoding or 'utf-8', errors='ignore')
 
         # 2 f1除了导航栏，可以多附带一些有用的参考信息
         # 2.1 前文的refs已经存储了超链接的导航
@@ -702,18 +706,18 @@ class MakeHtmlNavigation:
 
         # 2.5 收尾，写入f1
         refs.append('</body>\n</html>')
-        f1 = File(title + '_catalogue', Dir.TEMP, suffix='.html').write('\n'.join(refs), encoding=encoding,
-                                                                        if_exists='replace')
+        f1 = tmpdir / f'{safe_title}_catalogue.html'
+        f1.write_text('\n'.join(refs), encoding=encoding or 'utf-8', errors='ignore')
 
         # 3 生成主页 f0
         main_content = f"""<html>
         <frameset cols="20%,80%">
-        	<frame src="{f1}">
-        	<frame src="{f2}" name="showframe">
+        	<frame src="{f1.as_uri()}">
+        	<frame src="{f2.as_uri()}" name="showframe">
         </frameset></html>"""
 
-        f0 = File(title + '_index', Dir.TEMP, suffix='.html').write(main_content, encoding=encoding,
-                                                                    if_exists='replace')
+        f0 = tmpdir / f'{safe_title}_index.html'
+        f0.write_text(main_content, encoding=encoding or 'utf-8', errors='ignore')
         return f0
 
 

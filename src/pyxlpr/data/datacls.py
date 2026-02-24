@@ -6,11 +6,64 @@
 
 """ 相关数据格式类 """
 
+import os
+import re
+import sys
+from collections import Counter, defaultdict
 from pathlib import Path
-from pyxlpr.ai import *
-from pyxlpr.data import *
 
-# from pyxlpr.data.imtextline import TextlineShape
+from pyxllib.algo.geo import xywh2ltrb
+from pyxllib.prog.pupil import dprint
+from pyxllib.prog.specialist import mtqdm, tqdm, TicToc
+from pyxllib.text.pupil import ContentPartSpliter
+
+
+try:
+    import charset_normalizer
+except ModuleNotFoundError:
+    charset_normalizer = None
+
+
+def _detect_encoding(b):
+    if charset_normalizer is None:
+        return 'utf-8'
+    result = charset_normalizer.from_bytes(b)
+    best = result.best()
+    return best.encoding if best else 'utf-8'
+
+
+def _read_text_auto(file):
+    b = Path(file).read_bytes()
+    enc = _detect_encoding(b)
+    return b.decode(enc, errors='ignore')
+
+
+def _write_text_auto(file, text, encoding=None):
+    p = Path(file)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(text, encoding=encoding or 'utf-8', errors='ignore')
+    return p
+
+
+def _group_coco_gt(gt_dict):
+    imgid2anns = defaultdict(list)
+    for an in gt_dict.get('annotations', []):
+        imgid2anns[an['image_id']].append(an)
+    for img in gt_dict.get('images', []):
+        yield img, imgid2anns.get(img['id'], [])
+
+
+def _gen_categories(names):
+    return [{'id': i + 1, 'name': name} for i, name in enumerate(names)]
+
+
+def _gen_annotation(*, id, bbox, image_id, category_id=1, label=None, score=1, **kwargs):
+    an = {'id': int(id), 'image_id': int(image_id), 'category_id': int(category_id), 'bbox': bbox, 'score': score}
+    if label is not None:
+        an['label'] = label
+    if kwargs:
+        an.update(kwargs)
+    return an
 
 __1_zcdata = """
 """
@@ -26,8 +79,9 @@ class ZcTextGt:
         备注：具体文本数据好像不太适合直接存到内存里，就先不存了。
             但是这个类至少可以把相关功能整合在一起，不零散。
         """
-        self.root = Dir(root)
-        self.imdir = Dir(imdir, self.root)
+        self.root = Path(root)
+        imdir_path = Path(imdir)
+        self.imdir = imdir_path if imdir_path.is_absolute() else (self.root / imdir_path)
         self.parts = parts or []
 
         if data is None:
@@ -41,27 +95,29 @@ class ZcTextGt:
 
         TODO gt_dict可能是过量版，增设筛选规则？
         """
-        items = list(CocoData(gt_dict).group_gt())
+        items = list(_group_coco_gt(gt_dict))
         for img, anns in tqdm(items, desc='生成ZcTextGt的txt标注文件', disable=not prt):
             content = []
             for ann in anns:
                 ltrb = xywh2ltrb(ann['bbox'])
                 ltrb = ','.join([str(int(v)) for v in ltrb])
                 content.append('\t'.join([ltrb, ann['label']]))
-            File(img['file_name'], self.imdir, suffix='.txt').write('\n'.join(content))
+            out = self.imdir / Path(img['file_name']).with_suffix('.txt').name
+            _write_text_auto(out, '\n'.join(content))
 
     def writes(self, *, max_workers=8, prt=False):
         """ 重新写入txt文件 """
 
         def write(x):
             file, data = x
-            if file:  # 如果文件存在，要遵循原有的编码规则
-                with open(str(file), 'rb') as f:
-                    bstr = f.read()
-                encoding = get_encoding(bstr)
-                file.write(data, encoding=encoding, if_exists='replace')
-            else:  # 否则直接写入
-                file.write(data)
+            if file is None:
+                return
+            p = Path(file)
+            if p.exists():
+                encoding = get_encoding(p.read_bytes()) or 'utf-8'
+            else:
+                encoding = 'utf-8'
+            _write_text_auto(p, data, encoding=encoding)
 
         mtqdm(write, self.data, desc='写入labelme json数据', max_workers=max_workers, disable=not prt)
 
@@ -70,7 +126,7 @@ class ZcKvGt(ZcTextGt):
 
     def writes_from_coco(self, gt_dict, *, prt=False):
         """ coco标注 -> 智财偏好的，带类别的文本标注格式 """
-        items = list(CocoData(gt_dict).group_gt())
+        items = list(_group_coco_gt(gt_dict))
         for img, anns in tqdm(items, '生成ZcKvGt的txt标注文件', disable=not prt):
             content = []
             for ann in anns:
@@ -84,7 +140,8 @@ class ZcKvGt(ZcTextGt):
                 else:
                     kv = (cat - 1) % 2
                 content.append('\t'.join([ltrb, str(cat), str(kv), ann['label']]))
-            File(img['file_name'], self.imdir, suffix='.txt').write('\n'.join(content))
+            out = self.imdir / Path(img['file_name']).with_suffix('.txt').name
+            _write_text_auto(out, '\n'.join(content))
 
 
 class ZcKvDtOld:
@@ -113,7 +170,7 @@ class ZcKvDtOld:
                   ...
                   }
         """
-        content = File(file).read()
+        content = _read_text_auto(file)
         content = re.sub(r'(.+?)(\n\n)([^\n]+\n)', r'\3\1\2', content, flags=re.DOTALL)
         parts = ContentPartSpliter.multi_blank_lines(content)
 
@@ -136,10 +193,10 @@ class ZcKvDtOld:
         """ 配合gt标注文件，做更精细的zc结果解析
         """
         cat2id = {c['name']: c['id'] for c in gt_dict['categories']}
-        gt_annos = {x[0]['file_name']: x for x in CocoData(gt_dict).group_gt()}
+        gt_annos = {img['file_name']: (img, anns) for img, anns in _group_coco_gt(gt_dict)}
         dt_list = []
         for file, dt_annos in self.data.items():
-            file_name = pathlib.Path(file).name
+            file_name = Path(file).name
             image, annos = gt_annos[file_name]
 
             # 如果gt的annos比dt_annos少，需要扩充下，默认按最后一个gt的an填充
@@ -181,7 +238,7 @@ class ZcKvDt(ZcKvDtOld):
                   ...
                   }
         """
-        content = File(file).read()
+        content = _read_text_auto(file)
         parts = ContentPartSpliter.multi_blank_lines(content)
 
         data = dict()
@@ -205,10 +262,10 @@ class ZcKvDt(ZcKvDtOld):
         :param gt_dict: 需要有参照的gt文件，才能知道图片id，以及补充box位置信息
         """
         cat2id = {c['name']: c['id'] for c in gt_dict['categories']}
-        gt_annos = {x[0]['file_name']: x for x in CocoData(gt_dict).group_gt()}
+        gt_annos = {img['file_name']: (img, anns) for img, anns in _group_coco_gt(gt_dict)}
         dt_list = []
         for file, zc_annos in self.data.items():
-            file_name = pathlib.Path(file).name
+            file_name = Path(file).name
             image, im_annos = gt_annos[file_name]
 
             # 如果gt的annos比dt_annos少，需要扩充下，默认按最后一个gt的an填充
@@ -236,7 +293,7 @@ class ZcKvDt(ZcKvDtOld):
                 # 已经协调确定了空间顺序，但以防万一，可以再按空间排序下给到下游任务
                 #   为了效率，也可以确保gt的annos有序，操作时annos顺序不动
                 #   这里是前面为了匹配，已经把排序搞乱了，这里是必须要重排
-                dt_annos.sort(key=lambda x: TextlineShape(xywh2ltrb(x['bbox'])))  # 几何重排
+                dt_annos.sort(key=lambda x: (x['bbox'][1] + x['bbox'][3] / 2, x['bbox'][0] + x['bbox'][2] / 2))
                 dt_list += dt_annos
             else:  # 否则不匹配用不匹配的玩法
                 raise NotImplementedError
@@ -297,7 +354,7 @@ class BaiduOcrRes:
             一共22499行，大概是所有agreement，但可能有些空白图所以没结果
             每行第一段是png完整路径，第二段是百度api返回的json读取为dict后直接print的结果
         """
-        lines = File(file).read().splitlines()
+        lines = _read_text_auto(file).splitlines()
         data = dict()
         for line in tqdm(lines, '解析txt中每张图对应的字典识别数据'):
             if line == '': continue
@@ -350,16 +407,17 @@ class BaiduOcrRes:
                 loc = item['location']
                 bbox = [loc['left'], loc['top'], loc['width'], loc['height']]
                 start_dt_id += 1
-                an = CocoGtData.gen_annotation(id=start_dt_id, bbox=bbox, image_id=image_id, label=item['words'])
+                an = _gen_annotation(id=start_dt_id, bbox=bbox, image_id=image_id, label=item['words'])
                 annotations.append(an)
         return {'images': images,
                 'annotations': annotations,
-                'categories': CocoGtData.gen_categories(['text'])}
+                'categories': _gen_categories(['text'])}
 
 
 if __name__ == '__main__':
     os.chdir('D:/home/datasets/textGroup/SROIE2019+/data/task3_testcrop')
     with TicToc(__name__):
+        from pyxlpr.data.labelme import LabelmeDataset
         ld = LabelmeDataset.init_from_coco(r'test', 'data_crop.json')
         ld.writes()
         # print(ld)

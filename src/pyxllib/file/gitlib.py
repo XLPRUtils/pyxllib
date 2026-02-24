@@ -43,7 +43,6 @@ from pyxllib.prog.newbie import swap_rowcol
 from pyxllib.prog.pupil import dprint
 from pyxllib.prog.specialist import dataframe_str, bcompare
 from pyxllib.text.pupil import digit2weektag
-from pyxllib.file.specialist import Dir, File, filesmatch
 
 
 # TODO 可以学习了解使用二次封装的 https://github.com/ishepard/pydriller 库来实现需求
@@ -245,7 +244,7 @@ class Git(git.Git):
         if sha:
             s = self.show(f'{sha}:{file}')
         else:
-            s = File(os.path.join(self.working_dir, file)).read()
+            s = (Path(self.working_dir) / file).read_text(encoding='utf-8', errors='ignore')
         return s
 
     def bcompare(self, file, sha1=0, sha2=None):
@@ -295,8 +294,8 @@ class Git(git.Git):
         # 2 files没有设置则匹配所有文件
         # TODO 当前已经不存在的文件这样是找不到的，有办法把历史文件也挖出来？
         if not files:
-            with Dir(self.working_dir):
-                files = filesmatch('**/*.py')
+            root = Path(self.working_dir)
+            files = [p.relative_to(root).as_posix() for p in root.rglob('*.py') if p.is_file()]
 
         # 3 遍历文件
         for file in files:

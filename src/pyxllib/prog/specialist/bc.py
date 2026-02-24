@@ -5,15 +5,51 @@
 # @Date   : 2020/06/01 18:13
 
 import copy
+import json
+import os
+import tempfile
+from pathlib import Path
+from typing import Optional
 
 from pyxllib.prog.pupil import dprint, prettifystr
 from pyxllib.prog.browser import Explorer
 from pyxllib.algo.pupil import intersection_split
-from pyxllib.file.specialist import File, Dir, filesmatch, get_encoding, XlPath
+from pyxllib.file.specialist import get_encoding
 
 
 # 需要使用的第三方软件
 # BCompare.exe， bcompare函数要用
+
+def _as_existing_file_path(x):
+    if isinstance(x, (str, bytes)):
+        if isinstance(x, bytes):
+            return None
+        p = Path(x)
+        return p if p.is_file() else None
+    if isinstance(x, Path):
+        return x if x.is_file() else None
+    return None
+
+
+def _temp_file(name: str, suffix: Optional[str]):
+    suffix = suffix or ''
+    suffix = suffix if suffix.startswith('.') or suffix == '' else '.' + suffix
+    fd, p = tempfile.mkstemp(prefix=f'{name}_', suffix=suffix)
+    os.close(fd)
+    return Path(p)
+
+
+def _read_text_auto(p: Path):
+    b = p.read_bytes()
+    enc = get_encoding(b)
+    return b.decode(enc, errors='ignore')
+
+
+def _write_text_auto(p: Path, s: str):
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(s, encoding='utf-8', errors='ignore')
+    return p
+
 
 class BCompare(Explorer):
     def __init__(self, app='bcomp', shell=False):
@@ -50,8 +86,8 @@ class BCompare(Explorer):
         new_args = []
         default_suffix = None
         for i, arg in enumerate(args):
-            f = XlPath.safe_init(arg)
-            if f is not None and f.is_file():  # 是文件对象，且存在
+            f = _as_existing_file_path(arg)
+            if f is not None:
                 new_args.append(f)
                 if not default_suffix:
                     default_suffix = f.suffix
@@ -60,10 +96,10 @@ class BCompare(Explorer):
             #     raise FileNotFoundError(f'{f}')
             else:  # 不是文件对象，要转存到文件
                 if not files[i]:  # 没有设置文件名则生成一个
-                    files[i] = XlPath.init(ref_names[i], XlPath.tempdir(), suffix=default_suffix)
+                    files[i] = _temp_file(ref_names[i], default_suffix)
                 else:
-                    files[i] = XlPath(files[i])
-                files[i].write_text(str(arg))
+                    files[i] = Path(files[i])
+                _write_text_auto(files[i], prettifystr(arg))
                 new_args.append(files[i])
 
         return new_args
@@ -87,7 +123,7 @@ class BCompare(Explorer):
                 return
         super().__call__(*([str(f) for f in files]), wait=wait, **kwargs)
         # bc软件操作中可能会修改原文内容，所以这里需要重新读取，不能用前面算过的结果
-        return XlPath(files[0]).read_auto()
+        return _read_text_auto(Path(files[0]))
 
 
 bcompare = BCompare()  # nowatch: 调试阶段，不需要自动watch的变量
@@ -109,9 +145,20 @@ def modify_file(file, func, *, outfile=None, file_mode=None, debug=0):
             0 | False，直接生成目标文件，如果outfile已存在会被覆盖
             1 | True，直接生成目标文件，但是会弹出bc比较前后内容差异 （相同内容不会弹出）
     """
-    infile = File(file)
-    enc = get_encoding(infile.read(mode='b'))
-    data = infile.read(mode=file_mode, encoding=enc)
+    infile = Path(file)
+    b = infile.read_bytes()
+    enc = get_encoding(b)
+    if file_mode:
+        mode = file_mode.lower()
+        if mode.startswith('.'):
+            mode = mode[1:]
+        if mode == 'json':
+            data = json.loads(b.decode(enc, errors='ignore'))
+        else:
+            data = b.decode(enc, errors='ignore')
+    else:
+        data = b.decode(enc, errors='ignore')
+
     origin_content = str(data)
     new_data = func(data)
 
@@ -119,22 +166,37 @@ def modify_file(file, func, *, outfile=None, file_mode=None, debug=0):
     if outfile is None:  # 原地操作
         if isdiff:  # 内容不同才会有相关debug功能，否则静默跳过就好
             if debug == 0:
-                infile.write(new_data, mode=file_mode)  # 直接处理
+                if file_mode and file_mode.lower().lstrip('.') == 'json':
+                    infile.write_text(json.dumps(new_data, ensure_ascii=False, indent=2), encoding=enc, errors='ignore')
+                else:
+                    infile.write_text(str(new_data), encoding=enc, errors='ignore')
             elif debug == 1:
-                temp_file = File('refine_content', Dir.TEMP, suffix=infile.suffix).write(new_data)
-                bcompare(infile, temp_file)  # 使用beyond compare软件打开对比查看
+                temp_file = _temp_file('refine_content', infile.suffix)
+                if file_mode and file_mode.lower().lstrip('.') == 'json':
+                    _write_text_auto(temp_file, json.dumps(new_data, ensure_ascii=False, indent=2))
+                else:
+                    _write_text_auto(temp_file, str(new_data))
+                bcompare(str(infile), str(temp_file))
             elif debug == -1:
-                temp_file = File('origin_content', Dir.TEMP, suffix=infile.suffix)
-                infile.copy(temp_file)
-                infile.write(new_data, mode=file_mode, encoding=enc)  # 把原文件内容替换了
-                bcompare(infile, temp_file)  # 然后显示与旧内容进行对比
+                temp_file = _temp_file('origin_content', infile.suffix)
+                import shutil
+                shutil.copy2(str(infile), str(temp_file))
+                if file_mode and file_mode.lower().lstrip('.') == 'json':
+                    infile.write_text(json.dumps(new_data, ensure_ascii=False, indent=2), encoding=enc, errors='ignore')
+                else:
+                    infile.write_text(str(new_data), encoding=enc, errors='ignore')
+                bcompare(str(infile), str(temp_file))
             else:
                 raise ValueError(f'{debug}')
     else:
-        outfile = File(outfile)
-        outfile.write(new_data, mode=file_mode, encoding=enc)  # 直接处理
+        outfile = Path(outfile)
+        outfile.parent.mkdir(parents=True, exist_ok=True)
+        if file_mode and file_mode.lower().lstrip('.') == 'json':
+            outfile.write_text(json.dumps(new_data, ensure_ascii=False, indent=2), encoding=enc, errors='ignore')
+        else:
+            outfile.write_text(str(new_data), encoding=enc, errors='ignore')
         if debug and isdiff:
-            bcompare(infile, outfile)
+            bcompare(str(infile), str(outfile))
 
     return isdiff
 
@@ -143,8 +205,8 @@ class PairContent:
     """ 配对文本类，主要用于bc差异比较 """
 
     def __init__(self, left_file_name=None, right_file_name=None):
-        self.left_file = File(left_file_name) if left_file_name else left_file_name
-        self.right_file = File(right_file_name) if right_file_name else right_file_name
+        self.left_file = Path(left_file_name) if left_file_name else left_file_name
+        self.right_file = Path(right_file_name) if right_file_name else right_file_name
         self.left, self.right = [], []
 
     def add(self, lt, rt=None):
@@ -157,9 +219,11 @@ class PairContent:
     def bcompare(self, **kwargs):
         left, right = '\n'.join(self.left), '\n'.join(self.right)
         if self.left_file is not None:
-            left = self.left_file.write(left)
+            _write_text_auto(self.left_file, left)
+            left = str(self.left_file)
         if self.right_file is not None:
-            right = self.right_file.write(right)
+            _write_text_auto(self.right_file, right)
+            right = str(self.right_file)
         bcompare(left, right, **kwargs)
 
 
@@ -181,8 +245,11 @@ def filetext_replace(files, func, *,
     """
     ls = []
     total = 0
-    for f in filesmatch(files):
-        if '.venv/' in f:
+    for p in Path('.').glob(files):
+        if not p.is_file(): continue
+        f = str(p)
+        
+        if '.venv/' in f or '.venv\\' in f:
             continue
 
         # if 'A4-Exam' in f:
@@ -190,7 +257,7 @@ def filetext_replace(files, func, *,
         total += 1
         if total < start:
             continue
-        s0 = XlPath(f).read_text()
+        s0 = p.read_text(encoding='utf-8', errors='ignore')
         s1 = func(s0)
         if s0 != s1:
             match = len(ls) + 1
@@ -198,7 +265,7 @@ def filetext_replace(files, func, *,
             if bc:
                 bcompare(f, s1)
             elif write:  # 如果开了bc，程序是绝对不会自动写入的
-                File(f).write(s1, if_exists=if_exists)
+                p.write_text(s1, encoding='utf-8', errors='ignore')
             ls.append(f)
             if len(ls) == count:
                 break

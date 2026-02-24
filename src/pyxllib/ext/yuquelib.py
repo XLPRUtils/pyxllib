@@ -1243,7 +1243,7 @@ def check_block_type(tag):
         case 'NavigableString':
             return LakeBlockTypes.STR
         case _:
-            raise LakeBlockTypes.UNKNOWN
+            return LakeBlockTypes.UNKNOWN
 
 
 def parse_blocks(childrens):

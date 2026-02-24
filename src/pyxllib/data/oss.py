@@ -8,14 +8,14 @@
 oss2 · PyPI: https://pypi.org/project/oss2/
 """
 
+from pathlib import Path
+
 from pyxllib.prog.lazyimport import lazy_import
 
 try:
     import oss2
 except ModuleNotFoundError:
     oss2 = lazy_import('oss2', 'oss2')
-
-from pyxllib.file.specialist import File
 
 
 class OssBucket:
@@ -59,7 +59,7 @@ class OssBucket:
             return False
 
     def download(self, key, localfile):
-        File(localfile).ensure_parent()
+        Path(localfile).parent.mkdir(parents=True, exist_ok=True)
         if self.check_exists(key):
             return self.bucket.get_object_to_file(key, localfile)
         else:

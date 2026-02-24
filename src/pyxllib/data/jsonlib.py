@@ -5,6 +5,8 @@
 # @Date   : 2024/04/01
 
 from collections import Counter
+import json
+from pathlib import Path
 
 from pyxllib.prog.lazyimport import lazy_import
 
@@ -100,17 +102,21 @@ def view_jsons_summary(fd, files="**/*.json", encoding=None, max_items=10, max_v
     :param max_value_length: 值截断长度
     """
     from pyxllib.prog.specialist.common import KeyValuesCounter
-    from pyxllib.file.specialist.dirlib import Dir
     from pyxllib.text.document import Document
+    from pyxllib.file.specialist import get_encoding
     from loguru import logger
 
     kvc = KeyValuesCounter()
-    d = Dir(fd)
-    
+    root = Path(fd)
+
     # 统计数据
-    for p in d.select_files(files):
+    for p in root.glob(files):
+        if not p.is_file():
+            continue
         try:
-            data = p.read(encoding=encoding, mode=".json")
+            b = p.read_bytes()
+            enc = encoding or get_encoding(b)
+            data = json.loads(b.decode(enc, errors='ignore'))
             kvc.add(data, max_value_length=max_value_length)
         except Exception as e:
             logger.warning(f"Failed to read/parse {p}: {e}")
@@ -118,7 +124,7 @@ def view_jsons_summary(fd, files="**/*.json", encoding=None, max_items=10, max_v
     # 渲染展示
     doc = Document(title=f"JSON Summary: {fd}")
     doc.add_header("JSON Statistics", level=2)
-    doc.add_text(f"Source: {d.abspath()}")
+    doc.add_text(f"Source: {root.resolve()}")
     doc.add_json(kvc.kvs, title="Key-Values Distribution", max_items=max_items)
     doc.browse()
 

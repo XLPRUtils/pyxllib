@@ -9,6 +9,7 @@ import concurrent.futures
 import math
 import time
 import sys
+from pathlib import Path
 
 from pyxllib.prog.pupil import EmptyPoolExecutor, format_exception
 from pyxllib.text.pupil import shorten
@@ -41,8 +42,13 @@ def get_xllog(name='xllog', *, log_file=None):
         if os.path.isfile(XLLOG_CONF_FILE):
             # 尝试在默认位置是否有自定义配置文件，读取配置文件来创建
             import logging.config
-            from pyxllib.file.specialist import File
-            data = File(XLLOG_CONF_FILE).read()
+            import yaml
+            from pyxllib.file.specialist import get_encoding
+
+            p = Path(XLLOG_CONF_FILE)
+            b = p.read_bytes()
+            enc = get_encoding(b)
+            data = yaml.safe_load(b.decode(enc, errors='ignore'))
             if isinstance(data, dict):
                 # 推荐使用yaml的字典结构，格式更简洁清晰
                 logging.config.dictConfig(data)

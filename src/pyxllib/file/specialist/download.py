@@ -7,6 +7,8 @@
 import logging
 import os
 import shutil
+import tempfile
+from pathlib import Path
 from typing import Callable, List, Optional
 from urllib import request
 
@@ -22,7 +24,18 @@ try:
 except ModuleNotFoundError:
     BeautifulSoup = lazy_import('from bs4 import BeautifulSoup', 'beautifulsoup4')
 
-from pyxllib.file.specialist import File, Dir, refinepath
+from pyxllib.file.specialist import refinepath
+
+
+def _backup_file(path: Path):
+    if not path.exists():
+        return path
+    for i in range(1, 10000):
+        b = path.with_name(path.name + f'.bak{i}')
+        if not b.exists():
+            path.rename(b)
+            return b
+    raise RuntimeError(str(path))
 
 
 def download_file(url, fn=None, *, encoding=None, if_exists=None, ext=None, temp=False):
@@ -42,10 +55,24 @@ def download_file(url, fn=None, *, encoding=None, if_exists=None, ext=None, temp
     ValueError: 不能用目录初始化一个File对象 D:\home\chenkunze\slns\xlproject\xlsln\ckz2023
     """
     if not fn: fn = refinepath(url.split('/')[-1])[-80:]  # 这里故意截断文件名最长80个字符
-    root = Dir.TEMP if temp else None
-    fn = File(fn, root, suffix=ext).write(requests.get(url).content,
-                                          encoding=encoding, if_exists=if_exists, etag=(not fn))
-    return fn.to_str()
+    base = Path(tempfile.gettempdir()) if temp else Path.cwd()
+    p = Path(fn)
+    if not p.is_absolute():
+        p = base / p
+    if ext:
+        p = p.with_suffix(ext if ext.startswith('.') else '.' + ext)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    if p.exists():
+        if if_exists in ('ignore', 'skip'):
+            return str(p)
+        elif if_exists == 'backup':
+            _backup_file(p)
+        elif if_exists in (None, 'replace'):
+            pass
+        else:
+            raise FileExistsError(str(p))
+    p.write_bytes(requests.get(url).content)
+    return str(p)
 
 
 def read_from_ubuntu(url):
@@ -142,11 +169,13 @@ def ensure_localfile(localfile, from_url, *, if_exists=None, progress=True):
 
     >> ensure_localfile('ufo.csv', r'https://gitee.com/code4101/TestData/raw/master/ufo.csv')
     """
-    path, file = str(localfile), File(localfile)
-
-    if file.exist_preprcs(if_exists):
-        dirname, name = os.path.split(path)
-        download(from_url, dirname, filename=name, progress=progress)
+    p = Path(localfile)
+    if p.exists() and if_exists not in ('replace',):
+        return localfile
+    if p.exists() and if_exists == 'backup':
+        _backup_file(p)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    download(from_url, str(p.parent), filename=p.name, progress=progress)
     return localfile
 
 
@@ -159,12 +188,24 @@ def ensure_localdir(localdir, from_url, *, if_exists=None, progress=True, wrap=0
         wrap<0，有的从url下载的压缩包，还会自带一层目录，为了避免冗余，要去掉
     """
     from pyxllib.file.packlib import unpack_archive
-    d = Dir(localdir)
+    d = Path(localdir)
     if not d.is_dir():
-        if d.exist_preprcs(if_exists):
-            pack_file = download(from_url, d.parent, progress=progress)
-            unpack_archive(pack_file, localdir, wrap=wrap)
-            os.remove(pack_file)
+        if d.exists():
+            if if_exists in ('ignore', 'skip'):
+                return localdir
+            if if_exists == 'backup':
+                _backup_file(d)
+            elif if_exists in (None, 'replace'):
+                if d.is_file():
+                    d.unlink()
+                else:
+                    shutil.rmtree(d)
+            else:
+                raise FileExistsError(str(d))
+        d.parent.mkdir(parents=True, exist_ok=True)
+        pack_file = download(from_url, str(d.parent), progress=progress)
+        unpack_archive(pack_file, str(d), wrap=wrap)
+        os.remove(pack_file)
 
     return localdir
 
@@ -176,21 +217,19 @@ def get_font_file(name):
         simfang.ttf，仿宋
         msyh.ttf，微软雅黑
     """
-    from pyxllib.file.specialist import ensure_localfile, XlPath
-
     # 0 当前目录有，则优先返回当前目录的文件
-    p = XlPath(name)
+    p = Path(name)
     if p.is_file():
-        return p
+        return p.resolve()
 
     # 1 windows直接找系统的字体目录
-    font_file = XlPath(f'C:/Windows/Fonts/{name}')
+    font_file = Path(f'C:/Windows/Fonts/{name}')
     if font_file.is_file():
         return font_file
 
     # 2 否则下载到.xlpr/fonts
     # 注意不能下载到C:/Windows/Fonts，会遇到权限问题，报错
-    font_file = XlPath.userdir() / f'.xlpr/fonts/{name}'
+    font_file = Path.home() / f'.xlpr/fonts/{name}'
     # 去github上paddleocr项目下载
     # from_url = f'https://raw.githubusercontent.com/code4101/data1/main/fonts/{name}'
     from_url = f'https://xmutpriu.com/download/fonts/{name}'

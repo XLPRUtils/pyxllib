@@ -19,6 +19,8 @@ import copy
 import inspect
 import math
 import json
+import tempfile
+from pathlib import Path
 
 import numpy as np
 from tqdm import tqdm
@@ -27,7 +29,7 @@ from pyxlpr.ppocr.tools.program import preprocess
 from pyxlpr.ppocr.data import build_dataloader
 
 from pyxllib.algo.geo import rect_bounds, ltrb2xywh
-from pyxllib.file.specialist import XlPath, ensure_localfile, ensure_localdir
+from pyxllib.file.specialist import ensure_localfile, ensure_localdir
 from pyxllib.cv.xlcvlib import xlcv
 from pyxllib.prog.newbie import round_int
 
@@ -69,7 +71,7 @@ class PaddleOcrBaseConfig:
             candidates = ['best_accuracy', 'latest']
 
         for name in candidates:
-            f = XlPath(self.cfg['Global']['save_model_dir']) / name
+            f = Path(self.cfg['Global']['save_model_dir']) / name
             if f.with_suffix('.pdparams').exists():
                 self.cfg['Global']['checkpoints'] = f
                 return
@@ -84,12 +86,12 @@ class PaddleOcrBaseConfig:
         :param subpath: 例如 'det/det_mv3_db'
         """
         f = os.path.join(sys.modules['pyxlpr.ppocr'].__path__[0], 'configs', subpath + '.yml')
-        return self.config_from_content(XlPath(f).read_text())
+        return self.config_from_content(Path(f).read_text(encoding='utf-8', errors='ignore'))
 
     def set_save_dir(self, save_dir):
         """ 有很多个运行中文件的输出路径，可以统一到一个地方，并且只设置一次就够 """
         # self.d['Global']
-        save_dir = XlPath(save_dir)
+        save_dir = Path(save_dir)
         x = self.cfg['Global']
         x['save_model_dir'] = save_dir  # train时模型存储目录
         x['save_inference_dir'] = save_dir / 'infer'  # export_model时存储目录
@@ -113,7 +115,7 @@ class PaddleOcrBaseConfig:
         # 保险起见，就把self.cfg[mode]['dataset']整个重置了
         node = self.cfg[mode]['dataset']
         x = {'name': 'SimpleDataSet',
-             'data_dir': XlPath(data_dir),
+             'data_dir': Path(data_dir),
              'label_file_list': label_file_list}
         if ratio_list:
             x['ratio_list'] = ratio_list
@@ -138,24 +140,24 @@ class PaddleOcrBaseConfig:
         """
         node = self.cfg[mode]['dataset']
         x = {'name': 'XlSimpleDataSet',
-             'data_dir': XlPath(data_dir),
+             'data_dir': Path(data_dir),
              'data_list': data_list}
         x['transforms'] = node['transforms']
         self.cfg[mode]['dataset'] = x
 
     @classmethod
     def _rset_posix_path(cls, d):
-        from pathlib import Path
+        from pathlib import PurePath
 
         if isinstance(d, list):
             for i, x in enumerate(d):
-                if isinstance(x, (Path, XlPath)):
+                if isinstance(x, PurePath):
                     d[i] = x.as_posix()
                 else:
                     cls._rset_posix_path(x)
         elif isinstance(d, dict):
             for k, v in d.items():
-                if isinstance(v, (Path, XlPath)):
+                if isinstance(v, PurePath):
                     d[k] = v.as_posix()
                 else:
                     cls._rset_posix_path(v)
@@ -171,11 +173,11 @@ class PaddleOcrBaseConfig:
 
     def write_cfg_tempfile(self):
         """ 存储一个文件到临时目录，并返回文件路径 """
-        p = XlPath.tempfile('.yml')
-        # TODO 写入文件前，会把配置里 XlPath全部转为 as_poisx 的str
         self._rset_posix_path(self.cfg)
-        p.write_yaml(self.cfg)
-        return str(p)
+        fd, fn = tempfile.mkstemp(suffix='.yml')
+        os.close(fd)
+        Path(fn).write_text(yaml.safe_dump(self.cfg, sort_keys=False), encoding='utf-8', errors='ignore')
+        return fn
 
     def add_config_to_cmd_argv(self):
         """ 把配置参数加入命令行的 -c 命令中 """
@@ -243,14 +245,14 @@ class PaddleOcrBaseConfig:
     @classmethod
     def get_pretrained_model_backbone(cls, name):
         """ 只拿骨干网络的权重 """
-        local_file = XlPath.userdir() / f'.paddleocr/pretrained/{name}.pdparams'
+        local_file = Path.home() / f'.paddleocr/pretrained/{name}.pdparams'
         url = f'https://paddle-imagenet-models-name.bj.bcebos.com/dygraph/{name}.pdparams'
         ensure_localfile(local_file, url)
         return local_file.parent / local_file.stem  # 省略.pdparams后缀
 
     @classmethod
     def get_pretrained_model_ppocr(cls, name):
-        local_dir = XlPath.userdir() / f'.paddleocr/pretrained/{name}'
+        local_dir = Path.home() / f'.paddleocr/pretrained/{name}'
         url = f'https://paddleocr.bj.bcebos.com/dygraph_v2.0/ch/{name}.tar'
         ensure_localdir(local_dir, url, wrap=-1)
         return local_dir / 'best_accuracy'  # ppocr训练好的ocr模型
@@ -265,7 +267,7 @@ class PaddleOcrBaseConfig:
 
     def set_pretrained_infer_model(self, local_dir, url):
         """ 自己扩展的一个配置参数，metric的时候用 """
-        local_dir = XlPath.userdir() / f'.paddleocr/pretrained_infer/{local_dir}'
+        local_dir = Path.home() / f'.paddleocr/pretrained_infer/{local_dir}'
         path = ensure_localdir(local_dir, url, wrap=-1)
         self.cfg['Global']['pretrained_infer_model'] = path
 
@@ -512,7 +514,7 @@ class XlDetText(PaddleOcrBaseConfig):
 
                 # 1 拷贝图片数据到相对目录
                 src_img_path = x['img_path']
-                rel_img_path = XlPath(src_img_path).relpath(data_dir)
+                rel_img_path = Path(os.path.relpath(src_img_path, data_dir)).as_posix()
                 dst_img_path = out_dir / rel_img_path
                 os.makedirs(dst_img_path.parent, exist_ok=True)
                 if not dst_img_path.is_file():
@@ -592,7 +594,7 @@ class XlRec(PaddleOcrBaseConfig):
         from pyxllib.algo.stat import dataframes_to_excel
         from pyxlpr.ppocr.utils import get_dict_content
 
-        root = XlPath(xllabelme_data_dir)
+        root = Path(xllabelme_data_dir)
         outfile = root.parent / 'stat_texts.xlsx'
 
         # 1 读取数据
@@ -674,15 +676,15 @@ class XlRec(PaddleOcrBaseConfig):
         注意：本套生成方法仅供参考，这套处理目前不是那么泛用
         """
         # 0
-        src, dst = XlPath(src), XlPath(dst)
+        src, dst = Path(src), Path(dst)
         if recreate and dst.is_dir():
-            dst.delete()  # 如果已有，将其删除
+            shutil.rmtree(dst)
 
         # 1 生成图片
         chars = set()
         labels1, labels2 = [], []
         for f in tqdm(list(src.rglob('*.json')), desc='提取文本行数据', disable=not print_mode):
-            data = f.read_json()
+            data = json.loads(f.read_text(encoding='utf-8', errors='ignore'))
             impath = f.parent / data['imagePath']
             im = xlcv.read(impath)
             for i, sp in enumerate(data['shapes'], start=1):
@@ -690,6 +692,7 @@ class XlRec(PaddleOcrBaseConfig):
                 name = f'imgs/{f.stem}_r{i:03}.jpg'
                 text = json.loads(sp['label'])['text']
                 chars |= set(text)
+                (dst / 'imgs').mkdir(parents=True, exist_ok=True)
                 xlcv.write(xlcv.get_sub(im, sp['points']), dst / name)
                 labels1.append(f'{name}\t{text}')
 
@@ -700,12 +703,13 @@ class XlRec(PaddleOcrBaseConfig):
 
         # 2 字典文件
         chars -= set(' \n\t')  # 要去掉空格等字符
-        (dst / 'char_dict.txt').write_text('\n'.join(sorted(chars)))
+        dst.mkdir(parents=True, exist_ok=True)
+        (dst / 'char_dict.txt').write_text('\n'.join(sorted(chars)), encoding='utf-8', errors='ignore')
 
         # 3 标注数据
-        (dst / 'labels_rect.txt').write_text('\n'.join(labels1))
-        (dst / 'labels_warp.txt').write_text('\n'.join(labels2))
-        (dst / 'labels_total.txt').write_text('\n'.join(labels1 + labels2))
+        (dst / 'labels_rect.txt').write_text('\n'.join(labels1), encoding='utf-8', errors='ignore')
+        (dst / 'labels_warp.txt').write_text('\n'.join(labels2), encoding='utf-8', errors='ignore')
+        (dst / 'labels_total.txt').write_text('\n'.join(labels1 + labels2), encoding='utf-8', errors='ignore')
 
         return self
 
@@ -736,7 +740,7 @@ class XlOcr:
     """ 封装了文字技术体系，检测识别的一些标准化处理流程 """
 
     def __init__(self, root):
-        self.root = XlPath(root)  # 项目根目录
+        self.root = Path(root)
 
     def step1_autolabel(self):
         """ 预标注检测、识别 """

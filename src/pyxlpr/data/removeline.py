@@ -6,6 +6,7 @@
 
 
 from pyxllib.xlcv import *
+from pathlib import Path
 
 
 class RemoveLine:
@@ -157,13 +158,19 @@ def test_removeline(path):
 
     def func(p1, p2):
         dst = RemoveLine(str(p1)).run()
+        p2 = Path(p2)
+        p2.parent.mkdir(parents=True, exist_ok=True)
         cv2.imwrite(str(p2), dst)
 
-    d1, d2 = Dir(path), Dir(path + '+')
-    d2.ensure_dir()
-    d1_state = d1.select('*.png')
-    d1_state.subs = d1_state.subs
-    d1_state.procpaths(func, ref_dir=d2, pinterval=1000)
+    d1 = Path(path)
+    d2 = Path(str(path) + '+')
+    d2.mkdir(parents=True, exist_ok=True)
+    files = [p for p in d1.rglob('*.png') if p.is_file()]
+    for i, p1 in enumerate(files, start=1):
+        p2 = d2 / p1.relative_to(d1)
+        func(p1, p2)
+        if i % 1000 == 0:
+            print(i, '/', len(files))
 
 
 if __name__ == '__main__':

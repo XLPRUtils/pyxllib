@@ -10,8 +10,18 @@ import concurrent.futures
 import os
 import re
 import subprocess
+from pathlib import Path
 
-from pyxllib.file.specialist import File
+
+def backup_file(path: Path):
+    if not path.exists():
+        return path
+    for i in range(1, 10000):
+        b = path.with_name(path.name + f'.bak{i}')
+        if not b.exists():
+            path.rename(b)
+            return b
+    raise RuntimeError(str(path))
 
 
 def magick(infile, *, outfile=None, if_exists='error', transparent=None, trim=False, density=None, other_args=None):
@@ -37,31 +47,37 @@ def magick(infile, *, outfile=None, if_exists='error', transparent=None, trim=Fa
 
     # 2
     # 200914周一20:40，这有个相对路径的bug，修复了下，否则 test/a.png 会变成 test/test/a.png
-    if File(outfile).exist_preprcs(if_exists):
-        # 2.1 判断是否是支持的输入文件类型
-        ext = os.path.splitext(infile)[1].lower()
-        if not File(infile) or not ext in ('.png', '.eps', '.pdf', '.jpg', '.jpeg', '.wmf', '.emf'):
-            return False
+    outp = Path(outfile)
+    if outp.exists():
+        if if_exists in ('ignore', 'skip'):
+            return outfile
+        elif if_exists == 'backup':
+            backup_file(outp)
+        elif if_exists == 'replace':
+            pass
+        else:
+            raise FileExistsError(str(outp))
 
-        # 2.2 生成需要执行的参数
-        cmd = ['magick.exe']
-        # 透明、裁剪、density都是可以重复操作的
-        if density: cmd.extend(['-density', str(density)])
-        cmd.append(infile)
-        if transparent:
-            if not isinstance(transparent, str):
-                transparent_ = 'white'
-            else:
-                transparent_ = transparent
-            cmd.extend(['-transparent', transparent_])
-        if trim: cmd.append('-trim')
-        if other_args: cmd.extend(other_args)
-        cmd.append(outfile)
+    ext = os.path.splitext(infile)[1].lower()
+    if not Path(infile).is_file() or not ext in ('.png', '.eps', '.pdf', '.jpg', '.jpeg', '.wmf', '.emf'):
+        return False
 
-        # 2.3 生成目标png图片
-        cmd = [x.replace('\\', '/') for x in cmd]
-        print(' '.join(cmd))
-        subprocess.run(cmd, stderr=subprocess.PIPE, shell=True)  # 看不懂magick出错写的是啥，关了
+    cmd = ['magick.exe']
+    if density:
+        cmd.extend(['-density', str(density)])
+    cmd.append(infile)
+    if transparent:
+        transparent_ = transparent if isinstance(transparent, str) else 'white'
+        cmd.extend(['-transparent', transparent_])
+    if trim:
+        cmd.append('-trim')
+    if other_args:
+        cmd.extend(other_args)
+    cmd.append(outfile)
+
+    cmd = [x.replace('\\', '/') for x in cmd]
+    print(' '.join(cmd))
+    subprocess.run(cmd, stderr=subprocess.PIPE, shell=True)
 
     return outfile
 
@@ -103,7 +119,7 @@ def ensure_pngs(folder, *, if_exists='skip',
             if if_exists == 'ignore':
                 continue
             elif if_exists == 'backup':
-                File(name, folder, suffix='.png').backup(move=True)
+                backup_file(Path(folder) / f'{name}.png')
             elif if_exists == 'replace':
                 pass
             else:
@@ -147,13 +163,15 @@ def zoomsvg(file, scale=1):
         return re.sub(r'((?:height|width)=")(\d+(?:\.\d+)?)', g, m.group())
 
     if os.path.isfile(file):
-        s = re.sub(r'<svg .+?>', func, File(file).read(), flags=re.DOTALL)
-        File(file).write(s, if_exists='replace')
+        p = Path(file)
+        s = re.sub(r'<svg .+?>', func, p.read_text(encoding='utf-8', errors='ignore'), flags=re.DOTALL)
+        p.write_text(s, encoding='utf-8', errors='ignore')
     elif os.path.isdir(file):
         for f in os.listdir(file):
             if not f.endswith('.svg'): continue
             f = os.path.join(file, f)
-            s = re.sub(r'<svg\s+.+?>', func, File(f).read(), flags=re.DOTALL)
-            File(file).write(s, if_exists='replace')
+            p = Path(f)
+            s = re.sub(r'<svg\s+.+?>', func, p.read_text(encoding='utf-8', errors='ignore'), flags=re.DOTALL)
+            p.write_text(s, encoding='utf-8', errors='ignore')
     elif isinstance(file, str) and '<svg ' in file:  # 输入svg的代码文本
         return re.sub(r'<svg .+?>', func, file, flags=re.DOTALL)

@@ -40,7 +40,6 @@ try:
 except ModuleNotFoundError:
     uiautomation = lazy_import('uiautomation')
 
-from pyxllib.prog.uni_cache import uni_cache
 from pyxllib.cv.xlcvlib import CvImg
 from pyxlpr.ai.clientlib import XlAiClient
 
@@ -160,19 +159,18 @@ class ActiveWindowCapture(OriginalMSS):
     def __2_截图数据(self):
         pass
 
-    @uni_cache(mode='id,str', maxsize=16, ttl=3)
     def _capture_single_monitor(self, order):
         """ 缓存单个屏幕的截图 """
         if order == 0:
             # order=0时，拼接所有屏幕图像。虽然mss其实可以直接提供，但是这样就没有每个屏幕缓存的图片了，还是我自己处理一遍更好。
 
             # 计算坐标偏移量，将所有坐标调整至非负
-            min_left = min(monitor['left'] for monitor in self.monitors2)
-            min_top = min(monitor['top'] for monitor in self.monitors2)
+            min_left = min(monitor['left'] for monitor in self.monitors2[1:])
+            min_top = min(monitor['top'] for monitor in self.monitors2[1:])
 
             # 获取总画布大小（根据所有屏幕的范围计算）
-            max_right = max(monitor['left'] + monitor['width'] for monitor in self.monitors2)
-            max_bottom = max(monitor['top'] + monitor['height'] for monitor in self.monitors2)
+            max_right = max(monitor['left'] + monitor['width'] for monitor in self.monitors2[1:])
+            max_bottom = max(monitor['top'] + monitor['height'] for monitor in self.monitors2[1:])
             canvas_width = max_right - min_left
             canvas_height = max_bottom - min_top
 
@@ -239,8 +237,8 @@ class ActiveWindowCapture(OriginalMSS):
 
         # 2 获取对应 order 的屏幕原点坐标进行偏差修正
         if order == 0:
-            origin_x = self.monitors2[0]['left']
-            origin_y = self.monitors2[0]['top']
+            origin_x = min(monitor['left'] for monitor in self.monitors2[1:])
+            origin_y = min(monitor['top'] for monitor in self.monitors2[1:])
         else:
             origin_x = self.monitors2[order]['left']
             origin_y = self.monitors2[order]['top']
@@ -264,7 +262,6 @@ class ActiveWindowCapture(OriginalMSS):
 
         return screenshot
 
-    @uni_cache(mode='id,str', maxsize=16)
     def screenshot(self, order=0, *, to_pil=False, mark_active_window=False):
         """ 截屏
 

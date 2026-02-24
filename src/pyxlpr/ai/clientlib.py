@@ -17,6 +17,7 @@ import json
 import pprint
 import statistics
 import time
+from pathlib import Path
 
 import cv2
 import numpy as np
@@ -26,7 +27,7 @@ from pyxllib.prog.newbie import round_int
 from pyxllib.prog.pupil import is_url
 from pyxllib.prog.xlenv import XlEnv
 from pyxllib.algo.geo import xywh2ltrb, rect_bounds
-from pyxllib.file.specialist import XlPath, get_etag
+from pyxllib.file.specialist import get_etag
 from pyxllib.cv.expert import xlcv
 
 
@@ -1233,7 +1234,7 @@ class XlAiClient:
     def rec_speech(self, audio_file):
         """ 语音识别 """
         if os.path.isfile(audio_file):
-            audio = base64.b64encode(XlPath(audio_file).read_bytes()).decode()
+            audio = base64.b64encode(Path(audio_file).read_bytes()).decode()
         else:
             raise NotImplementedError
         text = self.priu_api('u2_conformer_wenetspeech', audio=audio)[0]
@@ -1252,7 +1253,7 @@ def demo_aipocr():
 
     mode = 'general'
 
-    _dir = XlPath("/home/chenkunze/data/aipocr_test")
+    _dir = Path("/home/chenkunze/data/aipocr_test")
     fmode = re.sub(r'^raw_', r'', mode)
     fmode = {'basicAccurate': 'accurate',
              'basicGeneral': 'general',
@@ -1261,7 +1262,8 @@ def demo_aipocr():
              'vat_invoice_verification': 'vatInvoice',
              'mathpix_latex': 'formula',
              }.get(fmode, fmode)
-    files = _dir.glob_images(f'*/{fmode}/**/*')
+    img_exts = {'.jpg', '.jpeg', '.png', '.bmp', '.tif', '.tiff', '.webp'}
+    files = [p for p in _dir.glob(f'*/{fmode}/**/*') if p.is_file() and p.suffix.lower() in img_exts]
 
     for f in list(files):
         # 1 处理指定图片
@@ -1269,8 +1271,8 @@ def demo_aipocr():
         #     continue
 
         # 2 检查字典
-        print(f.as_posix())
-        d = getattr(xlapi, mode)(f.as_posix())
+        print(str(f))
+        d = getattr(xlapi, mode)(str(f))
 
         # browser.html(d['htmltables'][0])
         print()
@@ -1279,14 +1281,16 @@ def demo_aipocr():
 
         # 3 前置的错误图可以删除；有shapes的可以转labelme；非labelme格式上面print后直接退出
         if 'error_code' in d:
-            f.delete()
+            f.unlink(missing_ok=True)
         elif d.get('shapes', 0):
             # tolabelme
-            lmdata = LabelmeDict.gen_data(f)
+            lmdata = LabelmeDict.gen_data(str(f))
             lmdata['shapes'] = d['shapes']
             for sp in lmdata['shapes']:
                 sp['label'] = json.dumps(sp['label'], ensure_ascii=False)
-            f.with_suffix('.json').write_json(lmdata)
+            out = f.with_suffix('.json')
+            out.parent.mkdir(parents=True, exist_ok=True)
+            out.write_text(json.dumps(lmdata, ensure_ascii=False, indent=2), encoding='utf-8', errors='ignore')
             break
         else:
             break

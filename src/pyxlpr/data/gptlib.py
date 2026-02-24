@@ -20,6 +20,9 @@ from urllib.parse import unquote
 import io
 import logging
 import warnings
+from pathlib import Path
+import shutil
+import tempfile
 
 from openpyxl import Workbook
 import pandas as pd
@@ -34,7 +37,7 @@ except ModuleNotFoundError:
 from pyxllib.prog.pupil import OutputLogger
 from pyxllib.prog.specialist import browser, TicToc
 from pyxllib.algo.pupil import ValuesStat
-from pyxllib.file.specialist import XlPath, JsonlDataFile, JsonlDataDir, TwinDirs, ensure_localdir
+from pyxllib.file.specialist import JsonlDataFile, JsonlDataDir, TwinDirs, ensure_localdir
 from pyxllib.file.xlsxlib import extract_workbook_summary
 from pyxllib.text.jinjalib import set_template, set_meta_template
 
@@ -53,13 +56,13 @@ class Tokenizer:
         if cls._tokenizer is None:
             # 根本没必要每次都尝试连接官网，本地有就不要老是sb的尝试连接huggingface
             # 而且官网连接也不稳，这里换成我自己的服务器中转
-            # gpt2_dir = XlPath.tempdir() / 'huggingface_gpt2'
+            # gpt2_dir = Path(tempfile.gettempdir()) / 'huggingface_gpt2'
             # ensure_localdir(gpt2_dir, 'https://xmutpriu.com/download/huggingface_gpt2.zip')
             # Tokenizer._tokenizer = GPT2TokenizerFast.from_pretrained(gpt2_dir)
             # 240103周三21:23，hx给过的新评测模型
-            gpt2_dir = XlPath.tempdir() / 'Atom-CL-SS'
+            gpt2_dir = Path(tempfile.gettempdir()) / 'Atom-CL-SS'
             ensure_localdir(gpt2_dir, 'https://xmutpriu.com/download/Atom-CL-SS.zip')
-            cls._tokenizer = AutoTokenizer.from_pretrained(gpt2_dir, trust_remote_code=True)
+            cls._tokenizer = AutoTokenizer.from_pretrained(str(gpt2_dir), trust_remote_code=True)
         return cls._tokenizer
 
     @classmethod
@@ -221,7 +224,16 @@ class GptChatJsonl(JsonlDataFile):
     def read_jsonl(self, file):
         """ 从一个文件加载数据
         """
-        self.records = XlPath(file).read_jsonl()
+        p = Path(file)
+        records = []
+        for line in p.read_text(encoding='utf-8', errors='ignore').splitlines():
+            if not line:
+                continue
+            try:
+                records.append(json.loads(line))
+            except json.JSONDecodeError:
+                pass
+        self.records = records
         try:
             self.start_id = self.records[-1]['id']
         except KeyError:
@@ -360,21 +372,21 @@ class GptChatJsonl(JsonlDataFile):
         这些路径可能在设置的时候图方便，设置的是非项目目录下的路径
         这个函数会对这些路径进行修正，为了修正，需要输入一个该jsonl所保存的目录位置
         """
-        save_dir = XlPath(save_dir)
+        save_dir = Path(save_dir)
         for i, record in tqdm(enumerate(self.records), desc='修复文件路径'):
             dst_dir = save_dir / 'upload_files' / str(record['id'])
             for j, text in enumerate(record['text']):
                 for k, fn in enumerate(text.get('file_paths', [])):
-                    src_file = XlPath(fn)
+                    src_file = Path(fn)
                     src_file2 = src_file.as_posix()
                     if src_file2.startswith(f'upload_files/{record["id"]}/'):
                         continue
                     dst_file = dst_dir / src_file.name
-                    dst_file2 = dst_file.relpath(save_dir).as_posix()
+                    dst_file2 = dst_file.relative_to(save_dir).as_posix()
                     if src_file.is_file():
                         if src_file2 != dst_file2:
                             dst_dir.mkdir(parents=True, exist_ok=True)
-                            src_file.copy(dst_file, if_exists='replace')
+                            shutil.copy2(src_file, dst_file)
                     else:  # 既然设置了，原文件目录应该在
                         raise FileNotFoundError(f'{src_file}')
                     text['file_paths'][k] = dst_file2
@@ -432,9 +444,9 @@ class GptChatJsonl(JsonlDataFile):
                 html_content += f"<pre>{html.escape(str(all_answers[idx]))}</pre>"
 
         html_content += "</body></html>"
-        html_file = (XlPath.tempdir() / (str(session.get('id', index)) + '.html'))
-        html_file.write_text(html_content)
-        browser.html(html_file)
+        html_file = Path(tempfile.gettempdir()) / (str(session.get('id', index)) + '.html')
+        html_file.write_text(html_content, encoding='utf-8', errors='ignore')
+        browser.html(str(html_file))
 
         # 返回HTML字符串
         return html_content
@@ -543,10 +555,13 @@ class GptChatJsonl(JsonlDataFile):
             self._parse_single_record_answer_downloads(record)
 
         # 目录里的文件名也同理做精简
-        for f in self.infile.parent.glob_files():
-            if f.name.startswith('OpenAI-download-'):
-                f.rename2(f.parent / re.sub(r'OpenAI-download-\d+-', '', f.name),
-                          if_exists='replace')
+        parent = Path(str(self.infile)).parent
+        for f in parent.glob('*'):
+            if f.is_file() and f.name.startswith('OpenAI-download-'):
+                dst = f.parent / re.sub(r'OpenAI-download-\d+-', '', f.name)
+                if dst.exists():
+                    dst.unlink()
+                f.replace(dst)
 
     def filter_to_rechat(self, check_func, rechat_path=None):
         """ 筛选失败的数据到一个新的目录，常用于对chatted数据筛选出未成功的样例，上池子重跑
@@ -558,10 +573,11 @@ class GptChatJsonl(JsonlDataFile):
         :param rechat_path: 把挑选出来的数据放到新路径
         """
         if rechat_path is None:
-            rechat_path = XlPath(self.infile.parent.as_posix() + '_rechat/in.jsonl')
+            base_dir = Path(str(self.infile)).parent
+            rechat_path = base_dir.with_name(base_dir.name + '_rechat') / 'in.jsonl'
 
-        rechat_path = XlPath(rechat_path)
-        td = TwinDirs(self.infile.parent, rechat_path.parent)
+        rechat_path = Path(rechat_path)
+        td = TwinDirs(Path(str(self.infile)).parent, rechat_path.parent)
 
         gcj = type(self)()
         for record in self.records:
@@ -585,10 +601,11 @@ class GptChatJsonl(JsonlDataFile):
             依据这个文件里的record记录更新回self
         """
         if rechat_path is None:
-            rechat_path = XlPath(self.infile.parent.as_posix() + '_rechat') / 'out.jsonl'
+            base_dir = Path(str(self.infile)).parent
+            rechat_path = base_dir.with_name(base_dir.name + '_rechat') / 'out.jsonl'
 
-        rechat_path = XlPath(rechat_path)
-        td = TwinDirs(rechat_path.parent, self.infile.parent)
+        rechat_path = Path(rechat_path)
+        td = TwinDirs(rechat_path.parent, Path(str(self.infile)).parent)
 
         id2index = {x['id']: i for i, x in enumerate(self.records)}
 
@@ -608,7 +625,7 @@ class GptChatJsonl(JsonlDataFile):
                 if 'all_answers' in x:
                     for answer in x['all_answers']:
                         for fname in answer.get('downloads', []):
-                            (XlPath(self.infile.parent) / fname).delete()
+                            (Path(str(self.infile)).parent / fname).unlink(missing_ok=True)
                 # 再把y拷贝过来
                 for answer in y['all_answers']:
                     for fname in answer.get('downloads', []):
@@ -880,9 +897,9 @@ class GptTrainJsonl(JsonlDataFile):
             html_content += f"<pre>{html.escape(content)}</pre>"
 
         html_content += "</body></html>"
-        html_file = (XlPath.tempdir() / (f'session_{index}.html'))  # 创建临时文件名，防止覆盖现有文件
-        html_file.write_text(html_content)
-        browser.html(html_file)  # 在浏览器中打开HTML文件
+        html_file = Path(tempfile.gettempdir()) / f'session_{index}.html'
+        html_file.write_text(html_content, encoding='utf-8', errors='ignore')
+        browser.html(str(html_file))  # 在浏览器中打开HTML文件
 
         # 或者返回HTML字符串
         return html_content
@@ -910,7 +927,7 @@ class GptChatDir:
         if root is None:
             root = self.__class__.__name__.lower()
 
-        self.root = root = XlPath(root)
+        self.root = root = Path(root)
         self.lines_per_file = lines_per_file
 
         self.chat_file = root / 'in.jsonl'

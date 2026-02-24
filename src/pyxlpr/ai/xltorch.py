@@ -17,6 +17,8 @@ from torchvision import transforms
 # 把pytorch等常用的导入写了
 import torch.utils.data
 from torchvision.datasets import VisionDataset
+from pathlib import Path
+import tempfile
 
 from pyxlpr.ai.specialist import ClasEvaluater, NvmDevice
 
@@ -40,10 +42,28 @@ __data = """
 """
 
 
+def _backup_file(path: Path):
+    if not path.exists():
+        return path
+    for i in range(1, 10000):
+        b = path.with_name(path.name + f'.bak{i}')
+        if not b.exists():
+            path.rename(b)
+            return b
+    raise RuntimeError(str(path))
+
+
+def _resolve_path(base_dir, file):
+    p = Path(file)
+    if p.is_absolute():
+        return p
+    return Path(base_dir) / p
+
+
 class TinyDataset(torch.utils.data.Dataset):
     def __init__(self, labelfile, label_transform, maxn=None):
         """ 超轻量级的Dataset类，一般由外部ProjectData类指定每行label的转换规则 """
-        self.labels = File(labelfile).read().splitlines()
+        self.labels = Path(labelfile).read_text(encoding='utf-8', errors='ignore').splitlines()
         self.label_transform = label_transform
 
         self.number = len(self.labels)
@@ -137,7 +157,7 @@ class Trainer:
     def __init__(self, log_dir, device, data, model, optimizer,
                  loss_func=None, pred_func=None, accuracy_func=None):
         # 0 初始化成员变量
-        self.log_dir, self.device = log_dir, device
+        self.log_dir, self.device = Path(log_dir), device
         self.data, self.model, self.optimizer = data, model, optimizer
         if loss_func: self.loss_func = loss_func
         if pred_func: self.pred_func = pred_func
@@ -145,10 +165,10 @@ class Trainer:
 
         # 1 日志
         timetag = datetime.datetime.now().strftime('%Y%m%d.%H%M%S')
-        # self.curlog_dir = Dir(self.log_dir / timetag)  # 本轮运行，实际log位置，是存放在一个子目录里
-        self.curlog_dir = Dir(self.log_dir)
-        self.curlog_dir.ensure_dir()
-        self.log = get_xllog(log_file=self.curlog_dir / 'log.txt')
+        # self.curlog_dir = self.log_dir / timetag  # 本轮运行，实际log位置，是存放在一个子目录里
+        self.curlog_dir = self.log_dir
+        self.curlog_dir.mkdir(parents=True, exist_ok=True)
+        self.log = get_xllog(log_file=str(self.curlog_dir / 'log.txt'))
         self.log.info(f'1/4 log_dir={self.curlog_dir}')
 
         # 2 设备
@@ -224,18 +244,26 @@ class Trainer:
 
         # TODO 和path结合，增加if_exists参数
         """
-        f = File(file, self.curlog_dir)
-        if f.exist_preprcs(if_exists=if_exists):
-            f.ensure_parent()
-            torch.save(self.model.state_dict(), str(f))
+        p = _resolve_path(self.curlog_dir, file)
+        if p.exists():
+            if if_exists in ('ignore', 'skip'):
+                return
+            elif if_exists == 'replace':
+                pass
+            elif if_exists == 'backup':
+                _backup_file(p)
+            else:
+                raise FileExistsError(str(p))
+        p.parent.mkdir(parents=True, exist_ok=True)
+        torch.save(self.model.state_dict(), str(p))
 
     def load_model_state(self, file):
         """ 读取模型参数值
 
         注意load和save的root差异！ load的默认父目录是在log_dir，而save默认是在curlog_dir！
         """
-        f = File(file, self.log_dir)
-        self.model.load_state_dict(torch.load(str(f), map_location=self.device))
+        p = _resolve_path(self.log_dir, file)
+        self.model.load_state_dict(torch.load(str(p), map_location=self.device))
 
     def viz_data(self):
         """ 用visdom显示样本数据
@@ -447,7 +475,7 @@ class XlPredictor:
 
         if state_file is not None:
             if is_url(state_file):
-                state_file = download(state_file, XlPath.tempdir() / 'xlpr')
+                state_file = download(state_file, str(Path(tempfile.gettempdir()) / 'xlpr'))
             state = torch.load(str(state_file), map_location=self.device)
             if 'model' in state:
                 state = state['model']

@@ -7,6 +7,7 @@
 import re
 import sys
 import textwrap
+from pathlib import Path
 
 from pyxllib.prog.lazyimport import lazy_import
 
@@ -29,7 +30,7 @@ from pyxllib.prog.newbie import len_in_dim2
 from pyxllib.prog.pupil import check_install_package
 from pyxllib.prog.specialist import dataframe_str
 from pyxllib.text.pupil import ContentLine
-from pyxllib.file.specialist import get_encoding, File
+from pyxllib.file.specialist import get_encoding
 
 
 def regularcheck(pattern, string, flags=0):
@@ -78,20 +79,28 @@ def ensure_content(ob=None, encoding=None):
     # TODO: 增加鲁棒性判断，如果输入的不是字符串类型也要有出错判断
     if ob is None:
         return sys.stdin.read()  # 注意输入是按 Ctrl + D 结束
-    elif File(ob):  # 如果存在这样的文件，那就读取文件内容（bug点：如果输入是目录名会PermissionError）
-        if ob.endswith('.docx'):  # 这里还要再扩展pdf、doc文件的读取
-            # 安装详见： https://blog.csdn.net/code4101/article/details/79328636
-            check_install_package('textract')
-            text = textract.process(ob)
-            return text.decode('utf8', errors='ignore')
-        elif ob.endswith('.doc'):
-            raise NotImplementedError
-        elif ob.endswith('.pdf'):
-            raise NotImplementedError
-        else:  # 按照普通的文本文件读取内容
-            return readtext(ob, encoding)
-    else:  # 判断不了的情况，也认为是字符串
+    if hasattr(ob, 'read'):
+        return ob.read()
+
+    try:
+        p = Path(ob)
+    except TypeError:
         return ob
+
+    if p.is_file():
+        suffix = p.suffix.lower()
+        if suffix == '.docx':
+            check_install_package('textract')
+            import textract
+            text = textract.process(str(p))
+            return text.decode('utf8', errors='ignore')
+        elif suffix == '.doc':
+            raise NotImplementedError
+        elif suffix == '.pdf':
+            raise NotImplementedError
+        else:
+            return readtext(str(p), encoding)
+    return ob
 
 
 def file_lastlines(fn, n):
@@ -101,20 +110,26 @@ def file_lastlines(fn, n):
     >> s = FileLastLine('book.log', 1)
     'Output written on book.dvi (2 pages, 7812 bytes).'
     """
-    f = ensure_content(fn)
     assert n >= 0
-    pos, lines = n + 1, []
-    while len(lines) <= n:
-        try:
-            f.seek(-pos, 2)
-        except IOError:
-            f.seek(0)
-            break
-        finally:
-            lines = list(f)
-        pos *= 2
-    f.close()
-    return ''.join(lines[-n:])
+    p = Path(fn)
+    if not p.is_file():
+        return ''
+
+    with p.open('rb') as f:
+        pos, lines = n + 1, []
+        while len(lines) <= n:
+            try:
+                f.seek(-pos, 2)
+            except OSError:
+                f.seek(0)
+                break
+            finally:
+                lines = f.readlines()
+            pos *= 2
+
+    b = b''.join(lines[-n:])
+    enc = get_encoding(b)
+    return b.decode(enc, errors='ignore')
 
 
 def readurl(url):

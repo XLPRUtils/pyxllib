@@ -14,6 +14,7 @@ import logging
 import random
 import shutil
 import re
+from pathlib import Path
 
 from tqdm import tqdm
 import numpy as np
@@ -26,7 +27,7 @@ import paddle.io
 # from paddle.io import DataLoader, Dataset
 
 from pyxllib.algo.pupil import natural_sort
-from pyxllib.xl import XlPath, browser
+from pyxllib.xl import browser
 from pyxllib.xlcv import xlcv
 from pyxlpr.ai.specialist import ClasEvaluater, show_feature_map
 
@@ -131,25 +132,33 @@ class ImageClasDataset(paddle.io.Dataset):
         """
 
         def run_mode0():
-            samples = list(XlPath(root).glob_images('**/*'))
+            rootp = Path(root)
+            img_exts = {'.jpg', '.jpeg', '.png', '.bmp', '.tif', '.tiff', '.webp'}
+            samples = [p for p in rootp.rglob('*') if p.is_file() and p.suffix.lower() in img_exts]
             return samples, []
 
         def run_mode1():
             samples, class_names = [], []
-            dirs = sorted(XlPath(root).glob_dirs())
+            rootp = Path(root)
+            dirs = sorted([p for p in rootp.iterdir() if p.is_dir()])
             for i, d in enumerate(dirs):
                 class_names.append(d.name)
-                for f in d.glob_images('**/*'):
-                    samples.append([f, i])
+                img_exts = {'.jpg', '.jpeg', '.png', '.bmp', '.tif', '.tiff', '.webp'}
+                for f in d.rglob('*'):
+                    if f.is_file() and f.suffix.lower() in img_exts:
+                        samples.append([f, i])
             return samples, class_names
 
         def run_mode2():
             samples, class_names = [], []
-            dirs = sorted(XlPath(root).rglob_dirs())
+            rootp = Path(root)
+            dirs = sorted([p for p in rootp.rglob('*') if p.is_dir()])
             for i, d in enumerate(dirs):
                 class_names.append(d.name)
-                for f in d.glob_images():
-                    samples.append([f, i])
+                img_exts = {'.jpg', '.jpeg', '.png', '.bmp', '.tif', '.tiff', '.webp'}
+                for f in d.iterdir():
+                    if f.is_file() and f.suffix.lower() in img_exts:
+                        samples.append([f, i])
             return samples, class_names
 
         func = {0: run_mode0, 1: run_mode1, 2: run_mode2}[class_mode]
@@ -159,12 +168,12 @@ class ImageClasDataset(paddle.io.Dataset):
     @classmethod
     def from_label(cls, label_file, root=None, ratio=None, **kwargs):
         """ 从标注文件初始化 """
-        label_file = XlPath(label_file)
-        lines = label_file.read_text().splitlines()
+        label_file = Path(label_file)
+        lines = label_file.read_text(encoding='utf-8', errors='ignore').splitlines()
         if root is None:
             root = label_file.parent
         else:
-            root = XlPath(root)
+            root = Path(root)
 
         samples, class_names = [], set()
         for line in lines:
@@ -186,10 +195,9 @@ class ImageClasDataset(paddle.io.Dataset):
         class_names = self.class_names
         if not class_names:
             class_names = list(map(str, range(self.num_classes)))
-        outfile = XlPath(outfile)
-        if not outfile.parent.is_dir():
-            os.makedirs(outfile.parent)
-        outfile.write_text('\n'.join(class_names))
+        outfile = Path(outfile)
+        outfile.parent.mkdir(parents=True, exist_ok=True)
+        outfile.write_text('\n'.join(class_names), encoding='utf-8', errors='ignore')
 
     @classmethod
     def img_augment(cls, img):
@@ -361,10 +369,10 @@ class VisualAcc(paddle.callbacks.Callback):
 
         super().__init__()
         # 这样奇怪地加后缀，是为了字典序后，每个实验的train显示在eval之前
-        d = XlPath(logdir) / (experimental_name + '_train')
+        d = Path(logdir) / (experimental_name + '_train')
         if reset and d.exists(): shutil.rmtree(d)
         self.write = LogWriter(logdir=str(d))
-        d = XlPath(logdir) / (experimental_name + '_val')
+        d = Path(logdir) / (experimental_name + '_val')
         if reset and d.exists(): shutil.rmtree(d)
         self.eval_writer = LogWriter(logdir=str(d))
         self.eval_times = 0
@@ -404,7 +412,7 @@ class XlModel(paddle.Model):
             self.get_save_dir()，有些场合显示指定要输出文件了，则需要用这个接口获得一个明确的目录
         """
         if self.save_dir is None:
-            return XlPath('.')
+            return Path('.')
         else:
             return self.save_dir
 
@@ -414,8 +422,8 @@ class XlModel(paddle.Model):
             如果在未设置save_dir情况下，仍使用相关读写文件功能，默认在当前目录下处理
         """
         # 相关数据的保存路径
-        self.save_dir = XlPath(save_dir)
-        os.makedirs(self.save_dir, exist_ok=True)
+        self.save_dir = Path(save_dir)
+        self.save_dir.mkdir(parents=True, exist_ok=True)
 
     def set_dataset(self, train_data=None, eval_data=None, test_data=None):
         if train_data:
@@ -466,11 +474,11 @@ class XlModel(paddle.Model):
             use_visualdl = True
 
         if use_visualdl:
-            p = self.save_dir or XlPath('.')
+            p = self.save_dir or Path('.')
             if not isinstance(use_visualdl, str):
                 num = max([int(re.search(r'\d+', x.stem).group())
-                           for x in p.glob_dirs()
-                           if re.match(r'e\d+_', x.stem)], default=0) + 1
+                           for x in p.iterdir()
+                           if x.is_dir() and re.match(r'e\d+_', x.stem)], default=0) + 1
                 use_visualdl = f'e{num:04}'
             self.callbacks.append(VisualAcc(p / 'visualdl', use_visualdl))
 
@@ -591,10 +599,10 @@ class ImageClasPredictor:
         注：使用这个接口初始化，在目录里必须要有个class_names.txt文件来确定类别数
             否则请用更底层的from_dynamic、from_static精细配置
         """
-        root = XlPath(root)
+        root = Path(root)
         class_names_file = root / 'class_names.txt'
         assert class_names_file.is_file(), f'{class_names_file} 必须要有类别昵称配置文件，才知道类别数'
-        class_names = class_names_file.read_text().splitlines()
+        class_names = class_names_file.read_text(encoding='utf-8', errors='ignore').splitlines()
 
         if dynamic_net:
             clas = ImageClasPredictor.from_dynamic(dynamic_net(num_classes=len(class_names)),

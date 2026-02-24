@@ -13,12 +13,12 @@
 # limitations under the License.
 
 import os
+from pathlib import Path
 
 __dirname__ = os.path.dirname(__file__)
 
 
 def get_dict_content(name):
     """ 获得该目录下的字典文件文本内容 """
-    from pyxllib.file.specialist import XlPath
-    p = XlPath(__dirname__) / name
-    return p.read_text()
+    p = Path(__dirname__) / name
+    return p.read_text(encoding='utf-8', errors='ignore')

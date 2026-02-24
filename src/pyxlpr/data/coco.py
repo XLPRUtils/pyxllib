@@ -42,7 +42,7 @@ from pyxllib.prog.specialist import mtqdm
 from pyxllib.algo.pupil import Groups, make_index_function, matchpairs
 from pyxllib.algo.geo import rect_bounds, rect2polygon, reshape_coords, ltrb2xywh, xywh2ltrb, ComputeIou
 from pyxllib.algo.stat import write_dataframes_to_excel
-from pyxllib.file.specialist import PathGroups, XlPath
+from pyxllib.file.specialist import PathGroups
 from pyxllib.prog.specialist import get_xllog
 from pyxlpr.data.icdar import IcdarEval
 from pyxlpr.data.labelme import LABEL_COLORMAP7, ToLabelmeJson, LabelmeDataset, LabelmeDict
@@ -58,7 +58,11 @@ class CocoGtData:
     """
 
     def __init__(self, gt):
-        self.gt_dict = gt if isinstance(gt, dict) else XlPath(gt).read_json()
+        if isinstance(gt, dict):
+            self.gt_dict = gt
+        else:
+            p = pathlib.Path(gt)
+            self.gt_dict = json.loads(p.read_text(encoding='utf-8', errors='ignore'))
 
     @classmethod
     def gen_image(cls, image_id, file_name, height=None, width=None, **kwargs):
@@ -83,12 +87,13 @@ class CocoGtData:
         :param start_idx: 图片起始下标
         :return: list[dict(id, file_name, width, height)]
         """
-        # files = Dir(imdir).select_files(['*.jpg', '*.png'])
-        files = XlPath(imdir).rglob_images()
+        imdir = pathlib.Path(imdir)
+        img_exts = {'.jpg', '.jpeg', '.png', '.bmp', '.tif', '.tiff', '.webp'}
+        files = [p for p in imdir.rglob('*') if p.is_file() and p.suffix.lower() in img_exts]
         images = []
         for i, f in enumerate(files, start=start_idx):
             w, h = PIL.Image.open(str(f)).size
-            images.append({'id': i, 'file_name': f.relpath(imdir).as_posix(),
+            images.append({'id': i, 'file_name': f.relative_to(imdir).as_posix(),
                            'width': w, 'height': h})
         return images
 
@@ -155,7 +160,7 @@ class CocoGtData:
         :param start_box_id: box_id起始编号
         :param category_id: 归属类别
         """
-        lines = XlPath(file).read_text()
+        lines = pathlib.Path(file).read_text(encoding='utf-8', errors='ignore')
         box_id = start_box_id
         annotations = []
         for line in lines.splitlines():
@@ -188,7 +193,9 @@ class CocoGtData:
     def gen_gt_dict(cls, images, annotations, categories, outfile=None):
         data = {'images': images, 'annotations': annotations, 'categories': categories}
         if outfile is not None:
-            XlPath(outfile).write_json(data)
+            p = pathlib.Path(outfile)
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding='utf-8', errors='ignore')
         return data
 
     @classmethod
@@ -323,7 +330,7 @@ class CocoGtData:
         :return:
             extdata，存储了一些匹配异常信息
         """
-        root, data = XlPath(root), {}
+        root, data = pathlib.Path(root), {}
         catid2name = {x['id']: x['name'] for x in self.gt_dict['categories']}
 
         # 0 工具函数
@@ -334,14 +341,25 @@ class CocoGtData:
                 return seg_color
 
         # 1 准备工作，构建文件名索引字典
-        gs = PathGroups.groupby([x for x in root.rglob_files()])
+        all_files = [p for p in root.rglob('*') if p.is_file()]
+        all_files_posix = [(p, p.as_posix()) for p in all_files]
+
+        def find_files(name):
+            stem, ext = os.path.splitext(str(name))
+            stem = '/' + stem.replace('\\', '/')
+            ext = ext.lower().lstrip('.')
+            res = []
+            for p, pposix in all_files_posix:
+                if pposix.endswith(stem) and p.suffix.lower().lstrip('.') == ext:
+                    res.append(p)
+            return res
 
         # 2 遍历生成labelme数据
         not_finds = set()  # coco里有的图片，root里没有找到
         multimatch = dict()  # coco里的某张图片，在root找到多个匹配文件
         for img, anns in tqdm(self.group_gt(reserve_empty=True), disable=not info):
             # 2.1 文件匹配
-            imfiles = gs.find_files(img['file_name'])
+            imfiles = find_files(img['file_name'])
             if not imfiles:  # 没有匹配图片的，不处理
                 not_finds.add(img['file_name'])
                 continue
@@ -352,7 +370,7 @@ class CocoGtData:
                 imfile = imfiles[0]
 
             # 2.2 数据内容转换
-            lmdict = LabelmeDict.gen_data(imfile)
+            lmdict = LabelmeDict.gen_data(str(imfile))
             img = DictTool.or_(img, {'xltype': 'image'})
             lmdict['shapes'].append(LabelmeDict.gen_shape(json.dumps(img, ensure_ascii=False), [[-10, 0], [-5, 0]]))
             for ann in anns:
@@ -380,8 +398,7 @@ class CocoGtData:
                             lmdict['shapes'].append(LabelmeDict.gen_shape(label, x))
 
             f = imfile.with_suffix('.json')
-
-            data[f.relpath(root)] = lmdict
+            data[f.relative_to(root).as_posix()] = lmdict
 
         return LabelmeDataset(root, data, extdata={'categories': self.gt_dict['categories'], 'not_finds': not_finds,
                                                    'multimatch': Groups(multimatch)})
@@ -458,7 +475,10 @@ class CocoData(CocoGtData):
             if not dt:
                 dt_list = default_dt
             else:
-                dt_list = dt if isinstance(dt, (list, tuple)) else XlPath(dt).read_json()
+                if isinstance(dt, (list, tuple)):
+                    dt_list = dt
+                else:
+                    dt_list = json.loads(pathlib.Path(dt).read_text(encoding='utf-8', errors='ignore'))
                 if min_score:
                     dt_list = [b for b in dt_list if (b['score'] >= min_score)]
                 if not dt_list:
@@ -961,7 +981,7 @@ class CocoParser(CocoEval):
         def func(g):
             # 1 获得图片id和文件
             image_id, df = g
-            imfile = XlPath(imdir) / df.iloc[0]['file_name']
+            imfile = pathlib.Path(imdir) / df.iloc[0]['file_name']
             if not imfile:
                 return  # 如果没有图片不处理
 
@@ -1288,7 +1308,7 @@ class CocoMatch(CocoParser, CocoMatchBase):
         def func(g):
             # 1 获得图片id和文件
             image_id, df = g
-            imfile = XlPath(imdir) / df.iloc[0]['file_name']
+            imfile = pathlib.Path(imdir) / df.iloc[0]['file_name']
             if not imfile:
                 return  # 如果没有图片不处理
             image = self.images.loc[image_id]

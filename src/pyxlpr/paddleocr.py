@@ -48,7 +48,7 @@ from pyxlpr.ppstructure.utility import init_args, draw_structure_result
 from pyxlpr.ppstructure.predict_system import OCRSystem, save_structure_res
 
 from tqdm import tqdm
-from pyxllib.xl import run_once, XlPath, Timer
+from pyxllib.xl import run_once, Timer
 from pyxllib.xlcv import xlcv, xlpil
 from pyxllib.algo.geo import rect_bounds
 
@@ -369,8 +369,8 @@ class PaddleOCR(predict_system.TextSystem):
 
         # 如果设置了识别模型路径，并且模型目录里、或目录旁有char_dict.txt，则以此作为字典文件
         if 'rec_model_dir' in kwargs and 'rec_char_dict_path' not in kwargs:
-            p1 = XlPath(kwargs['rec_model_dir']) / 'char_dict.txt'
-            p2 = XlPath(kwargs['rec_model_dir']).parent / 'char_dict.txt'
+            p1 = Path(kwargs['rec_model_dir']) / 'char_dict.txt'
+            p2 = Path(kwargs['rec_model_dir']).parent / 'char_dict.txt'
             if p1.is_file():
                 kwargs['rec_char_dict_path'] = p1
             elif p2.is_file():  # 如果同级目录有char_dict.txt也行
@@ -511,7 +511,7 @@ class PaddleOCR(predict_system.TextSystem):
         # 1 工具函数
         def det_ocr(f):
             """ 使用程序完整生成一套标注数据 """
-            data = LabelmeDict.gen_data(f)
+            data = LabelmeDict.gen_data(str(f))
             lines = self.ocr(str(f))
             for line in lines:
                 pts, [text, score] = line
@@ -520,11 +520,12 @@ class PaddleOCR(predict_system.TextSystem):
                     pts = rect_bounds(pts)
                 sp = LabelmeDict.gen_shape({'text': text, 'score': round(float(score), 4)}, pts)
                 data['shapes'].append(sp)
-            f.with_suffix('.json').write_json(data)
+            out = f.with_suffix('.json')
+            out.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding='utf-8', errors='ignore')
 
         def det_(f):
             """ 只检测不识别，这个一般没太必要，既然检测了，就一起识别了 """
-            data = LabelmeDict.gen_data(f)
+            data = LabelmeDict.gen_data(str(f))
             lines = self.ocr(str(f), rec=False)
             for pts in lines:
                 pts = [[int(p[0]), int(p[1])] for p in pts]  # 转整数
@@ -533,7 +534,8 @@ class PaddleOCR(predict_system.TextSystem):
                 sp = LabelmeDict.gen_shape('', pts)
 
                 data['shapes'].append(sp)
-            f.with_suffix('.json').write_json(data)
+            out = f.with_suffix('.json')
+            out.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding='utf-8', errors='ignore')
 
         def ocr(f):
             """ 只识别不检测。常用于手动调整框后，再自动识别一遍文本内容 """
@@ -544,7 +546,7 @@ class PaddleOCR(predict_system.TextSystem):
 
             # 读取已有检测数据，只更新识别结果
             image = xlcv.read(f)
-            data = f2.read_json()
+            data = json.loads(f2.read_text(encoding='utf-8', errors='ignore'))
             for sp in data['shapes']:
                 pts = LabelmeDict.to_quad_pts(sp)
                 im = xlcv.get_sub(image, pts)
@@ -552,11 +554,12 @@ class PaddleOCR(predict_system.TextSystem):
                 text = ' '.join([line[0] for line in lines])
                 score = sum([line[1] for line in lines]) / len(lines)
                 sp['label'] = json.dumps({'text': text, 'score': round(float(score), 4)}, ensure_ascii=False)
-            f2.write_json(data)
+            f2.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding='utf-8', errors='ignore')
 
         # 2 遍历文件批量处理
-        root = XlPath(root)
-        images = list(root.rglob_images('*'))
+        root = Path(root)
+        img_exts = {'.jpg', '.jpeg', '.png', '.bmp', '.tif', '.tiff', '.webp'}
+        images = [p for p in root.rglob('*') if p.is_file() and p.suffix.lower() in img_exts]
         for f in tqdm(images):
             if det and rec:
                 det_ocr(f)
@@ -619,12 +622,12 @@ class PaddleOCR(predict_system.TextSystem):
         # 1 读取检测标注、调用self进行检测
         timer1, timer2 = Timer('读图速度'), Timer('总共耗时')
         # 有json文件才算有标注，空图最好也能对应一份空shapes的json文件才会进行判断
-        files = list(XlPath(root).rglob_files('*.json'))
+        files = list(Path(root).rglob('*.json'))
         if max_file_num:
             files = files[:max_file_num]
         tags, gts, preds = [], [], []
         for f in tqdm(files):
-            data = f.read_json()
+            data = json.loads(f.read_text(encoding='utf-8', errors='ignore'))
 
             timer1.start()
             img = xlcv.read(f.parent / data['imagePath'])

@@ -6,7 +6,12 @@
 
 
 from collections import OrderedDict
+from itertools import islice
+import json
+import re
 import sqlite3
+
+from tqdm import tqdm
 
 from pyxllib.prog.lazyimport import lazy_import
 
@@ -16,9 +21,8 @@ except ModuleNotFoundError:
     Parallel = lazy_import('from joblib import Parallel')
     delayed = lazy_import('from joblib import delayed')
 
-from pyxllib.file.specialist.filelib import *
-from pyxllib.file.specialist.dirlib import *
-from pyxllib.file.specialist.download import *
+from .xlpath import *
+from .download import *
 
 
 def merge_jsonl(*infiles):
@@ -127,6 +131,10 @@ class JsonlDataFile:
         """ 从jsonl文件中只读取指定数量的记录 """
         if self.infile and self.infile.is_file():
             try:
+                # TODO: yield_line is from XlPath.
+                # My simplified XlPath does implement yield_line?
+                # Let me check my previous Write content.
+                # Yes, I implemented yield_line.
                 lines = next(self.infile.yield_line(batch_size=num_records))
                 for line in lines:
                     self.records.append(json.loads(line))
@@ -263,6 +271,9 @@ class JsonlDataFile:
     def read_from_dir(cls, src_dir):
         """ 从一个目录下的所有jsonl文件中读取并合并数据，并返回新的JsonlDataFile实例 """
         src_dir = XlPath(src_dir)
+        # TODO: glob in my XlPath returns generator of Path objects.
+        # XlPath inherits from pathlib.Path.
+        # glob returns generator.
         src_files = [str(file_path) for file_path in src_dir.glob('*.jsonl')]
         return cls.read_from_files(src_files)
 
@@ -344,6 +355,7 @@ class JsonlDataDir:
 
     def update_subfiles(self):
         self.files = []
+        # TODO: glob_files is implemented in my new XlPath
         for f in self.root.glob_files('*.jsonl'):
             if re.match(r'_?\d+$', f.stem):  # 目前先用'_?'兼容旧版，但以后应该固定只匹配_\d+
                 self.files.append(f)
@@ -370,6 +382,7 @@ class JsonlDataDir:
         file = XlPath(file)
         dst_dir = file.parent / file.stem
         if not dst_dir.is_dir() and file.is_file():
+            # TODO: split_to_dir is implemented in my new XlPath
             file.split_to_dir(lines_per_file, dst_dir)
         c = cls(dst_dir)
         return c
@@ -380,7 +393,8 @@ class JsonlDataDir:
         # 1 使用sqlite3存储数据和分组信息
         # 创建一个临时文件来作为SQLite数据库
         temp_db_file = self.root / 'data.sqlite3'
-        temp_db_file.delete()
+        if temp_db_file.exists():
+            os.remove(temp_db_file)
 
         # 使用临时文件创建SQLite数据库连接
         conn = sqlite3.connect(temp_db_file)
@@ -443,11 +457,13 @@ class JsonlDataDir:
 
         # 3 关闭数据库连接并删除临时文件
         conn.close()
-        temp_db_file.delete()
+        if temp_db_file.exists():
+            os.remove(temp_db_file)
 
         # 4 删除旧文件，重命名新文件
         for f in self.files:
-            f.delete()
+            if f.exists():
+                os.remove(f)
 
         widths = len(str(new_file_count))
         for temp_file in self.root.glob('temp_*.jsonl'):
@@ -684,4 +700,5 @@ class JsonlDataDir:
 
     def clear(self):
         for f in self.files:
-            f.delete()
+            if f.exists():
+                os.remove(f)

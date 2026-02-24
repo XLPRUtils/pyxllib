@@ -10,8 +10,9 @@
 """
 
 import re
+from pathlib import Path
 
-from pyxllib.xl import XlPath, Dir, shorten
+from pyxllib.text.pupil import shorten
 
 
 class IcdarEval:
@@ -60,18 +61,24 @@ class IcdarEval:
             # 如果是字典，信任其是按照官方格式来标注的
             # {'16000,1': b'566,227,673,261,0\n682,210,945,260,0', '16001,1': ...
             return label
-        elif isinstance(label, (str, XlPath)) and str(label)[-4:].lower() == '.zip':
+        elif isinstance(label, (str, Path)) and str(label)[-4:].lower() == '.zip':
             # 官方原版的 zip 文件初始化方法
             return label
-        elif Dir.safe_init(label):
-            # 输入是目录，则按照数字编号大小顺序依次读数数据
-            d = Dir(label)
-            res = dict()
-            for f in d.select_files('*.txt'):
-                k = re.search(r'\d+', f.stem).group()
-                res[k] = f.read(mode='b')
-            return res
         else:
+            # 输入是目录，则按照数字编号大小顺序依次读数数据
+            try:
+                d = Path(label)
+            except TypeError:
+                raise TypeError(shorten(label))
+            if d.is_dir():
+                res = dict()
+                for f in sorted(d.glob('*.txt')):
+                    m = re.search(r'\d+', f.stem)
+                    if not m:
+                        continue
+                    k = m.group()
+                    res[k] = f.read_bytes()
+                return res
             raise TypeError(shorten(label))
 
     def _eval(self, evaluate_method, default_evaluation_params, update_params):
