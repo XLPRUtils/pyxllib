@@ -2,27 +2,43 @@
 # -*- coding: utf-8 -*-
 # @Author : 陈坤泽
 # @Email  : 877362867@qq.com
-# @Date   : 2020/09/20
+# @Date   : 2021/06/06 11:00
 
-
+import datetime
 import time
 import timeit
 
-from pyxllib.prog.lazyimport import lazy_import
+from loguru import logger
 
-try:
-    from loguru import logger
-except ModuleNotFoundError:
-    logger = lazy_import('from loguru import logger')
+from pyxllib.algo.stat import ValuesStat
+from pyxllib.algo.sort import natural_sort
+from pyxllib.prog.fmt import human_readable_number
 
-try:
-    from humanfriendly import format_timespan
-except ModuleNotFoundError:
-    format_timespan = lazy_import('from humanfriendly import format_timespan')
 
-from pyxllib.algo.pupil import natural_sort, ValuesStat
-from pyxllib.text.pupil import shorten, listalign
-from pyxllib.prog.newbie import human_readable_number
+def utc_now(offset_hours=8, microseconds=0):
+    """ 有的机器可能本地时间设成了utc0，可以用这个方式，获得准确的utc8时间
+
+    :param microseconds: 微秒，如果不指定（None），就是当前时间的微秒
+    """
+    dt = datetime.datetime.utcnow()
+    dt += datetime.timedelta(hours=offset_hours)
+
+    if microseconds is not None:
+        dt = dt.replace(microsecond=microseconds)
+
+    return dt
+
+
+def utc_now2(offset_hours=8):
+    """ 转字符串格式 """
+    return utc_now().isoformat(' ', timespec='seconds')
+
+
+def utc_timestamp(offset_hours=8):
+    """ mysql等数据库支持的日期格式
+    """
+    return utc_now(offset_hours).isoformat(' ', timespec='seconds')
+
 
 __tictoc = """
 基于 pytictoc 代码，做了些自定义扩展
@@ -116,11 +132,6 @@ class TicToc:
             logger.info(f'{self.title} interrupt in {human_readable_number(elapsed, "秒")},')
 
 
-__timer = """
-
-"""
-
-
 class Timer:
     """分析性能用的计时器类，支持with语法调用
     必须显示地指明每一轮的start()和end()，否则会报错
@@ -212,6 +223,7 @@ def perftest(title, stmt="pass", repeat=1, number=1, globals=None, res_width=Non
     if res is None:
         res = ''
     else:
+        from pyxllib.text.pupil import shorten
         res = '运行结果：' + shorten(str(res), res_width)
     if print_:
         print(title, '用时(秒) ' + ValuesStat(data).summary(valfmt='.3f'), res)
@@ -242,6 +254,7 @@ class PerfTest:
                     funcnames.append(k)
 
         # 2 自然排序
+        from pyxllib.text.pupil import listalign
         funcnames = natural_sort(funcnames)
         funcnames2 = listalign([fn[5:] for fn in funcnames], 'r')
         for i, funcname in enumerate(funcnames):

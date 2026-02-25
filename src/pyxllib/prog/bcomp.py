@@ -2,19 +2,21 @@
 # -*- coding: utf-8 -*-
 # @Author : 陈坤泽
 # @Email  : 877362867@qq.com
-# @Date   : 2020/06/01 18:13
+# @Date   : 2021/06/06 11:00
 
 import copy
 import json
 import os
+import shutil
 import tempfile
 from pathlib import Path
 from typing import Optional
 
-from pyxllib.prog.pupil import dprint, prettifystr
+from pyxllib.algo.struct import intersection_split
+from pyxllib.file.xlpath import get_encoding
 from pyxllib.prog.browser import Explorer
-from pyxllib.algo.pupil import intersection_split
-from pyxllib.file.specialist import get_encoding
+from pyxllib.prog.debug import dprint
+from pyxllib.prog.fmt import prettifystr
 
 
 # 需要使用的第三方软件
@@ -179,7 +181,6 @@ def modify_file(file, func, *, outfile=None, file_mode=None, debug=0):
                 bcompare(str(infile), str(temp_file))
             elif debug == -1:
                 temp_file = _temp_file('origin_content', infile.suffix)
-                import shutil
                 shutil.copy2(str(infile), str(temp_file))
                 if file_mode and file_mode.lower().lstrip('.') == 'json':
                     infile.write_text(json.dumps(new_data, ensure_ascii=False, indent=2), encoding=enc, errors='ignore')
@@ -248,7 +249,7 @@ def filetext_replace(files, func, *,
     for p in Path('.').glob(files):
         if not p.is_file(): continue
         f = str(p)
-        
+
         if '.venv/' in f or '.venv\\' in f:
             continue
 

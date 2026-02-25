@@ -43,8 +43,18 @@ from pyxllib.prog.newbie import round_int
 from pyxllib.prog.pupil import dprint, run_once, inject_members
 from pyxllib.prog.browser import browser
 from pyxllib.algo.pupil import SearchBase
-from pyxllib.text.newbie import xldictstr
-from pyxllib.text.pupil import shorten, ensure_gbk, BookContents, strwidth, grp_chinese_char
+from pyxllib.text.format import xldictstr
+from pyxllib.text.format import strwidth, BookContents, east_asian_shorten as shorten
+from pyxllib.text.pattern import grp_chinese_char as _grp_chinese_char_str
+
+def grp_chinese_char():
+    return _grp_chinese_char_str
+
+def ensure_gbk(s, errors='ignore'):
+    try:
+        return s.encode('gbk', errors).decode('gbk')
+    except:
+        return s
 from pyxllib.file.specialist import get_etag
 from pyxllib.text.jinjalib import get_jinja_template
 

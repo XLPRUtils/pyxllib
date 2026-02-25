@@ -43,7 +43,7 @@ from pyxllib.algo.pupil import Groups, make_index_function, matchpairs
 from pyxllib.algo.geo import rect_bounds, rect2polygon, reshape_coords, ltrb2xywh, xywh2ltrb, ComputeIou
 from pyxllib.algo.stat import write_dataframes_to_excel
 from pyxllib.file.specialist import PathGroups
-from pyxllib.prog.specialist import get_xllog
+from loguru import logger
 from pyxlpr.data.icdar import IcdarEval
 from pyxlpr.data.labelme import LABEL_COLORMAP7, ToLabelmeJson, LabelmeDataset, LabelmeDict
 from xlcocotools.coco import COCO
@@ -1263,11 +1263,10 @@ class CocoMatch(CocoParser, CocoMatchBase):
     def eval_all(self, multi_iou_step=0.1):
         """ 把目前支持的所有coco格式的测评全部跑一遍
         """
-        xllog = get_xllog()
-        xllog.info('1 coco官方评测指标（综合性指标）')
+        logger.info('1 coco官方评测指标（综合性指标）')
         self.eval(print_mode=True)
 
-        xllog.info('2 icdar官方三种评测方法')
+        logger.info('2 icdar官方三种评测方法')
         ie = IcdarEval(*self.to_icdareval_data())
         print('icdar2013  ', ie.icdar2013())
         print('deteval    ', ie.deteval())
@@ -1281,12 +1280,12 @@ class CocoMatch(CocoParser, CocoMatchBase):
             print('iou        ', ie.iou())
         sys.stdout.flush()
 
-        xllog.info('3 框匹配情况，多分类F1值')
+        logger.info('3 框匹配情况，多分类F1值')
         # TODO 这个结果补充画个图表？
         print(f'gt共有{self.n_gt_box()}，dt共有{self.n_dt_box()}')
         print(self.multi_iou_f1_df(multi_iou_step))
 
-        xllog.info('4 dt按不同score过滤后效果')
+        logger.info('4 dt按不同score过滤后效果')
         with pd.option_context('display.max_colwidth', -1, 'display.max_columns', 20,
                                'display.width', 200):  # 上下文控制格式
             print(self.parse_dt_score())

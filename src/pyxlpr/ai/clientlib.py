@@ -28,7 +28,7 @@ from pyxllib.prog.pupil import is_url
 from pyxllib.prog.xlenv import XlEnv
 from pyxllib.algo.geo import xywh2ltrb, rect_bounds
 from pyxllib.file.specialist import get_etag
-from pyxllib.cv.expert import xlcv
+from pyxllib.cv.xlcvlib import xlcv
 
 
 def __1_转类labelme标注():

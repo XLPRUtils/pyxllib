@@ -68,16 +68,49 @@ except ModuleNotFoundError:
 
 from pyxllib.prog.newbie import first_nonnone, round_int
 from pyxllib.prog.pupil import xlwait, DictTool, run_once
-from pyxllib.prog.specialist import XlBaseModel, resolve_params
+from pyxllib.prog.specialist import XlBaseModel
 from pyxllib.prog.filelock import get_autogui_lock
 from pyxllib.algo.geo import ComputeIou, ltrb2xywh, xywh2ltrb
 from pyxllib.file.specialist import XlPath
-from pyxllib.cv.expert import xlcv, xlpil
+from pyxllib.cv.xlcvlib import xlcv
+from pyxllib.cv.xlpillib import xlpil
 from pyxlpr.data.labelme import LabelmeDict
 from pyxllib.autogui.uiautolib import uia, find_ctrl, UiCtrlNode
 from pyxllib.text.pstr import PStr
 
 from pyxlpr.ai.clientlib import XlAiClient
+
+
+def resolve_params(*models, mode="pass"):
+    """
+    Decorator to resolve Pydantic models from kwargs.
+    Mimics older pyxllib behavior or custom implementation for AnLib.
+    """
+    def decorator(func):
+        def wrapper(self, *args, **kwargs):
+            resolved_params = kwargs.copy()
+            for model_cls in models:
+                # Attempt to create model instance from kwargs
+                # XlBaseModel usually ignores extra fields by default
+                try:
+                    instance = model_cls(**kwargs)
+                except Exception:
+                    # Fallback if strict validation fails or other issues
+                    # Use construct to bypass validation if needed, or parse_obj
+                    # But parse_obj expects dict.
+                    # We can filter kwargs based on model fields if needed.
+                    valid_keys = model_cls.model_fields.keys()
+                    filtered = {k: v for k, v in kwargs.items() if k in valid_keys}
+                    instance = model_cls(**filtered)
+                
+                resolved_params[model_cls.__name__] = instance
+            
+            return func(self, *args, **resolved_params)
+        
+        wrapper.__name__ = func.__name__
+        wrapper.__doc__ = func.__doc__
+        return wrapper
+    return decorator
 
 
 @run_once()
@@ -116,8 +149,8 @@ class ImageTools:
         return max([abs(x - y) for x, y in zip(pixel1, pixel2)])
 
     @classmethod
-    @resolve_params(LocateParams, mode="pass")
-    def img_distance(cls, img1, img2, **resolved_params):
+    # @resolve_params(LocateParams, mode="pass")
+    def img_distance(cls, img1, img2, **kwargs):
         """计算两张图片的差异程度
 
         :param img1: 图片对象1 (PIL Image, numpy array, 或文件路径)
@@ -127,7 +160,12 @@ class ImageTools:
             color_tolerance: 判定像素是否不同的阈值
         :return: 差异度 (0.0 - 1.0)，0 表示完全相同，1 表示完全不同
         """
-        params: LocateParams = resolved_params["LocateParams"]
+        try:
+            params = LocateParams(**kwargs)
+        except Exception:
+            valid_fields = set(LocateParams.model_fields.keys())
+            filtered_kwargs = {k: v for k, v in kwargs.items() if k in valid_fields}
+            params = LocateParams(**filtered_kwargs)
 
         if isinstance(img1, (str, XlPath)):
             img1 = xlcv.read(img1)
@@ -155,19 +193,18 @@ class ImageTools:
         return cmp.sum() / cmp.size
 
     @classmethod
-    @resolve_params(LocateParams, mode="pass")
-    def base_find_img(cls, img, haystack=None, **resolved_params):
+    def base_find_img(cls, img, haystack=None, **kwargs):
         """在大图中查找目标小图的所有出现位置，并进行非极大值抑制(NMS)去重
 
         :param img: 目标子图 (Needle)
         :param haystack: 背景大图 (Haystack)，为 None 则默认为当前屏幕截图
-        :param resolved_params: LocateParams 参数
+        :param kwargs: LocateParams 参数
             grayscale: 是否灰度匹配
             confidence: 置信度阈值
             sort_by_confidence: 是否按匹配度排序
         :return: 匹配结果列表，格式为 list[[x, y, w, h]]，坐标为整数
         """
-        params: LocateParams = resolved_params["LocateParams"]
+        params = LocateParams(**kwargs)
 
         # 根据是否需要排序选择底层实现引擎
         if not params.sort_by_confidence:
@@ -693,11 +730,10 @@ class _AnShapePupil(_AnShapeBasic):
     def __2_基础操作(self):
         pass
 
-    @resolve_params(MouseParams, mode="pass")
-    def move_to(self, x_bias=None, y_bias=None, /, **resolved_params):
+    def move_to(self, x_bias=None, y_bias=None, **kwargs):
         """移动鼠标到该形状的中心位置
 
-        :param resolved_params: 包含 MouseParams
+        :param kwargs: 包含 MouseParams
             - x_bias, y_bias: 目标位置的固定修正
             - random_bias: 随机扰动范围
             - move_back: 移动过去后是否立刻移回原位 (类似"探一下"或悬停动作)
@@ -705,8 +741,9 @@ class _AnShapePupil(_AnShapeBasic):
         :return: 移动到的目标绝对坐标 [x, y]
         """
         # 1. 解析参数
-        params: MouseParams = self.resolve_model(resolved_params["MouseParams"])
-        params.update_valid(x_bias=x_bias, y_bias=y_bias)
+        params = self.resolve_model(MouseParams(**kwargs))
+        if x_bias is not None: params.x_bias = x_bias
+        if y_bias is not None: params.y_bias = y_bias
 
         # 2. 计算目标位置 (含固定偏移)
         point = self.get_abs_point(self["center"])
@@ -733,8 +770,7 @@ class _AnShapePupil(_AnShapeBasic):
 
         return point
 
-    @resolve_params(MouseParams, LocateParams, WaitParams, mode="pass")
-    def click(self, target=None, x_bias=None, y_bias=None, /, **resolved_params):
+    def click(self, target=None, x_bias=None, y_bias=None, **kwargs):
         """点击当前形状
 
         支持两种调用模式的智能点击：
@@ -746,7 +782,7 @@ class _AnShapePupil(_AnShapeBasic):
         2. LocateParams: 控制 wait_change 时的图像对比算法 (灰度、容差、置信度)。
         3. WaitParams: 控制 wait_change 时的超时时间 (timeout) 和检测频率 (interval)。
 
-        :param resolved_params: 包含 MouseParams, LocateParams, WaitParams
+        :param kwargs: 包含 MouseParams, LocateParams, WaitParams
         """
         # 1. 解析核心点击参数
         if isinstance(target, (int, float)):
@@ -756,15 +792,17 @@ class _AnShapePupil(_AnShapeBasic):
             x_bias = target  # 把原来的第1个参数给 x
             target = None  # 清空 target
 
-        params: MouseParams = self.resolve_model(resolved_params["MouseParams"])
-        params.update_valid(target=target, x_bias=x_bias, y_bias=y_bias)
+        params = self.resolve_model(MouseParams(**kwargs))
+        if target is not None: params.target = target
+        if x_bias is not None: params.x_bias = x_bias
+        if y_bias is not None: params.y_bias = y_bias
 
         # 2. 代理模式分支
         if params.target is not None:
             # 如果指定了 target，转交控制权给子元素
             # 注意：这里我们要把修正后的 bias 传下去
             # 并且我们要透传 resolved_params (里面包含了 WaitParams 等其他配置)
-            return self[params.target].click(x_bias=params.x_bias, y_bias=params.y_bias, **resolved_params)
+            return self[params.target].click(x_bias=params.x_bias, y_bias=params.y_bias, **kwargs)
 
         # 3. 计算点击坐标
         point = self.get_abs_point(self["center"])
@@ -796,13 +834,13 @@ class _AnShapePupil(_AnShapeBasic):
         # 5. 后置处理：等待画面变化
         if params.wait_change and before_click_shot is not None:
             # 解析辅助参数
-            locate_params: LocateParams = self.resolve_model(resolved_params["LocateParams"])
-            wait_params: WaitParams = self.resolve_model(resolved_params["WaitParams"])
+            locate_params = self.resolve_model(LocateParams(**kwargs))
+            wait_params = self.resolve_model(WaitParams(**kwargs))
 
             def check_changed():
                 # 计算点击前后的差异度
                 # ImageTools.img_distance 会从 resolved_params 中提取 LocateParams
-                diff = ImageTools.img_distance(before_click_shot, self.shot(), **resolved_params)
+                diff = ImageTools.img_distance(before_click_shot, self.shot(), **kwargs)
 
                 # 判定逻辑：差异度 > (1 - 相似度阈值)
                 # 例如 confidence=0.95，则 diff > 0.05 视为已变化

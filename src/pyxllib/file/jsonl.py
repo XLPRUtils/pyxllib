@@ -4,16 +4,19 @@
 # @Email  : 877362867@qq.com
 # @Date   : 2021/06/06 17:46
 
-
-from collections import OrderedDict
-from itertools import islice
 import json
+import os
 import re
 import sqlite3
-
-from tqdm import tqdm
+from collections import OrderedDict
+from itertools import islice
 
 from pyxllib.prog.lazyimport import lazy_import
+
+try:
+    from tqdm import tqdm
+except ModuleNotFoundError:
+    tqdm = lazy_import('from tqdm import tqdm')
 
 try:
     from joblib import Parallel, delayed
@@ -21,8 +24,7 @@ except ModuleNotFoundError:
     Parallel = lazy_import('from joblib import Parallel')
     delayed = lazy_import('from joblib import delayed')
 
-from .xlpath import *
-from .download import *
+from pyxllib.file.xlpath import XlPath
 
 
 def merge_jsonl(*infiles):
@@ -131,10 +133,7 @@ class JsonlDataFile:
         """ 从jsonl文件中只读取指定数量的记录 """
         if self.infile and self.infile.is_file():
             try:
-                # TODO: yield_line is from XlPath.
-                # My simplified XlPath does implement yield_line?
-                # Let me check my previous Write content.
-                # Yes, I implemented yield_line.
+                # yield_line is from XlPath.
                 lines = next(self.infile.yield_line(batch_size=num_records))
                 for line in lines:
                     self.records.append(json.loads(line))
@@ -271,9 +270,6 @@ class JsonlDataFile:
     def read_from_dir(cls, src_dir):
         """ 从一个目录下的所有jsonl文件中读取并合并数据，并返回新的JsonlDataFile实例 """
         src_dir = XlPath(src_dir)
-        # TODO: glob in my XlPath returns generator of Path objects.
-        # XlPath inherits from pathlib.Path.
-        # glob returns generator.
         src_files = [str(file_path) for file_path in src_dir.glob('*.jsonl')]
         return cls.read_from_files(src_files)
 
@@ -355,7 +351,6 @@ class JsonlDataDir:
 
     def update_subfiles(self):
         self.files = []
-        # TODO: glob_files is implemented in my new XlPath
         for f in self.root.glob_files('*.jsonl'):
             if re.match(r'_?\d+$', f.stem):  # 目前先用'_?'兼容旧版，但以后应该固定只匹配_\d+
                 self.files.append(f)
@@ -382,7 +377,6 @@ class JsonlDataDir:
         file = XlPath(file)
         dst_dir = file.parent / file.stem
         if not dst_dir.is_dir() and file.is_file():
-            # TODO: split_to_dir is implemented in my new XlPath
             file.split_to_dir(lines_per_file, dst_dir)
         c = cls(dst_dir)
         return c

@@ -12,6 +12,7 @@ from pyxllib.xlcv import *
 from functools import reduce
 from pathlib import Path
 
+from loguru import logger
 from shapely.geometry import MultiPolygon
 
 from pyxllib.algo.geo import split_vector_interval
@@ -280,7 +281,7 @@ class TextlineAnnotation(TextlineShape):
                     # imwrite(subim, 'subim.jpg')
                     # print(x, y, w, h)
                     # 要检查出现这些情况的所有数据：labels的少于spans
-                    get_xllog().warning(DPrint.format({'$异常': 'len(labels)<len(spans)',
+                    logger.warning(DPrint.format({'$异常': 'len(labels)<len(spans)',
                                                        'labels': labels, 'spans': spans}))
                     # 这种情况先保留原始框
                     new_annos.append(anno)

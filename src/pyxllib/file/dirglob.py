@@ -7,62 +7,7 @@
 import os
 import re
 import shutil
-import struct
-
-
-def struct_unpack(f, fmt):
-    r""" 类似np.fromfile的功能，读取并解析二进制数据
-
-    :param f:
-        如果带有read方法，则用read方法读取指定字节数
-        如果bytes对象则直接处理
-    :param fmt: 格式
-        默认按小端解析(2, 1, 0, 0) -> 258，如果需要大端，可以加前缀'>'
-        字节：c=char, b=signed char, B=unsigned char, ?=bool
-        2字节整数：h=short, H=unsigned short（后文同理，大写只是变成unsigned模式，不在累述）
-        4字节整数：i, I, l, L
-        8字节整数：q, Q
-        浮点数：e=2字节，f=4字节，d=8字节
-
-    >>> b = struct.pack('B', 127)
-    >>> b
-    b'\x7f'
-    >>> struct_unpack(b, 'c')
-    b'\x7f'
-    >>> struct_unpack(b, 'B')
-    127
-
-    >>> b = struct.pack('I', 258)
-    >>> b
-    b'\x02\x01\x00\x00'
-    >>> struct_unpack(b, 'I')  # 默认都是按小端打包、解析
-    258
-    >>> struct_unpack(b, '>I') # 错误示范，按大端解析的值
-    33619968
-    >>> struct_unpack(b, 'H'*2)  # 解析两个值，fmt*2即可
-    (258, 0)
-
-    >>> f = io.BytesIO(b'\x02\x01\x03\x04')
-    >>> struct_unpack(f, 'B'*3)  # 取前3个值，等价于np.fromfile(f, dtype='uint8', count=3)
-    (2, 1, 3)
-    >>> struct_unpack(f, 'B')  # 取出第4个值
-    4
-    """
-    # 1 取数据
-    size_ = struct.calcsize(fmt)
-    if hasattr(f, 'read'):
-        data = f.read(size_)
-        if len(data) < size_:
-            raise ValueError(f'剩余数据长度 {len(data)} 小于 fmt 需要的长度 {size_}')
-    else:  # 对于bytes等矩阵，可以多输入，但是只解析前面一部分
-        data = f[:size_]
-
-    # 2 解析
-    res = struct.unpack(fmt, data)
-    if len(res) == 1:  # 解析结果恰好只有一个的时候，返回值本身
-        return res[0]
-    else:
-        return res
+from pyxllib.file.xlpath import XlPath
 
 
 def recreate_folders(*dsts):
@@ -91,12 +36,6 @@ def checkpathfile(name):
     return None
 
 
-def filename_tail(fn, tail):
-    """在文件名末尾和扩展名前面加上一个tail"""
-    names = os.path.splitext(fn)
-    return names[0] + tail + names[1]
-
-
 def hasext(f, *exts):
     """判断文件f是否是exts扩展名中的一种，如果不是返回False，否则返回对应的值
 
@@ -118,16 +57,6 @@ def isdir(fn):
         return False
     except TypeError:  # 输入不是字符串类型
         return False
-
-
-__mygetfiles = """
-py有os.walk可以递归遍历得到一个目录下的所有文件
-但是“我们”常常要过滤掉备份文件（171020-153959），Old、temp目、.git等目录
-特别是windows还有一个很坑爹的$RECYCLE.BIN目录。
-所以在os.walk的基础上，再做了封装得到myoswalk。
-
-然后在myoswalk基础上，实现mygetfiles。
-"""
 
 
 def gen_file_filter(s):
@@ -173,13 +102,33 @@ def tex_conf_filefilter(f):
         return False
 
 
-def change_ext(filename, ext):
-    """更改文件名后缀
-    返回第1个参数是新的文件名，第2个参数是这个文件是否存在
+def reduce_dir_depth(srcdir, unwrap=999):
+    """ 精简冗余嵌套的目录
 
-    输入的fileName可以没有扩展名，如'A/B/C/a'，仍然可以找对应的扩展名为ext的文件
-    输入的ext不要含有'.'，例如正确格式是输入'tex'、'txt'
+    比如a目录下只有一个文件：a/b/1.txt，
+    那么可以精简为a/1.txt，不需要多嵌套一个b目录
+
+    :param srcdir: 要处理的目录
+    :param unwrap: 打算解开的层数，未设置则会尽可能多解开
     """
-    name = os.path.splitext(filename)[0]  # 'A/B/C/a.txt' --> 'A/B/C/a'
-    newname = name + '.' + ext
-    return newname, os.path.exists(newname)
+    import tempfile
+    root = p = XlPath(srcdir)
+    depth = 0
+
+    ps = list(p.glob('*'))
+    while len(ps) == 1 and ps[0].is_dir() and depth < unwrap:
+        depth += 1
+        p = ps[0]
+        ps = list(p.glob('*'))
+
+    if depth:
+        # 注意这里技巧，为了避免多层目录里会有相对同名的目录，导致出现不可预料的bug
+        # 算法原理是把要搬家的那层目录里的文件先移到临时文件，然后把原目录树结构删除后，再报临时文件的文件移回来
+        tmpdir = tempfile.mktemp()
+        shutil.move(str(p), str(tmpdir))
+        if depth > 1:
+            shutil.rmtree(next(root.glob('*')))
+
+        for pp in XlPath(tmpdir).glob('*'):
+            shutil.move(str(pp), str(root))
+        shutil.rmtree(tmpdir)

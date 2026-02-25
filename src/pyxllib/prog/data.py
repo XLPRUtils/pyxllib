@@ -2,12 +2,15 @@
 # -*- coding: utf-8 -*-
 # @Author : 陈坤泽
 # @Email  : 877362867@qq.com
-# @Date   : 2020/06/02 11:09
+# @Date   : 2021/06/06 11:00
 
-from collections import defaultdict, Counter
 import copy
+import json
+import random
 import re
 import sys
+from collections import defaultdict, Counter
+from typing import Dict, Any, Type, TypeVar, Union
 
 from pyxllib.prog.lazyimport import lazy_import
 
@@ -21,9 +24,143 @@ try:
 except ModuleNotFoundError:
     unique_everseen = lazy_import('from more_itertools import unique_everseen')
 
-from pyxllib.prog.newbie import typename
-from pyxllib.algo.pupil import natural_sort_key
-from pyxllib.text.pupil import shorten, east_asian_shorten
+try:
+    from pydantic import BaseModel, ValidationError
+except ModuleNotFoundError:
+    BaseModel = lazy_import('from pydantic import BaseModel')
+
+from pyxllib.prog.basic import typename
+from pyxllib.algo.sort import natural_sort_key
+from pyxllib.text.base import shorten
+from pyxllib.text.format import east_asian_shorten
+
+
+def convert_to_json_compatible(d, custom_converter=None):
+    """ 递归地将字典等类型转换为JSON兼容格式。对于非标准JSON类型，使用自定义转换器或默认转换为字符串。
+
+    :param d: 要转换的字典或列表。
+    :param custom_converter: 自定义转换函数，用于处理非标准JSON类型的值。
+    :return: 转换后的字典或列表。
+
+    todo 这个函数想法是好的，但总感觉精确性中，总容易有些问题的，需要更多的考察测试
+    """
+    if custom_converter is None:
+        custom_converter = str
+
+    if isinstance(d, dict):  # defaultdict呢？
+        return {k: convert_to_json_compatible(v, custom_converter) for k, v in d.items()}
+    elif isinstance(d, list):
+        return [convert_to_json_compatible(v, custom_converter) for v in d]
+    elif isinstance(d, (int, float, str, bool)) or d is None:
+        return d
+    else:
+        return custom_converter(d)
+
+
+class DictTool:
+    @classmethod
+    def json_loads(cls, label, default=None):
+        """ 尝试从一段字符串解析为字典
+
+        :param default: 如果不是字典时的处理策略
+            None，不作任何处理
+            str，将原label作为defualt这个键的值来存储
+        :return: s为非字典结构时返回空字典
+
+        >>> DictTool.json_loads('123', 'text')
+        {'text': '123'}
+        >>> DictTool.json_loads('[123, 456]', 'text')
+        {'text': '[123, 456]'}
+        >>> DictTool.json_loads('{"a": 123}', 'text')
+        {'a': 123}
+        """
+        labelattr = dict()
+        try:
+            data = json.loads(label)
+            if isinstance(data, dict):
+                labelattr = data
+        except json.decoder.JSONDecodeError:
+            pass
+        if not labelattr and isinstance(default, str):
+            labelattr[default] = label
+        return labelattr
+
+    @classmethod
+    def or_(cls, *args):
+        """ 合并到新字典
+
+        左边字典有的key，优先取左边，右边不会覆盖。
+        如果要覆盖效果，直接用 d1.update(d2)功能即可。
+
+        :return: args[0] | args[1] | ... | args[-1].
+        """
+        res = {}
+        cls.ior(res, *args)
+        return res
+
+    @classmethod
+    def ior(cls, dict_, *args):
+        """ 合并到第1个字典
+
+        :return: dict_ |= (args[0] | args[1] | ... | args[-1]).
+
+        220601周三15:45，默认已有对应key的话，值是不覆盖的，如果要覆盖，直接用update就行了，不需要这个接口
+            所以把3.9的|=功能关掉
+        """
+        # if sys.version_info.major == 3 and sys.version_info.minor >= 9:
+        #     for x in args:
+        #         dict_ |= x
+        # else:  # 旧版本py手动实现一个兼容功能
+        for x in args:
+            for k, v in x.items():
+                # 220729周五21:21，又切换成dict_有的不做替换
+                if k not in dict_:
+                    dict_[k] = v
+                # dict_[k] = v
+
+    @classmethod
+    def sub(cls, dict_, keys):
+        """ 删除指定键值（不存在的跳过，不报错）
+
+        inplace subtraction
+
+        :param keys: 可以输入另一个字典，也可以输入一个列表表示要删除的键值清单
+
+        :return: dict2 = dict_ - keys
+        """
+        if isinstance(keys, dict):
+            keys = keys.keys()
+
+        return {k: v for k, v in dict_.items() if k not in keys}
+
+    @classmethod
+    def isub(cls, dict_, keys):
+        """ 删除指定键值（不存在的跳过，不报错）
+
+        inplace subtraction
+
+        keys可以输入另一个字典，也可以输入一个列表表示要删除的键值清单
+
+        效果相当于 dict_ -= keys
+        """
+        if isinstance(keys, dict):
+            keys = keys.keys()
+
+        for k in keys:
+            if k in dict_:
+                del dict_[k]
+
+
+def shuffle_dict_keys(d):
+    keys = list(d.keys())
+    random.shuffle(keys)
+    d = {k: d[k] for k in keys}
+    return d
+
+
+def is_valid_identifier(name):
+    """ 判断是否是合法的标识符 """
+    return re.match(r'^[a-zA-Z_][a-zA-Z0-9_]*$', name)
 
 
 def dataframe_str(df, *args, ambiguous_as_wide=None, shorten=True):
@@ -60,6 +197,19 @@ def dataframe_str(df, *args, ambiguous_as_wide=None, shorten=True):
                 df = df.applymap(lambda x: east_asian_shorten(str(x), pd.options.display.max_colwidth))
         s = str(df)
     return s
+
+
+def to_list(d, nsort=False):
+    if isinstance(d, dict):
+        items = list(d.items())
+        if nsort:
+            items.sort(key=lambda x: natural_sort_key(str(x[0])))
+        return items
+    return list(d)
+
+
+def to_df(d):
+    return pd.DataFrame(d)
 
 
 class TypeConvert:
@@ -342,3 +492,62 @@ class JsonStructParser:
 
         df = pd.DataFrame.from_records(ls, columns=columns)
         return df
+
+
+class BitMaskTool:
+    """ 位掩码工具 """
+
+    def __init__(self, names):
+        self.names = names
+        self.name2mask = {name: 1 << i for i, name in enumerate(names)}
+
+    def to_mask(self, names):
+        """ 将名称列表转换为掩码 """
+        mask = 0
+        for name in names:
+            mask |= self.name2mask[name]
+        return mask
+
+    def to_names(self, mask):
+        """ 将掩码转换为名称列表 """
+        names = []
+        for i, name in enumerate(self.names):
+            if mask & (1 << i):
+                names.append(name)
+        return names
+
+
+class XlBaseModel(BaseModel):
+    """
+    1. 提供一个dict函数，可以将对象转换为dict
+    """
+
+    def dict(self, **kwargs):
+        return self.model_dump(**kwargs)
+
+    @classmethod
+    def parse_obj(cls, obj):
+        return cls.model_validate(obj)
+
+
+T = TypeVar("T", bound=BaseModel)
+
+
+def resolve_params(params: Union[Dict[str, Any], T], model_cls: Type[T]) -> T:
+    """
+    解析参数并返回指定的 Pydantic 模型实例。
+
+    :param params: 输入参数，可以是字典或 Pydantic 模型实例。
+    :param model_cls: 目标 Pydantic 模型类。
+    :return: 目标 Pydantic 模型实例。
+    :raises TypeError: 如果输入参数类型不匹配。
+    :raises ValidationError: 如果参数校验失败。
+    """
+    if isinstance(params, dict):
+        # 如果是字典，直接用 parse_obj 解析
+        return model_cls.model_validate(params)
+    elif isinstance(params, model_cls):
+        # 如果已经是目标类型的实例，直接返回
+        return params
+    else:
+        raise TypeError(f"Expected dict or {model_cls.__name__}, got {type(params).__name__}")

@@ -14,13 +14,14 @@ from collections import Counter
 from pathlib import Path
 
 import numpy as np
+from loguru import logger
 
 from pyxllib.prog.newbie import round_int
 from pyxllib.prog.pupil import DictTool
-from pyxllib.prog.specialist import get_xllog, Iterate
+from pyxllib.prog.iter import Iterate
 from pyxllib.file.specialist import get_encoding
-from pyxllib.prog.specialist import mtqdm
-from pyxllib.cv.expert import xlpil
+from pyxllib.prog.iter import mtqdm
+from pyxllib.cv.xlpillib import xlpil
 from pyxllib.algo.geo import ltrb2xywh, rect_bounds, warp_points, resort_quad_points, rect2polygon, get_warp_mat
 
 
@@ -358,7 +359,7 @@ class ToLabelmeJson:
         try:
             obj = cls(imgpath)
         except TypeError as e:  # 解析不了的输出错误日志
-            get_xllog().exception(e)
+            logger.exception(e)
             return
         obj.get_data(annotation)
         obj.write()  # 保存json文件到img对应目录下

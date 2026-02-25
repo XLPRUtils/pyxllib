@@ -533,13 +533,20 @@ class SubprocessTaskParams(PopenParams):
 class SubprocessTask:
     """ subprocess类型的task任务，后续可能跟apscheduler结合使用 """
 
-    @resolve_params(SubprocessTaskParams, mode='pass')
-    def __init__(self, args='', /, **resolved_params):
+    # @resolve_params(SubprocessTaskParams, mode='pass')
+    def __init__(self, args='', /, **kwargs):
         # aps4.0.0a6使用仿函数机制的话还有些瑕疵不兼容，必须要配置这个值，不然会运行不了
         # 而且这个也算是唯一标识，必须不同实例值不同，才能确保aps4不会判别为同一task
         self.__qualname__ = str(id(self))
 
-        params: SubprocessTaskParams = resolved_params['SubprocessTaskParams']
+        # 手动解析参数
+        try:
+            params = SubprocessTaskParams(**kwargs)
+        except Exception:
+            # 过滤掉不属于 SubprocessTaskParams 的参数
+            valid_fields = set(SubprocessTaskParams.model_fields.keys())
+            filtered_kwargs = {k: v for k, v in kwargs.items() if k in valid_fields}
+            params = SubprocessTaskParams(**filtered_kwargs)
 
         # 执行程序需要使用的参数
         self.args = args or params.args
@@ -685,9 +692,9 @@ class SubprocessTask:
 
 class XlServerSubprocessTask(SubprocessTask):
 
-    @resolve_params(SubprocessTaskParams, mode='pass')
-    def __init__(self, args='', /, port=None, locations=None, **resolve_params):
-        super().__init__(args, resolve_params['SubprocessTaskParams'])
+    # @resolve_params(SubprocessTaskParams, mode='pass')
+    def __init__(self, args='', /, port=None, locations=None, **kwargs):
+        super().__init__(args, **kwargs)
 
         # 我用nginx需要额外补充的两个属性值
         self.port = None
@@ -717,8 +724,8 @@ class XlServerSubprocessTask(SubprocessTask):
             self.set_arg('--port', port)
 
     @classmethod
-    @resolve_params(SubprocessTaskParams, mode='pass')
-    def create_from_ports(cls, args='', /, ports=None, locations=None, **resolve_params):
+    # @resolve_params(SubprocessTaskParams, mode='pass')
+    def create_from_ports(cls, args='', /, ports=None, locations=None, **kwargs):
         """
         :param ports:
             list[int]，指定配置若干端口的程序
@@ -733,7 +740,7 @@ class XlServerSubprocessTask(SubprocessTask):
         # 2 遍历端口，依次启动进程
         tasks = []
         for port in ports:
-            task = cls(args, resolve_params['SubprocessTaskParams'], port=port, locations=locations)
+            task = cls(args, port=port, locations=locations, **kwargs)
             if port:
                 task.name = task.name or ''
                 task.name = f'{task.name}:{port}'
@@ -825,39 +832,33 @@ class XlScheduler(GetAttr):
         else:
             raise ValueError(f'不支持的触发器类型 {type(trigger)}')
 
-    @resolve_params(SubprocessTaskParams, mode='pass')
-    def add_cmd(self, args: str | list = '', trigger=None, /, ports=None, locations=None, **resolve_params):
+    # @resolve_params(SubprocessTaskParams, mode='pass')
+    def add_cmd(self, args: str | list = '', trigger=None, /, ports=None, locations=None, **kwargs):
         """ 添加subprocess.Popen类型的任务
         :param ports: 数量取决于ports的配置
         """
         # 虽然从通用角度来说，如果没使用ports参数，这里使用SubprocessTask任务类型也是可以的
         #   但XlServerSubprocessTask其实也兼容SubprocessTask的所有功能，问题不大
-        tasks = XlServerSubprocessTask.create_from_ports(args, resolve_params['SubprocessTaskParams'],
-                                                         ports=ports, locations=locations)
-        del resolve_params['SubprocessTaskParams']
+        tasks = XlServerSubprocessTask.create_from_ports(args, ports=ports, locations=locations, **kwargs)
         for task in tasks:
-            self.add_schedule(task, trigger, **resolve_params)
+            self.add_schedule(task, trigger, **kwargs)
         return tasks
 
-    @resolve_params(SubprocessTaskParams, mode='pass')
-    def add_py(self, args: str | list = '', trigger=None, /, ports=None, locations=None, **resolve_params):
+    # @resolve_params(SubprocessTaskParams, mode='pass')
+    def add_py(self, args: str | list = '', trigger=None, /, ports=None, locations=None, **kwargs):
         if isinstance(args, str):
             args = f'{sys.executable} {args}'
         else:
             args = [sys.executable, *args]
-        params = resolve_params['SubprocessTaskParams']
-        del resolve_params['SubprocessTaskParams']
-        return self.add_cmd(args, trigger, params, ports=ports, locations=locations, **resolve_params)
+        return self.add_cmd(args, trigger, ports=ports, locations=locations, **kwargs)
 
-    @resolve_params(SubprocessTaskParams, mode='pass')
-    def add_module(self, args: str | list = '', trigger=None, /, ports=None, locations=None, **resolve_params):
+    # @resolve_params(SubprocessTaskParams, mode='pass')
+    def add_module(self, args: str | list = '', trigger=None, /, ports=None, locations=None, **kwargs):
         if isinstance(args, str):
             args = f'{sys.executable} -m {args}'
         else:
             args = [sys.executable, '-m', *args]
-        params = resolve_params['SubprocessTaskParams']
-        del resolve_params['SubprocessTaskParams']
-        return self.add_cmd(args, trigger, params, ports=ports, locations=locations, **resolve_params)
+        return self.add_cmd(args, trigger, ports=ports, locations=locations, **kwargs)
 
     def add_script_task(self,
                         script_content,

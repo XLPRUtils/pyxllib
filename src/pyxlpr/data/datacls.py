@@ -14,7 +14,8 @@ from pathlib import Path
 
 from pyxllib.algo.geo import xywh2ltrb
 from pyxllib.prog.pupil import dprint
-from pyxllib.prog.specialist import mtqdm, tqdm, TicToc
+from pyxllib.prog.time import TicToc
+from pyxllib.prog.iter import tqdm, mtqdm
 from pyxllib.text.pupil import ContentPartSpliter
 
 

@@ -26,8 +26,8 @@ try:
 except ModuleNotFoundError:
     pd = lazy_import('pandas')
 
-from pyxllib.prog.pupil import dprint, typename
-from pyxllib.file.specialist import XlPath
+from pyxllib.prog.basic import typename
+from pyxllib.file.xlpath import XlPath
 
 
 def treetable(childreds, parents, arg3=None, nodename_colname=None):
@@ -96,7 +96,6 @@ def treetable(childreds, parents, arg3=None, nodename_colname=None):
 
     # 3 dfs
     cnt = 1
-
     def dfs(node, d):
         """找node的所有子结点"""
         nonlocal cnt
@@ -146,6 +145,7 @@ def treetable_flatten(df, *, reverse=False, childid_colname='id', parentid_colna
     parentid = dict()  # parentid[k] = v， 存储结点k对应的父结点v
     nodeval = dict()  # nodeval[k] = v，  存储结点k需要显示的数值情况
     if len(df[df.index.duplicated()]):
+        from pyxllib.prog.debug import dprint
         dprint(len(set(df.index)), len(df.index))  # 有重复index
         raise ValueError
 
@@ -496,5 +496,27 @@ def dataframe_to_list(df):
 
     # 将表头和数据行合并成最终的列表
     result_list = [headers] + data_rows
-
     return result_list
+
+
+class ValuesStat:
+    """ 简单的数值统计类 """
+    def __init__(self, data):
+        self.data = [x for x in data if x is not None]
+
+    def summary(self, valfmt='.3f'):
+        if not self.data:
+            return '(empty)'
+        
+        import statistics
+        try:
+            n = len(self.data)
+            min_v = min(self.data)
+            max_v = max(self.data)
+            mean_v = statistics.mean(self.data)
+            # median_v = statistics.median(self.data)
+            
+            # 格式化字符串
+            return f'n={n} min={min_v:{valfmt}} max={max_v:{valfmt}} mean={mean_v:{valfmt}}'
+        except Exception as e:
+            return f'(error: {e})'

@@ -7,6 +7,7 @@
 
 from pyxllib.xlcv import *
 
+from loguru import logger
 import torch
 from torch import nn, optim
 import torch.utils.data
@@ -168,7 +169,8 @@ class Trainer:
         # self.curlog_dir = self.log_dir / timetag  # 本轮运行，实际log位置，是存放在一个子目录里
         self.curlog_dir = self.log_dir
         self.curlog_dir.mkdir(parents=True, exist_ok=True)
-        self.log = get_xllog(log_file=str(self.curlog_dir / 'log.txt'))
+        logger.add(str(self.curlog_dir / 'log.txt'))
+        self.log = logger
         self.log.info(f'1/4 log_dir={self.curlog_dir}')
 
         # 2 设备
