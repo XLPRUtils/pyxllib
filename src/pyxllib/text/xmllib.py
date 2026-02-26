@@ -39,10 +39,11 @@ try:
 except ModuleNotFoundError:
     format_size = lazy_import('from humanfriendly import format_size')
 
-from pyxllib.prog.newbie import round_int
-from pyxllib.prog.pupil import dprint, run_once, inject_members
+from pyxllib.prog.fmt import round_int
+from pyxllib.prog.debug import dprint
+from pyxllib.prog.run import run_once, inject_members
 from pyxllib.prog.browser import browser
-from pyxllib.algo.pupil import SearchBase
+from pyxllib.algo.search import SearchBase
 from pyxllib.text.format import xldictstr
 from pyxllib.text.format import strwidth, BookContents, east_asian_shorten as shorten
 from pyxllib.text.pattern import grp_chinese_char as _grp_chinese_char_str
@@ -55,7 +56,7 @@ def ensure_gbk(s, errors='ignore'):
         return s.encode('gbk', errors).decode('gbk')
     except:
         return s
-from pyxllib.file.specialist import get_etag
+from pyxllib.file.xlpath import get_etag
 from pyxllib.text.jinjalib import get_jinja_template
 
 

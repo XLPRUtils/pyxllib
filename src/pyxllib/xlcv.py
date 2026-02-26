@@ -4,10 +4,11 @@
 # @Email  : 877362867@qq.com
 # @Date   : 2021/06/03 22:23
 
-from pyxllib.xl import *
+# from pyxllib.xl import *
 from pyxllib.algo.geo import *
 # from pyxllib.cv.pupil import *
-from pyxllib.cv.expert import *
+# from pyxllib.cv.expert import *
+from pyxllib.cv.xlcvlib import *
 from pyxllib.cv.xlpillib import *
 
 # 把自定义的一些功能嵌入到PIL.Image.Image类中。

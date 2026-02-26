@@ -20,8 +20,8 @@ from notion_client import Client as NotionClient
 import notion_client.errors
 from dotenv import load_dotenv
 
-from pyxllib.xl import *
-from pyxllib.file.specialist import cache_file
+# from pyxllib.xl import *
+from pyxllib.file.xlpath import cache_file
 from pyxllib.file.xlsxlib import *
 
 from pyxllib.xlcv import *

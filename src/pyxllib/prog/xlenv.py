@@ -28,7 +28,7 @@ try:
 except ModuleNotFoundError:
     deprecated = lazy_import('from deprecated import deprecated')
 
-from pyxllib.text.newbie import add_quote
+from pyxllib.text.base import add_quote
 
 
 class XlEnv:
@@ -137,7 +137,7 @@ class XlEnv:
 
 def get_xl_homedir(host=None):
     """ 获取用户工作目录 """
-    from pyxllib.file.specialist import XlPath
+    from pyxllib.file.xlpath import XlPath
     if os.getenv('XL_HOMEDIR'):  # 如果环境变量直接配置
         home = os.getenv('XL_HOMEDIR')
     else:  # 否则去检索表查找
@@ -278,7 +278,7 @@ def __xlhome系列():
 
 def xlhome_dir(dir, root=None):
     """ 创建、定位在home目录下的subdir目录 """
-    from pyxllib.file.specialist import XlPath
+    from pyxllib.file.xlpath import XlPath
     root = get_xl_homedir() if root is None else XlPath(root)
     d = root / dir
     d.mkdir(exist_ok=True, parents=True)
@@ -296,7 +296,7 @@ def xlhome_path(file, root=None):
     """ 定位在home目录下的file文件
     如果不存在，会自动创建文件所属的所有父目录
     """
-    from pyxllib.file.specialist import XlPath
+    from pyxllib.file.xlpath import XlPath
     root = get_xl_homedir() if root is None else XlPath(root)
     f = root / file
     f.parent.mkdir(exist_ok=True, parents=True)

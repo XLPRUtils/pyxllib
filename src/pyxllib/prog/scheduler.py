@@ -94,8 +94,8 @@ except ModuleNotFoundError:
     uvicorn = lazy_import('import uvicorn')
 
 from pyxllib.prog.xltime import XlTime
-from pyxllib.prog.specialist import XlBaseModel, resolve_params
-from pyxllib.file.specialist import XlPath
+from pyxllib.prog.data import XlBaseModel, resolve_params
+from pyxllib.file.xlpath import XlPath
 
 
 def __1_定时():

@@ -23,11 +23,11 @@ import cv2
 import numpy as np
 import requests
 
-from pyxllib.prog.newbie import round_int
-from pyxllib.prog.pupil import is_url
+from pyxllib.prog.fmt import round_int
+from pyxllib.prog.sys import is_url
 from pyxllib.prog.xlenv import XlEnv
 from pyxllib.algo.geo import xywh2ltrb, rect_bounds
-from pyxllib.file.specialist import get_etag
+from pyxllib.file.xlpath import get_etag
 from pyxllib.cv.xlcvlib import xlcv
 
 

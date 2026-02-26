@@ -6,7 +6,7 @@
 
 import textwrap
 
-from pyxllib.prog.newbie import typename
+from pyxllib.prog.basic import typename
 from pyxllib.text.format import listalign
 from pyxllib.text.convert import int2myalphaenum
 

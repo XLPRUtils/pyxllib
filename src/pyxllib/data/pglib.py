@@ -10,7 +10,7 @@
 
 import sys
 
-from pyxllib.file.specialist import XlPath
+from pyxllib.file.xlpath import XlPath
 
 import io
 from collections import Counter
@@ -33,11 +33,12 @@ try:
 except ModuleNotFoundError:
     psycopg = lazy_import('psycopg', 'psycopg[binary]')
 
-from pyxllib.prog.newbie import round_int, human_readable_number
-from pyxllib.prog.pupil import utc_now, utc_timestamp, is_valid_identifier
+from pyxllib.prog.fmt import round_int, human_readable_number
+from pyxllib.prog.time import utc_now, utc_timestamp
+from pyxllib.prog.data import is_valid_identifier
 from pyxllib.prog.xlenv import XlHosts
-from pyxllib.algo.pupil import ValuesStat2
-from pyxllib.file.specialist import get_etag, StreamJsonlWriter
+from pyxllib.algo.stat import ValuesStat2
+from pyxllib.file.xlpath import get_etag, StreamJsonlWriter
 from pyxllib.data.sqlite import SqlBase, SqlBuilder
 
 

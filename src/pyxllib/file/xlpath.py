@@ -235,7 +235,7 @@ def get_etag(arg):
 
     import io
     import requests
-    from pyxllib.prog.pupil import is_url, is_file
+    from pyxllib.prog.sys import is_url, is_file
 
     if isinstance(arg, bytes):  # 二进制数据
         return qiniu.utils.etag_stream(io.BytesIO(arg))

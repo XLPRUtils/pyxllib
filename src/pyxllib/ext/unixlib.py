@@ -58,9 +58,9 @@ try:
 except ModuleNotFoundError:
     scplib = lazy_import('scp')
 
-from pyxllib.prog.specialist import mtqdm
-from pyxllib.algo.pupil import natural_sort
-from pyxllib.file.specialist import XlPath
+from pyxllib.prog.iter import mtqdm
+from pyxllib.algo.sort import natural_sort
+from pyxllib.file.xlpath import XlPath
 from pyxllib.prog.xlenv import get_xl_hostname, XlHosts
 
 

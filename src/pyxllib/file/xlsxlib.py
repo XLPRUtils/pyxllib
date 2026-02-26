@@ -60,14 +60,16 @@ try:
 except ModuleNotFoundError:
     jsonpickle = lazy_import('jsonpickle')
 
-from pyxllib.prog.newbie import human_readable_number
-from pyxllib.prog.pupil import (inject_members, dprint, xlmd5, shuffle_dict_keys, Timeout,
-                                safe_div, format_exception, DictTool, run_once)
+from pyxllib.prog.fmt import human_readable_number
+from pyxllib.prog.run import inject_members, run_once, Timeout
+from pyxllib.prog.debug import dprint, format_exception
+from pyxllib.prog.basic import xlmd5, safe_div
+from pyxllib.prog.data import shuffle_dict_keys, DictTool
 from pyxllib.prog.time import TicToc
 from pyxllib.prog.browser import browser
 from pyxllib.algo.specialist import product
-from pyxllib.text.pupil import calc_chinese_ratio
-from pyxllib.file.specialist import XlPath
+from pyxllib.text.pattern import calc_chinese_ratio
+from pyxllib.file.xlpath import XlPath
 
 
 def __1_basic():

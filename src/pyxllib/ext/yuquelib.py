@@ -38,12 +38,14 @@ try:
 except ModuleNotFoundError:
     pd = lazy_import('pandas')
 
-from pyxllib.prog.newbie import SingletonForEveryInitArgs
-from pyxllib.prog.pupil import run_once
-from pyxllib.text.pupil import UrlQueryBuilder, shorten
+from pyxllib.prog.basic import SingletonForEveryInitArgs
+from pyxllib.prog.run import run_once
+from pyxllib.text.struct import UrlQueryBuilder
+from pyxllib.text.base import shorten
 from pyxllib.text.nestenv import NestEnv
 from pyxllib.text.xmllib import BeautifulSoup, XlBs4Tag
-from pyxllib.file.specialist import refinepath, XlPath
+from pyxllib.file.fmt import refinepath
+from pyxllib.file.xlpath import XlPath
 from pyxllib.cv.xlcvlib import xlcv
 
 

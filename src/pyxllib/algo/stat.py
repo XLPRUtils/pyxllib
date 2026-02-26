@@ -11,6 +11,9 @@
 
 import sys
 from collections import defaultdict, Counter
+from statistics import quantiles
+import datetime
+import re
 
 from pyxllib.prog.lazyimport import lazy_import
 
@@ -27,6 +30,7 @@ except ModuleNotFoundError:
     pd = lazy_import('pandas')
 
 from pyxllib.prog.basic import typename
+from pyxllib.prog.fmt import human_readable_number
 from pyxllib.file.xlpath import XlPath
 
 
@@ -520,3 +524,187 @@ class ValuesStat:
             return f'n={n} min={min_v:{valfmt}} max={max_v:{valfmt}} mean={mean_v:{valfmt}}'
         except Exception as e:
             return f'(error: {e})'
+
+
+class ValuesStat2:
+    """ 240509周四17:33，第2代统计器
+
+    240628周五14:05 todo 关于各种特殊格式数据，怎么计算是个问题
+        这问题可能有些复杂，近期估计没空折腾，留以后有空折腾的一个大坑了
+    """
+
+    def __init__(self, values=None, raw_values=None, data_type=None):
+        from statistics import pstdev, mean
+
+        # 支持输入可能带有非数值类型的raw_values
+        data_type = data_type or ''
+        if raw_values:
+            if 'timestamp' in data_type:
+                values = [x.timestamp() for x in raw_values if hasattr(x, 'timestamp')]
+            else:
+                values = [x for x in raw_values if isinstance(x, (int, float))]  # todo 可能需要更泛用的判断数值的方法
+
+        self.date_type = data_type
+        self.raw_values = raw_values
+        values = values or []
+        self.values = sorted(values)
+        if self.raw_values:
+            self.raw_n = len(self.raw_values)
+        else:
+            self.raw_n = 0
+        self.n = len(values)
+
+        if 'timestamp' in data_type:
+            self.sum = None
+        else:
+            self.sum = sum(values)
+
+        if self.n:
+            self.mean = mean(self.values)
+            self.std = pstdev(self.values)
+            self.min, self.max = self.values[0], self.values[-1]
+        else:
+            self.mean = self.std = self.min = self.max = None
+
+        self.dist = None
+
+    def __len__(self):
+        return self.n
+
+    def _summary(self, unit=None, precision=4, percentile_count=5):
+        """ 返回字典结构的总结 """
+        """ 文本汇总性的报告
+
+        :param percentile_count: 包括两个极值端点的切分点数，
+            设置2，就是不设置分位数，就是只展示最小、最大值
+            如果设置了3，就表示"中位数、二分位数"，在展示的时候，会显示50%位置的分位数值
+            如果设置了5，就相当于"四分位数"，会显示25%、50%、75%位置的分位数值
+        :param unit: 展示数值时使用的单位
+        :param precision: 展示数值时的精度
+        """
+
+        # 1 各种细分的格式化方法
+        def fmt0(v):
+            # 数量类整数的格式
+            return human_readable_number(v, '万')
+
+        def fmt1(v):
+            if isinstance(v, str):
+                return v
+            return human_readable_number(v, unit or 'K', precision)
+
+        def fmt2(v):
+            # 日期类数据的格式化
+            # todo 这个应该数据的具体格式来设置的，但是这个现在有点难写，先写死
+            if isinstance(v, str):
+                return v
+            elif isinstance(v, (int, float)):
+                v = datetime.datetime.fromtimestamp(v)
+
+            return v.strftime(unit or '%Y-%m-%d %H:%M:%S')
+
+        def fmt2b(v):
+            # 时间长度类数据的格式化
+            return human_readable_number(v, '秒')
+
+        if 'timestamp' in self.date_type:
+            fmt = fmt2
+            fmtb = fmt2b
+        else:
+            fmt = fmtb = fmt1
+
+        # 2 生成统计报告
+        desc = {}
+        if self.raw_n and self.raw_n > self.n:
+            desc["总数"] = f"{fmt0(self.n)}/{fmt0(self.raw_n)}≈{self.n / self.raw_n:.2%}"
+        else:
+            desc["总数"] = f"{fmt0(self.n)}"
+
+        if self.sum is not None:
+            desc["总和"] = f"{fmt(self.sum)}"
+        if self.mean is not None and self.std is not None:
+            desc["均值±标准差"] = f"{fmt(self.mean)}±{fmtb(self.std)}"
+        elif self.mean is not None:
+            desc["均值"] = f"{fmt(self.mean)}"
+        elif self.std is not None:
+            desc["标准差"] = f"{fmtb(self.std)}"
+
+        if self.values:
+            dist = [self.values[0]]
+            if percentile_count > 2:
+                quartiles = quantiles(self.values, n=percentile_count - 1)
+                dist += quartiles
+            dist.append(self.values[-1])
+
+            desc["分布"] = '/'.join([fmt(v) for v in dist])
+        elif self.dist:
+            desc["分布"] = '/'.join([fmt(v) for v in self.dist])
+
+        return desc
+
+    def summary(self, unit=None, precision=4, percentile_count=5):
+        """ 文本汇总性的报告
+
+        :param unit: 展示数值时使用的单位
+        :param precision: 展示数值时的精度
+        :param percentile_count: 包括两个极值端点的切分点数，
+            设置2，就是不设置分位数，就是只展示最小、最大值
+            如果设置了3，就表示"中位数、二分位数"，在展示的时候，会显示50%位置的分位数值
+            如果设置了5，就相当于"四分位数"，会显示25%、50%、75%位置的分位数值
+        """
+        desc = self._summary(unit, precision, percentile_count)
+        return '\t'.join([f"{key}: {value}" for key, value in desc.items()])
+
+    def calculate_ratios(self, x_values, fmt=False, unit=False):
+        """ 计算并返回一个字典，其中包含每个 x_values 中的值与其小于等于该值的元素的比例
+
+        :param x_values: 一个数值列表，用来计算每个数值小于等于它的元素的比例
+        :param fmt: 直接将值格式化好
+        :return: 一个字典，键为输入的数值，值为对应的比例（百分比）
+        """
+        from bisect import bisect_right
+        ratio_dict = {}
+        for x in x_values:
+            position = bisect_right(self.values, x)
+            if self.n > 0:
+                ratio = (position / self.n)
+            else:
+                ratio = 0
+            ratio_dict[x] = ratio
+
+        def unit_func(x):
+            if unit:
+                return human_readable_number(x, unit, 4)
+            return x
+
+        if fmt:
+            ratio_dict = {unit_func(x): f'{ratio:.2%}' for x, ratio in ratio_dict.items()}
+
+        return ratio_dict
+
+    def group_count(self, max_entries=None, min_count=None):
+        """ 统计每种取值出现的次数，并根据条件过滤结果
+
+        :param max_entries: 最多显示的条目数
+        :param min_count: 显示的条目至少出现的次数
+        """
+        from collections import Counter
+
+        # 使用Counter来计数每个值出现的次数
+        counts = Counter(self.values or self.raw_values)
+
+        # 根据min_count过滤计数结果
+        if min_count is not None:
+            counts = {k: v for k, v in counts.items() if v >= min_count}
+
+        # 根据max_entries限制结果数量
+        if max_entries is not None:
+            # 按出现次数降序排列，然后选取前max_entries项
+            most_common = counts.most_common(max_entries)
+            # 转换回字典形式
+            counts = dict(most_common)
+        else:
+            # 如果没有指定max_entries，则保持所有满足min_count的结果
+            counts = dict(sorted(counts.items(), key=lambda item: item[1], reverse=True))
+
+        return counts

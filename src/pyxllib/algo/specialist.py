@@ -24,7 +24,7 @@ try:
 except ModuleNotFoundError:
     deprecated = lazy_import('deprecated', 'Deprecated')
 
-from pyxllib.prog.pupil import DictTool
+from pyxllib.prog.data import DictTool
 
 
 @deprecated(reason='这个实现方式不佳，请参考 make_index_function')

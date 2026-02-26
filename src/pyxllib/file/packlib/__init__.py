@@ -14,8 +14,9 @@ import zipfile
 from zipfile import ZipFile
 import tempfile
 
-from pyxllib.file.specialist import XlPath, reduce_dir_depth
-from pyxllib.prog.pupil import inject_members
+from pyxllib.file.xlpath import XlPath
+from pyxllib.file.dirglob import reduce_dir_depth
+from pyxllib.prog.run import inject_members
 
 """ 问题：py官方的ZipFile解压带中文的文件会乱码
 

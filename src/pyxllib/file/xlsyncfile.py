@@ -28,8 +28,8 @@ try:
 except ModuleNotFoundError:
     requests = lazy_import('requests')
 
-from pyxllib.file.specialist import XlPath, GetEtag
-from pyxllib.prog.pupil import format_exception
+from pyxllib.file.xlpath import XlPath, GetEtag
+from pyxllib.prog.debug import format_exception
 
 
 class SyncFileClient:

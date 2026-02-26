@@ -44,8 +44,9 @@ try:
 except (ModuleNotFoundError, ImportError):
     accimage = None
 
-from pyxllib.prog.pupil import inject_members
-from pyxllib.file.specialist import XlPath, get_font_file
+from pyxllib.prog.run import inject_members
+from pyxllib.file.xlpath import XlPath
+from pyxllib.file.downloader import get_font_file
 from pyxllib.cv.xlcvlib import xlcv
 
 

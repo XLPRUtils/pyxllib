@@ -13,10 +13,10 @@ from collections import Counter, defaultdict
 from pathlib import Path
 
 from pyxllib.algo.geo import xywh2ltrb
-from pyxllib.prog.pupil import dprint
+from pyxllib.prog.debug import dprint
 from pyxllib.prog.time import TicToc
 from pyxllib.prog.iter import tqdm, mtqdm
-from pyxllib.text.pupil import ContentPartSpliter
+from pyxllib.text.struct import ContentPartSpliter
 
 
 try:

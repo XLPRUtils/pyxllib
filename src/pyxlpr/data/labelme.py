@@ -16,10 +16,10 @@ from pathlib import Path
 import numpy as np
 from loguru import logger
 
-from pyxllib.prog.newbie import round_int
-from pyxllib.prog.pupil import DictTool
+from pyxllib.prog.fmt import round_int
+from pyxllib.prog.data import DictTool
 from pyxllib.prog.iter import Iterate
-from pyxllib.file.specialist import get_encoding
+from pyxllib.file.xlpath import get_encoding
 from pyxllib.prog.iter import mtqdm
 from pyxllib.cv.xlpillib import xlpil
 from pyxllib.algo.geo import ltrb2xywh, rect_bounds, warp_points, resort_quad_points, rect2polygon, get_warp_mat

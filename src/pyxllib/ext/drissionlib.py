@@ -35,9 +35,9 @@ except ModuleNotFoundError:
     ChromiumBase = lazy_import('from DrissionPage._pages.chromium_base import ChromiumBase')
     ChromiumTab = lazy_import('from DrissionPage._pages.chromium_tab import ChromiumTab')
 
-from pyxllib.prog.pupil import inject_members
-from pyxllib.text.pupil import strfind
-from pyxllib.file.specialist import GetEtag
+from pyxllib.prog.run import inject_members
+from pyxllib.text.match import strfind
+from pyxllib.file.xlpath import GetEtag
 
 
 @deprecated(reason='get_dp_page逻辑不太对，请换用get_dp_tab')

@@ -66,12 +66,14 @@ try:
 except ModuleNotFoundError:
     pyscreeze = lazy_import("pyscreeze")
 
-from pyxllib.prog.newbie import first_nonnone, round_int
-from pyxllib.prog.pupil import xlwait, DictTool, run_once
-from pyxllib.prog.specialist import XlBaseModel
+from pyxllib.prog.iter import first_nonnone
+from pyxllib.prog.fmt import round_int
+from pyxllib.prog.run import xlwait, run_once
+from pyxllib.prog.data import DictTool
+from pyxllib.prog.data import XlBaseModel
 from pyxllib.prog.filelock import get_autogui_lock
 from pyxllib.algo.geo import ComputeIou, ltrb2xywh, xywh2ltrb
-from pyxllib.file.specialist import XlPath
+from pyxllib.file.xlpath import XlPath
 from pyxllib.cv.xlcvlib import xlcv
 from pyxllib.cv.xlpillib import xlpil
 from pyxlpr.data.labelme import LabelmeDict

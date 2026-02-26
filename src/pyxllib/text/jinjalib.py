@@ -14,7 +14,7 @@ except ModuleNotFoundError:
     Template = lazy_import('from jinja2 import Template')
     Environment = lazy_import('from jinja2 import Environment')
 
-from pyxllib.file.specialist import XlPath
+from pyxllib.file.xlpath import XlPath
 
 
 def set_template(s, *args, **kwargs):

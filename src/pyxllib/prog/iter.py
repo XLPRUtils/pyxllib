@@ -21,7 +21,7 @@ except ModuleNotFoundError:
 
 from pyxllib.prog.debug import format_exception
 from pyxllib.prog.run import EmptyPoolExecutor
-from pyxllib.text.pupil import shorten
+from pyxllib.text.base import shorten
 
 
 class GenFunction:

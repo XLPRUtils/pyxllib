@@ -28,7 +28,7 @@ except ModuleNotFoundError:
 
 from pyxllib.prog.fmt import human_readable_size
 from pyxllib.prog.run import run_once
-from pyxllib.file.specialist import cache_file
+from pyxllib.file.xlpath import cache_file
 
 
 def system_information():

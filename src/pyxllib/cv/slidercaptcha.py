@@ -12,10 +12,10 @@ try:
 except ModuleNotFoundError:
     cv2 = lazy_import('cv2', 'opencv-python')
 
-from pyxllib.file.specialist import XlPath
+from pyxllib.file.xlpath import XlPath
 
-from pyxllib.file.specialist import download_file
-from pyxllib.prog.pupil import is_url
+from pyxllib.file.downloader import download_file
+from pyxllib.prog.sys import is_url
 
 
 class SliderCaptchaLocator:

@@ -36,9 +36,9 @@ try:
 except ModuleNotFoundError:
     pd = lazy_import('pandas')
 
-from pyxllib.prog.pupil import run_once
-from pyxllib.prog.specialist import dataframe_str
-from pyxllib.text.pupil import briefstr
+from pyxllib.prog.run import run_once
+from pyxllib.prog.data import dataframe_str
+from pyxllib.text.diff import briefstr
 
 # 忽略特定的警告
 warnings.filterwarnings("ignore", category=FutureWarning,

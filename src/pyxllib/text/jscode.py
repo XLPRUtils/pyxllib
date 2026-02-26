@@ -21,7 +21,7 @@ try:
 except ModuleNotFoundError:
     jsbeautifier = lazy_import('jsbeautifier')
 
-from pyxllib.file.specialist import XlPath
+from pyxllib.file.xlpath import XlPath
 from pyxllib.prog.uni_cache import uni_cache
 
 

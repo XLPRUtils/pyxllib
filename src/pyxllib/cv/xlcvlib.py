@@ -33,10 +33,11 @@ try:
 except ModuleNotFoundError:
     requests = lazy_import('requests')
 
-from pyxllib.prog.newbie import round_int, RunOnlyOnce
-from pyxllib.prog.pupil import EnchantBase, EnchantCvt
+from pyxllib.prog.fmt import round_int
+from pyxllib.prog.run import RunOnlyOnce
+from pyxllib.prog.basic import EnchantBase, EnchantCvt
 from pyxllib.algo.geo import rect_bounds, warp_points, reshape_coords, quad_warp_wh, get_warp_mat, rect2polygon
-from pyxllib.file.specialist import XlPath
+from pyxllib.file.xlpath import XlPath
 
 _show_win_num = 0
 
