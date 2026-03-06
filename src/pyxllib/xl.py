@@ -16,24 +16,31 @@ except ModuleNotFoundError:
 
 from pyxllib.file.packlib import *
 
-from pyxllib.prog.newbie import *
-from pyxllib.prog.pupil import *
-from pyxllib.prog.specialist import *
-from pyxllib.prog.xltime import *
+# from pyxllib.prog.newbie import *
+# from pyxllib.prog.pupil import *
+# from pyxllib.prog.specialist import *
+# from pyxllib.prog.xltime import *
+from pyxllib.prog.debug import dprint, loguru_setup_jsonl_logfile, format_exception
+from pyxllib.prog.basic import typename
+from pyxllib.prog.fmt import print2string
+from pyxllib.prog.time import utc_now2, utc_timestamp
+
 from pyxllib.prog.browser import browser
 from deprecated import deprecated
 
-from pyxllib.algo.newbie import *
-from pyxllib.algo.pupil import *
-from pyxllib.algo.specialist import *
+# from pyxllib.algo.newbie import *
+# from pyxllib.algo.pupil import *
+# from pyxllib.algo.specialist import *
 
-from pyxllib.text.newbie import *
-from pyxllib.text.pupil import *
-from pyxllib.text.specialist import *
+# from pyxllib.text.newbie import *
+# from pyxllib.text.pupil import *
+# from pyxllib.text.specialist import *
 
-from pyxllib.file.newbie import *
-from pyxllib.file.pupil import *
-from pyxllib.file.specialist import *
+# from pyxllib.file.newbie import *
+# from pyxllib.file.pupil import *
+# from pyxllib.file.specialist import *
+from pyxllib.file.xlpath import XlPath, GetEtag
+
 
 if __name__ == '__main__':
     # 直接运行的话，支持开放出所有函数类接口

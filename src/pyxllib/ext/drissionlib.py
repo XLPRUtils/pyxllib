@@ -257,34 +257,56 @@ def close_duplicate_tabs(browser=None):
 
     # 250115周三21:12 这步不稳定，会报错，不知道为啥。导致dp最后经常没有清理tabs
     # 250204周二09:21，好像是浏览器重启更新到最新版本就行了~ 这里也要加个try
+    # 250228周五00:30, 这步经常会卡死，导致整个程序挂起。这里加上更严格的异常捕获和日志，如果失败就放弃清理，不影响主流程。
     try:
+        # get_tabs 内部可能会因为 CDP 连接问题而挂起，这里虽然没法直接设 timeout 参数，
+        # 但我们可以在外层捕获可能的异常
         all_tabs = browser.get_tabs()
-    except TimeoutError:
-        logger.warning(
-            'browser.get_tabs()运行报错，请清查浏览器是否已更新但没有重启。本次将browser.quit()退出整个浏览器。')
-        # 你不让我关tabs是吧，那我就把整个浏览器关了
-        browser.quit()
+    except Exception as e:
+        logger.warning(f'close_duplicate_tabs 失败（已跳过）: {e}')
+        # 如果获取标签页都失败了，那清理也就无从谈起了，直接返回
         return
 
     seen_domains = set()
 
     # 2 第一次遍历：保留首个出现的域名，其余重复则关闭
     for t in all_tabs:
-        parsed_url = urlparse(t.url)
-        domain = parsed_url.netloc  # netloc 通常可拿到域名部分
-        # logger.info(f'{t.url}, {domain}')
+        try:
+            # 这里的 t.url 也可能触发异常（如果 tab 已经失效）
+            parsed_url = urlparse(t.url)
+            domain = parsed_url.netloc  # netloc 通常可拿到域名部分
+            # logger.info(f'{t.url}, {domain}')
 
-        if domain in seen_domains:
-            t.close()
-        else:
-            seen_domains.add(domain)
+            if domain in seen_domains:
+                # 250228 避免卡死，强制使用 javascript 关闭，不走 DP 的 CDP 协议等待
+                # t.run_js('window.close()')  # 这个不一定能关掉
+                # t.close()
+                
+                # 250228 强制关闭策略：直接发送 CDP 命令而不等待
+                try:
+                    t._run_cdp('Target.closeTarget', targetId=t.tab_id)
+                except:
+                    t.close()  # 兜底
+            else:
+                seen_domains.add(domain)
+        except Exception as e:
+            # 单个 tab 处理失败，不影响其他 tab
+            logger.warning(f'处理单个 tab 异常: {e}')
+            continue
 
     # 3 第二次遍历：如果剩余标签页 > 1，则关掉chrome://newtab/
-    remaining_tabs = browser.get_tabs()
-    if len(remaining_tabs) > 1:
-        for t in remaining_tabs:
-            if t.url.startswith('chrome://newtab'):
-                t.close()
+    try:
+        remaining_tabs = browser.get_tabs()
+        if len(remaining_tabs) > 1:
+            for t in remaining_tabs:
+                if t.url.startswith('chrome://newtab'):
+                    # t.close()
+                    try:
+                        t._run_cdp('Target.closeTarget', targetId=t.tab_id)
+                    except:
+                        t.close()
+    except Exception as e:
+        logger.warning(f'清理 chrome://newtab 异常: {e}')
 
 
 def dp_check_quit():

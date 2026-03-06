@@ -59,6 +59,28 @@ class XlPath(type(pathlib.Path())):
     def tempdir(cls):
         return cls(tempfile.gettempdir())
 
+    def exist_preprcs(self, if_exists=None):
+        """ 处理文件已存在的情况
+        :param if_exists:
+            None: 默认，如果存在则覆盖
+            'skip': 跳过，不写入
+            'error': 抛出异常
+            'backup': 备份原文件 (TODO)
+        :return: bool, 是否继续写入
+        """
+        if not self.exists():
+            return True
+            
+        if if_exists is None or if_exists == 'replace':
+            return True
+        elif if_exists == 'skip' or if_exists == 'ignore':
+            return False
+        elif if_exists == 'error':
+            raise FileExistsError(f"File exists: {self}")
+        else:
+            # 默认行为：覆盖
+            return True
+
     def read_text(self, encoding=None, errors='strict', return_mode=False):
         """ 读取文本文件，支持自动检测编码 """
         if not encoding:

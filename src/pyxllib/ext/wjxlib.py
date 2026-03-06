@@ -33,10 +33,11 @@ from pyxllib.ext.drissionlib import DpWebBase
 class WjxWeb(DpWebBase):
     """ 问卷星网页的爬虫 """
 
-    def __init__(self, url=None):
-        super().__init__('https://www.wjx.cn/login.aspx')
+    def __init__(self, url='https://www.wjx.cn/'):
+        super().__init__(url)
         self.login()
-        self.tab.get(url)
+        if url:
+            self.tab.get(url)
 
     def login(self):
         tab = self.tab

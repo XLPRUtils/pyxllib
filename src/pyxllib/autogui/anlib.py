@@ -333,6 +333,11 @@ class DragParams(XlBaseModel):
     # 设置合理的持续时间可以避免操作过快导致滚动惯性过大或未被识别
     drag_duration: float = 1.0
 
+    def update_valid(self, **kwargs):
+        for k, v in kwargs.items():
+            if v is not None:
+                setattr(self, k, v)
+
 
 class MouseParams(XlBaseModel):
     """鼠标交互行为参数
@@ -1203,7 +1208,7 @@ class AnShape(_AnShapePupil):
 
         # 拖拽重试循环
         while not shapes and k < drag_params.drag_count:
-            self.drag_to(drag_params)
+            self.drag_to(DragParams=drag_params)
             shapes = find_subtext()
             k += 1
 

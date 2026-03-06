@@ -381,14 +381,20 @@ def loguru_setup_jsonl_logfile(sink, *, rotation='50 MB', retention='30 days', *
             "time": record["time"].strftime("%Y-%m-%d %H:%M:%S.%f")[:-3],
             "level": record["level"].name,
             "message": record["message"],
-            "file": record["file"].name,
-            "line": record["line"],
+            # "file": record["file"].name,  # 'NoneType' object has no attribute 'name'
+            # "line": record["line"],
             "function": record["function"],
-            "module": record["module"],
+            # "module": record["module"],
             # "process": record["process"].name,
             # "thread": record["thread"].name,
             "extra": record["extra"]
         }
+        if record["file"]:
+            log_record["file"] = record["file"].name
+        if record["line"]:
+            log_record["line"] = record["line"]
+        if record["module"]:
+            log_record["module"] = record["module"]
         # 如果有异常信息，添加到记录中
         if record["exception"]:
             log_record["exception"] = str(record["exception"])
@@ -400,9 +406,35 @@ def loguru_setup_jsonl_logfile(sink, *, rotation='50 MB', retention='30 days', *
     # logger.remove()
 
     # 添加新的 handler，使用自定义的 JSON 格式化器
+    # 2024-02-27: 修复 Loguru KeyError: '"time"' 问题
+    # 当使用 format=function 时，Loguru 期望函数返回格式化后的字符串，但它内部处理机制似乎会再次尝试格式化
+    # 正确的做法是直接让 format 函数返回处理好的 JSON 字符串，但在 add 时不应该再有其他干扰
+    # 参考 loguru 文档：sink 可以是函数，也可以是文件路径。如果是文件路径，format 参数可以是字符串或函数。
+    # 这里的问题可能是 json_formatter 返回的内容包含了类似 {time} 的字符串，被 loguru 再次解析了。
+    # 实际上，loguru 的 format 参数如果是一个函数，它应该接受 record 并返回字符串。
+    
+    # 经过排查，问题在于 loguru 的 format 参数如果返回的字符串中包含 {}，loguru 可能会尝试对其进行 .format() 操作
+    # 但在这里我们返回的是 JSON 字符串，其中必然包含 {}。
+    # 解决方法：在返回的 JSON 字符串中，将 { 和 } 转义，或者使用 serialize=True 参数（如果 loguru 支持直接序列化）
+    # 但 loguru 的 serialize=True 是默认的 JSON 格式，我们想要自定义格式。
+    
+    # 另一种思路：sink 作为一个函数，在函数内部写入文件。但这里 sink 是文件路径。
+    
+    # 重新审视错误：KeyError: '"time"'。这说明 format_map 正在尝试解析我们返回的 JSON 字符串中的 key。
+    # 因为 JSON 字符串里有 "time": "...", loguru 把它当成了格式化占位符。
+    # 所以我们需要转义返回字符串中的花括号。
+    
+    def json_formatter_safe(record):
+        json_str = json_formatter(record)
+        # 1. 转义花括号，避免 loguru 再次格式化
+        # 2. 转义 < 和 >，避免 loguru 将其解析为颜色标签 (如 <green>, <module>)
+        #    loguru 的颜色标签格式是 <color>，如果 json 中包含类似 <module> 的内容，会报错
+        #    解决方法：将 < 替换为 \<
+        return json_str.replace("{", "{{").replace("}", "}}").replace("<", "\\<")
+
     logger.add(
         sink,
-        format=json_formatter,
+        format=json_formatter_safe,
         rotation=rotation,
         retention=retention,
         **kwargs
