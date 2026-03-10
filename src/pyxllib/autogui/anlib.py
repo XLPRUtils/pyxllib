@@ -390,6 +390,51 @@ class WaitParams(XlBaseModel):
     interval: float = 1.0
 
 
+class ActivityWatchParams(XlBaseModel):
+    """等待期间的画面活性监控参数"""
+
+    # 连续多久没有明显画面变化，则判定为等待失活
+    stall_timeout: float | None = None
+
+    # 活性检测阈值，使用缩放灰度图的平均像素差异（0~1）
+    activity_threshold: float = 0.003
+
+    # 活性检测采样频率；默认沿用 wait 的 interval
+    activity_check_interval: float | None = None
+
+    # 活性签名缩放尺寸，先降采样再比较，抑制小噪声
+    activity_resize: tuple[int, int] = (64, 128)
+
+    # 是否先转灰度再比较
+    activity_grayscale: bool = True
+
+    # 降噪模糊核大小；0/1 表示不模糊
+    activity_blur: int = 3
+
+    # 需要忽略的局部区域，坐标系相对于当前 shape
+    activity_ignore_regions: tuple[tuple[int, int, int, int], ...] = ()
+
+    # 是否忽略鼠标周围区域，避免 hover 干扰
+    activity_ignore_mouse: bool = True
+
+    # 鼠标忽略区半径
+    activity_mouse_radius: int = 24
+
+    # 检测到 stall 后是否抛出异常；否则提前返回当前结果
+    stall_raise: bool = True
+
+    # 是否打印活性采样日志
+    stall_debug: bool = False
+
+
+class WaitStallError(TimeoutError):
+    """等待目标期间，画面长时间失活"""
+
+    def __init__(self, message, *, info=None):
+        super().__init__(message)
+        self.info = info or {}
+
+
 class _AnShapeBasic(UserDict):
     """形状基础类
 
@@ -691,6 +736,71 @@ class _AnShapeBasic(UserDict):
         # logger.info(f'{x} {y} {w} {h}')
         pil_img = pyautogui.screenshot(region=[x, y, w, h])
         return xlpil.to_cv2_image(pil_img)
+
+    @staticmethod
+    def _clip_local_xywh(rect, width, height):
+        x, y, w, h = [int(v) for v in rect]
+        x1 = max(0, x)
+        y1 = max(0, y)
+        x2 = min(width, x + w)
+        y2 = min(height, y + h)
+        if x2 <= x1 or y2 <= y1:
+            return None
+        return [x1, y1, x2 - x1, y2 - y1]
+
+    def _activity_ignore_regions(self, activity_params: ActivityWatchParams):
+        regions = [list(rect) for rect in activity_params.activity_ignore_regions]
+
+        if activity_params.activity_ignore_mouse:
+            abs_x, abs_y, width, height = self.get_abs_xywh()
+            mouse_x, mouse_y = pyautogui.position()
+            local_x, local_y = mouse_x - abs_x, mouse_y - abs_y
+            radius = max(1, int(activity_params.activity_mouse_radius))
+            rect = self._clip_local_xywh(
+                [local_x - radius, local_y - radius, radius * 2 + 1, radius * 2 + 1],
+                width,
+                height,
+            )
+            if rect:
+                regions.append(rect)
+
+        return regions
+
+    def build_activity_signature(self, shot=None, activity_params: ActivityWatchParams | None = None):
+        """将当前画面压缩为适合比较活性的签名图"""
+        activity_params = activity_params or ActivityWatchParams()
+        img = self.shot() if shot is None else shot
+        img = np.array(img)
+
+        if img.ndim == 3 and activity_params.activity_grayscale:
+            img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+
+        height, width = img.shape[:2]
+        for rect in self._activity_ignore_regions(activity_params):
+            rect = self._clip_local_xywh(rect, width, height)
+            if not rect:
+                continue
+            x, y, w, h = rect
+            img[y : y + h, x : x + w] = 0
+
+        blur = int(activity_params.activity_blur or 0)
+        if blur > 1:
+            if blur % 2 == 0:
+                blur += 1
+            img = cv2.GaussianBlur(img, (blur, blur), 0)
+
+        rw, rh = [max(1, int(v)) for v in activity_params.activity_resize]
+        if img.shape[1] != rw or img.shape[0] != rh:
+            img = cv2.resize(img, (rw, rh), interpolation=cv2.INTER_AREA)
+
+        return np.array(img, dtype=np.float32)
+
+    @staticmethod
+    def calc_activity_motion_score(prev_signature, curr_signature):
+        prev_signature = np.array(prev_signature, dtype=np.float32)
+        curr_signature = np.array(curr_signature, dtype=np.float32)
+        diff = np.abs(curr_signature - prev_signature)
+        return float(np.mean(diff) / 255.0)
 
     def get_pixel(self):
         """获取当前形状中心点的像素值 (RGB)
@@ -1095,36 +1205,116 @@ class AnShape(_AnShapePupil):
             # (即忽略 target_rect，直接在全图中找 target_img)
             return self._search_full_mode(target_img, default_text, locate_params, drag_params)
 
-    @resolve_params(WaitParams, LocateParams, DragParams, mode="pass")
+    def _wait_with_watchdog(self, func, condition=bool, *, label="", **resolved_params):
+        wait_params: WaitParams = self.resolve_model(resolved_params["WaitParams"])
+        activity_params: ActivityWatchParams = self.resolve_model(resolved_params["ActivityWatchParams"])
+
+        started_at = time.time()
+        last_probe_at = None
+        last_active_at = started_at
+        last_signature = None
+        last_motion_score = None
+        probe_interval = (
+            activity_params.activity_check_interval
+            if activity_params.activity_check_interval is not None
+            else wait_params.interval
+        )
+        probe_interval = max(0, probe_interval)
+        on_stall = resolved_params.get("on_stall")
+
+        while True:
+            res = func()
+            if condition(res):
+                return res
+
+            now = time.time()
+
+            if activity_params.stall_timeout is not None:
+                should_probe = (
+                    last_probe_at is None
+                    or probe_interval == 0
+                    or (now - last_probe_at) >= probe_interval
+                )
+                if should_probe:
+                    current_signature = self.build_activity_signature(activity_params=activity_params)
+                    if last_signature is not None:
+                        last_motion_score = self.calc_activity_motion_score(last_signature, current_signature)
+                        if last_motion_score > activity_params.activity_threshold:
+                            last_active_at = now
+
+                        if activity_params.stall_debug:
+                            logger.info(
+                                f"{label or self.total_name()} motion={last_motion_score:.4f}, "
+                                f"idle={now - last_active_at:.1f}s"
+                            )
+
+                    last_signature = current_signature
+                    last_probe_at = now
+
+                    stall_elapsed = now - last_active_at
+                    if last_motion_score is not None and stall_elapsed >= activity_params.stall_timeout:
+                        info = {
+                            "label": label or self.total_name(),
+                            "elapsed": now - started_at,
+                            "stall_elapsed": stall_elapsed,
+                            "motion_score": last_motion_score,
+                            "activity_threshold": activity_params.activity_threshold,
+                        }
+                        if callable(on_stall):
+                            try:
+                                on_stall(info)
+                            except Exception as e:
+                                logger.warning(f"on_stall 回调执行失败: {e}")
+
+                        message = (
+                            f"{info['label']} 等待失活，连续 {stall_elapsed:.1f}s 无明显变化，"
+                            f"motion={last_motion_score:.4f}, threshold={activity_params.activity_threshold:.4f}"
+                        )
+                        if activity_params.stall_raise:
+                            raise WaitStallError(message, info=info)
+                        logger.warning(message)
+                        return res
+
+            if wait_params.timeout and (now - started_at > wait_params.timeout):
+                return res
+
+            if wait_params.interval > 0:
+                time.sleep(wait_params.interval)
+
+    @resolve_params(WaitParams, ActivityWatchParams, mode="pass")
+    def wait_until(self, func, condition=bool, *, label="", **resolved_params):
+        """通用等待器，支持在等待期间做画面失活监控"""
+        return self._wait_with_watchdog(func, condition=condition, label=label, **resolved_params)
+
+    @resolve_params(WaitParams, ActivityWatchParams, LocateParams, DragParams, mode="pass")
     def wait_img(self, target=None, **resolved_params):
         """等待目标图片出现
 
         :param dst: 匹配目标
         :param resolved_params:
             - WaitParams: 控制超时(timeout)和检测间隔(interval)
+            - ActivityWatchParams: 控制等待期间的失活监控
             - LocateParams & DragParams: 透传给 find_img
         :return: 成功返回 result (self 或 shapes列表)，超时抛出异常
         """
-        wait_params: WaitParams = self.resolve_model(resolved_params["WaitParams"])
-
-        # 使用 xlwait 轮询
-        return xlwait(
-            lambda: self.find_img(target, **resolved_params), timeout=wait_params.timeout, interval=wait_params.interval
+        label = f"{self.total_name()}.wait_img({target})"
+        return self._wait_with_watchdog(
+            lambda: self.find_img(target, **resolved_params),
+            label=label,
+            **resolved_params,
         )
 
-    @resolve_params(WaitParams, LocateParams, DragParams, mode="pass")
+    @resolve_params(WaitParams, ActivityWatchParams, LocateParams, DragParams, mode="pass")
     def waitleave_img(self, target=None, **resolved_params):
         """等待目标图片消失 (不再能匹配到)
 
         参数同 wait_img
         """
-        wait_params: WaitParams = self.resolve_model(resolved_params["WaitParams"])
-
-        # 逻辑取反：直到 find_img 返回 None 或 空列表
-        return xlwait(
+        label = f"{self.total_name()}.waitleave_img({target})"
+        return self._wait_with_watchdog(
             lambda: not self.find_img(target, **resolved_params),
-            timeout=wait_params.timeout,
-            interval=wait_params.interval,
+            label=label,
+            **resolved_params,
         )
 
     @resolve_params(WaitParams, LocateParams, DragParams, mode="pass")
@@ -1214,32 +1404,31 @@ class AnShape(_AnShapePupil):
 
         return shapes
 
-    @resolve_params(WaitParams, DragParams, mode="pass")
+    @resolve_params(WaitParams, ActivityWatchParams, DragParams, mode="pass")
     def wait_text(self, target=None, **resolved_params):
         """等待目标文本出现
 
         :param dst: 匹配目标
         :param resolved_params:
             - WaitParams: 控制超时和检测间隔
+            - ActivityWatchParams: 控制等待期间的失活监控
             - DragParams: 透传给 find_text 用于滚动查找
         """
-        wait_params: WaitParams = self.resolve_model(resolved_params["WaitParams"])
-
-        return xlwait(
+        label = f"{self.total_name()}.wait_text({target})"
+        return self._wait_with_watchdog(
             lambda: self.find_text(target, **resolved_params),
-            timeout=wait_params.timeout,
-            interval=wait_params.interval,
+            label=label,
+            **resolved_params,
         )
 
-    @resolve_params(WaitParams, DragParams, mode="pass")
+    @resolve_params(WaitParams, ActivityWatchParams, DragParams, mode="pass")
     def waitleave_text(self, target=None, **resolved_params):
         """等待目标文本消失"""
-        wait_params: WaitParams = self.resolve_model(resolved_params["WaitParams"])
-
-        return xlwait(
+        label = f"{self.total_name()}.waitleave_text({target})"
+        return self._wait_with_watchdog(
             lambda: not self.find_text(target, **resolved_params),
-            timeout=wait_params.timeout,
-            interval=wait_params.interval,
+            label=label,
+            **resolved_params,
         )
 
     @resolve_params(WaitParams, DragParams, mode="pass")
