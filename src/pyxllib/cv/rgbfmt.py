@@ -269,16 +269,16 @@ _COLOR_LIST1 = """
 010203,浓黑,Rich black (FOGRA39)
 36454F,木炭,Charcoal
 F4F0EC,灰黄,Isabelline
-E6FFED,git绿1,
-CDFFD8,git绿2,
-ACF2BD,git绿3,
-FFEEF0,git红1,
-FFDCE0,git红2,
-FDB8C0,git红3,
-F1F8FF,git蓝1,
-DAECFE,git蓝2,
+E6FFED,GitHub新增绿1,
+CDFFD8,GitHub新增绿2,
+ACF2BD,GitHub新增绿3,
+FFEEF0,GitHub删除红1,
+FFDCE0,GitHub删除红2,
+FDB8C0,GitHub删除红3,
+F1F8FF,GitHub提示蓝1,
+DAECFE,GitHub提示蓝2,
 """
-# git绿1，github desktop，新增行三个级别绿，最浅的一种
+# GitHub新增绿1，GitHub Desktop 新增行三级绿色里最浅的一种
 
 _COLOR_LIST2 = """
 000000,,Black

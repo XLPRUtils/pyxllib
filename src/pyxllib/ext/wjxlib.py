@@ -33,28 +33,48 @@ from pyxllib.ext.drissionlib import DpWebBase
 class WjxWeb(DpWebBase):
     """ 问卷星网页的爬虫 """
 
-    def __init__(self, url='https://www.wjx.cn/'):
+    HOME_URL = 'https://www.wjx.cn/'
+    LOGIN_URL = 'https://www.wjx.cn/login.aspx'
+    RESULT_LIMIT_URL = 'https://www.wjx.cn/wjx/activitystat/resultlimit.aspx'
+
+    def __init__(self, url=HOME_URL):
         super().__init__(url)
         self.login()
-        if url:
+        if url and url != self.LOGIN_URL and self.tab.url != url:
             self.tab.get(url)
 
-    def login(self):
+    def _ensure_credentials(self):
+        username = os.getenv('WJX_USERNAME')
+        password = os.getenv('WJX_PASSWORD')
+        if not username or not password:
+            raise RuntimeError('未设置环境变量 WJX_USERNAME / WJX_PASSWORD，无法自动登录问卷星')
+        return username, password
+
+    def _wait_login_result(self, timeout=60, interval=1):
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            if not self.tab.url.startswith(self.LOGIN_URL):
+                return True
+            time.sleep(interval)
+        return False
+
+    def login(self, wait_timeout=60):
         tab = self.tab
 
-        if tab.url.startswith('https://www.wjx.cn/wjx/activitystat/resultlimit.aspx'):
+        if tab.url.startswith(self.RESULT_LIMIT_URL):
             tab('t:a@@text():登录').click()
+            time.sleep(2)
 
-        if tab.url.startswith('https://www.wjx.cn/login.aspx'):
+        if tab.url.startswith(self.LOGIN_URL):
+            username, password = self._ensure_credentials()
             time.sleep(2)
-            tab('t:input@@name=UserName').input(os.getenv('WJX_USERNAME'), clear=True)
+            tab('t:input@@name=UserName').input(username, clear=True)
             time.sleep(2)
-            tab('t:input@@name=Password').input(os.getenv('WJX_PASSWORD'), clear=True)
+            tab('t:input@@name=Password').input(password, clear=True)
             time.sleep(2)
-            # tab('t:label@@for=RememberMe').click()
-            # time.sleep(2)
             tab('t:input@@type=submit').click()
-            time.sleep(10)
+            if not self._wait_login_result(timeout=wait_timeout):
+                raise RuntimeError('问卷星登录后仍停留在登录页，可能需要人工完成验证码或额外验证')
 
     def get_page_num(self):
         """
