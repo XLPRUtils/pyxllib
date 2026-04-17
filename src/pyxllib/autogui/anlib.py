@@ -1946,7 +1946,6 @@ class AnWindow(AnRegion):
 
         self._xlapi = None  # ocr工具
         self._speaker = None  # 语音播报工具
-        # todo 添加数据库db？
 
     def set_ctrl(
         self,
