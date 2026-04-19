@@ -29,6 +29,7 @@ prog = [ # 工程需要的一些特殊工具
     "fastcore>=1.8.1", # 有些好用的工程功能，比如from fastcore.utils import GetAttr，用于不实际继承的情况拥有类似继承的操作模式
     "fire",            # 制作命令行工具
     "cachebox",        # 缓存工具，比cachetools性能更好，在我的uni_cache下速度快约10%
+    "nb-time>=2.8",    # pyxllib.prog.xltime 的底层时间实现
 ]
 algo = [ # 算法库
     "anytree",      # 树形结构处理
@@ -108,6 +109,9 @@ advance = [ # 比较全面的，高级的依赖
     "pyxllib[basic]",
     "pyxllib[xlcv,xlsx,autogui]",
 ]
+kq5034 = [ # kq5034 业务运行时依赖
+    "pyxllib[advance]",
+]
 flask = [
     "flask",              # 传统写后端的工具
     "flask-cors",         # 跨域问题
@@ -165,7 +169,7 @@ exclude = [".github", ".gitignore", ".gitattributes", "tests", "examples"]
 path = "src/pyxllib/__init__.py"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/pyxllib", "src/pyxlpr", "src/wxautox"]
+packages = ["src/pyxllib", "src/pyxlpr", "src/wxautox", "src/kq5034"]
 
 [tool.uv]
 index-url = "https://pypi.tuna.tsinghua.edu.cn/simple"

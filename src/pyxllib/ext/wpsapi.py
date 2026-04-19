@@ -122,6 +122,38 @@ class WpsOnlineBook:
         """ 表格数据很多概念跟sql数据库是类似的，也有增删改查系列的功能需求 """
         pass
 
+    @staticmethod
+    def _normalize_sql_select_data(data, fields=None):
+        """ WPS 的 sqlSelect 在整列为空时，偶尔会返回长度更短的数组。
+
+        这里把各列统一补齐到相同长度，避免 pandas DataFrame 构造时报
+        ``All arrays must be of the same length``。
+        """
+        if not isinstance(data, dict):
+            return data
+
+        normalized = {}
+        keys = list(fields or data.keys())
+        for key in data.keys():
+            if key not in keys:
+                keys.append(key)
+
+        list_lengths = [len(v) for v in data.values() if isinstance(v, list)]
+        if not list_lengths:
+            return data
+        max_len = max(list_lengths)
+
+        for key in keys:
+            value = data.get(key, [])
+            if isinstance(value, list):
+                if len(value) < max_len:
+                    value = value + [None] * (max_len - len(value))
+            elif max_len:
+                value = [value] + [None] * (max_len - 1)
+            normalized[key] = value
+
+        return normalized
+
     def sql_select(self, sheet_name, fields,
                    data_row=0,
                    filter_empty_rows=True, *,
@@ -134,6 +166,7 @@ class WpsOnlineBook:
         :param return_mode: 'pd' or 'json'
         """
         data = self.run_func('sqlSelect', sheet_name, fields, data_row, filter_empty_rows)
+        data = self._normalize_sql_select_data(data, fields)
         if return_mode == 'json':
             return data
         elif return_mode == 'pd':

@@ -314,6 +314,12 @@ return count;
     return total
 
 
+def 清理问卷星干扰弹窗(tab: Any, max_rounds: int = 3, wait_seconds: float = 0.5) -> int:
+    """中文兼容名：关闭问卷星里偶发的活动弹窗、推广浮层。"""
+
+    return clean_wjx_popups(tab, max_rounds=max_rounds, wait_seconds=wait_seconds)
+
+
 def _cleanup_extra_wjx_tabs(session: WjxSession) -> int:
     try:
         tabs = session.browser.get_tabs(url="wjx.cn")
@@ -1150,4 +1156,5 @@ __all__ = [
     "read_course_options",
     "resolve_wjx_credentials",
     "resume_responses",
+    "清理问卷星干扰弹窗",
 ]

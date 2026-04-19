@@ -6,10 +6,13 @@
 
 
 from collections import defaultdict
+import colorsys
+from functools import lru_cache
+import hashlib
 import math
 import re
 
-from pyxllib.prog.pupil import run_once
+from pyxllib.prog.run import run_once
 
 # 中文wiki颜色列表：https://zh.m.wikipedia.org/zh-hans/%E9%A2%9C%E8%89%B2%E5%88%97%E8%A1%A8
 _COLOR_LIST0 = """
@@ -1259,6 +1262,91 @@ FFFFF0,,Ivory
 FFFFFF,,White
 """
 
+_HASH_COLOR_TONE_SPECS = {
+    'dark': {
+        'candidate_min_lightness': 0.12,
+        'candidate_max_lightness': 0.52,
+        'candidate_min_saturation': 0.22,
+        'candidate_min_brightness': 0,
+        'candidate_max_brightness': 150,
+        'seed_saturation': (0.42, 0.82),
+        'seed_lightness': (0.24, 0.38),
+    },
+    'light': {
+        'candidate_min_lightness': 0.60,
+        'candidate_max_lightness': 0.92,
+        'candidate_min_saturation': 0.12,
+        'candidate_min_brightness': 170,
+        'candidate_max_brightness': 255,
+        'seed_saturation': (0.22, 0.58),
+        'seed_lightness': (0.68, 0.84),
+    },
+}
+
+
+def _normalize_hash_color_tone(tone='dark'):
+    tone = str(tone or 'dark').strip().lower()
+    if tone not in _HASH_COLOR_TONE_SPECS:
+        raise ValueError(f'不支持的哈希颜色类型: {tone}')
+    return tone
+
+
+def _color_brightness(color):
+    return (color.r * 299 + color.g * 587 + color.b * 114) / 1000
+
+
+def _color_hls(color):
+    return colorsys.rgb_to_hls(color.r / 255, color.g / 255, color.b / 255)
+
+
+def _resolve_hash_ratio(byte_value, lower, upper):
+    return lower + (upper - lower) * (byte_value / 255)
+
+
+def _build_hash_seed_color(text, tone):
+    spec = _HASH_COLOR_TONE_SPECS[tone]
+    payload = str(text or '')
+    digest = hashlib.blake2b(payload.encode('utf-8'), digest_size=16).digest()
+    hue = int.from_bytes(digest[:2], 'big') / 65535
+    saturation = _resolve_hash_ratio(digest[2], *spec['seed_saturation'])
+    lightness = _resolve_hash_ratio(digest[3], *spec['seed_lightness'])
+    r, g, b = colorsys.hls_to_rgb(hue, lightness, saturation)
+    return RgbFormatter.from_percentage(r, g, b)
+
+
+def _is_hash_color_candidate(color, tone):
+    spec = _HASH_COLOR_TONE_SPECS[tone]
+    _, lightness, saturation = _color_hls(color)
+    brightness = _color_brightness(color)
+    return (
+        spec['candidate_min_lightness'] <= lightness <= spec['candidate_max_lightness']
+        and saturation >= spec['candidate_min_saturation']
+        and spec['candidate_min_brightness'] <= brightness <= spec['candidate_max_brightness']
+    )
+
+
+@lru_cache(maxsize=32)
+def _get_hash_color_candidates(color_range=2, tone='dark'):
+    tone = _normalize_hash_color_tone(tone)
+    colors = []
+    for hex_value in _get_hexs_names(color_range)[0].keys():
+        color = RgbFormatter.from_hex(hex_value)
+        if _is_hash_color_candidate(color, tone):
+            colors.append(color)
+    if not colors:
+        raise ValueError(f'没有可用的{tone}哈希颜色候选集')
+    return tuple(colors)
+
+
+def _find_nearest_hash_color(color, candidates):
+    nearest_color, nearest_distance = None, 1e10
+    for candidate in candidates:
+        distance = color.distance(candidate)
+        if distance < nearest_distance:
+            nearest_distance = distance
+            nearest_color = candidate
+    return nearest_color
+
 
 class RgbFormatter:
     """ Format Color """
@@ -1316,6 +1404,9 @@ class RgbFormatter:
 
     def to_tuple(self):
         return self.r, self.g, self.b
+
+    def brightness(self):
+        return _color_brightness(self)
 
     @staticmethod
     def from_vba_value(v):
@@ -1403,6 +1494,10 @@ class RgbFormatter:
         _, name2hex = _get_hexs_names(2)
         h = name2hex[name]
         return cls.from_hex(h)
+
+    @classmethod
+    def from_hash_text(cls, text, *, tone='dark', color_range=2):
+        return hash_text_to_std_color(text, tone=tone, color_range=color_range)
 
     def distance(self, c2):
         """ 两个rgb颜色的距离对比
@@ -1523,3 +1618,28 @@ def _get_colors_array(color_range=2):
     hexs = _get_hexs_names(color_range)[0].keys()
     arr = np.array([RgbFormatter.from_hex(h).to_tuple() for h in hexs])
     return arr
+
+
+@lru_cache(maxsize=4096)
+def _hash_text_to_std_color_cached(text, tone, color_range):
+    tone = _normalize_hash_color_tone(tone)
+    seed_color = _build_hash_seed_color(text, tone)
+    candidates = _get_hash_color_candidates(color_range, tone)
+    return _find_nearest_hash_color(seed_color, candidates)
+
+
+def hash_text_to_std_color(text, *, tone='dark', color_range=2):
+    """ 把任意文本稳定映射到标准色卡中的一个颜色
+
+    :param text: 输入文本，相同文本会得到稳定相同的颜色
+    :param tone:
+        dark，适合浅背景上的深色前景
+        light，适合深背景上的浅色前景
+    :param color_range: 颜色候选范围，语义同 _get_hexs_names
+    """
+    color_range = int(color_range)
+    return _hash_text_to_std_color_cached(str(text or ''), _normalize_hash_color_tone(tone), color_range)
+
+
+def hash_text_to_hex_color(text, *, tone='dark', color_range=2, lower=False):
+    return hash_text_to_std_color(text, tone=tone, color_range=color_range).to_hex(lower=lower)
