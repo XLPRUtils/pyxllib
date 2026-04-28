@@ -1,3 +1,6 @@
+import sys
+import types
+
 import pandas as pd
 
 from kq5034.wjx_automation import (
@@ -5,6 +8,7 @@ from kq5034.wjx_automation import (
     分析问卷星滞留记录,
     匹配问卷星用户候选,
     提取修正需求课次标签,
+    提醒问卷数据,
     获取问卷星增量记录,
     标准化问卷星记录,
 )
@@ -138,6 +142,39 @@ def test_读取CodeYun问卷提醒数据支持分页(monkeypatch):
     assert df['序号'].tolist() == [12, 11, 10]
     assert df['1、所属课程'].tolist() == ['20260415梵呗初阶', '20260408第39届念住', '20260401第45届觉观']
     assert df['处理状态'].tolist() == ['', '', '']
+
+
+def test_提醒问卷数据支持传入CodeYun接口(monkeypatch):
+    api_url = 'http://192.168.31.63:5173/api/attendance/wjx-data'
+
+    class FakeResponse:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {
+                'total': 1,
+                'items': [
+                    {'seq': 12, 'course_name': '20260415梵呗初阶', 'process_status': ''},
+                ],
+            }
+
+    def fake_get(url, *, params=None, timeout=None):
+        assert url == api_url
+        assert params == {'page': 1, 'page_size': 100}
+        assert timeout == (5, 20)
+        return FakeResponse()
+
+    sent = []
+    fake_common = types.ModuleType('kq5034.common')
+    fake_common.wechat_lock_send = lambda dst, message: sent.append((dst, message))
+    monkeypatch.setitem(sys.modules, 'kq5034.common', fake_common)
+    monkeypatch.setattr('kq5034.wjx_automation.requests.get', fake_get)
+
+    result = 提醒问卷数据(api_url=api_url)
+
+    assert result['梵呗']['items'] == ['20260415梵呗初阶：12']
+    assert sent == [('本体音艺考勤班委群', result['梵呗']['message'])]
 
 
 def test_匹配问卷星用户候选复用相似度算法():

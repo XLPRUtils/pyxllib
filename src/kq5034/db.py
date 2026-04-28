@@ -557,6 +557,10 @@ class KqDb(XlprDb):
         }
 
         def 读取用户导出表(path):
+            with open(path, 'rb') as fh:
+                if fh.read(4).startswith(b'PK\x03\x04'):
+                    raise ValueError(f'用户导出文件不是CSV，疑似误下载了Excel文件：file={path}')
+
             last_columns = []
             for attempt in range(1, 4):
                 try:
@@ -1151,12 +1155,14 @@ ORDER BY ldt.lesson_id DESC;
         :param name: 打卡配置名
         :param file: 本地文件路径
         """
-        # 1 删除旧数据
         clockin_id = self.exec2one(r'SELECT clockin_id FROM clockin_table WHERE name=%s', [name, ])
-        self.execute(f'DELETE FROM clockin_data_table WHERE clockin_id={clockin_id}')
-        self.commit()
+        file = str(file)
+        existing_count = self.exec2one(
+            'SELECT COUNT(*) FROM clockin_data_table WHERE clockin_id=%s',
+            [clockin_id]
+        )
 
-        # 2 插入新数据
+        # 1 先确认新文件可读，再覆盖旧数据
         zhname2en = {
             '用户ID': 'user_id2',  # 1 以下是禅宗体系
             '用户昵称': 'nickname',
@@ -1192,15 +1198,26 @@ ORDER BY ldt.lesson_id DESC;
             try:
                 df = pd.read_csv(file)
             except ValueError as e2:
-                logger.info(f"Excel读取失败: {e1}")
-                logger.info(f"CSV读取失败: {e2}")
+                logger.info(f"Excel读取失败: {file}, {e1}")
+                logger.info(f"CSV读取失败: {file}, {e2}")
                 return  # 结束函数执行
             except Exception as e2:
-                logger.info(f"Excel读取失败: {e1}")
-                logger.info(f"CSV读取异常: {e2}")
+                logger.info(f"Excel读取失败: {file}, {e1}")
+                logger.info(f"CSV读取异常: {file}, {e2}")
                 return
         except Exception as e1:
-            logger.info(f"Excel读取异常: {e1}")
+            logger.info(f"Excel读取异常: {file}, {e1}")
+            return
+
+        recognized_cols = [col for col in df.columns if col in zhname2en]
+        if not recognized_cols:
+            logger.info(f"打卡文件表头异常，已跳过覆盖: {file}, cols={list(df.columns)}")
+            return
+        if df.empty and existing_count:
+            logger.info(
+                f"打卡文件为空，已跳过覆盖已有数据: {file}, "
+                f"clockin_id={clockin_id}, existing_count={existing_count}"
+            )
             return
 
         custom_fillna(df, '', numeric_fill_value='')
@@ -1217,6 +1234,10 @@ ORDER BY ldt.lesson_id DESC;
                     if ext_col in row:
                         text += f'\n{ext_col}：' + str(row[ext_col])
                 row['文字内容'] = text
+
+        # 2 新文件已确认可读，再覆盖旧数据
+        self.execute(f'DELETE FROM clockin_data_table WHERE clockin_id={clockin_id}')
+        self.commit()
 
         for idx, row in df.iterrows():
             row2 = {'clockin_name': name, 'clockin_id': clockin_id, 'extra': {}}

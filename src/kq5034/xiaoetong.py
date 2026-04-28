@@ -388,53 +388,217 @@ return true;
                     tab.close()
             self.tab = original_tab
 
-    def __1_导出各种表格数据(self):
-        pass
+    @staticmethod
+    def _标准化下载名(name):
+        return re.sub(r'\s+', '', name or '')
 
-    def download_last_file(self):
-        """ 去数据中心等着下载最新的生成的数据文件
-        """
-        tab = self.tab
+    @staticmethod
+    def _取生成器返回值(generator):
+        while True:
+            try:
+                next(generator)
+            except StopIteration as err:
+                return err.value
 
-        # 1 等待按钮变可下载
-        tr = ele = None
-        max_attempts = 30
-        for attempt in range(1, max_attempts + 1):
-            tab.get('https://admin.xiaoe-tech.com/t/basic-platform/downloadCenter#/')
-            tab.wait(5)
+    def _提取下载中心任务名(self, row):
+        first_td = row('tag:td', timeout=0.5)
+        return first_td.text if first_td else row.text.split('\n', 1)[0]
+
+    def _列出下载中心任务名(self, match_keywords=None):
+        """ 读取当前下载中心里可下载的任务名，用于过滤旧任务。 """
+        match_keywords = [self._标准化下载名(x) for x in (match_keywords or []) if x]
+
+        with self.临时工作标签页(url='https://admin.xiaoe-tech.com/t/basic-platform/downloadCenter#/', wait_seconds=5) as tab:
             rows = []
             for tbody in tab.eles('tag:tbody'):
                 rows.extend(tbody.eles('tag:tr'))
 
+            task_names = set()
             for row in rows:
                 btn = row('tag:button@@text():下载', timeout=0.5)
-                if btn:
-                    tr, ele = row, btn
-                    break
+                if not btn:
+                    continue
+
+                task_name = self._提取下载中心任务名(row)
+                normalized_name = self._标准化下载名(task_name)
+                if match_keywords and not any(x in normalized_name for x in match_keywords):
+                    continue
+                task_names.add(task_name)
+
+            return task_names
+
+    def _列出下载中心任务记录(self, match_keywords=None):
+        """读取下载中心任务记录，兼容处理中/成功两类状态判断。"""
+        match_keywords = [self._标准化下载名(x) for x in (match_keywords or []) if x]
+
+        with self.临时工作标签页(url='https://admin.xiaoe-tech.com/t/basic-platform/downloadCenter#/', wait_seconds=5) as tab:
+            rows = []
+            for tbody in tab.eles('tag:tbody'):
+                rows.extend(tbody.eles('tag:tr'))
+
+            records = []
+            for row in rows:
+                tds = row.eles('tag:td')
+                if len(tds) < 9:
+                    continue
+
+                task_name = (tds[0].text or '').strip()
+                normalized_name = self._标准化下载名(task_name)
+                if match_keywords and not any(x in normalized_name for x in match_keywords):
+                    continue
+
+                status = (tds[6].text or '').strip()
+                action_text = (tds[8].text or '').strip()
+                apply_time = (tds[5].text or '').strip()
+                can_download = bool(row('tag:button@@text():下载', timeout=0.3)) or '下载' in action_text
+                records.append({
+                    'name': task_name,
+                    'normalized_name': normalized_name,
+                    'status': status,
+                    'apply_time': apply_time,
+                    'action_text': action_text,
+                    'can_download': can_download,
+                })
+
+            return records
+
+    def _提取禅宗打卡导出名(self, tab):
+        """ 从禅宗打卡页提取下载中心中应出现的任务名前缀。 """
+        text = ''
+        with contextlib.suppress(Exception):
+            text = tab.run_js('return document.querySelector("#sub_app_container")?.innerText || ""') or ''
+
+        ignore_lines = {
+            '详情', '任务数据', '编辑', '删除', '编辑|删除', '全部',
+            '已完成成员', '未完成成员', '完成情况', '参与人数', '已完成', '未完成', '完成率（%）',
+            '无数据', '动态详情', '分享',
+        }
+        lines = []
+        for line in text.splitlines():
+            line = line.strip()
+            if not line or line in ignore_lines or line.startswith('任务时间：'):
+                continue
+            if len(line) <= 40:
+                lines.append(line)
+
+        for line in lines:
+            if '打卡' in line:
+                return line
+
+        for line in lines:
+            if '共修' in line:
+                return line
+
+        for line in lines:
+            return line
+
+        return ''
+
+    def _等待禅宗打卡导出按钮(self, tab, *, max_attempts=4):
+        """ 禅宗打卡页偶发空白或加载慢，重试刷新直到导出按钮出现。 """
+        last_body = ''
+        for attempt in range(1, max_attempts + 1):
+            with contextlib.suppress(Exception):
+                tab.run_js('document.querySelector(".notify-wrap")?.remove()')
+            with contextlib.suppress(Exception):
+                tab.wait.eles_loaded('.tabs-pane', timeout=10)
+
+            pane = tab('.tabs-pane', timeout=2)
+            btn = pane('tag:button@@class:ss-button@@text():导出', timeout=2) if pane else None
+            if btn:
+                return pane, btn
+
+            with contextlib.suppress(Exception):
+                last_body = (tab.run_js(
+                    'return document.querySelector("#sub_app_container")?.innerText || document.body.innerText || ""'
+                ) or '')[:200]
+            logger.warning(f'禅宗打卡页导出按钮未就绪，重试 {attempt}/{max_attempts}: '
+                           f'url={tab.url} body={last_body!r}')
+            tab.refresh()
+            tab.wait(min(3 + attempt, 8))
+
+        raise RuntimeError(f'禅宗打卡页导出按钮等待超时：url={tab.url} body={last_body!r}')
+
+    def __1_导出各种表格数据(self):
+        pass
+
+    def download_last_file(self, match_keywords=None, exclude_task_names=None):
+        """ 去数据中心等着下载最新的生成的数据文件
+        """
+        return self._取生成器返回值(self.iter_download_last_file(match_keywords, exclude_task_names))
+
+    def iter_download_last_file(self, match_keywords=None, exclude_task_names=None, *,
+                                poll_seconds=60, max_wait_seconds=None, refresh_every_checks=5):
+        """生成器版下载中心轮询，便于行为树逐步推进。"""
+        tab = self.tab
+        match_keywords = [self._标准化下载名(x) for x in (match_keywords or []) if x]
+        exclude_task_names = {self._标准化下载名(x) for x in (exclude_task_names or []) if x}
+
+        yield '下载中心轮询：打开页面'
+        tab.get('https://admin.xiaoe-tech.com/t/basic-platform/downloadCenter#/')
+        with contextlib.suppress(Exception):
+            tab.wait.eles_loaded('tag:tbody', timeout=15)
+        tab.wait(5)
+
+        tr = ele = None
+        start_ts = time.time()
+        check_index = 0
+        while True:
+            check_index += 1
+            rows = []
+            for tbody in tab.eles('tag:tbody'):
+                rows.extend(tbody.eles('tag:tr'))
+
+            skipped_existing = False
+            for row in rows:
+                btn = row('tag:button@@text():下载', timeout=0.5)
+                if not btn:
+                    continue
+
+                file1 = self._提取下载中心任务名(row)
+                normalized_name = self._标准化下载名(file1)
+                if match_keywords and not any(x in normalized_name for x in match_keywords):
+                    continue
+                if normalized_name in exclude_task_names:
+                    skipped_existing = True
+                    continue
+                if file1 in self.exist_files:
+                    skipped_existing = True
+                    continue
+
+                tr, ele = row, btn
+                break
 
             if ele:
                 break
 
-            logger.warning(f'下载中心暂未出现可下载任务，重试 {attempt}/{max_attempts}，url={tab.url}')
-            tab.refresh()
-            tab.wait(2)
-        else:
-            raise RuntimeError(f'下载中心等待超时，未找到可下载任务：url={tab.url}')
+            elapsed = time.time() - start_ts
+            if max_wait_seconds is not None and elapsed >= max_wait_seconds:
+                if match_keywords:
+                    raise RuntimeError(f'下载中心等待超时，未找到匹配任务：keywords={match_keywords} url={tab.url}')
+                raise RuntimeError(f'下载中心等待超时，未找到可下载任务：url={tab.url}')
 
-        # 2 判断是不是之前已下载过的文件，如果是就是上游出现问题了。
-        #   一般是比如第18课有数据，第19课没数据，没有导出，但硬下载第19课数据，则实际是下载了第18课数据来填充第19课数据。
-        #   可以通过在下载这里缓存已下载过文件名进行检查
-        first_td = tr('tag:td', timeout=2)
-        file1 = first_td.text if first_td else tr.text.split('\n', 1)[0]  # file1是网页上标记的名字，file2是下载后的路径和名字，两者不一定完全一致
-        if file1 in self.exist_files:
-            return None
-        else:
-            self.exist_files.add(file1)
+            if match_keywords:
+                logger.info(f'下载中心暂未出现匹配任务，继续等待：'
+                            f'elapsed={elapsed:.0f}s check={check_index} '
+                            f'keywords={match_keywords} url={tab.url} skipped_existing={skipped_existing}')
+            else:
+                logger.info(f'下载中心暂未出现可下载任务，继续等待：elapsed={elapsed:.0f}s check={check_index} url={tab.url}')
+            yield f'下载中心轮询：未命中任务 check={check_index} elapsed={elapsed:.0f}s'
+            tab.wait(poll_seconds)
+            if refresh_every_checks and check_index % refresh_every_checks == 0:
+                logger.info(f'下载中心轮询：刷新页面 check={check_index} elapsed={elapsed:.0f}s url={tab.url}')
+                tab.refresh()
+                with contextlib.suppress(Exception):
+                    tab.wait.eles_loaded('tag:tbody', timeout=15)
+                tab.wait(2)
 
-        # 3 下载，并找到下载的文件名
-        tab.wait(5)  # 等待一会，安全稳定些~ 防止下载到空文件夹等异常
+        file1 = self._提取下载中心任务名(tr)
+        self.exist_files.add(file1)
 
-        # + 修改：使用指定的下载目录，避免系统临时目录清理导致的问题
+        yield f'下载中心轮询：准备下载 task={file1}'
+        tab.wait(5)
+
         from pathlib import Path
         download_dir = Path.home() / 'Downloads' / '_xlproject_temp_downloads'
         download_dir.mkdir(parents=True, exist_ok=True)
@@ -444,30 +608,53 @@ return true;
 
     def export_user_list(self, search_name=None, download=True):
         """ 导出全部用户清单 """
+        return self._取生成器返回值(self.iter_export_user_list(search_name, download))
+
+    def iter_export_user_list(self, search_name=None, download=True):
+        """生成器版导出用户清单，导出等待过程可逐步观察。"""
         tab = self.tab
+
+        yield '用户列表导出：打开用户列表页'
         tab.get('https://admin.xiaoe-tech.com/t/user_manage/index#/user_list/list')
         if search_name is None:
             tab('tag:span@@text()=重置', timeout=30).click()
         else:
-            tab('tag:input@@placeholder=请输入昵称/备注名搜索').input(str(search_name), clear=True)  # 小批量数据测试用
+            tab('tag:input@@placeholder=请输入昵称/备注名搜索').input(str(search_name), clear=True)
             tab('tag:span@@text()=筛选').click()
+
+        existing_exports = self._列出下载中心任务名(['用户列表导出']) if download else set()
+        task_records = self._列出下载中心任务记录(['用户列表导出']) if download else []
+        processing_tasks = [x for x in task_records if ('处理中' in x['status'] or '任务撤回' in x['action_text']) and not x['can_download']]
+        if processing_tasks:
+            processing_tasks.sort(key=lambda x: x['apply_time'], reverse=True)
+            task = processing_tasks[0]
+            yield f"用户列表导出：复用处理中任务 task={task['name']} apply_time={task['apply_time']}"
+            return (yield from self.iter_download_last_file([task['name']], refresh_every_checks=5))
+
+        yield f'用户列表导出：已有下载任务数={len(existing_exports)}'
+
         tab('tag:span@@text():导出列表').click()
         tab.wait(5)
-        # 把能勾选的，没勾选的，全勾上
         for label in tab.eles('tag:label@@class=el-checkbox'):
             label('tag:span').click()
-        # 241209周一20:03，不知道为啥，考勤六步这里"导出"老是经常容易找不到，所以就从5秒再多加一些时间
+        yield '用户列表导出：已展开导出字段'
+
         tab.wait(10)
-        # 这一步不知道为什么，每次检索速度会有点慢
         tab('tag:button@@text()=导出', timeout=20).click()
+        yield '用户列表导出：已提交导出任务'
 
         if download:
             tab.wait(3)
-            return self.download_last_file()
+            return (yield from self.iter_download_last_file(
+                ['用户列表导出'],
+                exclude_task_names=existing_exports,
+                refresh_every_checks=5,
+            ))
 
     def export_clockin_data(self, url, download=True, start_date=None, end_date=None):
         """ 导出指定的打卡数据文件 """
         cache_key = None
+        expected_download_name = ''
         if 'community_admin' in url:  # 禅宗打卡
             if start_date is None:  # 开始时间可以设置为一年前
                 start_date = (datetime.datetime.now() - datetime.timedelta(days=365)).strftime('%Y-%m-%d')
@@ -487,32 +674,43 @@ return true;
 
         if 'community_admin' in url:  # 禅宗打卡
             tab.wait(3)
-
-            # 直接操作 DOM 移除提示框组件（移除整个通知容器）
-            tab.run_js('document.querySelector(".notify-wrap")?.remove()')
-            tab.wait(0.5)
-
-            # tab.run_js('location.reload()')  # 强制刷新页面
-            tab.wait.eles_loaded('.tabs-pane', timeout=5)  # 确保父容器加载完成
+            pane, _ = self._等待禅宗打卡导出按钮(tab)
+            expected_download_name = self._提取禅宗打卡导出名(tab)
             # 等待按钮变为可点击状态
-            btn = tab('.tabs-pane')('tag:button@@class:ss-button@@text():导出')(
+            btn = pane('tag:button@@class:ss-button@@text():导出')(
                 'tag:span@@text():导出').wait.clickable()
             btn.scroll.to_see()
             # 点击前再次检查状态
-            btn.click(timeout=4) if btn.states.is_clickable else print("按钮仍不可点击")
+            if not btn.states.is_clickable:
+                raise RuntimeError(f'禅宗打卡页导出按钮不可点击：url={tab.url}')
+            btn.click(timeout=4)
 
             # page('.tabs-pane')('.ss-button__content')('tag:span@@text():导出').click()
             # tab('.tabs-pane')('tag:button@@class:ss-button@@text():导出')('tag:span@@text():导出').click()
             tab.wait(1)
-            tab('tag:input@@placeholder=开始日期@@class=el-range-input').click()
-            tab('tag:input@@placeholder=开始日期@@class=el-input__inner').input(start_date, clear=True)
-            tab('tag:input@@placeholder=开始时间@@class=el-input__inner').input('00:00', clear=True)
-            tab('tag:input@@placeholder=结束日期@@class=el-input__inner').input(end_date, clear=True)
-            tab('tag:input@@placeholder=结束时间@@class=el-input__inner').input('23:59', clear=True)
+            range_input = None
+            for attempt in range(1, 4):
+                range_input = tab('tag:input@@placeholder=开始日期@@class=el-range-input', timeout=3)
+                if range_input:
+                    break
+                logger.warning(f'禅宗打卡导出弹窗未出现，重试 {attempt}/3：url={tab.url}')
+                btn.click(by_js=True)
+                tab.wait(2)
+            if not range_input:
+                raise RuntimeError(f'禅宗打卡导出弹窗等待超时：url={tab.url}')
+
+            range_input.click()
+            tab.wait(0.5)
+            tab.action_type(tab('tag:input@@placeholder=开始日期@@class=el-input__inner', timeout=10), start_date)
+            tab.action_type(tab('tag:input@@placeholder=开始时间@@class=el-input__inner', timeout=10), '00:00')
+            tab.action_type(tab('tag:input@@placeholder=结束日期@@class=el-input__inner', timeout=10), end_date)
+            tab.action_type(tab('tag:input@@placeholder=结束时间@@class=el-input__inner', timeout=10), '23:59')
             tab('tag:div@@class=el-picker-panel__footer@@text():确定').click()
             tab.wait(1)
-            tab('tag:button@@class=el-button el-picker-panel__link-btn '
-                'el-button--default el-button--mini is-plain@@text():确定').click()  # 这是两个不同的"确认"按钮
+            confirm_btn = tab('tag:button@@class=el-button el-picker-panel__link-btn '
+                              'el-button--default el-button--mini is-plain@@text():确定', timeout=2)
+            if confirm_btn:
+                confirm_btn.click()  # 这是两个不同的"确认"按钮
             tab('tag:button@@class=el-button el-button--primary@@text():导出').click()
         elif 'diaryList' in url:  # 日历打卡（日历打卡多了一个字段"打卡天数"）
             try:
@@ -551,7 +749,11 @@ return true;
         if download:
             tab.wait(3)
             # tab.close()
-            file = self.download_last_file()
+            file = self.download_last_file([expected_download_name] if expected_download_name else None)
+            if file and expected_download_name:
+                if self._标准化下载名(expected_download_name) not in self._标准化下载名(file.name):
+                    logger.warning(f'禅宗打卡导出文件名校验失败：expect={expected_download_name} got={file.name} url={url}')
+                    file = None
             if cache_key is not None:
                 file = self._store_runtime_cached_file(cache_key, file)
             return file
