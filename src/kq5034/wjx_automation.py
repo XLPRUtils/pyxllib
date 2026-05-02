@@ -894,18 +894,16 @@ def _读取CodeYun问卷提醒数据(api_url=CodeYun问卷数据接口, page_siz
     """从 CodeYun 接口分页读取问卷提醒所需字段。"""
     rows = []
     page = 1
-    total = None
 
     while True:
         resp = requests.get(
             api_url,
-            params={'page': page, 'page_size': page_size},
-            timeout=(5, 20),
+            params={'page': page, 'page_size': page_size, 'process_status': '__empty__'},
+            timeout=60,
         )
         resp.raise_for_status()
         payload = resp.json()
         items = payload.get('items') or []
-        total = _转整数(payload.get('total'), total or 0)
 
         for item in items:
             seq = _转整数(item.get('seq'), 0)
@@ -918,8 +916,6 @@ def _读取CodeYun问卷提醒数据(api_url=CodeYun问卷数据接口, page_siz
             })
 
         if len(items) < page_size:
-            break
-        if total and len(rows) >= total:
             break
 
         page += 1

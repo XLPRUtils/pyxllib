@@ -1,5 +1,7 @@
 import datetime
+import inspect
 import json
+from pathlib import Path
 
 import pytest
 
@@ -46,6 +48,32 @@ def test_action_supports_generator_and_releases_control(tmp_path):
     assert runner.run_once() == Status.RUNNING
     assert runner.run_once() == Status.SUCCESS
     assert events == ["start", "end"]
+
+
+def test_trace_logs_generator_yield_and_return_source_locations(tmp_path):
+    lines = {}
+
+    def leaf():
+        lines["yield"] = inspect.currentframe().f_lineno + 1
+        yield
+        lines["return"] = inspect.currentframe().f_lineno + 1
+        return "done"
+
+    def wrapper():
+        return (yield from leaf())
+
+    log_path = tmp_path / "trace.log"
+    runner = BehaviorTreeRunner(Root(Action(wrapper)), tmp_path / "state.json", trace=2, log_path=log_path)
+    filename = Path(__file__).name
+
+    assert runner.run_once() == Status.RUNNING
+    log_text = log_path.read_text(encoding="utf-8")
+    assert f"tree yield: {filename}:{lines['yield']} -> RUNNING" in log_text
+
+    assert runner.run_once() == Status.SUCCESS
+    log_text = log_path.read_text(encoding="utf-8")
+    assert f"tree return: {filename}:{lines['return']} -> SUCCESS" in log_text
+    assert "tree tick:" not in log_text
 
 
 def test_sequence_and_selector_handle_skip(tmp_path):

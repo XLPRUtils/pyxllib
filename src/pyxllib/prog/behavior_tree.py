@@ -28,6 +28,7 @@ import inspect
 import json
 import logging
 import re
+import sys
 import time
 import traceback
 from dataclasses import dataclass
@@ -80,6 +81,12 @@ class NextWake:
     """节点返回的下一次唤醒时间。"""
 
     run_at: datetime.datetime
+
+
+@dataclass
+class _TraceInterrupt:
+    kind: str
+    location: Optional[str]
 
 
 def _format_time(value: Optional[datetime.datetime]) -> Optional[str]:
@@ -193,6 +200,28 @@ def _coerce_status(value: Any) -> Status:
     return Status.SUCCESS
 
 
+def _source_location(filename: str, lineno: int) -> str:
+    return f"{Path(filename).name}:{lineno}"
+
+
+def _frame_source_location(frame) -> str:
+    return _source_location(frame.f_code.co_filename, frame.f_lineno)
+
+
+def _deepest_generator(generator: GeneratorType) -> GeneratorType:
+    current = generator
+    while isinstance(current.gi_yieldfrom, GeneratorType):
+        current = current.gi_yieldfrom
+    return current
+
+
+def _suspended_generator_location(generator: GeneratorType) -> Optional[str]:
+    frame = _deepest_generator(generator).gi_frame
+    if frame is None:
+        return None
+    return _frame_source_location(frame)
+
+
 def _is_within_time(window_start: str, window_end: str, *, base_time: datetime.datetime) -> bool:
     def parse_clock(value: str) -> int:
         match = _TIME_RE.match(str(value).strip())
@@ -219,6 +248,7 @@ class TreeContext:
         self.blackboard = runner.state.setdefault("blackboard", {})
         self.next_run_at = None
         self._slept = False
+        self.trace_interrupt = None
 
     def now(self) -> datetime.datetime:
         return self.runner.now()
@@ -405,12 +435,16 @@ class Action(Node):
             self.generator = result
 
         try:
-            next(self.generator)
+            ctx.runner._advance_generator(self.generator)
+            if ctx.runner.trace >= 2:
+                ctx.trace_interrupt = _TraceInterrupt("yield", _suspended_generator_location(self.generator))
             return self._record(Status.RUNNING)
         except StopIteration as err:
             self.generator = None
             if isinstance(err.value, NextWake):
                 ctx.next_run_at = err.value.run_at
+            if ctx.runner.trace >= 2:
+                ctx.trace_interrupt = _TraceInterrupt("return", ctx.runner._generator_return_location())
             return self._record(_coerce_status(err.value))
 
 
@@ -963,6 +997,7 @@ class BehaviorTreeRunner:
         self.state = self.load_state()
         self.memory_state = {"nodes": {}, "blackboard": {}}
         self.logger = self._create_logger(log_path)
+        self._last_generator_return_locations = []
         self._assign_paths()
 
     def now(self) -> datetime.datetime:
@@ -1007,7 +1042,7 @@ class BehaviorTreeRunner:
         else:
             self.save_state()
             if self.trace >= 2:
-                self.logger.debug("tree tick: %s", status.value)
+                self._log_trace_interrupt(ctx, status)
             return status
 
     def run_forever(self, tick_seconds=1) -> None:
@@ -1022,9 +1057,40 @@ class BehaviorTreeRunner:
             else:
                 self.save_state()
                 if self.trace >= 2:
-                    self.logger.debug("tree tick: %s", status.value)
+                    self._log_trace_interrupt(ctx, status)
                 if not ctx._slept:
                     time.sleep(tick_seconds)
+
+    def _advance_generator(self, generator: GeneratorType) -> None:
+        if self.trace < 2:
+            next(generator)
+            return
+
+        self._last_generator_return_locations = []
+        previous_trace = sys.gettrace()
+
+        def trace_func(frame, event, arg):
+            if event == "return" and frame.f_code.co_flags & inspect.CO_GENERATOR:
+                self._last_generator_return_locations.append(_frame_source_location(frame))
+            return trace_func
+
+        sys.settrace(trace_func)
+        try:
+            next(generator)
+        finally:
+            sys.settrace(previous_trace)
+
+    def _generator_return_location(self) -> Optional[str]:
+        if not self._last_generator_return_locations:
+            return None
+        return self._last_generator_return_locations[0]
+
+    def _log_trace_interrupt(self, ctx: TreeContext, status: Status) -> None:
+        interrupt = ctx.trace_interrupt
+        if interrupt is None:
+            return
+        location = interrupt.location or "unknown"
+        self.logger.debug("tree %s: %s -> %s", interrupt.kind, location, status.value)
 
     def _create_logger(self, log_path) -> logging.Logger:
         logger = logging.getLogger(f"{__name__}.{id(self)}")

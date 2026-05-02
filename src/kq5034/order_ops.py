@@ -24,6 +24,9 @@ ORDER_NUMERIC_COLUMNS = ["订单金额", "已返款", "退款额度"]
 OrderLookupMode = Literal["hybrid", "db_only", "browser_only"]
 DEFAULT_ORDER_LOOKUP_MODE: OrderLookupMode = "hybrid"
 ORDER_LOOKUP_MODES = frozenset({"hybrid", "db_only", "browser_only"})
+RefundQueryType = Literal["auto", "pay_order", "merchant_order", "refund_id"]
+DEFAULT_REFUND_QUERY_TYPE: RefundQueryType = "auto"
+REFUND_QUERY_TYPES = frozenset({"auto", "pay_order", "merchant_order", "refund_id"})
 
 
 class OrderAutomationError(RuntimeError):
@@ -39,6 +42,29 @@ def _normalize_lookup_mode(value: Any, *, strict: bool = False) -> OrderLookupMo
     if strict:
         raise OrderAutomationError(f"不支持的订单查单模式：{value}")
     return DEFAULT_ORDER_LOOKUP_MODE
+
+
+def _normalize_refund_query_type(value: Any, *, strict: bool = False) -> RefundQueryType:
+    normalized = str(value or "").strip().lower()
+    if not normalized:
+        return DEFAULT_REFUND_QUERY_TYPE
+
+    alias_map = {
+        "wechat_order_id": "pay_order",
+        "wechat_order": "pay_order",
+        "transaction_id": "pay_order",
+        "flow_order": "pay_order",
+        "merchant_order_id": "merchant_order",
+        "merchant": "merchant_order",
+        "voucher_id": "merchant_order",
+        "refund": "refund_id",
+    }
+    normalized = alias_map.get(normalized, normalized)
+    if normalized in REFUND_QUERY_TYPES:
+        return cast(RefundQueryType, normalized)
+    if strict:
+        raise OrderAutomationError(f"不支持的退款详情查询类型：{value}")
+    return DEFAULT_REFUND_QUERY_TYPE
 
 
 def _normalize_order_id(order_id: Any) -> str:
@@ -118,6 +144,89 @@ def _generate_candidate_order_ids(order_id: Any) -> list[str]:
     if "-" in normalized_order_id and "0" in normalized_order_id:
         return _generate_zero_o_variants(normalized_order_id)
     return [normalized_order_id]
+
+
+def _normalize_refund_detail_row(row: dict[str, Any] | None) -> dict[str, Any]:
+    source = dict(row or {})
+    return {
+        "wechat_order_id": _normalize_order_id(source.get("交易单号")),
+        "merchant_order_id": _normalize_order_id(source.get("商户单号")),
+        "refund_id": _normalize_order_id(source.get("退款单号")),
+        "refund_amount": _coerce_number(source.get("退款金额"), 0.0),
+        "refund_status": str(source.get("退款状态") or "").strip(),
+        "applicant": str(source.get("申请人") or "").strip(),
+        "submitted_at": str(source.get("提交时间") or "").strip(),
+        "completed_at": str(source.get("退款完成时间") or "").strip(),
+    }
+
+
+def query_order_refund_details(
+    order_id: Any,
+    *,
+    query_type: Any = DEFAULT_REFUND_QUERY_TYPE,
+    weipay=None,
+    weipay_login_users: Sequence[str] | None = None,
+) -> dict[str, Any]:
+    normalized_order_id = _normalize_order_id(order_id)
+    if not normalized_order_id:
+        raise OrderAutomationError("订单号不能为空")
+
+    normalized_query_type = _normalize_refund_query_type(query_type, strict=True)
+    candidate_ids = (
+        _generate_candidate_order_ids(normalized_order_id)
+        if normalized_query_type in {"auto", "merchant_order"}
+        else [normalized_order_id]
+    )
+
+    weipay = _ensure_weipay(weipay, weipay_login_users=weipay_login_users)
+    matched_order_id = normalized_order_id
+    raw_rows: list[dict[str, Any]] = []
+    last_error = ""
+    had_successful_query = False
+
+    for candidate_id in candidate_ids:
+        matched_order_id = candidate_id
+        try:
+            rows = weipay.search_refund_details(candidate_id, query_type=normalized_query_type)
+        except Exception as exc:
+            last_error = str(exc)
+            logger.warning(
+                "退款详情查询失败，尝试下一候选订单号：order_id=%s candidate=%s error=%s",
+                normalized_order_id,
+                candidate_id,
+                exc,
+            )
+            continue
+        had_successful_query = True
+
+        raw_rows = [dict(row) for row in rows if isinstance(row, dict)]
+        if raw_rows:
+            break
+
+    if not raw_rows and last_error and not had_successful_query:
+        raise OrderAutomationError(f"退款详情查询失败：{last_error}")
+
+    rows = [_normalize_refund_detail_row(row) for row in raw_rows]
+    refund_statuses: list[str] = []
+    for row in rows:
+        status = row["refund_status"]
+        if status and status not in refund_statuses:
+            refund_statuses.append(status)
+
+    first_row = rows[0] if rows else {}
+    return {
+        "summary": {
+            "order_id": normalized_order_id,
+            "matched_order_id": matched_order_id,
+            "query_type": normalized_query_type,
+            "row_count": len(rows),
+            "refund_amount_total": round(sum(row["refund_amount"] for row in rows), 2),
+            "wechat_order_id": str(first_row.get("wechat_order_id") or ""),
+            "merchant_order_id": str(first_row.get("merchant_order_id") or ""),
+            "refund_statuses": refund_statuses,
+        },
+        "rows": rows,
+    }
 
 
 def find_order_in_db(order_id: Any, *, kqdb=None) -> dict[str, Any]:
