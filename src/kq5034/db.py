@@ -1437,11 +1437,24 @@ ORDER BY ldt.lesson_id DESC;
         """ 更新微信支付数据 """
         from .weipay import Weipay
 
-        # 下载这个月账单数据，每个月1、2号，也会补下载上个月的账单数据。本地会有备份文件，兼容一些旧框架算法。
-        files = Weipay(['考勤后台']).daily_update(today)
-        # 下载的文件数据会更新到数据库，推荐以后使用数据库进行相关的逻辑处理。
-        for f in files:
-            self.update_weipay_from_file(f)
+        logger.info(f'开始更新微信支付数据：today={today}')
+        weipay = Weipay(['考勤后台'])
+        try:
+            # 下载这个月账单数据，每个月1、2号，也会补下载上个月的账单数据。本地会有备份文件，兼容一些旧框架算法。
+            files = weipay.daily_update(today)
+            logger.info(f'微信支付账单下载完成：file_count={len(files)} files={files}')
+            # 下载的文件数据会更新到数据库，推荐以后使用数据库进行相关的逻辑处理。
+            for f in files:
+                self.update_weipay_from_file(f)
+                logger.info(f'微信支付账单导入完成：file={f}')
+            logger.info('微信支付数据更新完成')
+        finally:
+            try:
+                if getattr(weipay, 'tab', None):
+                    weipay.tab.close()
+                    logger.info('微信支付账单更新标签页已自动关闭')
+            except Exception as exc:
+                logger.warning(f'关闭微信支付账单更新标签页失败，已忽略：{exc}')
 
     def browser_weipay_data(self, voucher_ids):
         """ 查看微信支付数据，保持voucher_id的顺序并处理空值和无效值。"""

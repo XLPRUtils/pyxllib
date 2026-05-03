@@ -486,7 +486,7 @@ class KqTools:
         lines2 = cls.过滤有效返款促学金(lines)
         # 空数据就不用继续处理了
         if not lines2:
-            return
+            return {'submitted': False, 'completed': False, 'reason': 'no_lines'}
 
         # 2 计算标题
         titles = {x.split(',')[2] for x in lines2}
@@ -506,4 +506,4 @@ class KqTools:
         # 4 自动执行返款
         if weipay is None:
             weipay = Weipay(['考勤后台'])
-        weipay.request_file_refund(file)
+        return weipay.request_file_refund(file)

@@ -1,5 +1,9 @@
-# -*- coding: utf-8 -*-
+﻿# -*- coding: utf-8 -*-
 """微信支付最小可用实现。"""
+
+import json
+import tempfile
+from pathlib import Path
 
 from .common import *  # noqa: F403
 from .wechat_runtime import KqWechat
@@ -75,7 +79,7 @@ class Weipay(DpWebBase):
         values = [str(v) for v in values]
         minimum_count = minimum_count or len(values)
         js = r"""
-const values = arguments[0] || [];
+const values = JSON.parse(arguments[0] || '[]');
 const minimumCount = arguments[1] || values.length;
 const isVisible = (el) => {
   if (!el) return false;
@@ -102,15 +106,137 @@ for (let i = 0; i < values.length; i++) {
   input.value = values[i];
   input.dispatchEvent(new Event('input', {bubbles: true}));
   input.dispatchEvent(new Event('change', {bubbles: true}));
+  input.dispatchEvent(new KeyboardEvent('keydown', {key: 'Enter', bubbles: true}));
+  input.dispatchEvent(new KeyboardEvent('keyup', {key: 'Enter', bubbles: true}));
+  input.blur();
+  input.dispatchEvent(new Event('blur', {bubbles: true}));
+}
+if (inputs.length) {
+  document.body.click();
 }
 return 'OK';
 """
-        result = tab.run_js(js, values, minimum_count)
+        result = tab.run_js(js, json.dumps(values, ensure_ascii=False), minimum_count)
         if result != 'OK':
             raise RuntimeError(f'页面输入框填写失败：{result}')
 
+    @staticmethod
+    def _snapshot_download_dir():
+        d = Path(tempfile.gettempdir())
+        data = {}
+        for f in d.iterdir():
+            if not f.is_file():
+                continue
+            try:
+                stat = f.stat()
+                data[str(f)] = (stat.st_size, stat.st_mtime)
+            except OSError:
+                continue
+        return data
+
+    def _wait_for_new_download_file(self, before_files, timeout=120):
+        d = Path(tempfile.gettempdir())
+        allow_suffixes = {'.csv', '.xls', '.xlsx', '.zip'}
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            candidates = []
+            for f in d.iterdir():
+                if not f.is_file():
+                    continue
+                if f.suffix.lower() not in allow_suffixes:
+                    continue
+                try:
+                    stat = f.stat()
+                except OSError:
+                    continue
+                key = str(f)
+                signature = (stat.st_size, stat.st_mtime)
+                if before_files.get(key) == signature:
+                    continue
+                candidates.append((stat.st_mtime, f, stat.st_size))
+
+            candidates.sort(reverse=True)
+            for _, f, size0 in candidates:
+                time.sleep(0.8)
+                try:
+                    size1 = f.stat().st_size
+                except OSError:
+                    continue
+                if size1 > 0 and size1 == size0:
+                    return XlPath(f)
+            time.sleep(1)
+        raise RuntimeError('等待微信支付账单下载文件超时')
+
+    @staticmethod
+    def _iter_visible_tip_dialogs(tab):
+        try:
+            dialogs = tab.eles('t:div@@aria-label=温馨提示')
+        except Exception:
+            return []
+
+        visible_dialogs = []
+        for dialog in dialogs:
+            try:
+                if not dialog.states.has_rect:
+                    continue
+            except Exception:
+                continue
+            visible_dialogs.append(dialog)
+        return visible_dialogs
+
+    def _confirm_bill_download_dialog(self, tab, timeout=90):
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            try:
+                body_text = self._normalize_page_text(tab('tag:body').text)
+            except Exception:
+                body_text = ''
+
+            if body_text:
+                # 资金账单页 body.text 会长期包含隐藏模板中的“未开通资金账户”等文案，
+                # 这里不能直接拿整页文本做权限判错，否则会误伤正常的下载确认流程。
+                if any(x in body_text for x in ['请使用微信扫码登录', '二维码失效', '微信扫一扫登录', '请扫码登录', '登录超时，请重新登录']):
+                    raise RuntimeError('微信支付登录态已失效，请重新扫码登录后再执行批量退款')
+                if '暂时无该功能权限' in body_text and '请联系本商户员工管理员' in body_text:
+                    raise RuntimeError('微信支付当前登录态缺少访问权限，请重新扫码或完成安全验证后再试')
+
+            for dialog in self._iter_visible_tip_dialogs(tab):
+                try:
+                    text = self._normalize_page_text(dialog.text)
+                except Exception:
+                    continue
+                if '当前商户号还未开通资金账户' in text and '无法查看资金账单' in text:
+                    raise RuntimeError('微信支付当前商户号未开通资金账户，无法下载资金账单')
+                if '账单打包完成' not in text and '请确认下载' not in text:
+                    continue
+
+                btn = None
+                for selector in (
+                        't:button@@class:el-button--primary@@text():确 定',
+                        't:button@@class:el-button--primary',
+                ):
+                    try:
+                        btn = dialog.ele(selector, timeout=1)
+                    except Exception:
+                        btn = None
+                    if btn:
+                        break
+                if not btn:
+                    continue
+
+                btn.click(by_js=True)
+                try:
+                    dialog.wait.hidden()
+                except Exception:
+                    pass
+                return True
+
+            time.sleep(0.5)
+        return False
+
     def download_monthly_records(self, month, save_dir=True):
         tab = self.tab
+        logger.info(f'开始下载微信支付账单：month={month} save_dir={save_dir}')
         tab.get('https://pay.weixin.qq.com/index.php/xphp/cfund_bill_nc/funds_bill_nc#/')
 
         start_day = month + '-01'
@@ -118,30 +244,50 @@ return 'OK';
 
         tab.wait(3)
         self._fill_visible_inputs(tab, [start_day, end_day], minimum_count=2)
-        if not self._click_visible_text_action(tab, ['查询']):
-            query_btn = tab.ele('tag:button@@text()=查询', timeout=5)
-            if not query_btn:
-                raise RuntimeError('未找到微信支付账单查询按钮')
-            query_btn.click(by_js=True)
+
+        # 账单页左侧有“已结算查询”入口，这里只点主查询按钮。
+        query_btn = None
+        for selector in (
+                't:button@@class:el-button--primary@@text()=查询',
+                't:button@@class:el-button--primary@@text():查询',
+                't:button@@text()=查询',
+        ):
+            try:
+                query_btn = tab.ele(selector, timeout=3)
+            except Exception:
+                query_btn = None
+            if query_btn:
+                break
+        if not query_btn:
+            raise RuntimeError('未找到微信支付账单查询按钮')
+        query_btn.click(by_js=True)
         tab.wait(5)
 
         if not save_dir:
             return None
 
-        download_btn = tab.ele('tag:a@@class=popups download', timeout=10) or tab.ele('tag:a@@text()=下载', timeout=5)
+        before_files = self._snapshot_download_dir()
+
+        download_btn = None
+        for selector in (
+                't:a@@class=popups download@@text():业务明细账单',
+                't:a@@class=popups download',
+                't:a@@text()=下载',
+        ):
+            try:
+                download_btn = tab.ele(selector, timeout=5)
+            except Exception:
+                download_btn = None
+            if download_btn:
+                break
         if not download_btn:
             raise RuntimeError('未找到微信支付账单下载入口')
         download_btn.click(by_js=True)
 
-        dialog = tab.ele('tag:div@@class=el-dialog__wrapper new-capital-down-dialog', timeout=15) or tab.ele('tag:div@@class=el-dialog__wrapper', timeout=15)
-        if not dialog:
-            raise RuntimeError('未找到微信支付账单下载弹窗')
+        if not self._confirm_bill_download_dialog(tab, timeout=90):
+            raise RuntimeError('未找到微信支付账单下载确认弹窗')
 
-        primary_btn = dialog.ele('tag:button@@class:primary', timeout=60) or dialog.ele('tag:a@@class:primary', timeout=60)
-        if not primary_btn:
-            raise RuntimeError('未找到微信支付账单下载确认按钮')
-
-        src_file = XlPath(primary_btn.click.to_download().wait(show=False))
+        src_file = self._wait_for_new_download_file(before_files, timeout=120)
         if save_dir is True:
             save_dir = xlhome_dir('data/m2112kq5034/数据表')
         else:
@@ -150,6 +296,7 @@ return 'OK';
         name = re.sub(r'_\d+\.csv$', '.csv', src_file.name)
         dst_file = save_dir / name
         shutil.copy(src_file, dst_file)
+        logger.info(f'微信支付账单下载完成：month={month} file={dst_file}')
         return dst_file
 
     def daily_update(self, today=None):
@@ -168,22 +315,25 @@ return 'OK';
         if current_day != 1:
             months.append(f'{current_year}-{str(current_month).zfill(2)}')
 
+        logger.info(f'开始执行微信支付账单日更：today={today} months={months}')
         for month in months:
             dst_file = None
             last_error = None
-            for _ in range(4):
+            for i in range(4):
                 try:
                     dst_file = self.download_monthly_records(month)
                     last_error = None
                     break
                 except DrissionPage.errors.NoRectError as exc:
                     last_error = exc
+                    logger.warning(f'月份账单下载遇到 NoRectError，准备重试：month={month} attempt={i + 1}/4 error={exc}')
                     time.sleep(1)
             if dst_file is not None:
                 dst_files.append(dst_file)
             elif last_error is not None:
                 raise last_error
 
+        logger.info(f'微信支付账单日更完成：file_count={len(dst_files)} files={dst_files}')
         return dst_files
 
     @staticmethod
@@ -265,6 +415,65 @@ return `${hiddenAncestor ? 1 : 0}|${rect.width}|${rect.height}|${zIndex}`;
     def _is_element_really_visible(self, ele):
         state = self._get_element_render_state(ele)
         return not state['hidden_ancestor'] and state['width'] > 0 and state['height'] > 0
+
+    @staticmethod
+    def _dom_click(ele):
+        js = r"""
+const el = this;
+if (!el) return false;
+['mouseover', 'mousedown', 'mouseup', 'click'].forEach((name) => {
+  el.dispatchEvent(new MouseEvent(name, {bubbles: true, cancelable: true, view: window}));
+});
+if (typeof el.click === 'function') el.click();
+return true;
+"""
+        try:
+            return bool(ele.run_js(js))
+        except Exception:
+            return False
+
+    def _click_submit_success_dialog_primary(self, tab):
+        js = r"""
+const normalize = (value) => String(value || '').replace(/\s+/g, ' ').trim();
+const isVisible = (el) => {
+  if (!el) return false;
+  let p = el;
+  while (p) {
+    const style = getComputedStyle(p);
+    const cls = (p.className || '').toString();
+    if (cls.includes('hide') || style.display === 'none' || style.visibility === 'hidden' || Number(style.opacity) === 0) {
+      return false;
+    }
+    p = p.parentElement;
+  }
+  const rect = el.getBoundingClientRect();
+  return rect.width > 0 && rect.height > 0;
+};
+const dialogs = [...document.querySelectorAll('.dialog')].filter(isVisible);
+const dialog = dialogs.find((node) => {
+  const text = normalize(node.innerText || node.textContent);
+  return text.includes('????') || text.includes('?????????');
+});
+if (!dialog) return '';
+const selectors = [
+  '.dialog-ft a.btn.btn-primary.popups',
+  'a.btn.btn-primary.popups',
+  '.dialog-ft a.btn.btn-primary',
+  'a.btn.btn-primary'
+];
+for (const selector of selectors) {
+  const btn = dialog.querySelector(selector);
+  if (btn && isVisible(btn)) {
+    btn.click();
+    return normalize(btn.innerText || btn.textContent || '');
+  }
+}
+return '';
+"""
+        try:
+            return str(tab.run_js(js) or '').strip()
+        except Exception:
+            return ''
 
     def _click_visible_text_action_js(self, tab, texts):
         if not texts:
@@ -391,67 +600,69 @@ return [...new Set(rows)].slice(0, 20);
             raise RuntimeError('微信支付登录态已失效，请重新扫码登录后再执行批量退款')
         if '暂时无该功能权限' in text and '请联系本商户员工管理员' in text:
             raise RuntimeError('微信支付当前登录态缺少访问权限，请重新扫码或完成安全验证后再试')
+        if '当前商户号还未开通资金账户' in text and '无法查看资金账单' in text:
+            raise RuntimeError('微信支付当前商户号未开通资金账户，无法下载资金账单')
+
+    @staticmethod
+    def _batch_refund_submit_marker_path(file):
+        file = XlPath(file)
+        return file.parent / f'{file.stem}.submitted.json'
+
+    def _load_batch_refund_submit_marker(self, file):
+        marker = self._batch_refund_submit_marker_path(file)
+        if not marker.is_file():
+            return None
+        try:
+            data = json.loads(marker.read_text(encoding='utf-8'))
+            if isinstance(data, dict):
+                data.setdefault('marker_file', str(marker))
+                return data
+        except Exception as exc:
+            logger.warning(f'批量退款提交标记读取失败，忽略并继续：file={file!s}，marker={marker!s}，error={exc}')
+        return None
+
+    def _save_batch_refund_submit_marker(self, file, *, stage, status_text=''):
+        file = XlPath(file)
+        marker = self._batch_refund_submit_marker_path(file)
+        payload = {
+            'file': str(file),
+            'file_name': file.name,
+            'stage': stage,
+            'status_text': self._normalize_page_text(status_text)[:500],
+            'saved_at': pd.Timestamp.now().strftime('%Y-%m-%d %H:%M:%S'),
+        }
+        marker.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding='utf-8')
+        return payload
 
     def 尝试点击返款提交后的提示按钮(self, tab, timeout=15):
-        success_markers = ['退款申请已提交成功', '提交成功']
-        action_texts = ['进入批次查询', '进入退款查询', '继续退款操作', '确认', '完成', '知道了', '返回']
-        locators = [
-            'tag:a@@text():进入退款查询', 'tag:button@@text()=进入退款查询',
-            'tag:a@@text():继续退款操作', 'tag:button@@text()=继续退款操作',
-            'tag:a@@text():进入批次查询', 'tag:button@@text()=进入批次查询',
-            'tag:a@@class=btn btn-primary close-dialog JSCloseDG', 'tag:a@@id=FinishProtocolBn',
-            'tag:a@@text()=进入商户平台', 'tag:a@@tabindex=2',
-            'tag:a@@text()=完成', 'tag:button@@text()=完成',
-            'tag:a@@text()=确认', 'tag:button@@text()=确认', 'tag:span@@text()=确认',
-            'tag:a@@text()=知道了', 'tag:a@@text()=返回', 'tag:button@@text()=返回',
-            'tag:i@@class=el-dialog__close el-icon el-icon-close', 'tag:i@@class=el-dialog__close',
-        ]
         deadline = time.time() + timeout
-        start_url = tab.url
-        clicked_any = False
-        saw_submit_success = False
         while time.time() < deadline:
             try:
-                body_text = tab('tag:body').text
+                body_text = self._normalize_page_text(tab('tag:body').text)
             except Exception:
                 body_text = ''
-            success_context = any(x in body_text for x in success_markers) or '温馨提示' in body_text or '操作成功' in body_text
-            if success_context:
-                saw_submit_success = saw_submit_success or any(x in body_text for x in success_markers)
-                clicked_text = self._click_visible_text_action(tab, action_texts)
+
+            if '提交成功' in body_text or '退款申请已提交成功' in body_text:
+                clicked_text = self._click_submit_success_dialog_primary(tab)
                 if clicked_text:
-                    clicked_any = True
                     tab.wait(1)
-                    return {
-                        'clicked': True,
-                        'clicked_text': clicked_text,
-                        'saw_submit_success': saw_submit_success,
-                        'page_changed': tab.url != start_url,
-                    }
+                    return True
 
-            clicked_this_round = False
-            for locator in locators:
                 try:
-                    for btn in tab.eles(locator):
-                        if not self._is_element_really_visible(btn):
-                            continue
-                        btn.click(by_js=True)
-                        tab.wait(1)
-                        clicked_any = True
-                        clicked_this_round = True
-                        break
+                    btn = tab('tag:a@@class=btn btn-primary popups@@text()=确认', timeout=1)
                 except Exception:
-                    continue
-                if clicked_this_round:
-                    break
-            if clicked_this_round:
-                return {'clicked': True, 'saw_submit_success': saw_submit_success, 'page_changed': tab.url != start_url}
-            time.sleep(1)
-        if saw_submit_success:
-            logger.warning(f'未能自动点击退款提交成功弹窗按钮，url={tab.url}，title={tab.title}，可见动作={self._snapshot_visible_action_texts(tab)}')
-        return {'clicked': clicked_any, 'saw_submit_success': saw_submit_success, 'page_changed': tab.url != start_url}
+                    btn = None
+                if btn and self._is_element_really_visible(btn):
+                    if not self._dom_click(btn):
+                        btn.click(by_js=True)
+                    tab.wait(1)
+                    return True
 
-    def 填写密码与验证码(self, tab):
+            time.sleep(0.5)
+
+        return False
+
+    def 填写密码与验证码(self, tab, submit_file=None):
         inputs = tab.eles('tag:input@@class=real-input')
         passwd = XlEnv.get(f'XL_KQ_PAY_PASSWORD_{self.user}', decoding=True) or XlEnv.get('XL_KQ_PAY_PASSWORD', decoding=True)
         if passwd:
@@ -464,6 +675,12 @@ return [...new Set(rows)].slice(0, 20);
             inputs[1].input(vcode, clear=True)
         time.sleep(1)
         tab('tag:a@@text()=确定@@class=btn btn-primary align-center').click()
+        if submit_file is not None:
+            self._save_batch_refund_submit_marker(
+                submit_file,
+                stage='submit_clicked',
+                status_text='已点击提交，等待后续确认',
+            )
         return self.尝试点击返款提交后的提示按钮(tab)
 
     @staticmethod
@@ -799,7 +1016,7 @@ return 'OK';
     def _extract_batch_refund_status(self, submit_started_at=None, file_name=''):
         tab = self.tab
         js = r"""
-const normalize = (value) => (value || '').replace(/\s+/g, ' ').trim();
+const normalize = (value) => String(value || '').replace(/\s+/g, ' ').trim();
 const isVisible = (el) => {
   if (!el) return false;
   let p = el;
@@ -812,54 +1029,77 @@ const isVisible = (el) => {
   const rect = el.getBoundingClientRect();
   return rect.width > 0 && rect.height > 0;
 };
-return [...document.querySelectorAll('table')].filter(isVisible).map((table, tableIndex) => ({tableIndex, text: normalize(table.innerText || table.textContent), rows: [...table.querySelectorAll('tr')].map((row, rowIndex) => ({rowIndex, text: normalize(row.innerText || row.textContent)})).filter(row => row.text)})).filter(table => table.rows.length);
+return [...document.querySelectorAll('table')].filter(isVisible).map((table, tableIndex) => {
+  let headers = [...table.querySelectorAll('thead th, thead td')].map((cell) => normalize(cell.innerText || cell.textContent));
+  const tbodyRows = [...table.querySelectorAll('tbody tr')];
+  let dataRows = tbodyRows;
+  if (!headers.length && tbodyRows.length) {
+    headers = [...tbodyRows[0].querySelectorAll('th,td')].map((cell) => normalize(cell.innerText || cell.textContent));
+    dataRows = tbodyRows.slice(1);
+  }
+  if (!dataRows.length) {
+    const allRows = [...table.querySelectorAll('tr')];
+    if (!headers.length && allRows.length) {
+      headers = [...allRows[0].querySelectorAll('th,td')].map((cell) => normalize(cell.innerText || cell.textContent));
+      dataRows = allRows.slice(1);
+    } else {
+      dataRows = allRows;
+    }
+  }
+  const rows = dataRows.map((row, rowIndex) => {
+    const cells = [...row.querySelectorAll('td,th')].map((cell) => normalize(cell.innerText || cell.textContent));
+    const record = {};
+    headers.forEach((header, index) => {
+      if (header) record[header] = cells[index] || '';
+    });
+    return {rowIndex, cells, record, text: normalize(row.innerText || row.textContent)};
+  }).filter((row) => row.text);
+  return {tableIndex, headers, rows, text: normalize(table.innerText || table.textContent)};
+}).filter((table) => table.rows.length);
 """
         try:
             tables = tab.run_js(js) or []
         except Exception:
             return None
-        candidates = []
+
         file_marker = self._basename_stem(file_name)
-        time_markers = []
-        if submit_started_at is not None:
-            try:
-                submit_dt = pd.to_datetime(submit_started_at)
-                time_markers = [
-                    submit_dt.strftime('%Y-%m-%d'),
-                    submit_dt.strftime('%Y/%m/%d'),
-                    submit_dt.strftime('%H:%M'),
-                ]
-            except Exception:
-                time_markers = []
-        for table_index, table in enumerate(tables):
+
+        for table in tables:
+            headers = table.get('headers') or []
+            if '批次状态' not in headers:
+                continue
+
             rows = table.get('rows') or []
-            for row in rows[:10]:
-                row_text = self._normalize_page_text(row.get('text'))
-                if not row_text:
-                    continue
-                if '处理失败' in row_text or '部分失败' in row_text or '退款失败' in row_text:
-                    kind = 'failure'
-                elif '已处理' in row_text or '处理完成' in row_text or '已完成' in row_text:
-                    kind = 'success'
-                elif '处理中' in row_text or '待处理' in row_text:
-                    kind = 'processing'
-                else:
-                    continue
-                score = 20 if table_index == 0 else 0
-                if row.get('rowIndex') == 1:
-                    score += 50
-                elif row.get('rowIndex') == 0:
-                    score += 10
-                if file_marker and file_marker in row_text:
-                    score += 200
-                for marker in time_markers:
-                    if marker and marker in row_text:
-                        score += 40
-                candidates.append({'status_kind': kind, 'row_text': row_text, 'table_index': table_index, 'row_index': row.get('rowIndex'), 'score': score})
-        if not candidates:
-            return None
-        candidates.sort(key=lambda item: (-item['score'], item['table_index'], item['row_index']))
-        return candidates[0]
+            matched_rows = []
+            if file_marker:
+                matched_rows = [row for row in rows if file_marker in self._normalize_page_text((row.get('record') or {}).get('文件名') or row.get('text'))]
+            target_rows = matched_rows or rows
+            if not target_rows:
+                continue
+
+            row = target_rows[0]
+            record = row.get('record') or {}
+            status_text = self._normalize_page_text(record.get('批次状态') or row.get('text'))
+            row_text = self._normalize_page_text(row.get('text'))
+            if '处理失败' in status_text or '部分失败' in status_text or '退款失败' in status_text:
+                kind = 'failure'
+            elif '已处理' in status_text or '处理完成' in status_text or '已完成' in status_text:
+                kind = 'success'
+            elif '处理中' in status_text or '待处理' in status_text:
+                kind = 'processing'
+            else:
+                kind = 'unknown'
+
+            return {
+                'status_kind': kind,
+                'status_text': status_text,
+                'row_text': row_text,
+                'table_index': table.get('tableIndex'),
+                'row_index': row.get('rowIndex'),
+                'record': record,
+            }
+
+        return None
 
     def _goto_batch_refund_query_view(self, timeout=10):
         tab = self.tab
@@ -888,87 +1128,101 @@ return [...document.querySelectorAll('table')].filter(isVisible).map((table, tab
             time.sleep(1)
         return False
 
-    def _refresh_batch_refund_query_view(self):
+    def _refresh_batch_refund_query_view(self, result_page_url=None):
         tab = self.tab
-        for locator in ['tag:button@@text()=查询', 'tag:a@@text():查询']:
-            try:
-                for ele in tab.eles(locator):
-                    if not self._is_element_really_visible(ele):
-                        continue
-                    ele.click(by_js=True)
-                    tab.wait(1)
-                    return True
-            except Exception:
-                continue
-        clicked_text = self._click_visible_text_action(tab, ['查询'])
-        if clicked_text:
-            tab.wait(1)
+        result_page_url = result_page_url or 'https://pay.weixin.qq.com/index.php/xphp/cbatchrefund/refund#/pages/refund_list/refund_list'
+
+        # 只允许停留/回到批量退款结果页，不再在整页范围内盲点“查询”，否则容易误跳到别的结算查询模块。
+        if '/refund#/pages/refund_list/refund_list' not in tab.url:
+            tab.get(result_page_url)
+            tab.wait(2)
             return True
-        return False
+
+        try:
+            tab.refresh()
+        except Exception:
+            tab.get(result_page_url)
+        tab.wait(2)
+        return True
 
     def wait_batch_refund_completion(self, timeout=300, submit_started_at=None, file_name='',
-                                     initial_popup_result=None, submit_soft_timeout=60):
+                                     initial_popup_result=None, submit_soft_timeout=60,
+                                     submit_confirmed=False):
         tab = self.tab
+        result_page_url = 'https://pay.weixin.qq.com/index.php/xphp/cbatchrefund/refund#/pages/refund_list/refund_list'
         deadline = time.time() + timeout
         last_status_text = ''
-        submit_success_seen = bool(initial_popup_result and initial_popup_result.get('saw_submit_success', False))
-        query_view_opened = bool(initial_popup_result and initial_popup_result.get('page_changed', False))
-        submit_observed_at = time.time() if (submit_success_seen or query_view_opened) else None
+        submit_observed_at = time.time()
         last_refresh_at = 0
+        submitted = bool(submit_confirmed)
+
+        if '/refund#/pages/refund_list/refund_list' not in tab.url:
+            tab.get(result_page_url)
+            tab.wait(2)
+
         while time.time() < deadline:
-            body_text = tab('tag:body').text
+            try:
+                body_text = tab('tag:body').text
+            except Exception:
+                body_text = ''
             normalized_body = self._normalize_page_text(body_text)
-            self._raise_if_weipay_auth_invalid(normalized_body)
-            popup_result = self.尝试点击返款提交后的提示按钮(tab, timeout=2)
-            submit_success_seen = submit_success_seen or popup_result.get('saw_submit_success', False)
-            query_view_opened = query_view_opened or popup_result.get('page_changed', False)
-            if submit_observed_at is None and (
-                submit_success_seen
-                or query_view_opened
-                or popup_result.get('clicked', False)
-                or '批量退款批次查询' in normalized_body
-            ):
-                submit_observed_at = time.time()
+            try:
+                self._raise_if_weipay_auth_invalid(normalized_body)
+            except Exception:
+                if submitted:
+                    logger.warning(
+                        f'批量退款提交后检测阶段遇到登录态/权限问题，按已提交继续后续流程：'
+                        f'file={file_name!r}，url={tab.url}，title={tab.title}，状态摘要={normalized_body[:300]!r}'
+                    )
+                    return {'submitted': True, 'completed': False, 'status_text': normalized_body[:300], 'reason': 'post_submit_auth_invalid'}
+                raise
+
+            if '提交成功' in normalized_body or '退款申请已提交成功' in normalized_body:
+                submitted = True
+                self.尝试点击返款提交后的提示按钮(tab, timeout=2)
+                if '/refund#/pages/refund_list/refund_list' not in tab.url:
+                    tab.get(result_page_url)
+                    tab.wait(2)
+                continue
+
             batch_state = self._extract_batch_refund_status(submit_started_at=submit_started_at, file_name=file_name)
+
             if batch_state:
-                last_status_text = batch_state['row_text'][:300]
+                submitted = True
+                last_status_text = batch_state.get('row_text', '')[:300]
                 if batch_state['status_kind'] == 'success':
                     logger.info(f'批量退款处理完成：{last_status_text}')
-                    return
+                    return {'submitted': True, 'completed': True, 'status_text': last_status_text, 'reason': 'batch_success'}
                 if batch_state['status_kind'] == 'failure':
                     raise RuntimeError(f'微信支付批量退款批次处理失败，file={file_name!r}，url={tab.url}，title={tab.title}，状态摘要={last_status_text!r}')
-                if submit_observed_at is None:
-                    submit_observed_at = time.time()
-                if submit_soft_timeout and time.time() - submit_observed_at >= submit_soft_timeout:
+                if batch_state['status_kind'] == 'processing':
+                    if submit_soft_timeout and time.time() - submit_observed_at >= submit_soft_timeout:
+                        logger.warning(
+                            f'批量退款已提交且处理中超过{submit_soft_timeout}s，按软超时继续后续流程：'
+                            f'file={file_name!r}，url={tab.url}，title={tab.title}，状态摘要={last_status_text!r}'
+                        )
+                        return {'submitted': True, 'completed': False, 'status_text': last_status_text, 'reason': 'processing_soft_timeout'}
+                elif time.time() - submit_observed_at >= 10:
+                    logger.warning(f'批量退款结果页未识别出明确批次状态，继续轮询：file={file_name!r}，状态摘要={last_status_text!r}')
+            else:
+                last_status_text = normalized_body[:300]
+                if submitted and submit_soft_timeout and time.time() - submit_observed_at >= submit_soft_timeout:
                     logger.warning(
-                        f'批量退款处理超过{submit_soft_timeout}s，按软超时继续后续流程：'
+                        f'批量退款已提交，结果页超过{submit_soft_timeout}s仍未识别到批次状态，按软超时继续后续流程：'
                         f'file={file_name!r}，url={tab.url}，title={tab.title}，状态摘要={last_status_text!r}'
                     )
-                    return
-                if time.time() - last_refresh_at >= 5:
-                    self._refresh_batch_refund_query_view()
-                    last_refresh_at = time.time()
-                time.sleep(2)
-                continue
-            last_status_text = normalized_body[:300]
-            if submit_success_seen or popup_result.get('clicked', False) or '批量退款批次查询' in normalized_body:
-                if not query_view_opened:
-                    query_view_opened = self._goto_batch_refund_query_view(timeout=5)
-                    if query_view_opened:
-                        tab.wait(1)
-                        continue
-                if submit_observed_at is None:
-                    submit_observed_at = time.time()
-                if submit_soft_timeout and time.time() - submit_observed_at >= submit_soft_timeout:
-                    logger.warning(
-                        f'批量退款提交后检测超过{submit_soft_timeout}s，未识别到完成态，按软超时继续后续流程：'
-                        f'file={file_name!r}，url={tab.url}，title={tab.title}，状态摘要={last_status_text!r}'
-                    )
-                    return
-                if time.time() - last_refresh_at >= 5:
-                    self._refresh_batch_refund_query_view()
-                    last_refresh_at = time.time()
+                    return {'submitted': True, 'completed': False, 'status_text': last_status_text, 'reason': 'unknown_soft_timeout'}
+
+            if time.time() - last_refresh_at >= 5:
+                self._refresh_batch_refund_query_view(result_page_url)
+                last_refresh_at = time.time()
             time.sleep(1)
+        if submitted:
+            logger.warning(
+                f'批量退款提交后检测超时，但该文件已确认提交，按保护策略继续后续流程：'
+                f'file={file_name!r}，url={tab.url}，title={tab.title}，状态摘要={last_status_text!r}'
+            )
+            return {'submitted': True, 'completed': False, 'status_text': last_status_text, 'reason': 'post_submit_hard_timeout'}
         raise RuntimeError(f'微信支付批量退款结果未完成，file={file_name!r}，url={tab.url}，title={tab.title}，状态摘要={last_status_text!r}')
 
     def request_file_refund(self, file=None):
@@ -977,6 +1231,14 @@ return [...document.querySelectorAll('table')].filter(isVisible).map((table, tab
             files = list(d.glob_files('*.csv'))
             files.sort(key=lambda f: f.mtime())
             file = files[-1]
+        file = XlPath(file)
+        marker = self._load_batch_refund_submit_marker(file)
+        if marker:
+            logger.warning(
+                f'批量退款文件已存在提交标记，跳过再次提交：'
+                f'file={str(file)!r}，stage={marker.get("stage")!r}，saved_at={marker.get("saved_at")!r}'
+            )
+            return {'submitted': True, 'completed': False, 'status_text': marker.get('status_text', ''), 'reason': 'submit_marker_exists', 'marker': marker}
         tab = self.tab
         tab.get('https://pay.weixin.qq.com/index.php/xphp/cbatchrefund/batch_refund#/pages/index/index')
         tab.wait(2)
@@ -985,5 +1247,15 @@ return [...document.querySelectorAll('table')].filter(isVisible).map((table, tab
         tab('tag:a@@text():确定@@class=btn btn-primary@@href=javascript:void(0);').click()
         tab.wait(2)
         submit_started_at = pd.Timestamp.now()
-        popup_result = self.填写密码与验证码(tab)
-        self.wait_batch_refund_completion(submit_started_at=submit_started_at, file_name=str(file), initial_popup_result=popup_result)
+        popup_confirmed = self.填写密码与验证码(tab, submit_file=file)
+        if popup_confirmed:
+            self._save_batch_refund_submit_marker(file, stage='submit_success_popup', status_text='提交成功')
+        result = self.wait_batch_refund_completion(
+            submit_started_at=submit_started_at,
+            file_name=str(file),
+            submit_confirmed=True,
+        )
+        if result and result.get('submitted'):
+            self._save_batch_refund_submit_marker(file, stage=result.get('reason', 'submitted'), status_text=result.get('status_text', ''))
+        return result
+
