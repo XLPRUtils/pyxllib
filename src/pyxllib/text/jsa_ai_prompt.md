@@ -163,32 +163,6 @@ print(res)
 以及大部分功能，都是要封装成函数来供应的，工具性的函数写英文命名，业务性的函数可以写中文名。
 
 示例2：
-（1）jsa调用py，获得问卷星增量数据
-（2）将py中的df数据增量写入表格
-```js
-const maxValue = Math.max(
-    0, // 默认值
-    ...packTableDataFields('问卷星', ['序号'], 4)['序号']
-        .filter(value => typeof value === 'number')
-)
-const pyScript = `
-from xlsln.kq5034.ckz240412网课考勤 import 获得问卷星数据
-exist_max_id = ${maxValue}  # 已有数据的最大id
-df = 获得问卷星数据()
-if min(df['序号']) > exist_max_id:  # 如果第一页数据不全，直接更新下载全量数据
-    df = 获得问卷星数据(True)
-df = df[df['序号'] > exist_max_id]  # 过滤出新数据
-data = df.to_dict(orient='split')  # 返回数据
-del data['index']
-return data
-`
-const jsonData = runIsolatedPyScript(pyScript, 'codepc_mi15')
-// formatLocalDatetime是我自定义的一个获得当期本地时间的函数
-Range('B3').Value2 = '最近运行更新时间：\n' + formatLocalDatetime()
-insertNewDataWithHeaders(jsonData, 2, 4)
-```
-
-示例3：
 （1）对一些需要运行很长时间的任务，一般需要一个配置单元格，比如这里是'E3'。
 如果E3为空，则启动程序，并且注意runIsolatedPyScript传参要给出long_task: true。
 （2）然后在E3记录task_id，还可以在F3做备注。 如果E3不为空，则去检查程序是否运行完了。

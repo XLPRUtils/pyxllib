@@ -192,6 +192,7 @@ class XiaoetongWeb(DpWebBase):
     _CACHE_MISS = object()
     _EMPTY_EXPORT = object()
     _runtime_export_cache = {}
+    _runtime_export_cache_ttl = datetime.timedelta(hours=2)
 
     def __init__(self, name=None, passwd=None):
         super().__init__('https://admin.xiaoe-tech.com')
@@ -216,7 +217,27 @@ class XiaoetongWeb(DpWebBase):
             return self._CACHE_MISS
 
         entry = cache[key]
+        # 兼容旧版无时间戳缓存：直接视为过期，避免无限复用。
         if entry is self._EMPTY_EXPORT:
+            cache.pop(key, None)
+            if label:
+                logger.info(f'导出缓存缺少时间戳，按过期处理：{label}')
+            return self._CACHE_MISS
+
+        created_at = entry.get('created_at') if isinstance(entry, dict) else None
+        if not isinstance(created_at, datetime.datetime):
+            cache.pop(key, None)
+            if label:
+                logger.info(f'导出缓存缺少时间戳，按过期处理：{label}')
+            return self._CACHE_MISS
+
+        if datetime.datetime.now() - created_at > type(self)._runtime_export_cache_ttl:
+            cache.pop(key, None)
+            if label:
+                logger.info(f'导出缓存已过期：{label}')
+            return self._CACHE_MISS
+
+        if entry.get('empty'):
             if label:
                 logger.info(f'命中导出缓存（空结果）：{label}')
             return None
@@ -231,7 +252,10 @@ class XiaoetongWeb(DpWebBase):
     def _store_runtime_cached_file(self, key, file):
         cache = type(self)._runtime_export_cache
         if file is None:
-            cache[key] = self._EMPTY_EXPORT
+            cache[key] = {
+                'empty': True,
+                'created_at': datetime.datetime.now(),
+            }
             return None
 
         file = XlPath(file)
@@ -241,6 +265,7 @@ class XiaoetongWeb(DpWebBase):
         cache[key] = {
             'suffix': file.suffix,
             'content': file.read_bytes(),
+            'created_at': datetime.datetime.now(),
         }
         return file
 

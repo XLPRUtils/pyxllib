@@ -228,8 +228,8 @@ def ocr_to_labelme(ocr_result, shape_type="polygon", image_path=None, label_fiel
         res = ocr_result
 
     # 1. 基础信息
-    img_path = image_path or res.get("input_path", "unknown.jpg")
-    img_name = Path(img_path).name
+    img_path = image_path or res.get("input_path", "")
+    img_name = Path(img_path).name if img_path else "unknown.jpg"
 
     # 尝试获取图片宽高
     height = 0

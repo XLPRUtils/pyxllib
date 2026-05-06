@@ -1102,6 +1102,35 @@ class BehaviorTreeRunner:
             logger.addHandler(logging.NullHandler())
             return logger
 
+        try:
+            from loguru import logger as loguru_logger
+            
+            # 使用 loguru
+            class LoguruHandler(logging.Handler):
+                def emit(self, record):
+                    try:
+                        level = loguru_logger.level(record.levelname).name
+                    except ValueError:
+                        level = record.levelno
+                    
+                    frame, depth = logging.currentframe(), 2
+                    while frame.f_code.co_filename == logging.__file__:
+                        frame = frame.f_back
+                        depth += 1
+                        
+                    loguru_logger.opt(depth=depth, exception=record.exc_info).log(level, record.getMessage())
+                    
+            handler = LoguruHandler()
+            logger.addHandler(handler)
+            
+            if log_path:
+                Path(log_path).parent.mkdir(parents=True, exist_ok=True)
+                loguru_logger.add(log_path, level="DEBUG", encoding="utf-8")
+                
+            return logger
+        except ImportError:
+            pass
+
         formatter = logging.Formatter("%(asctime)s %(levelname)s %(message)s")
         stream_handler = logging.StreamHandler()
         stream_handler.setFormatter(formatter)

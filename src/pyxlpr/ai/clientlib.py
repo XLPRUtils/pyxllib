@@ -1241,6 +1241,43 @@ class XlAiClient:
         return text
 
 
+_local_ocr_model = None
+
+class LocalOcrClient:
+    """本地直接加载模型的 OCR 客户端，主要兼容 XlAiClient 中的 common_ocr 和 rec_singleline。
+    当不需要/无法启动独立的 xlserver 时使用。
+    """
+    def __init__(self):
+        # 初始化什么都不做，延迟到调用时加载
+        pass
+
+    def common_ocr(self, image, **options):
+        from pyxllib.ai.ocr import ocr_text, ocr_to_labelme
+        
+        # 调用封装好的 ocr_text，获取 PaddleOCR v3.x 的 OCRResult 结果
+        res = ocr_text(image, model="basic")
+        
+        # 将 OCRResult 结果转换为 anlib 需要的 labelme 格式
+        # 使用矩形框（rectangle），并保留 score 等字段（label_fields 传 None 默认只取 text）
+        # 这里为了兼容原有 label 只有 text 和 score 的格式：
+        lmdict = ocr_to_labelme(res, shape_type="rectangle")
+        
+        # ocr_to_labelme 默认生成的格式有些许不同，这里再微调一下使其完全对齐以前的结构
+        for shape in lmdict.get("shapes", []):
+            if "flags" in shape and "score" in shape["flags"]:
+                score = shape["flags"]["score"]
+                text = shape["label"]
+                shape["label"] = {"text": text, "score": score}
+                
+        return lmdict
+
+    def rec_singleline(self, image, mode='common_ocr', **options):
+        """通用的识别一张图的所有文本，并拼接到一起"""
+        d = self.common_ocr(image, **options)
+        texts = [sp['label']['text'] for sp in d.get('shapes', [])]
+        return ' '.join(texts)
+
+
 def demo_aipocr():
     import pprint
     import re

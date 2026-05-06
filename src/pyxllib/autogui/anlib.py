@@ -24,6 +24,8 @@ import time
 import random
 import re
 import datetime
+import ctypes
+from itertools import product
 from collections import UserDict
 from typing import Literal
 
@@ -51,9 +53,11 @@ except ModuleNotFoundError:
 
 try:
     import win32com
+    import win32api
     import win32gui
 except ModuleNotFoundError:
     win32com = lazy_import("win32com", "pywin32")
+    win32api = lazy_import("win32api", "pywin32")
     win32gui = lazy_import("win32gui", "pywin32")
 
 try:
@@ -81,6 +85,237 @@ from pyxllib.autogui.uiautolib import uia, find_ctrl, UiCtrlNode
 from pyxllib.text.pstr import PStr
 
 from pyxlpr.ai.clientlib import XlAiClient
+
+
+_SCREEN_CAPTURE_MAPPER = None
+_SCREEN_CAPTURE_MAPPER_SIGNATURE = None
+_MSS_INSTANCE = None
+_MSS_UNAVAILABLE = False
+
+
+def _monitor_dpi_scale(hmon):
+    """获取显示器相对 96 DPI 的缩放倍率。"""
+    try:
+        xdpi = ctypes.c_uint()
+        ydpi = ctypes.c_uint()
+        ctypes.windll.shcore.GetDpiForMonitor(int(hmon), 0, ctypes.byref(xdpi), ctypes.byref(ydpi))
+        return max(1.0, xdpi.value / 96)
+    except Exception:
+        return 1.0
+
+
+def _is_primary_monitor(hmon):
+    try:
+        return bool(win32api.GetMonitorInfo(hmon).get("Flags", 0) & 1)
+    except Exception:
+        return False
+
+
+def _monitor_records():
+    records = []
+    for hmon, _hdc, rect in win32api.EnumDisplayMonitors():
+        records.append(
+            {
+                "hmon": hmon,
+                "rect": tuple(int(v) for v in rect),
+                "dpi_scale": _monitor_dpi_scale(hmon),
+                "is_primary": _is_primary_monitor(hmon),
+            }
+        )
+    return records
+
+
+def _scaled_rect(rect, scale):
+    left, top, right, bottom = rect
+    return (
+        int(round(left / scale)),
+        int(round(top / scale)),
+        int(round(right / scale)),
+        int(round(bottom / scale)),
+    )
+
+
+def _union_size(rects):
+    left = min(rect[0] for rect in rects)
+    top = min(rect[1] for rect in rects)
+    right = max(rect[2] for rect in rects)
+    bottom = max(rect[3] for rect in rects)
+    return right - left, bottom - top
+
+
+def _dedup_scales(scales):
+    res = []
+    for scale in scales:
+        scale = max(1.0, float(scale))
+        if not any(abs(scale - old) < 1e-6 for old in res):
+            res.append(scale)
+    return res
+
+
+def _choose_monitor_capture_scales(records, primary_size, all_screens_size):
+    """为每个显示器选择从 Win32 坐标到多屏截图坐标的缩放倍率。
+
+    :param list records: `_monitor_records()` 的结果。
+    :param tuple primary_size: `pyautogui.size()` 看到的主屏截图尺寸。
+    :param tuple all_screens_size: `ImageGrab.grab(all_screens=True).size`。
+    :return list[float]: 与 records 顺序一致的缩放倍率。
+
+    >>> records = [
+    ...     {"rect": (0, 0, 3840, 2560), "dpi_scale": 1.5, "is_primary": True},
+    ...     {"rect": (5760, 0, 7920, 3840), "dpi_scale": 1.5, "is_primary": False},
+    ... ]
+    >>> _choose_monitor_capture_scales(records, (3840, 2560), (5280, 2560))
+    [1.0, 1.5]
+    """
+    if not records:
+        return []
+
+    primary = next((r for r in records if r["is_primary"]), records[0])
+    pr_left, pr_top, pr_right, pr_bottom = primary["rect"]
+    pr_width, pr_height = pr_right - pr_left, pr_bottom - pr_top
+    primary_scale_x = pr_width / primary_size[0] if primary_size[0] else 1.0
+    primary_scale_y = pr_height / primary_size[1] if primary_size[1] else 1.0
+    primary_scale = max(1.0, (primary_scale_x + primary_scale_y) / 2)
+
+    candidate_groups = []
+    for record in records:
+        candidates = [1.0, record["dpi_scale"], primary_scale]
+        if record["is_primary"]:
+            candidates.insert(0, primary_scale)
+        candidate_groups.append(_dedup_scales(candidates))
+
+    best_scales = [primary_scale if r["is_primary"] else r["dpi_scale"] for r in records]
+    best_score = float("inf")
+    for scales in product(*candidate_groups):
+        image_rects = [_scaled_rect(record["rect"], scale) for record, scale in zip(records, scales)]
+        width, height = _union_size(image_rects)
+        size_score = abs(width - all_screens_size[0]) + abs(height - all_screens_size[1])
+        primary_score = sum(abs(scale - primary_scale) for record, scale in zip(records, scales) if record["is_primary"])
+        score = size_score * 1000 + primary_score
+        if score < best_score:
+            best_score = score
+            best_scales = list(scales)
+    return best_scales
+
+
+def _imagegrab_all_screens_size():
+    from PIL import ImageGrab
+
+    return ImageGrab.grab(all_screens=True).size
+
+
+def _screen_capture_mapper(refresh=False):
+    """获取多屏截图坐标映射，缓存显示器枚举和 DPI 推断结果。"""
+    global _SCREEN_CAPTURE_MAPPER, _SCREEN_CAPTURE_MAPPER_SIGNATURE
+
+    records = _monitor_records()
+    primary_size = tuple(pyautogui.size())
+    signature = tuple((r["rect"], round(r["dpi_scale"], 4), r["is_primary"]) for r in records), primary_size
+    if not refresh and _SCREEN_CAPTURE_MAPPER is not None and signature == _SCREEN_CAPTURE_MAPPER_SIGNATURE:
+        return _SCREEN_CAPTURE_MAPPER
+
+    try:
+        all_screens_size = _imagegrab_all_screens_size()
+        scales = _choose_monitor_capture_scales(records, primary_size, all_screens_size)
+    except Exception as e:
+        logger.warning(f"初始化多屏截图坐标映射失败，将使用 DPI 估算值: {e!r}")
+        scales = [1.0 if r["is_primary"] else r["dpi_scale"] for r in records]
+
+    for record, scale in zip(records, scales):
+        record["capture_scale"] = scale
+
+    _SCREEN_CAPTURE_MAPPER = {"records": records, "primary_size": primary_size}
+    _SCREEN_CAPTURE_MAPPER_SIGNATURE = signature
+    return _SCREEN_CAPTURE_MAPPER
+
+
+def _find_monitor_record_for_xywh(xywh, records):
+    x, y, w, h = [int(round(v)) for v in xywh]
+    cx, cy = x + w // 2, y + h // 2
+    for record in records:
+        left, top, right, bottom = record["rect"]
+        if left <= cx < right and top <= cy < bottom:
+            return record
+
+    def distance_to_rect(record):
+        left, top, right, bottom = record["rect"]
+        dx = max(left - cx, 0, cx - right)
+        dy = max(top - cy, 0, cy - bottom)
+        return dx * dx + dy * dy
+
+    return min(records, key=distance_to_rect)
+
+
+def _to_multiscreen_capture_region(xywh):
+    """将 Win32/UIA 绝对区域转换为多屏截图 backend 的区域。"""
+    x, y, w, h = [int(round(v)) for v in xywh]
+    mapper = _screen_capture_mapper()
+    record = _find_monitor_record_for_xywh([x, y, w, h], mapper["records"])
+    scale = record["capture_scale"]
+    sx = int(round(x / scale))
+    sy = int(round(y / scale))
+    sw = max(1, int(round(w / scale)))
+    sh = max(1, int(round(h / scale)))
+    return sx, sy, sw, sh
+
+
+def _resize_pil_if_needed(pil_img, size):
+    if pil_img.size == size:
+        return pil_img
+
+    from PIL import Image
+
+    resample = Image.Resampling.BICUBIC if hasattr(Image, "Resampling") else Image.BICUBIC
+    return pil_img.resize(size, resample)
+
+
+def _mss_grab_region(region):
+    global _MSS_INSTANCE, _MSS_UNAVAILABLE
+    if _MSS_UNAVAILABLE:
+        return None
+
+    try:
+        import mss
+        from PIL import Image
+
+        if _MSS_INSTANCE is None:
+            _MSS_INSTANCE = mss.mss()
+        left, top, width, height = region
+        shot = _MSS_INSTANCE.grab({"left": left, "top": top, "width": width, "height": height})
+        return Image.frombytes("RGB", shot.size, shot.rgb)
+    except Exception as e:
+        _MSS_UNAVAILABLE = True
+        logger.debug(f"mss 多屏截图 backend 不可用，回退到 PIL ImageGrab: {e!r}")
+        return None
+
+
+def _imagegrab_multiscreen_region(region):
+    from PIL import ImageGrab
+
+    left, top, width, height = region
+    return ImageGrab.grab(bbox=(left, top, left + width, top + height), all_screens=True)
+
+
+def _screenshot_region(xywh):
+    """按屏幕绝对坐标截图，兼容 Windows 多屏与非主屏 DPI 缩放。
+
+    :param xywh: 屏幕绝对坐标区域 `[x, y, w, h]`。
+    :return: PIL Image。主屏内使用 pyautogui 快路径；跨出主屏时使用多屏截图 backend。
+    """
+    x, y, w, h = [int(round(v)) for v in xywh]
+    w, h = max(1, w), max(1, h)
+
+    screen_w, screen_h = pyautogui.size()
+    if 0 <= x and 0 <= y and x + w <= screen_w and y + h <= screen_h:
+        return pyautogui.screenshot(region=[x, y, w, h])
+
+    region = _to_multiscreen_capture_region([x, y, w, h])
+    try:
+        pil_img = _mss_grab_region(region) or _imagegrab_multiscreen_region(region)
+        return _resize_pil_if_needed(pil_img, (w, h))
+    except Exception as e:
+        logger.warning(f"多屏截图失败，区域={xywh!r}，映射区域={region!r}，将退回 pyautogui: {e!r}")
+        return pyautogui.screenshot(region=[x, y, w, h])
 
 
 def resolve_params(*models, mode="pass"):
@@ -117,8 +352,13 @@ def resolve_params(*models, mode="pass"):
 
 @run_once()
 def get_xlapi():
+    website = os.getenv("MAIN_WEBSITE")
+    if website == "local":
+        from pyxlpr.ai.clientlib import LocalOcrClient
+        return LocalOcrClient()
+
     xlapi = XlAiClient(auto_login=False, check=False)
-    xlapi.login_priu(os.getenv("XL_API_PRIU_TOKEN"), os.getenv("MAIN_WEBSITE"))
+    xlapi.login_priu(os.getenv("XL_API_PRIU_TOKEN"), website)
     return xlapi
 
 
@@ -138,6 +378,15 @@ class LocateParams(XlBaseModel):
     # 在返回结果前，是否根据置信度分数进行降序排序
     # 若为 True，将强制使用 OpenCV 引擎进行匹配
     sort_by_confidence: bool = False
+
+    # Anchor 模式原位校验失败后，是否在标注框附近做一次有限范围的多尺度补偿搜索
+    anchor_fallback: bool = True
+
+    # Anchor 补偿搜索的外扩像素。只围绕原标注框扩展，避免退化成全图多尺度搜索
+    anchor_fallback_margin: int = 80
+
+    # Anchor 补偿搜索使用的模板缩放倍率
+    anchor_fallback_scales: tuple[float, ...] = (1.0, 1.25, 1.5)
 
 
 class ImageTools:
@@ -307,6 +556,43 @@ class ImageTools:
             matches.append((x, y, w, h, conf))
 
         return matches
+
+    @classmethod
+    def find_best_scaled_img(cls, img, haystack, scales, *, grayscale=False):
+        """在大图中按多个模板尺度寻找最佳匹配。
+
+        :param img: 目标子图。
+        :param haystack: 搜索区域。
+        :param scales: 模板缩放倍率序列。
+        :param bool grayscale: 是否转灰度匹配。
+        :return: `(score, rect)`，rect 为 `[x, y, w, h]`；没有可比较模板时返回 `(0.0, None)`。
+        """
+        template, search_img = cls._prepare_images(img, haystack, grayscale)
+        if template.size == 0 or search_img.size == 0:
+            return 0.0, None
+
+        best_score = 0.0
+        best_rect = None
+        for scale in scales:
+            scale = max(0.1, float(scale))
+            width = max(1, int(round(template.shape[1] * scale)))
+            height = max(1, int(round(template.shape[0] * scale)))
+            if width > search_img.shape[1] or height > search_img.shape[0]:
+                continue
+
+            if width == template.shape[1] and height == template.shape[0]:
+                scaled_template = template
+            else:
+                interpolation = cv2.INTER_CUBIC if scale > 1 else cv2.INTER_AREA
+                scaled_template = cv2.resize(template, (width, height), interpolation=interpolation)
+
+            result = cv2.matchTemplate(search_img, scaled_template, cv2.TM_CCOEFF_NORMED)
+            _minv, maxv, _minloc, maxloc = cv2.minMaxLoc(result)
+            if maxv > best_score:
+                best_score = float(maxv)
+                best_rect = [int(maxloc[0]), int(maxloc[1]), int(width), int(height)]
+
+        return best_score, best_rect
 
 
 class DragParams(XlBaseModel):
@@ -734,7 +1020,7 @@ class _AnShapeBasic(UserDict):
         x, y = self.get_abs_point(self["xywh"][:2])  # 左上角相对坐标转绝对坐标
         w, h = self["xywh"][2:]  # 宽度和高度
         # logger.info(f'{x} {y} {w} {h}')
-        pil_img = pyautogui.screenshot(region=[x, y, w, h])
+        pil_img = _screenshot_region([x, y, w, h])
         return xlpil.to_cv2_image(pil_img)
 
     @staticmethod
@@ -1127,6 +1413,58 @@ class AnShape(_AnShapePupil):
 
         return None
 
+    @staticmethod
+    def _expand_local_rect(rect, width, height, margin):
+        x, y, w, h = [int(round(v)) for v in rect]
+        margin = max(0, int(round(margin)))
+        x1 = max(0, x - margin)
+        y1 = max(0, y - margin)
+        x2 = min(width, x + w + margin)
+        y2 = min(height, y + h + margin)
+        if x2 <= x1 or y2 <= y1:
+            return None
+        return [x1, y1, x2 - x1, y2 - y1]
+
+    def _anchor_fallback_search(self, target_img, target_rect, default_text, locate_params: LocateParams):
+        """Anchor 原位校验失败后的有限范围多尺度补偿搜索。"""
+        if not locate_params.anchor_fallback:
+            return None
+
+        if target_rect is None:
+            if self.parent is None:
+                return None
+            scope = self.parent
+            anchor_rect = self.get_xywh_in(scope)
+        else:
+            scope = self
+            anchor_rect = target_rect
+
+        scope_shot = scope.shot()
+        height, width = scope_shot.shape[:2]
+        search_rect = self._expand_local_rect(anchor_rect, width, height, locate_params.anchor_fallback_margin)
+        if search_rect is None:
+            return None
+
+        sx, sy, sw, sh = search_rect
+        search_img = scope_shot[sy : sy + sh, sx : sx + sw]
+        score, local_rect = ImageTools.find_best_scaled_img(
+            target_img,
+            search_img,
+            locate_params.anchor_fallback_scales,
+            grayscale=locate_params.grayscale,
+        )
+
+        logger.info(f"{self.total_name()} anchor_fallback {score:.0%}")
+        if not local_rect or score <= locate_params.confidence:
+            return None
+
+        x, y, w, h = local_rect
+        rect = [sx + x, sy + y, w, h]
+        sp = AnShape({"text": default_text, "xywh": rect}, parent=scope)
+        sp["img"] = scope_shot[rect[1] : rect[1] + rect[3], rect[0] : rect[0] + rect[2]]
+        sp.update_data(shot=False)
+        return sp
+
     def _search_full_mode(self, target_img, default_text, locate_params: LocateParams, drag_params: DragParams):
         """[内部辅助] Search 模式：全图搜索 + 拖拽重试
 
@@ -1198,7 +1536,10 @@ class AnShape(_AnShapePupil):
         # 4. 分发执行
         if not scan:
             # --- Anchor Mode ---
-            return self._verify_anchor_mode(target_img, target_rect, default_text, locate_params)
+            res = self._verify_anchor_mode(target_img, target_rect, default_text, locate_params)
+            if res:
+                return res
+            return self._anchor_fallback_search(target_img, target_rect, default_text, locate_params)
         else:
             # --- Search Mode ---
             # 如果强制要求 Search (scan=True) 但又依赖坐标 (Verify Logic)，这里会按 Search 处理
