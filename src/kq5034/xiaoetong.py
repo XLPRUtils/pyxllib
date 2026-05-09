@@ -425,6 +425,95 @@ return true;
             except StopIteration as err:
                 return err.value
 
+    @staticmethod
+    def _下载文件候选目录(download_dir):
+        dirs = [Path(download_dir), Path(tempfile.gettempdir()), Path.home() / 'Downloads']
+        result = []
+        for d in dirs:
+            if d not in result:
+                result.append(d)
+        return result
+
+    @staticmethod
+    def _查找本地下载文件(file_name, download_dir, *, newer_than_ts=None):
+        candidates = []
+        for d in XiaoetongWeb._下载文件候选目录(download_dir):
+            if not d.exists():
+                continue
+            for path in d.iterdir():
+                if path.name == file_name or path.name.startswith(file_name):
+                    candidates.append(path)
+
+        existing = []
+        for path in candidates:
+            if path in existing or path.name.endswith('.crdownload'):
+                continue
+            try:
+                stat = path.stat()
+            except OSError:
+                continue
+            if not path.is_file():
+                continue
+            if newer_than_ts is not None and stat.st_mtime + 1 < newer_than_ts:
+                continue
+            existing.append((stat.st_mtime, path))
+        if not existing:
+            return None
+
+        existing.sort(key=lambda x: x[0], reverse=True)
+        return existing[0][1]
+
+    @staticmethod
+    def _文件已稳定(path, *, interval=0.5):
+        try:
+            stat1 = path.stat()
+            if stat1.st_size <= 0:
+                return False
+            time.sleep(interval)
+            stat2 = path.stat()
+            return stat1.st_size == stat2.st_size and stat1.st_mtime == stat2.st_mtime
+        except OSError:
+            return False
+
+    def _归档下载文件(self, path, download_dir):
+        download_dir = Path(download_dir)
+        path = Path(path)
+        download_dir.mkdir(parents=True, exist_ok=True)
+        target = download_dir / path.name
+        if path.resolve() == target.resolve():
+            return XlPath(target)
+        if target.exists():
+            stem, suffix = target.stem, target.suffix
+            index = 1
+            while target.exists():
+                target = download_dir / f'{stem} ({index}){suffix}'
+                index += 1
+        return XlPath(shutil.move(str(path), str(target)))
+
+    def _等待下载完成文件(self, mission, file_name, download_dir, *, start_ts, timeout_seconds):
+        deadline = time.time() + timeout_seconds
+        while time.time() < deadline:
+            if mission is not None and getattr(mission, 'is_done', False):
+                final_path = getattr(mission, 'final_path', None)
+                if final_path and Path(final_path).exists():
+                    return XlPath(final_path)
+                break
+
+            file_path = self._查找本地下载文件(file_name, download_dir, newer_than_ts=start_ts)
+            if file_path is not None and self._文件已稳定(file_path):
+                final_path = self._归档下载文件(file_path, download_dir)
+                if mission is not None and not getattr(mission, 'is_done', False):
+                    with contextlib.suppress(Exception):
+                        mission._mgr.set_done(mission, 'completed', final_path=str(final_path))
+                return final_path
+
+            time.sleep(0.2)
+
+        if mission is not None and not getattr(mission, 'is_done', False):
+            with contextlib.suppress(Exception):
+                mission.cancel()
+        raise RuntimeError(f'下载文件等待超时：task={file_name} timeout={timeout_seconds}s')
+
     def _提取下载中心任务名(self, row):
         first_td = row('tag:td', timeout=0.5)
         return first_td.text if first_td else row.text.split('\n', 1)[0]
@@ -553,7 +642,8 @@ return true;
         return self._取生成器返回值(self.iter_download_last_file(match_keywords, exclude_task_names))
 
     def iter_download_last_file(self, match_keywords=None, exclude_task_names=None, *,
-                                poll_seconds=60, max_wait_seconds=None, refresh_every_checks=5):
+                                poll_seconds=60, max_wait_seconds=None, refresh_every_checks=5,
+                                download_wait_seconds=180):
         """生成器版下载中心轮询，便于行为树逐步推进。"""
         tab = self.tab
         match_keywords = [self._标准化下载名(x) for x in (match_keywords or []) if x]
@@ -619,7 +709,6 @@ return true;
                 tab.wait(2)
 
         file1 = self._提取下载中心任务名(tr)
-        self.exist_files.add(file1)
 
         yield f'下载中心轮询：准备下载 task={file1}'
         tab.wait(5)
@@ -628,7 +717,22 @@ return true;
         download_dir = Path.home() / 'Downloads' / '_xlproject_temp_downloads'
         download_dir.mkdir(parents=True, exist_ok=True)
 
-        file2 = XlPath(ele.click.to_download(str(download_dir), by_js=True).wait(show=False))
+        start_download_ts = time.time()
+        mission = ele.click.to_download(str(download_dir), by_js=True, timeout=30)
+        if not mission:
+            file2 = self._查找本地下载文件(file1, download_dir, newer_than_ts=start_download_ts)
+            if file2 is None or not self._文件已稳定(file2):
+                raise RuntimeError(f'下载事件等待超时，未获得下载任务：task={file1} url={tab.url}')
+            file2 = self._归档下载文件(file2, download_dir)
+        else:
+            file2 = self._等待下载完成文件(
+                mission,
+                file1,
+                download_dir,
+                start_ts=start_download_ts,
+                timeout_seconds=download_wait_seconds,
+            )
+        self.exist_files.add(file1)
         return file2
 
     def export_user_list(self, search_name=None, download=True):

@@ -20,6 +20,7 @@ shape: view里的各个位置对象标记内容。上述所有类其实都是sha
 
 import json
 import os
+import sys
 import time
 import random
 import re
@@ -91,6 +92,14 @@ _SCREEN_CAPTURE_MAPPER = None
 _SCREEN_CAPTURE_MAPPER_SIGNATURE = None
 _MSS_INSTANCE = None
 _MSS_UNAVAILABLE = False
+_ANLIB_SOURCE_PATH = os.path.normcase(os.path.abspath(__file__))
+
+
+def _is_anlib_source_file(filename):
+    try:
+        return os.path.normcase(os.path.abspath(filename)) == _ANLIB_SOURCE_PATH
+    except (TypeError, ValueError):
+        return False
 
 
 def _monitor_dpi_scale(hmon):
@@ -913,6 +922,26 @@ class _AnShapeBasic(UserDict):
                 cur_shape = cur_shape.parent
         return cur_value
 
+    @staticmethod
+    def _external_caller_depth_from_here():
+        """计算当前调用点到第一个 anlib 外部调用帧的深度。"""
+        frame = sys._getframe(1)
+        depth = 0
+        while frame:
+            if not _is_anlib_source_file(frame.f_code.co_filename):
+                return depth
+            frame = frame.f_back
+            depth += 1
+        return None
+
+    @staticmethod
+    def _locate_log_info(message, caller_depth_from_find_img=None):
+        if caller_depth_from_find_img is None:
+            logger.info(message)
+        else:
+            # _locate_log_info -> _verify/_anchor_fallback -> find_img -> external caller.
+            logger.opt(depth=caller_depth_from_find_img + 2).info(message)
+
     def resolve_model(self, model_instance: BaseModel) -> BaseModel:
         """解析 Pydantic 模型，融合继承逻辑
 
@@ -1364,7 +1393,14 @@ class AnShape(_AnShapePupil):
 
         return target_img, target_rect, default_text
 
-    def _verify_anchor_mode(self, target_img, target_rect, default_text, locate_params: LocateParams):
+    def _verify_anchor_mode(
+        self,
+        target_img,
+        target_rect,
+        default_text,
+        locate_params: LocateParams,
+        caller_depth_from_find_img=None,
+    ):
         """[内部辅助] Anchor 模式：原位校验
 
         :param target_rect: 必须提供。如果为 None，表示对比 self 的全图。
@@ -1393,7 +1429,7 @@ class AnShape(_AnShapePupil):
         diff = ImageTools.img_distance(img_to_compare, target_img, LocateParams=locate_params)
         conf = 1.0 - diff
 
-        logger.info(f"{self.total_name()} {conf:.0%}")
+        self._locate_log_info(f"{self.total_name()} {conf:.0%}", caller_depth_from_find_img)
 
         if conf > locate_params.confidence:
             if target_rect:
@@ -1425,7 +1461,14 @@ class AnShape(_AnShapePupil):
             return None
         return [x1, y1, x2 - x1, y2 - y1]
 
-    def _anchor_fallback_search(self, target_img, target_rect, default_text, locate_params: LocateParams):
+    def _anchor_fallback_search(
+        self,
+        target_img,
+        target_rect,
+        default_text,
+        locate_params: LocateParams,
+        caller_depth_from_find_img=None,
+    ):
         """Anchor 原位校验失败后的有限范围多尺度补偿搜索。"""
         if not locate_params.anchor_fallback:
             return None
@@ -1454,7 +1497,10 @@ class AnShape(_AnShapePupil):
             grayscale=locate_params.grayscale,
         )
 
-        logger.info(f"{self.total_name()} anchor_fallback {score:.0%}")
+        self._locate_log_info(
+            f"{self.total_name()} anchor_fallback {score:.0%}",
+            caller_depth_from_find_img,
+        )
         if not local_rect or score <= locate_params.confidence:
             return None
 
@@ -1536,10 +1582,23 @@ class AnShape(_AnShapePupil):
         # 4. 分发执行
         if not scan:
             # --- Anchor Mode ---
-            res = self._verify_anchor_mode(target_img, target_rect, default_text, locate_params)
+            caller_depth_from_find_img = self._external_caller_depth_from_here()
+            res = self._verify_anchor_mode(
+                target_img,
+                target_rect,
+                default_text,
+                locate_params,
+                caller_depth_from_find_img,
+            )
             if res:
                 return res
-            return self._anchor_fallback_search(target_img, target_rect, default_text, locate_params)
+            return self._anchor_fallback_search(
+                target_img,
+                target_rect,
+                default_text,
+                locate_params,
+                caller_depth_from_find_img,
+            )
         else:
             # --- Search Mode ---
             # 如果强制要求 Search (scan=True) 但又依赖坐标 (Verify Logic)，这里会按 Search 处理

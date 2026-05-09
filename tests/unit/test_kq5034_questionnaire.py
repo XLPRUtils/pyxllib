@@ -1,3 +1,4 @@
+import datetime
 import sys
 import types
 
@@ -79,7 +80,7 @@ def test_读取CodeYun问卷提醒数据支持分页(monkeypatch):
     assert df['处理状态'].tolist() == ['', '', '']
 
 
-def test_提醒问卷数据支持传入CodeYun接口(monkeypatch):
+def test_提醒问卷数据支持传入CodeYun接口(monkeypatch, tmp_path):
     api_url = 'http://192.168.31.63:5173/api/attendance/wjx-data'
 
     class FakeResponse:
@@ -106,7 +107,67 @@ def test_提醒问卷数据支持传入CodeYun接口(monkeypatch):
     monkeypatch.setitem(sys.modules, 'kq5034.common', fake_common)
     monkeypatch.setattr('kq5034.questionnaire.requests.get', fake_get)
 
-    result = 提醒问卷数据(api_url=api_url)
+    result = 提醒问卷数据(api_url=api_url, state_path=tmp_path / 'reminder_state.json')
 
     assert result['梵呗']['items'] == ['20260415梵呗初阶：12']
     assert sent == [('本体音艺考勤班委群', result['梵呗']['message'])]
+
+
+def test_提醒问卷数据禅宗同清单非周日不重复发送(monkeypatch, tmp_path):
+    api_url = 'http://192.168.31.63:5173/api/attendance/wjx-data'
+
+    class FakeResponse:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {
+                'total': 2,
+                'items': [
+                    {'seq': 652, 'course_name': '202605禅宗五阶', 'process_status': ''},
+                    {'seq': 653, 'course_name': '202605禅宗五阶', 'process_status': ''},
+                ],
+            }
+
+    monkeypatch.setattr('kq5034.questionnaire.requests.get', lambda *args, **kwargs: FakeResponse())
+    sent = []
+    fake_common = types.ModuleType('kq5034.common')
+    fake_common.wechat_lock_send = lambda dst, message: sent.append((dst, message))
+    monkeypatch.setitem(sys.modules, 'kq5034.common', fake_common)
+
+    state_path = tmp_path / 'reminder_state.json'
+    提醒问卷数据(api_url=api_url, state_path=state_path, today=datetime.datetime(2026, 5, 8, 9))
+    提醒问卷数据(api_url=api_url, state_path=state_path, today=datetime.datetime(2026, 5, 9, 9))
+
+    assert len(sent) == 1
+    assert sent[0][0] == '禅宗修道考勤管理'
+
+
+def test_提醒问卷数据禅宗周日同清单仍发送(monkeypatch, tmp_path):
+    api_url = 'http://192.168.31.63:5173/api/attendance/wjx-data'
+
+    class FakeResponse:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {
+                'total': 2,
+                'items': [
+                    {'seq': 652, 'course_name': '202605禅宗五阶', 'process_status': ''},
+                    {'seq': 653, 'course_name': '202605禅宗五阶', 'process_status': ''},
+                ],
+            }
+
+    monkeypatch.setattr('kq5034.questionnaire.requests.get', lambda *args, **kwargs: FakeResponse())
+    sent = []
+    fake_common = types.ModuleType('kq5034.common')
+    fake_common.wechat_lock_send = lambda dst, message: sent.append((dst, message))
+    monkeypatch.setitem(sys.modules, 'kq5034.common', fake_common)
+
+    state_path = tmp_path / 'reminder_state.json'
+    提醒问卷数据(api_url=api_url, state_path=state_path, today=datetime.date(2026, 5, 9))
+    提醒问卷数据(api_url=api_url, state_path=state_path, today=datetime.date(2026, 5, 10))
+
+    assert len(sent) == 2
+    assert [x[0] for x in sent] == ['禅宗修道考勤管理', '禅宗修道考勤管理']

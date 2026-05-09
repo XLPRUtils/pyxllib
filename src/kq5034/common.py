@@ -57,6 +57,84 @@ except ModuleNotFoundError:
 
     logger = logging.getLogger(__name__)
 
+
+def _patch_drissionpage_download_move():
+    """兼容新版 Chrome 下载完成后不再保留 guid 临时文件的情况。"""
+
+    try:
+        from DataRecorder.tools import get_usable_path
+        from DrissionPage._units.downloader import DownloadManager
+    except Exception:
+        return
+
+    if getattr(DownloadManager, '_kq5034_missing_tmp_file_patched', False):
+        return
+
+    original_on_progress = DownloadManager._onDownloadProgress
+
+    def is_recent_download_file(path):
+        try:
+            return (
+                path.is_file()
+                and not path.name.endswith('.crdownload')
+                and time.time() - path.stat().st_mtime <= 300
+            )
+        except OSError:
+            return False
+
+    def on_download_progress(self, **kwargs):
+        try:
+            return original_on_progress(self, **kwargs)
+        except FileNotFoundError as err:
+            mission = self._missions.get(kwargs.get('guid'))
+            if kwargs.get('state') != 'completed' or mission is None:
+                raise
+
+            tmp_dir = Path(mission.tmp_path)
+            folder = Path(mission.folder)
+            default_to_path = folder / mission.name
+
+            candidates = [
+                tmp_dir / mission.id,
+                Path(tempfile.gettempdir()) / mission.name,
+                tmp_dir / mission.name,
+                default_to_path,
+            ]
+            source = next((p for p in candidates if is_recent_download_file(p)), None)
+            if source is None:
+                logger.warning(f'DrissionPage下载完成但临时文件缺失，未找到兜底文件：{mission.name} err={err}')
+                self.set_done(mission, 'canceled')
+                return
+
+            try:
+                mission.received_bytes = kwargs.get('receivedBytes', mission.received_bytes)
+                mission.total_bytes = kwargs.get('totalBytes', mission.total_bytes)
+                if source.resolve() == default_to_path.resolve() or mission._overwrite is not None:
+                    to_path = default_to_path
+                else:
+                    to_path = Path(get_usable_path(str(default_to_path)))
+                folder.mkdir(parents=True, exist_ok=True)
+                if source.resolve() != to_path.resolve():
+                    for _ in range(10):
+                        try:
+                            shutil.move(str(source), str(to_path))
+                            break
+                        except PermissionError:
+                            time.sleep(.5)
+                    else:
+                        shutil.copy2(str(source), str(to_path))
+                self.set_done(mission, 'completed', final_path=str(to_path))
+                logger.warning(f'DrissionPage下载临时文件缺失，已按文件名兜底搬运：{source} -> {to_path}')
+            except Exception as fallback_err:
+                logger.warning(f'DrissionPage下载兜底搬运失败：{mission.name} err={fallback_err}')
+                self.set_done(mission, 'canceled')
+
+    DownloadManager._onDownloadProgress = on_download_progress
+    DownloadManager._kq5034_missing_tmp_file_patched = True
+
+
+_patch_drissionpage_download_move()
+
 try:
     import xlproject.loadenv  # noqa: F401
 except Exception:
