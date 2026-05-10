@@ -1073,6 +1073,7 @@ ORDER BY ldt.lesson_id DESC;
 
             self.insert_row('lesson_data_table', row2, commit=-1)
         self.commit_all()
+        return len(df)
 
     def browser_lesson_data(self, course_name, lesson_names=None, user_id2s=None):
         """ 查看视频课程数据并保持用户ID的顺序及处理空值和无效值

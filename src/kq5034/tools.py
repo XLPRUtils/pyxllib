@@ -236,31 +236,37 @@ class KqTools:
             total_num += num
 
             # 2 遍历更新每个课次
-            for i, row in enumerate(lessons, start=1):
-                logger.info(f'shop={shop_id} {i}/{num}：' + row['lesson_name'])
+            try:
+                for i, row in enumerate(lessons, start=1):
+                    logger.info(f'shop={shop_id} {i}/{num}：' + row['lesson_name'])
 
-                try:
-                    file = self.xe2.export_lesson_data(row)
-                except DrissionPage.errors.PageDisconnectedError:
-                    logger.warning('DrissionPage连接断开，尝试重启浏览器')
-                    if self._xe2:
-                        self._xe2.quit()
-                        self._xe2 = None
-                    file = self.xe2.export_lesson_data(row)
+                    try:
+                        file = self.xe2.export_lesson_data(row)
+                    except DrissionPage.errors.PageDisconnectedError:
+                        logger.warning('DrissionPage连接断开，尝试重启浏览器')
+                        if self._xe2:
+                            self._xe2.quit()
+                            self._xe2 = None
+                        file = self.xe2.export_lesson_data(row)
 
-                if file is not None:
-                    self.kqdb.update_lesson_data_from_file(row['lesson_id'], file)
+                    imported_count = 0
+                    if file is not None:
+                        imported_count = self.kqdb.update_lesson_data_from_file(row['lesson_id'], file)
+                        if imported_count <= 0 and '闯关' not in row['lesson_name']:
+                            raise RuntimeError(f'课次数据文件导入0行，已停止后续流程：lesson={row["lesson_name"]} file={file}')
+                    elif '闯关' not in row['lesson_name']:
+                        raise RuntimeError(f'课次数据导出未获得文件，已停止后续流程：lesson={row["lesson_name"]}')
 
-                # 有数据，或者闯关类课程，更新update_time
-                # 闯关课程，无论数据下载成功与否，都要强制到下个节点再更新
-                if file or '闯关' in row['lesson_name']:
-                    self.kqdb.update_row('lesson_table',
-                                         {'next_update': self._计算课次下一次需要更新的时间点(row)},
-                                         {'lesson_id': row['lesson_id']},
-                                         commit=True)
-
-            尝试关闭重复页面(self.xe2.browser, timeout=1, reason=f'shop={shop_id}课次下载后兜底清理',
-                     keep_tab_ids=[getattr(self.xe2.tab, 'tab_id', None)])
+                    # 有数据，或者闯关类课程，更新update_time
+                    # 闯关课程，无论数据下载成功与否，都要强制到下个节点再更新
+                    if imported_count > 0 or '闯关' in row['lesson_name']:
+                        self.kqdb.update_row('lesson_table',
+                                             {'next_update': self._计算课次下一次需要更新的时间点(row)},
+                                             {'lesson_id': row['lesson_id']},
+                                             commit=True)
+            finally:
+                尝试关闭重复页面(self.xe2.browser, timeout=1, reason=f'shop={shop_id}课次下载后兜底清理',
+                         keep_tab_ids=[getattr(self.xe2.tab, 'tab_id', None)])
                 
             return total_num
 
@@ -279,23 +285,30 @@ class KqTools:
                                       f"WHERE lesson_name LIKE '%{course_name}%' "
                                       'ORDER BY lesson_id').fetchall()
 
-        for lesson in tqdm(lessons, desc=f'{course_name} 课次数据更新'):
-            lesson_id, lesson_name, url = lesson['lesson_id'], lesson['lesson_name'], lesson['lesson_id2']
+        try:
+            for lesson in tqdm(lessons, desc=f'{course_name} 课次数据更新'):
+                lesson_id, lesson_name, url = lesson['lesson_id'], lesson['lesson_name'], lesson['lesson_id2']
 
-            if update_mode == 0:
-                if self.kqdb.exec2one('SELECT COUNT(1) FROM lesson_data_table WHERE lesson_id=%s LIMIT 1',
-                                      [lesson_id]):
-                    continue
-            elif update_mode == 2:
-                self.kqdb.execute('DELETE FROM lesson_data_table WHERE lesson_id=%s', [lesson_id, ])
-                self.kqdb.commit()
+                reset_before_import = False
+                if update_mode == 0:
+                    if self.kqdb.exec2one('SELECT COUNT(1) FROM lesson_data_table WHERE lesson_id=%s LIMIT 1',
+                                          [lesson_id]):
+                        continue
+                elif update_mode == 2:
+                    reset_before_import = True
 
-            file = self.xe2.export_lesson_data(lesson)  # 导出数据，下载数据，获得文件路径file
-            if file is None:
-                continue
-            self.kqdb.update_lesson_data_from_file(lesson_id, file)  # 把文件数据上传数据库
-        尝试关闭重复页面(self.xe2.browser, timeout=1, reason=f'{course_name}课次批量下载后收尾',
-                 keep_tab_ids=[getattr(self.xe2.tab, 'tab_id', None)])
+                file = self.xe2.export_lesson_data(lesson)  # 导出数据，下载数据，获得文件路径file
+                if file is None:
+                    raise RuntimeError(f'课次数据导出未获得文件，已停止批量更新：lesson={lesson_name}')
+                if reset_before_import:
+                    self.kqdb.execute('DELETE FROM lesson_data_table WHERE lesson_id=%s', [lesson_id, ])
+                    self.kqdb.commit()
+                imported_count = self.kqdb.update_lesson_data_from_file(lesson_id, file)  # 把文件数据上传数据库
+                if imported_count <= 0 and '闯关' not in lesson_name:
+                    raise RuntimeError(f'课次数据文件导入0行，已停止批量更新：lesson={lesson_name} file={file}')
+        finally:
+            尝试关闭重复页面(self.xe2.browser, timeout=1, reason=f'{course_name}课次批量下载后收尾',
+                     keep_tab_ids=[getattr(self.xe2.tab, 'tab_id', None)])
 
     def update_clockin(self, clockin_name, url=None, download=True):
         """ shop2的打卡数据
@@ -499,7 +512,11 @@ class KqTools:
         today = datetime.date.today()
         subdir_name = f'{today.year}年{today.month:02}月'
         dfmt = today.strftime('%y%m%d')
-        file = cls.root / '返款表' / subdir_name / f'd{dfmt}-{title}.csv'
+        minute_tag = datetime.datetime.now().strftime('%H%M')
+        file = cls.root / '返款表' / subdir_name / f'd{dfmt}-{minute_tag}-{title}.csv'
+        if file.exists():
+            second_tag = datetime.datetime.now().strftime('%H%M%S')
+            file = cls.root / '返款表' / subdir_name / f'd{dfmt}-{second_tag}-{title}.csv'
         file.parent.mkdir(parents=True, exist_ok=True)
         file.write_text('\n'.join(lines2))
 

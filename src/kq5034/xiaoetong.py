@@ -193,6 +193,15 @@ class XiaoetongWeb(DpWebBase):
     _EMPTY_EXPORT = object()
     _runtime_export_cache = {}
     _runtime_export_cache_ttl = datetime.timedelta(hours=2)
+    _live_lesson_wait_seconds = 60
+    _live_lesson_max_attempts = 3
+    _live_user_list_page_size = 100
+    _live_user_list_custom_items = [
+        'user_id', 'wx_nickname', 'comment_name', 'user_created_at', 'phone', 'phone_collect',
+        'alive_join_type', 'first_in_time', 'last_in_time', 'his_online_time', 'his_learn_time',
+        'his_learning_time', 'his_learned_time', 'learning_progress', 'learned_progress_times',
+        'max_learned_progress', 'is_finish', 'comment_num', 'user_total_price', 'equity_status',
+    ]
 
     def __init__(self, name=None, passwd=None):
         super().__init__('https://admin.xiaoe-tech.com')
@@ -403,15 +412,21 @@ return true;
                 tab.wait(wait_seconds)
             yield tab
         finally:
-            try:
-                if getattr(tab, 'tab_id', None):
-                    tab._run_cdp('Target.closeTarget', targetId=tab.tab_id)
-                else:
-                    tab.close()
-            except Exception:
-                with contextlib.suppress(Exception):
-                    tab.close()
+            self._关闭标签页(tab, reason='临时工作标签页收尾')
             self.tab = original_tab
+
+    def _关闭标签页(self, tab, *, reason=''):
+        """关闭单个工作标签页；失败时只记录日志，避免清理错误打断主流程。"""
+        tab_id = getattr(tab, 'tab_id', None)
+        try:
+            if tab_id:
+                self.browser._run_cdp('Target.closeTarget', targetId=tab_id)
+            else:
+                tab.close()
+        except Exception as e:
+            logger.warning(f'关闭标签页失败，尝试备用关闭：tab={tab_id} reason={reason} err={e}')
+            with contextlib.suppress(Exception):
+                tab.close()
 
     @staticmethod
     def _标准化下载名(name):
@@ -496,8 +511,11 @@ return true;
             if mission is not None and getattr(mission, 'is_done', False):
                 final_path = getattr(mission, 'final_path', None)
                 if final_path and Path(final_path).exists():
-                    return XlPath(final_path)
-                break
+                    if self._文件已稳定(Path(final_path)):
+                        return self._归档下载文件(final_path, download_dir)
+                file_path = self._查找本地下载文件(file_name, download_dir, newer_than_ts=start_ts)
+                if file_path is not None and self._文件已稳定(file_path):
+                    return self._归档下载文件(file_path, download_dir)
 
             file_path = self._查找本地下载文件(file_name, download_dir, newer_than_ts=start_ts)
             if file_path is not None and self._文件已稳定(file_path):
@@ -519,7 +537,7 @@ return true;
         return first_td.text if first_td else row.text.split('\n', 1)[0]
 
     def _列出下载中心任务名(self, match_keywords=None):
-        """ 读取当前下载中心里可下载的任务名，用于过滤旧任务。 """
+        """读取当前下载中心里可下载的任务名，用于过滤旧任务。"""
         match_keywords = [self._标准化下载名(x) for x in (match_keywords or []) if x]
 
         with self.临时工作标签页(url='https://admin.xiaoe-tech.com/t/basic-platform/downloadCenter#/', wait_seconds=5) as tab:
@@ -527,7 +545,7 @@ return true;
             for tbody in tab.eles('tag:tbody'):
                 rows.extend(tbody.eles('tag:tr'))
 
-            task_names = set()
+            task_names = []
             for row in rows:
                 btn = row('tag:button@@text():下载', timeout=0.5)
                 if not btn:
@@ -537,7 +555,7 @@ return true;
                 normalized_name = self._标准化下载名(task_name)
                 if match_keywords and not any(x in normalized_name for x in match_keywords):
                     continue
-                task_names.add(task_name)
+                task_names.append(task_name)
 
             return task_names
 
@@ -647,7 +665,7 @@ return true;
         """生成器版下载中心轮询，便于行为树逐步推进。"""
         tab = self.tab
         match_keywords = [self._标准化下载名(x) for x in (match_keywords or []) if x]
-        exclude_task_names = {self._标准化下载名(x) for x in (exclude_task_names or []) if x}
+        exclude_task_counts = Counter(self._标准化下载名(x) for x in (exclude_task_names or []) if x)
 
         yield '下载中心轮询：打开页面'
         tab.get('https://admin.xiaoe-tech.com/t/basic-platform/downloadCenter#/')
@@ -664,7 +682,8 @@ return true;
             for tbody in tab.eles('tag:tbody'):
                 rows.extend(tbody.eles('tag:tr'))
 
-            skipped_existing = False
+            candidate_rows = []
+            task_counts = Counter()
             for row in rows:
                 btn = row('tag:button@@text():下载', timeout=0.5)
                 if not btn:
@@ -674,7 +693,14 @@ return true;
                 normalized_name = self._标准化下载名(file1)
                 if match_keywords and not any(x in normalized_name for x in match_keywords):
                     continue
-                if normalized_name in exclude_task_names:
+
+                task_counts[normalized_name] += 1
+                candidate_rows.append((row, btn, file1, normalized_name))
+
+            skipped_existing = False
+            for row, btn, file1, normalized_name in candidate_rows:
+                # 下载中心通常按申请时间倒序排列；同名任务数量超过旧任务数量时，第一条同名任务视为本轮新导出。
+                if exclude_task_counts.get(normalized_name, 0) >= task_counts[normalized_name]:
                     skipped_existing = True
                     continue
                 if file1 in self.exist_files:
@@ -953,6 +979,170 @@ return true;
         tab.listen.start('tag:ul@@unselectable=unselectable@@class=ant-pagination ant-table-pagination')
         tab.wait(3)
 
+    def _查找直播用户列表导出按钮(self, tab):
+        for locator in ('tag:button@@text()=导出列表', 'tag:button@@text():导出列表'):
+            btn = tab(locator, timeout=0.5)
+            if btn:
+                return btn
+        return None
+
+    def _统计直播用户列表行数(self, tab):
+        for locator in ('t:table@@class:ss-table__body', 't:div@@class:ss-table__body-wrapper'):
+            body = tab(locator, timeout=0.5)
+            if not body:
+                continue
+            tbody = body('t:tbody', timeout=0.2)
+            trs = tbody.eles('t:tr', timeout=0.2) if tbody else body.eles('t:tr', timeout=0.2)
+            if trs:
+                return len(trs)
+        return 0
+
+    def _直播课用户页摘要(self, tab, *, max_chars=500):
+        try:
+            return (tab.run_js(
+                'return document.querySelector("live-user-list")?.innerText || document.body.innerText || ""'
+            ) or '')[:max_chars]
+        except Exception as e:
+            return f'<body text error: {e}>'
+
+    def _等待直播课用户导出按钮(self, tab, row, work_url):
+        """小鹅通直播用户页经常慢加载；必须等到导出入口出现，不能把空壳 DOM 当作空数据。"""
+        lesson = row.get('lesson_name', row.get('lesson_id2', ''))
+        last_summary = ''
+        for attempt in range(1, self._live_lesson_max_attempts + 1):
+            deadline = time.time() + self._live_lesson_wait_seconds
+            check_index = 0
+            while time.time() < deadline:
+                check_index += 1
+                with contextlib.suppress(Exception):
+                    tab.run_js('document.querySelector(".notify-wrap")?.remove()')
+
+                btn = self._查找直播用户列表导出按钮(tab)
+                if btn:
+                    logger.info(f'直播课用户列表导出按钮已就绪：lesson={lesson} attempt={attempt} check={check_index}')
+                    return btn
+
+                rows = self._统计直播用户列表行数(tab)
+                logger.info(f'直播课用户列表未就绪，继续等待：lesson={lesson} '
+                            f'attempt={attempt}/{self._live_lesson_max_attempts} '
+                            f'check={check_index} rows={rows} url={tab.url}')
+                tab.wait(10)
+
+            last_summary = self._直播课用户页摘要(tab)
+            logger.warning(f'直播课用户列表导出按钮等待超时，准备刷新重试：lesson={lesson} '
+                           f'attempt={attempt}/{self._live_lesson_max_attempts} '
+                           f'url={tab.url} body={last_summary!r}')
+            if attempt < self._live_lesson_max_attempts:
+                tab.get(work_url)
+                tab.wait(10)
+
+        logger.warning(f'直播课用户列表导出按钮始终未出现，改用后台用户列表接口兜底：'
+                       f'lesson={lesson} url={tab.url} body={last_summary!r}')
+        return None
+
+    @staticmethod
+    def _直播课秒数(value):
+        if value in (None, '', '--'):
+            return 0
+        try:
+            return int(float(value))
+        except Exception:
+            return 0
+
+    def _请求直播课用户列表页(self, tab, lesson_id2, page):
+        payload = {
+            'resource_id': lesson_id2,
+            'page': page,
+            'page_size': self._live_user_list_page_size,
+            'order_by': 6,
+            'order_type': 1,
+            'is_free_resource': False,
+            'custom_items': self._live_user_list_custom_items,
+            'key_word_type': 2,
+            'key_word': '',
+            'user_tags': [],
+            'user_created_start': '',
+            'user_created_end': '',
+            'equity_status': 0,
+        }
+        js = r'''
+const payload = arguments[0];
+return fetch('/xe.data-user-behavior.live.user_list_filter/1.0.0', {
+  method: 'POST',
+  credentials: 'include',
+  headers: {'content-type': 'application/json;charset=UTF-8'},
+  body: JSON.stringify(payload)
+}).then(async r => {
+  const text = await r.text();
+  let data = null;
+  try { data = JSON.parse(text); } catch (e) { data = {raw_text: text}; }
+  return {status: r.status, ok: r.ok, data};
+}).catch(e => ({error: String(e), stack: e.stack}));
+'''
+
+        last_res = None
+        for attempt in range(1, 6):
+            last_res = tab.run_js(js, payload)
+            if isinstance(last_res, dict) and last_res.get('status') == 200:
+                data = last_res.get('data') or {}
+                if data.get('code') == 0:
+                    return data
+                logger.warning(f'直播课用户列表接口返回业务错误，重试：lesson_id2={lesson_id2} '
+                               f'page={page} attempt={attempt}/5 data={data}')
+            else:
+                logger.warning(f'直播课用户列表接口请求失败，重试：lesson_id2={lesson_id2} '
+                               f'page={page} attempt={attempt}/5 res={last_res}')
+            tab.wait(10 * attempt)
+
+        raise RuntimeError(f'直播课用户列表接口请求失败：lesson_id2={lesson_id2} page={page} last_res={last_res}')
+
+    def _导出直播课用户列表接口CSV(self, tab, row):
+        """当小鹅通用户列表组件空白时，直接用同源后台接口生成兼容 CSV。"""
+        lesson_id2 = str(row.get('lesson_id2') or '').strip()
+        lesson = row.get('lesson_name', lesson_id2)
+        items = []
+        page = 1
+        total = None
+        while True:
+            data = self._请求直播课用户列表页(tab, lesson_id2, page)
+            payload = data.get('data') or {}
+            rows = payload.get('list') or []
+            total = int(payload.get('total') or 0)
+            items.extend(rows)
+            logger.info(f'直播课用户列表接口分页：lesson={lesson} page={page} '
+                        f'got={len(rows)} accumulated={len(items)} total={total}')
+            if len(items) >= total or not rows:
+                break
+            page += 1
+
+        safe_name = re.sub(r'[\\/:*?"<>|\r\n]+', '_', lesson or lesson_id2)
+        download_dir = Path.home() / 'Downloads' / '_xlproject_temp_downloads'
+        download_dir.mkdir(parents=True, exist_ok=True)
+        file = download_dir / f'{safe_name}-live-user-list-api-{datetime.datetime.now():%Y%m%d_%H%M%S}.csv'
+
+        out_rows = []
+        for item in items:
+            out_rows.append({
+                '用户ID': item.get('user_id') or '',
+                '用户昵称': item.get('wx_nickname') or '',
+                '备注名': item.get('comment_name') or '',
+                '状态': '',
+                '直播间停留时长(秒)': self._直播课秒数(item.get('his_online_time')),
+                '累计观看时长(秒)': self._直播课秒数(item.get('his_learn_time')),
+                '直播观看时长(秒)': self._直播课秒数(item.get('his_learning_time')),
+                '回放观看时长(秒)': self._直播课秒数(item.get('his_learned_time')),
+                '评论次数': self._直播课秒数(item.get('comment_num')),
+                '直播间成交金额': item.get('user_total_price') or 0,
+            })
+
+        pd.DataFrame(out_rows, columns=[
+            '用户ID', '用户昵称', '备注名', '状态',
+            '直播间停留时长(秒)', '累计观看时长(秒)', '直播观看时长(秒)', '回放观看时长(秒)',
+            '评论次数', '直播间成交金额',
+        ]).to_csv(file, index=False, encoding='utf-8-sig')
+        logger.warning(f'已使用直播课用户列表接口生成兜底CSV：lesson={lesson} rows={len(out_rows)} total={total} file={file}')
+        return XlPath(file)
+
     def export_lesson_data(self, row, download=True):
         """ 导出指定课程的数据
 
@@ -968,14 +1158,19 @@ return true;
             raise TypeError
 
         shop_id = row.get('shop_id') if isinstance(row, dict) else None
-        cache_key = self._make_runtime_cache_key('lesson', row['lesson_id2'], shop_id=shop_id)
+        lesson_id2 = str(row.get('lesson_id2') or '').strip()
+        if not lesson_id2:
+            logger.info(f'课次链接为空，跳过导出：lesson={row.get("lesson_name", "")}')
+            return None
+
+        cache_key = self._make_runtime_cache_key('lesson', lesson_id2, shop_id=shop_id)
         if download:
-            cached_file = self._restore_runtime_cached_file(cache_key, label=row['lesson_id2'])
+            cached_file = self._restore_runtime_cached_file(cache_key, label=lesson_id2)
             if cached_file is not self._CACHE_MISS:
                 return cached_file
 
         # 2 目前有3类情况的课次分类处理
-        url = row['lesson_id2']
+        url = lesson_id2
         work_url = url
         wait_seconds = 3
         if not url.startswith('https://admin.xiaoe-tech.com/t/community_admin/miniCommunity#/course_detail_page') \
@@ -985,6 +1180,7 @@ return true;
         elif url.startswith('https://admin.xiaoe-tech.com/t/course/camp_pro/course_detail_page'):
             wait_seconds = 5
 
+        existing_exports = []
         with self.临时工作标签页(url=work_url, wait_seconds=wait_seconds) as tab:
             if shop_id:
                 target_shop, _ = self._标准化店铺(shop_id)
@@ -1034,14 +1230,16 @@ return true;
                 tab.wait(5)
                 tab('t:div@@class=ant-modal-content')('t:button@@text():导 出').click()
             else:
-                # 遇到空数据表，不用处理
-                trs = tab('t:table@@class:ss-table__body')('t:tbody').eles('t:tr')
-                if not trs:
-                    self._store_runtime_cached_file(cache_key, None)
-                    return
+                if download:
+                    existing_exports = self._列出下载中心任务名()
+
+                btn = self._等待直播课用户导出按钮(tab, row, work_url)
+                if not btn:
+                    file = self._导出直播课用户列表接口CSV(tab, row)
+                    return self._store_runtime_cached_file(cache_key, file) if download else file
 
                 # 正常导出数据
-                tab('tag:button@@text()=导出列表').click()
+                btn.click(by_js=True)
                 tab.wait(5)
                 for i in range(10):
                     try:
@@ -1055,19 +1253,16 @@ return true;
 
             if download:
                 tab.wait(5)
-                file = self.download_last_file()
+                file = self.download_last_file(exclude_task_names=existing_exports)
                 if not file:
-                    self._store_runtime_cached_file(cache_key, None)
-                    return None
+                    raise RuntimeError(f'课次导出已提交但未下载到文件：lesson={row.get("lesson_name", "")} url={url}')
                 # bug: 这个要考虑后缀.csv等的影响，以及dp自带的下载，逻辑有些不同
                 m = re.search(r'\(\d+\)$', file.stem)
                 if m:
                     msg = (f'尝试导出课程数据：{url}，但是获得文件：{file.name}，从文件名看，大概率是出问题了，'
                            '比如这堂课数据是空的没有导出文件，而自动继续下载浏览器记录的上一次的课程数据文件，所以有文件名重名问题'
-                           '或者小鹅通不稳定，该课次数据未正常导出。为了避免意外错误，本处直接返回None。')
-                    wechat_logger.warning(msg)
-                    self._store_runtime_cached_file(cache_key, None)
-                    return
+                           '或者小鹅通不稳定，该课次数据未正常导出。为了避免意外错误，本处直接抛错阻断后续流程。')
+                    raise RuntimeError(msg)
                 file = self._store_runtime_cached_file(cache_key, file)
                 return file
 

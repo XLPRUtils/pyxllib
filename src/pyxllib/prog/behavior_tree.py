@@ -27,6 +27,7 @@ import datetime
 import inspect
 import json
 import logging
+import os
 import re
 import sys
 import time
@@ -86,7 +87,18 @@ class NextWake:
 @dataclass
 class _TraceInterrupt:
     kind: str
-    location: Optional[str]
+    location: Optional["_SourceLocation"]
+    node_path: str = ""
+
+
+@dataclass
+class _SourceLocation:
+    filename: str
+    lineno: int
+    function: str
+
+    def brief(self) -> str:
+        return f"{Path(self.filename).name}:{self.lineno}"
 
 
 def _format_time(value: Optional[datetime.datetime]) -> Optional[str]:
@@ -200,12 +212,12 @@ def _coerce_status(value: Any) -> Status:
     return Status.SUCCESS
 
 
-def _source_location(filename: str, lineno: int) -> str:
-    return f"{Path(filename).name}:{lineno}"
+def _source_location(filename: str, lineno: int, function: str) -> _SourceLocation:
+    return _SourceLocation(filename, lineno, function)
 
 
-def _frame_source_location(frame) -> str:
-    return _source_location(frame.f_code.co_filename, frame.f_lineno)
+def _frame_source_location(frame) -> _SourceLocation:
+    return _source_location(frame.f_code.co_filename, frame.f_lineno, frame.f_code.co_name)
 
 
 def _deepest_generator(generator: GeneratorType) -> GeneratorType:
@@ -215,7 +227,7 @@ def _deepest_generator(generator: GeneratorType) -> GeneratorType:
     return current
 
 
-def _suspended_generator_location(generator: GeneratorType) -> Optional[str]:
+def _suspended_generator_location(generator: GeneratorType) -> Optional[_SourceLocation]:
     frame = _deepest_generator(generator).gi_frame
     if frame is None:
         return None
@@ -437,14 +449,14 @@ class Action(Node):
         try:
             ctx.runner._advance_generator(self.generator)
             if ctx.runner.trace >= 2:
-                ctx.trace_interrupt = _TraceInterrupt("yield", _suspended_generator_location(self.generator))
+                ctx.trace_interrupt = _TraceInterrupt("yield", _suspended_generator_location(self.generator), self.path)
             return self._record(Status.RUNNING)
         except StopIteration as err:
             self.generator = None
             if isinstance(err.value, NextWake):
                 ctx.next_run_at = err.value.run_at
             if ctx.runner.trace >= 2:
-                ctx.trace_interrupt = _TraceInterrupt("return", ctx.runner._generator_return_location())
+                ctx.trace_interrupt = _TraceInterrupt("return", ctx.runner._generator_return_location(), self.path)
             return self._record(_coerce_status(err.value))
 
 
@@ -998,6 +1010,11 @@ class BehaviorTreeRunner:
         self.memory_state = {"nodes": {}, "blackboard": {}}
         self.logger = self._create_logger(log_path)
         self._last_generator_return_locations = []
+        self.last_trace_interrupt = None
+        self.last_trace_signature = None
+        self.last_trace_first_seen_at = None
+        self.last_trace_last_seen_at = None
+        self.last_trace_count = 0
         self._assign_paths()
 
     def now(self) -> datetime.datetime:
@@ -1020,8 +1037,12 @@ class BehaviorTreeRunner:
         if self.state_path is None:
             return
         self.state_path.parent.mkdir(parents=True, exist_ok=True)
-        with open(self.state_path, "w", encoding="utf-8") as f:
+        tmp_path = self.state_path.with_name(f"{self.state_path.name}.tmp")
+        with open(tmp_path, "w", encoding="utf-8") as f:
             json.dump(self.state, f, ensure_ascii=False, indent=2)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp_path, self.state_path)
 
     def node_state(self, node: Node) -> Dict[str, Any]:
         state_root = self.state if node.persist else self.memory_state
@@ -1080,7 +1101,7 @@ class BehaviorTreeRunner:
         finally:
             sys.settrace(previous_trace)
 
-    def _generator_return_location(self) -> Optional[str]:
+    def _generator_return_location(self) -> Optional[_SourceLocation]:
         if not self._last_generator_return_locations:
             return None
         return self._last_generator_return_locations[0]
@@ -1089,8 +1110,40 @@ class BehaviorTreeRunner:
         interrupt = ctx.trace_interrupt
         if interrupt is None:
             return
-        location = interrupt.location or "unknown"
-        self.logger.debug("tree %s: %s -> %s", interrupt.kind, location, status.value)
+        self.last_trace_interrupt = interrupt
+        location = interrupt.location
+        if interrupt.kind == "yield" and location is not None:
+            signature = "|".join(
+                [
+                    str(interrupt.node_path or ""),
+                    str(location.filename),
+                    str(location.lineno),
+                    str(location.function),
+                ]
+            )
+            now = ctx.now()
+            if self.last_trace_signature != signature:
+                self.last_trace_signature = signature
+                self.last_trace_first_seen_at = now
+                self.last_trace_count = 1
+            else:
+                self.last_trace_count += 1
+            self.last_trace_last_seen_at = now
+        elif interrupt.kind == "return":
+            self.last_trace_signature = None
+            self.last_trace_first_seen_at = None
+            self.last_trace_last_seen_at = None
+            self.last_trace_count = 0
+        extra = {}
+        location_text = "unknown"
+        if location is not None:
+            location_text = location.brief()
+            extra = {
+                "source_path": location.filename,
+                "source_line": location.lineno,
+                "source_function": location.function,
+            }
+        self.logger.debug("tree %s: %s -> %s", interrupt.kind, location_text, status.value, extra=extra)
 
     def _create_logger(self, log_path) -> logging.Logger:
         logger = logging.getLogger(f"{__name__}.{id(self)}")
@@ -1112,13 +1165,23 @@ class BehaviorTreeRunner:
                         level = loguru_logger.level(record.levelname).name
                     except ValueError:
                         level = record.levelno
-                    
-                    frame, depth = logging.currentframe(), 2
-                    while frame.f_code.co_filename == logging.__file__:
+
+                    frame, depth = inspect.currentframe(), 0
+                    while frame is not None:
+                        if frame.f_code.co_filename == record.pathname and frame.f_code.co_name == record.funcName:
+                            break
                         frame = frame.f_back
                         depth += 1
-                        
-                    loguru_logger.opt(depth=depth, exception=record.exc_info).log(level, record.getMessage())
+
+                    if frame is None:
+                        depth = 2
+
+                    source = {
+                        "source_path": getattr(record, "source_path", record.pathname),
+                        "source_line": getattr(record, "source_line", record.lineno),
+                        "source_function": getattr(record, "source_function", record.funcName),
+                    }
+                    loguru_logger.bind(**source).opt(depth=depth, exception=record.exc_info).log(level, record.getMessage())
                     
             handler = LoguruHandler()
             logger.addHandler(handler)

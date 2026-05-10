@@ -14,6 +14,7 @@ import datetime
 import inspect
 import json
 import logging
+import os
 import re
 import time
 import traceback
@@ -332,8 +333,12 @@ class TaskScheduler:
 
     def save_state(self) -> None:
         self.state_path.parent.mkdir(parents=True, exist_ok=True)
-        with open(self.state_path, "w", encoding="utf-8") as f:
+        tmp_path = self.state_path.with_name(f"{self.state_path.name}.tmp")
+        with open(tmp_path, "w", encoding="utf-8") as f:
             json.dump(self.state, f, ensure_ascii=False, indent=2)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp_path, self.state_path)
 
     def task(
         self,
