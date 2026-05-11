@@ -7,13 +7,16 @@ from datetime import datetime, timedelta
 from pyxllib.autogui.wechat_archive import WeChatArchive, normalize_wx_messages, parse_wechat_time
 
 
+_DEFAULT_MSG_ID = object()
+
+
 class FakeMsg:
-    def __init__(self, msg_type, content, *, sender=None, sender_remark=None, msg_id=None, mtype="", time=None):
+    def __init__(self, msg_type, content, *, sender=None, sender_remark=None, msg_id=_DEFAULT_MSG_ID, mtype="", time=None):
         self.type = msg_type
         self.content = content
         self.sender = sender
         self.sender_remark = sender_remark
-        self.id = msg_id or "{}:{}".format(msg_type, content)
+        self.id = "{}:{}".format(msg_type, content) if msg_id is _DEFAULT_MSG_ID else msg_id
         self.mtype = mtype
         self.time = time
         self.info = [msg_type, content, self.id]
@@ -68,10 +71,12 @@ def test_normalize_messages_propagates_time_and_types():
             FakeMsg("time", "15:01", time="15:01"),
             FakeMsg("self", "发给自己", sender="Self", msg_id="1"),
             FakeMsg("friend", "群消息", sender="张三", sender_remark="张三备注", msg_id="2"),
-            FakeMsg("friend", "[图片]", sender="李四", msg_id="3"),
+            FakeMsg("friend", "[图片]", sender="李四", msg_id="3", mtype="text"),
             FakeMsg("friend", "[文件] report.xlsx", sender="李四", msg_id="4"),
             FakeMsg("friend", "[链接]", sender="李四", msg_id="5"),
+            FakeMsg("friend", "[音乐]", sender="李四", msg_id="5b"),
             FakeMsg("recall", "你撤回了一条消息", msg_id="6"),
+            FakeMsg("friend", r"C:\wx\image.png", sender="李四", msg_id="7", mtype="image"),
         ],
         "文件传输助手",
         collected_at="2026-05-10 16:30:00",
@@ -86,7 +91,10 @@ def test_normalize_messages_propagates_time_and_types():
     assert rows[3]["message_type"] == "image"
     assert rows[4]["message_type"] == "file"
     assert rows[5]["message_type"] == "link"
-    assert rows[6]["message_type"] == "recall"
+    assert rows[6]["message_type"] == "link"
+    assert rows[7]["message_type"] == "recall"
+    assert rows[8]["message_type"] == "image"
+    assert rows[8]["media_path"] == r"C:\wx\image.png"
 
 
 def test_sqlite_write_is_idempotent(tmp_path):
@@ -168,6 +176,65 @@ def test_sync_incremental_reads_tail_without_duplicates(tmp_path):
     conn = sqlite3.connect(db_path)
     try:
         assert conn.execute("SELECT COUNT(*) FROM messages").fetchone()[0] == 3
+    finally:
+        conn.close()
+
+
+def test_media_capture_enriches_existing_placeholder(tmp_path):
+    db_path = tmp_path / "wechat.sqlite"
+    placeholder = [
+        FakeMsg("time", "15:01", time="15:01"),
+        FakeMsg("friend", "[图片]", sender="文件传输助手", msg_id="img-1", mtype="text"),
+    ]
+    wx = FakeWx([placeholder])
+    archive = WeChatArchive(db_path, wx=wx)
+
+    first = archive.pull_chat("文件传输助手")
+    wx.pages[0] = [
+        FakeMsg("time", "15:01", time="15:01"),
+        FakeMsg("friend", r"C:\wx\img.png", sender="文件传输助手", msg_id="img-1", mtype="image"),
+    ]
+    second = archive.pull_chat("文件传输助手", save_media=True)
+
+    assert first["inserted"] == 2
+    assert second["inserted"] == 0
+    conn = sqlite3.connect(db_path)
+    try:
+        assert conn.execute("SELECT COUNT(*) FROM messages").fetchone()[0] == 2
+        row = conn.execute("SELECT message_type, content, media_path FROM messages WHERE message_type='image'").fetchone()
+        assert row == ("image", r"C:\wx\img.png", r"C:\wx\img.png")
+    finally:
+        conn.close()
+
+
+def test_media_capture_without_raw_id_stays_idempotent(tmp_path):
+    db_path = tmp_path / "wechat.sqlite"
+    wx = FakeWx(
+        [
+            [
+                FakeMsg("time", "15:01", time="15:01", msg_id=None),
+                FakeMsg("friend", "[图片]", sender="文件传输助手", msg_id=None, mtype="text"),
+            ]
+        ]
+    )
+    archive = WeChatArchive(db_path, wx=wx)
+
+    first = archive.pull_chat("文件传输助手")
+    wx.pages[0] = [
+        FakeMsg("time", "15:01", time="15:01", msg_id=None),
+        FakeMsg("friend", r"C:\wx\img.png", sender="文件传输助手", msg_id=None, mtype="image"),
+    ]
+    second = archive.pull_chat("文件传输助手", save_media=True)
+    third = archive.pull_chat("文件传输助手", save_media=True)
+
+    assert first["inserted"] == 2
+    assert second["inserted"] == 0
+    assert third["inserted"] == 0
+    conn = sqlite3.connect(db_path)
+    try:
+        assert conn.execute("SELECT COUNT(*) FROM messages").fetchone()[0] == 2
+        row = conn.execute("SELECT message_type, content, media_path FROM messages WHERE message_type='image'").fetchone()
+        assert row == ("image", r"C:\wx\img.png", r"C:\wx\img.png")
     finally:
         conn.close()
 
@@ -262,6 +329,79 @@ def test_plan_sync_chats_prioritizes_unread_and_skips_backoff(tmp_path):
 
     assert [item["name"] for item in plan] == ["B", "A"]
     assert "unread:3" in plan[0]["reasons"]
+
+
+def test_plan_sync_chats_discovers_recent_unknown_chats(tmp_path):
+    db_path = tmp_path / "wechat.sqlite"
+    archive = WeChatArchive(db_path, wx=FakeWx([[]]))
+
+    plan = archive.plan_sync_chats(
+        recent_chat_names=["新群", "文件传输助手"],
+        unread_chat_names={"新群": 2},
+        now=datetime(2026, 5, 10, 12, 0, 0),
+    )
+
+    assert [item["name"] for item in plan[:2]] == ["新群", "文件传输助手"]
+    assert plan[0]["chat_id"] is None
+    assert plan[0]["backfill_history"] is True
+    assert "discovered" in plan[0]["reasons"]
+    assert "unread:2" in plan[0]["reasons"]
+
+
+def test_plan_history_chats_prefers_old_unfinished_chat(tmp_path):
+    db_path = tmp_path / "wechat.sqlite"
+    archive = WeChatArchive(db_path, wx=FakeWx([[]]))
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            """
+            INSERT INTO accounts(account_key, nickname, computer_name, wx_version, created_at, updated_at)
+            VALUES ('a', 'a', 'pc', 'test', '2026-05-10 00:00:00', '2026-05-10 00:00:00')
+            """
+        )
+        account_id = conn.execute("SELECT id FROM accounts WHERE account_key='a'").fetchone()[0]
+        for name, reached_top, first_time in [
+            ("旧群", 0, "2024-01-01 00:00:00"),
+            ("新群", 0, "2026-05-01 00:00:00"),
+            ("已清仓", 1, "2023-01-01 00:00:00"),
+        ]:
+            conn.execute(
+                """
+                INSERT INTO chats(account_id, name, status, created_at, updated_at)
+                VALUES (?, ?, 'active', '2026-05-10 00:00:00', '2026-05-10 00:00:00')
+                """,
+                (account_id, name),
+            )
+            chat_id = conn.execute("SELECT id FROM chats WHERE name=?", (name,)).fetchone()[0]
+            conn.execute(
+                """
+                INSERT INTO chat_sync_config(chat_id, enabled, priority, sync_latest, backfill_history, created_at, updated_at)
+                VALUES (?, 1, 0, 1, 1, '2026-05-10 00:00:00', '2026-05-10 00:00:00')
+                """,
+                (chat_id,),
+            )
+            conn.execute(
+                """
+                INSERT INTO sync_state(chat_id, reached_top, updated_at)
+                VALUES (?, ?, '2026-05-10 00:00:00')
+                """,
+                (chat_id, reached_top),
+            )
+            conn.execute(
+                """
+                INSERT INTO messages(
+                    account_id, chat_id, direction, sender, message_type, content,
+                    normalized_time, fingerprint, collected_at
+                )
+                VALUES (?, ?, 'in', 'x', 'text', ?, ?, ?, '2026-05-10 00:00:00')
+                """,
+                (account_id, chat_id, name, first_time, f"{name}-fingerprint"),
+            )
+
+    plan = archive.plan_history_chats(now=datetime(2026, 5, 10, 12, 0, 0))
+
+    assert [item["name"] for item in plan] == ["旧群", "新群"]
+    assert plan[0]["first_message_time"] == "2024-01-01 00:00:00"
+    assert "history_pending" in plan[0]["reasons"]
 
 
 def test_schema_migration_adds_incremental_tables(tmp_path):

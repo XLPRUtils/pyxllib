@@ -1075,14 +1075,48 @@ ORDER BY ldt.lesson_id DESC;
         self.commit_all()
         return len(df)
 
-    def browser_lesson_data(self, course_name, lesson_names=None, user_id2s=None):
+    @staticmethod
+    def _normalize_user_alias_map(user_alias_map=None):
+        if not user_alias_map:
+            return {}
+        alias_map = {}
+        for src, dst in user_alias_map.items():
+            if src is None or dst is None:
+                continue
+            src_text = str(src).strip()
+            dst_text = str(dst).strip()
+            if src_text and dst_text and src_text != dst_text:
+                alias_map[src_text] = dst_text
+        return alias_map
+
+    @staticmethod
+    def _apply_user_alias_map(df, user_alias_map=None):
+        alias_map = KqDb._normalize_user_alias_map(user_alias_map)
+        if not alias_map or df.empty or 'user_id2' not in df.columns:
+            return df
+
+        df = df.copy()
+
+        def resolve_user_id(user_id2):
+            if user_id2 is None:
+                return user_id2
+            key = str(user_id2).strip()
+            return alias_map.get(key, user_id2)
+
+        df['user_id2'] = df['user_id2'].map(resolve_user_id)
+        return df
+
+    def browser_lesson_data(self, course_name, lesson_names=None, user_id2s=None, user_alias_map=None):
         """ 查看视频课程数据并保持用户ID的顺序及处理空值和无效值
 
         :param course_name: 获取对应课程的课次数据
         :param lesson_names: 可以限定只获取课程下某些课次的数据，默认获取全部课次
             写的时候不要带 f'{course_name}-' 的前缀
         :param user_id2s: 如果提供了用户清单（允许重复、空行），按照用户清单的行顺序返回df
+        :param user_alias_map: 虚拟账号合并映射，格式为 {副账号: 主账号}
         """
+        alias_map = self._normalize_user_alias_map(user_alias_map)
+
         # 1 获取课程相关的所有课时数据
         lessons = self.exec2dict('SELECT * FROM lesson_table '
                                  f"WHERE lesson_name LIKE '%{course_name}%' "
@@ -1100,10 +1134,14 @@ ORDER BY ldt.lesson_id DESC;
                 df = self.exec2df('SELECT * '
                                   'FROM lesson_data_table '
                                   f"WHERE lesson_id='{lesson['lesson_id']}'")
+                df = self._apply_user_alias_map(df, alias_map)
                 # 按学员分组
                 df2 = df.groupby('user_id2')
                 # 每个学员的进度情况是单独计算的
-                res = df2.apply(lambda items: self.user_study_result(lesson, items), include_groups=False)
+                res = df2.apply(
+                    lambda items: self.user_study_result(lesson, items, reduce_db=not bool(alias_map)),
+                    include_groups=False,
+                )
                 df3 = pd.DataFrame(res, columns=[lesson['brief_lesson_name']])
                 dfs.append(df3)
 
@@ -1291,12 +1329,16 @@ ORDER BY ldt.lesson_id DESC;
 
         return df2
 
-    def browser_clockin_data(self, course_name, clockin_names=None, user_id2s=None, titles=None, filter=None):
+    def browser_clockin_data(self, course_name, clockin_names=None, user_id2s=None, titles=None, filter=None,
+                             user_alias_map=None):
         """ 查看打卡数据，保持用户ID的顺序并处理空值和无效值
 
         :param titles: 是否只在限定打卡任务名内统计，并且去重
         :param filter: 对初步获取的df，自定义的过滤处理函数
+        :param user_alias_map: 虚拟账号合并映射，格式为 {副账号: 主账号}
         """
+        alias_map = self._normalize_user_alias_map(user_alias_map)
+
         # 1 获取课程相关的所有打卡数据
         if clockin_names is None:  # 说明要自动获取
             clockin_names = self.exec2col('SELECT name FROM clockin_table '
@@ -1313,6 +1355,7 @@ ORDER BY ldt.lesson_id DESC;
 
         if filter is not None:
             df = filter(df)
+        df = self._apply_user_alias_map(df, alias_map)
 
         # 1.2 分用户统计打卡次数
         def count_func(items):
@@ -1336,8 +1379,7 @@ ORDER BY ldt.lesson_id DESC;
             items['task_date_title'] = tags
 
             # 按照task_date_title分组，每组取第一个
-            items = items.duplicated(subset='task_date_title', keep='first')
-
+            items = items.drop_duplicates(subset='task_date_title', keep='first')
             return len(items)
 
         # 先按照user_id2, clockin_name分组

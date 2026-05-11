@@ -168,8 +168,6 @@ def _parse_period_hour(period, hour):
 def classify_message_type(msg_type, mtype, content):
     if msg_type in ("time", "sys", "recall"):
         return msg_type
-    if mtype:
-        return mtype
 
     text = content or ""
     placeholder_map = [
@@ -178,12 +176,16 @@ def classify_message_type(msg_type, mtype, content):
         ("[文件]", "file"),
         ("[语音]", "voice"),
         ("[链接]", "link"),
-        ("[音乐]", "music"),
+        ("[音乐]", "link"),
         ("[位置]", "location"),
     ]
     for prefix, kind in placeholder_map:
         if text.startswith(prefix):
             return kind
+    if mtype:
+        if mtype == "card":
+            return "link"
+        return mtype
     return "text"
 
 
@@ -242,7 +244,7 @@ def normalize_wx_messages(messages, chat_name, collected_at=None, now=None):
             "direction": direction,
             "sender": sender,
             "sender_remark": sender_remark,
-            "type": message_type,
+            "type": mtype or message_type,
             "content": content,
             "time": normalized_time,
             "raw_time_label": raw_time_label,
@@ -285,8 +287,9 @@ def _safe_info(msg):
 class WeChatArchive:
     """High-level API for archiving a WeChat conversation through GUI/UIA."""
 
-    def __init__(self, db_path, *, wx=None, lock_timeout=-1, chat_timeout=5):
+    def __init__(self, db_path, *, wx=None, lock_timeout=-1, chat_timeout=5, media_dir=None):
         self.db_path = os.path.abspath(os.fspath(db_path))
+        self.media_dir = os.path.abspath(os.fspath(media_dir)) if media_dir else os.path.join(os.path.dirname(self.db_path), "media")
         self.wx = wx
         self.lock_timeout = lock_timeout
         self.chat_timeout = chat_timeout
@@ -312,6 +315,11 @@ class WeChatArchive:
             parseurl=False,
             scroll_interval=0.3,
             settle_timeout=1.5,
+            load_more_max_steps=20,
+            jump_to_loaded_top=True,
+            prefix_read_overlap=20,
+            initial_top_prefix_count=None,
+            duplicate_scroll_burst=1,
             max_no_progress=2,
             max_runtime=None,
             lock=True,
@@ -339,6 +347,9 @@ class WeChatArchive:
         previous_oldest = None
         previous_screen = None
         chat_id = None
+        loaded_since_last_read = False
+        pending_prefix_count = 0
+        first_read = True
 
         with self._connect() as conn:
             with self._wechat_session(lock=lock) as wx:
@@ -349,17 +360,37 @@ class WeChatArchive:
                 chat_id = self._upsert_chat(conn, account_id, chat_info, enable_sync=enable_sync)
 
                 while True:
-                    if max_runtime is not None and time.monotonic() - start_time >= max_runtime:
+                    if max_runtime is not None and time.monotonic() - start_time >= max_runtime and not loaded_since_last_read:
                         last_error = "max_runtime reached"
                         break
+                    loaded_since_last_read = False
 
-                    wx_messages = wx.GetAllMessage(
-                        savepic=save_media if savepic is None else savepic,
-                        savevideo=save_media if savevideo is None else savevideo,
-                        savefile=save_media if savefile is None else savefile,
-                        savevoice=save_media if savevoice is None else savevoice,
+                    effective_savepic = save_media if savepic is None else savepic
+                    effective_savevideo = save_media if savevideo is None else savevideo
+                    effective_savefile = save_media if savefile is None else savefile
+                    effective_savevoice = save_media if savevoice is None else savevoice
+                    if effective_savepic or effective_savevideo or effective_savefile or effective_savevoice:
+                        self._configure_media_save_path()
+
+                    read_prefix_count = pending_prefix_count
+                    read_prefix_overlap = prefix_read_overlap
+                    if first_read and initial_top_prefix_count:
+                        if jump_to_loaded_top:
+                            self._jump_to_loaded_message_top(wx)
+                        read_prefix_count = int(initial_top_prefix_count)
+                        read_prefix_overlap = 0
+                    wx_messages = self._get_loaded_messages(
+                        wx,
+                        savepic=effective_savepic,
+                        savevideo=effective_savevideo,
+                        savefile=effective_savefile,
+                        savevoice=effective_savevoice,
                         parseurl=parseurl,
+                        prefix_count=read_prefix_count,
+                        prefix_overlap=read_prefix_overlap,
                     )
+                    first_read = False
+                    pending_prefix_count = 0
                     records = normalize_wx_messages(wx_messages, chat_info["chat_name"])
                     inserted = self._insert_messages(conn, account_id, chat_id, records)
                     conn.commit()
@@ -398,11 +429,39 @@ class WeChatArchive:
                         last_error = "no progress while loading history"
                         break
 
-                    loaded = wx.LoadMoreMessage(interval=scroll_interval)
-                    scroll_count += 1
-                    if not loaded:
-                        reached_top = True
-                        last_error = None
+                    if jump_to_loaded_top:
+                        self._jump_to_loaded_message_top(wx)
+
+                    load_attempts = 1
+                    if inserted == 0 and duplicate_scroll_burst and duplicate_scroll_burst > 1:
+                        load_attempts = int(duplicate_scroll_burst)
+                    if max_scrolls is not None:
+                        load_attempts = min(load_attempts, max_scrolls - scroll_count)
+
+                    stop_after_load = False
+                    for _ in range(max(1, load_attempts)):
+                        if max_runtime is not None and time.monotonic() - start_time >= max_runtime:
+                            last_error = "max_runtime reached"
+                            if loaded_since_last_read:
+                                break
+                            stop_after_load = True
+                            break
+                        before_count = self._message_child_count(wx)
+                        loaded = self._load_more_message(wx, interval=scroll_interval, max_steps=load_more_max_steps)
+                        scroll_count += 1
+                        after_count = self._message_child_count(wx)
+                        if loaded is False:
+                            reached_top = True
+                            last_error = None
+                            stop_after_load = True
+                            break
+                        if loaded is True:
+                            loaded_since_last_read = True
+                            if before_count is not None and after_count is not None and after_count > before_count:
+                                pending_prefix_count += after_count - before_count
+                        if max_scrolls is not None and scroll_count >= max_scrolls:
+                            break
+                    if stop_after_load:
                         break
 
                 self._update_sync_state(
@@ -423,6 +482,7 @@ class WeChatArchive:
             "matched_name": matched_name,
             "chat_id": chat_id,
             "db_path": self.db_path,
+            "media_dir": self.media_dir,
             "seen": total_seen,
             "inserted": total_inserted,
             "scroll_count": scroll_count,
@@ -450,6 +510,74 @@ class WeChatArchive:
         kwargs.setdefault("until", "top")
         kwargs.setdefault("max_scrolls", max_scrolls)
         return self.pull_chat(chat_name, **kwargs)
+
+    def sync_history_clearance(
+            self,
+            chat_name=None,
+            *,
+            max_runtime=1800,
+            max_scrolls=200,
+            exact=True,
+            save_media=False):
+        """Deep-first history backfill for the current hardest unfinished chat."""
+        if self.wx is None:
+            with self._wechat_session(lock=True) as wx:
+                original_wx = self.wx
+                self.wx = wx
+                try:
+                    return self.sync_history_clearance(
+                        chat_name,
+                        max_runtime=max_runtime,
+                        max_scrolls=max_scrolls,
+                        exact=exact,
+                        save_media=save_media,
+                    )
+                finally:
+                    self.wx = original_wx
+
+        plan = self.plan_history_chats(
+            manual_chat_names=[chat_name] if chat_name else None,
+            limit=1,
+        )
+        if not plan:
+            return {
+                "db_path": self.db_path,
+                "started_at": _now_text(),
+                "finished_at": _now_text(),
+                "planned": [],
+                "processed_chats": 0,
+                "results": [],
+                "seen": 0,
+                "inserted": 0,
+                "scroll_count": 0,
+                "stopped_reason": "no unfinished history chat",
+            }
+
+        item = plan[0]
+        result = self._run_sync_phase(
+            item["name"],
+            "history_clearance",
+            chat_id=item.get("chat_id"),
+            exact=exact,
+            save_media=save_media,
+            max_scrolls=max_scrolls,
+            max_runtime=max_runtime,
+        )
+        return {
+            "db_path": self.db_path,
+            "started_at": result.get("started_at") or _now_text(),
+            "finished_at": _now_text(),
+            "max_runtime": max_runtime,
+            "max_scrolls": max_scrolls,
+            "planned": plan,
+            "processed_chats": 1,
+            "results": [result],
+            "seen": result.get("seen", 0) or 0,
+            "inserted": result.get("inserted", 0) or 0,
+            "scroll_count": result.get("scroll_count", 0) or 0,
+            "reached_top": result.get("reached_top", False),
+            "stopped_reason": result.get("last_error"),
+        }
 
     def sync_incremental(
             self,
@@ -649,33 +777,123 @@ class WeChatArchive:
         for name in manual_names:
             if name in known_names:
                 continue
+            items.append(self._new_sync_plan_item(name, score=10000, reasons=["manual"], backfill_history=False))
+
+        discovered_names = list(dict.fromkeys([*recent_names, *list(unread_map)]))
+        for name in discovered_names:
+            if not name or name in known_names or name in manual_set:
+                continue
+            rank = recent_rank.get(name)
+            unread_count = _as_int(unread_map.get(name), 0)
+            score = 300
+            reasons = ["discovered"]
+            if rank is not None:
+                score += max(0, 400 - rank * 8)
+                reasons.append("recent:{}".format(rank + 1))
+            if unread_count:
+                score += 800 + min(unread_count, 99) * 4
+                reasons.append("unread:{}".format(unread_count))
+            items.append(self._new_sync_plan_item(name, score=score, reasons=reasons, backfill_history=True))
+
+        items.sort(key=lambda item: (-item["score"], item["name"]))
+        if limit is not None:
+            items = items[:limit]
+        return items
+
+    def plan_history_chats(
+            self,
+            *,
+            manual_chat_names=None,
+            limit=None,
+            include_disabled=True,
+            now=None):
+        """Build a deep-first plan for clearing unfinished chat history."""
+        now = now or datetime.now()
+        manual_names = _as_list(manual_chat_names)
+        manual_set = set(manual_names)
+
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT
+                    c.id AS chat_id,
+                    c.name,
+                    c.chat_type,
+                    c.remark,
+                    cfg.enabled,
+                    cfg.priority,
+                    cfg.sync_latest,
+                    cfg.backfill_history,
+                    ss.reached_top,
+                    ss.last_error,
+                    ss.last_incremental_at,
+                    ss.last_history_at,
+                    ss.last_success_at,
+                    ss.consecutive_failures,
+                    ss.next_due_at,
+                    COUNT(m.id) AS message_count,
+                    MAX(m.collected_at) AS latest_collected_at,
+                    MIN(m.normalized_time) AS first_message_time,
+                    MAX(m.normalized_time) AS last_message_time
+                FROM chats c
+                LEFT JOIN chat_sync_config cfg ON cfg.chat_id = c.id
+                LEFT JOIN sync_state ss ON ss.chat_id = c.id
+                LEFT JOIN messages m ON m.chat_id = c.id
+                GROUP BY c.id
+                """
+            ).fetchall()
+
+        items = []
+        known_names = set()
+        for row in rows:
+            item = dict(row)
+            known_names.add(item["name"])
+            enabled = bool(item.get("enabled", 1))
+            if not enabled and item["name"] not in manual_set and not include_disabled:
+                continue
+            scored = self._score_history_plan_item(item, now, manual_set)
+            if scored is not None:
+                items.append(scored)
+
+        for name in manual_names:
+            if name in known_names:
+                continue
             items.append(
-                {
-                    "chat_id": None,
-                    "name": name,
-                    "enabled": True,
-                    "priority": 0,
-                    "sync_latest": True,
-                    "backfill_history": False,
-                    "reached_top": False,
-                    "message_count": 0,
-                    "latest_collected_at": None,
-                    "last_message_time": None,
-                    "last_incremental_at": None,
-                    "last_history_at": None,
-                    "last_success_at": None,
-                    "consecutive_failures": 0,
-                    "next_due_at": None,
-                    "score": 10000,
-                    "reasons": ["manual"],
-                    "due": True,
-                }
+                self._new_sync_plan_item(
+                    name,
+                    score=10000,
+                    reasons=["manual", "unknown_chat"],
+                    backfill_history=True,
+                )
             )
 
         items.sort(key=lambda item: (-item["score"], item["name"]))
         if limit is not None:
             items = items[:limit]
         return items
+
+    def _new_sync_plan_item(self, name, *, score, reasons, backfill_history):
+        return {
+            "chat_id": None,
+            "name": name,
+            "enabled": True,
+            "priority": 0,
+            "sync_latest": True,
+            "backfill_history": bool(backfill_history),
+            "reached_top": False,
+            "message_count": 0,
+            "latest_collected_at": None,
+            "first_message_time": None,
+            "last_message_time": None,
+            "last_incremental_at": None,
+            "last_history_at": None,
+            "last_success_at": None,
+            "consecutive_failures": 0,
+            "next_due_at": None,
+            "score": round(float(score), 2),
+            "reasons": reasons,
+            "due": True,
+        }
 
     def _remaining_runtime(self, start_time, max_runtime):
         if max_runtime is None:
@@ -684,14 +902,16 @@ class WeChatArchive:
 
     def _run_sync_phase(self, chat_name, phase, *, chat_id=None, exact=True, save_media=False, max_scrolls=0, max_runtime=None):
         try:
-            if phase == "history":
+            if phase in ("history", "history_clearance"):
                 result = self.backfill_chat_history(
                     chat_name,
                     max_scrolls=max_scrolls,
                     exact=exact,
                     save_media=save_media,
                     max_runtime=max_runtime,
-                    enable_sync=False,
+                    duplicate_scroll_burst=5 if phase == "history_clearance" else 1,
+                    initial_top_prefix_count=500 if phase == "history_clearance" else None,
+                    enable_sync=True,
                 )
             else:
                 result = self.sync_chat_latest(
@@ -699,7 +919,7 @@ class WeChatArchive:
                     exact=exact,
                     save_media=save_media,
                     max_runtime=max_runtime,
-                    enable_sync=False,
+                    enable_sync=True,
                 )
             result["phase"] = phase
             return result
@@ -779,6 +999,79 @@ class WeChatArchive:
             "reached_top": bool(item.get("reached_top", 0)),
             "message_count": _as_int(item.get("message_count"), 0),
             "latest_collected_at": item.get("latest_collected_at"),
+            "last_message_time": item.get("last_message_time"),
+            "last_incremental_at": item.get("last_incremental_at"),
+            "last_history_at": item.get("last_history_at"),
+            "last_success_at": item.get("last_success_at"),
+            "consecutive_failures": failures,
+            "next_due_at": item.get("next_due_at"),
+            "score": round(score, 2),
+            "reasons": reasons,
+            "due": True,
+        }
+
+    def _score_history_plan_item(self, item, now, manual_set):
+        name = item["name"]
+        manual = name in manual_set
+        reached_top = bool(item.get("reached_top", 0))
+        if reached_top and not manual:
+            return None
+
+        next_due_at = _parse_datetime_text(item.get("next_due_at"))
+        if next_due_at and next_due_at > now and not manual:
+            return None
+
+        reasons = []
+        score = 1000 + float(_as_int(item.get("priority"), 0))
+        if manual:
+            score += 10000
+            reasons.append("manual")
+
+        if not reached_top:
+            reasons.append("history_pending")
+
+        first_time = item.get("first_message_time")
+        first_dt = _parse_datetime_text(first_time)
+        if first_dt is None:
+            score += 500
+            reasons.append("unknown_oldest")
+        else:
+            age_days = max(0, (now - first_dt).days)
+            score += min(3000, age_days * 5)
+            reasons.append("oldest:{}d".format(age_days))
+
+        message_count = _as_int(item.get("message_count"), 0)
+        if message_count:
+            score += min(800, message_count / 5)
+            reasons.append("messages:{}".format(message_count))
+
+        history_age = _hours_since(now, item.get("last_history_at"))
+        if history_age is None:
+            score += 100
+            reasons.append("never_history")
+        else:
+            score += min(100, history_age / 8)
+            if history_age >= 24:
+                reasons.append("history_stale:{:.1f}h".format(history_age))
+
+        failures = _as_int(item.get("consecutive_failures"), 0)
+        if failures:
+            score -= min(1000, 240 * failures)
+            reasons.append("failures:{}".format(failures))
+
+        return {
+            "chat_id": item.get("chat_id"),
+            "name": name,
+            "chat_type": item.get("chat_type"),
+            "remark": item.get("remark"),
+            "enabled": bool(item.get("enabled", 1)),
+            "priority": _as_int(item.get("priority"), 0),
+            "sync_latest": bool(item.get("sync_latest", 1)),
+            "backfill_history": bool(item.get("backfill_history", 1)),
+            "reached_top": reached_top,
+            "message_count": message_count,
+            "latest_collected_at": item.get("latest_collected_at"),
+            "first_message_time": first_time,
             "last_message_time": item.get("last_message_time"),
             "last_incremental_at": item.get("last_incremental_at"),
             "last_history_at": item.get("last_history_at"),
@@ -922,6 +1215,27 @@ class WeChatArchive:
                 """,
                 (now, now),
             )
+            conn.executescript(
+                """
+                UPDATE messages SET message_type='image'
+                WHERE message_type='text' AND content LIKE '[图片]%';
+                UPDATE messages SET message_type='video'
+                WHERE message_type='text' AND content LIKE '[视频]%';
+                UPDATE messages SET message_type='file'
+                WHERE message_type='text' AND content LIKE '[文件]%';
+                UPDATE messages SET message_type='voice'
+                WHERE message_type='text' AND content LIKE '[语音]%';
+                UPDATE messages SET message_type='link'
+                WHERE message_type='text' AND (content LIKE '[链接]%' OR content LIKE '[音乐]%');
+                UPDATE messages SET message_type='location'
+                WHERE message_type='text' AND content LIKE '[位置]%';
+                UPDATE messages SET media_path=content
+                WHERE media_path IS NULL
+                    AND message_type IN ('image', 'video', 'file', 'voice')
+                    AND content IS NOT NULL
+                    AND content NOT LIKE '[%';
+                """
+            )
             conn.commit()
 
     def _ensure_table_columns(self, conn, table_name, columns):
@@ -952,6 +1266,16 @@ class WeChatArchive:
         from pyxllib.autogui.wxautolib import WeChatSingletonLock
 
         return WeChatSingletonLock(self.lock_timeout)
+
+    def _configure_media_save_path(self):
+        os.makedirs(self.media_dir, exist_ok=True)
+        try:
+            from pyxllib.autogui.wxautolib import WxParam
+
+            if hasattr(WxParam, "DEFALUT_SAVEPATH"):
+                WxParam.DEFALUT_SAVEPATH = self.media_dir
+        except Exception:
+            pass
 
     def _enter_chat(self, wx, chat_name, exact=True):
         if not hasattr(wx, "ChatWith"):
@@ -1006,6 +1330,130 @@ class WeChatArchive:
                 stable_count = 0
                 last_count = count
             time.sleep(poll_interval)
+
+    def _load_more_message(self, wx, interval=0.3, max_steps=20):
+        """Bounded variant of wxautox.LoadMoreMessage."""
+        msg_list = _safe_getattr(wx, "C_MsgList", None)
+        if msg_list is None or not hasattr(msg_list, "GetChildren") or max_steps is None:
+            return wx.LoadMoreMessage(interval=interval)
+
+        try:
+            children = msg_list.GetChildren()
+            if not children:
+                return False
+            msg_len = len(children)
+            loadmore_top = children[0].BoundingRectangle.top
+
+            for _ in range(max(1, int(max_steps))):
+                children = msg_list.GetChildren()
+                if len(children) > msg_len:
+                    msg_list.WheelUp(wheelTimes=1, waitTime=0.1)
+                    return True
+
+                msg_len = len(children)
+                msg_list.WheelUp(wheelTimes=10)
+                time.sleep(interval)
+
+                children = msg_list.GetChildren()
+                if not children:
+                    return False
+                current_top = children[0].BoundingRectangle.top
+                if current_top == loadmore_top and len(children) == msg_len:
+                    msg_list.WheelUp(wheelTimes=1, waitTime=0.1)
+                    return False
+                loadmore_top = current_top
+
+            msg_list.WheelUp(wheelTimes=1, waitTime=0.1)
+            return None
+        except Exception:
+            return None
+
+    def _jump_to_loaded_message_top(self, wx, wait=0.2):
+        msg_list = _safe_getattr(wx, "C_MsgList", None)
+        if msg_list is None:
+            return False
+        try:
+            if hasattr(msg_list, "GetScrollPattern"):
+                pattern = msg_list.GetScrollPattern()
+                if getattr(pattern, "VerticallyScrollable", False):
+                    no_scroll = getattr(pattern, "NoScrollValue", -1)
+                    pattern.SetScrollPercent(no_scroll, 0)
+                    if wait:
+                        time.sleep(wait)
+                    return True
+        except Exception:
+            pass
+        if not hasattr(msg_list, "SendKeys"):
+            return False
+        try:
+            if hasattr(msg_list, "Click"):
+                msg_list.Click(simulateMove=False)
+        except Exception:
+            pass
+        try:
+            msg_list.SendKeys("{Ctrl}{Home}")
+            if wait:
+                time.sleep(wait)
+            return True
+        except Exception:
+            return False
+
+    def _message_child_count(self, wx):
+        msg_list = _safe_getattr(wx, "C_MsgList", None)
+        if msg_list is None or not hasattr(msg_list, "GetChildren"):
+            return None
+        try:
+            return len(msg_list.GetChildren())
+        except Exception:
+            return None
+
+    def _get_loaded_messages(
+            self,
+            wx,
+            *,
+            savepic=False,
+            savevideo=False,
+            savefile=False,
+            savevoice=False,
+            parseurl=False,
+            prefix_count=0,
+            prefix_overlap=20):
+        if prefix_count and prefix_count > 0 and hasattr(wx, "_getmsgs"):
+            msg_list = _safe_getattr(wx, "C_MsgList", None)
+            if msg_list is not None and hasattr(msg_list, "GetChildren"):
+                try:
+                    children = msg_list.GetChildren()
+                    limit = min(len(children), int(prefix_count) + max(0, int(prefix_overlap or 0)))
+                    if limit > 0:
+                        if (
+                                not savepic
+                                and not savevideo
+                                and not savefile
+                                and not savevoice
+                                and not parseurl
+                                and hasattr(wx, "_split")):
+                            return [
+                                wx._split(item)
+                                for item in children[:limit]
+                                if _safe_getattr(item, "ControlTypeName", None) == "ListItemControl"
+                            ]
+                        return wx._getmsgs(
+                            children[:limit],
+                            savepic=savepic,
+                            savevideo=savevideo,
+                            savefile=savefile,
+                            savevoice=savevoice,
+                            parseurl=parseurl,
+                        )
+                except Exception:
+                    pass
+        return wx.GetAllMessage(
+            savepic=savepic,
+            savevideo=savevideo,
+            savefile=savefile,
+            savevoice=savevoice,
+            parseurl=parseurl,
+        )
 
     def _upsert_account(self, conn, wx):
         nickname = _safe_getattr(wx, "nickname", None)
@@ -1085,6 +1533,8 @@ class WeChatArchive:
     def _insert_messages(self, conn, account_id, chat_id, records):
         inserted = 0
         for row in records:
+            if row["media_path"] and self._enrich_existing_media_message(conn, chat_id, row):
+                continue
             cursor = conn.execute(
                 """
                 INSERT OR IGNORE INTO messages(
@@ -1113,6 +1563,101 @@ class WeChatArchive:
             )
             inserted += cursor.rowcount
         return inserted
+
+    def _enrich_existing_media_message(self, conn, chat_id, row):
+        update_params = (
+            row["content"],
+            row["media_path"],
+            row["raw_id"],
+            row["raw_json"],
+            row["collected_at"],
+        )
+        if row["raw_id"]:
+            cursor = conn.execute(
+                """
+                UPDATE messages
+                SET content=?, media_path=?, raw_id=COALESCE(?, raw_id), raw_json=?, collected_at=?
+                WHERE chat_id=?
+                    AND raw_id=?
+                    AND message_type=?
+                    AND media_path IS NULL
+                """,
+                (*update_params, chat_id, row["raw_id"], row["message_type"]),
+            )
+            if cursor.rowcount:
+                return True
+
+        existing = conn.execute(
+            """
+            SELECT id
+            FROM messages
+            WHERE chat_id=?
+                AND direction IS ?
+                AND sender IS ?
+                AND sender_remark IS ?
+                AND message_type=?
+                AND normalized_time IS ?
+                AND media_path=?
+            ORDER BY id DESC
+            LIMIT 1
+            """,
+            (
+                chat_id,
+                row["direction"],
+                row["sender"],
+                row["sender_remark"],
+                row["message_type"],
+                row["normalized_time"],
+                row["media_path"],
+            ),
+        ).fetchone()
+        if existing:
+            conn.execute(
+                """
+                UPDATE messages
+                SET content=?, media_path=?, raw_id=COALESCE(?, raw_id), raw_json=?, collected_at=?
+                WHERE id=?
+                """,
+                (*update_params, existing["id"]),
+            )
+            return True
+
+        candidate = conn.execute(
+            """
+            SELECT id
+            FROM messages
+            WHERE chat_id=?
+                AND direction IS ?
+                AND sender IS ?
+                AND sender_remark IS ?
+                AND message_type=?
+                AND normalized_time IS ?
+                AND media_path IS NULL
+                AND content LIKE '[%'
+            ORDER BY id DESC
+            LIMIT 1
+            """,
+            (
+                chat_id,
+                row["direction"],
+                row["sender"],
+                row["sender_remark"],
+                row["message_type"],
+                row["normalized_time"],
+            ),
+        ).fetchone()
+        if not candidate:
+            return False
+
+        conn.execute(
+            """
+            UPDATE messages
+            SET content=?, media_path=?, raw_id=COALESCE(?, raw_id), raw_json=?, collected_at=?
+            WHERE id=?
+            """,
+            (*update_params, candidate["id"]),
+        )
+        return True
 
     def _get_sync_state(self, conn, chat_id):
         row = conn.execute("SELECT * FROM sync_state WHERE chat_id=?", (chat_id,)).fetchone()

@@ -436,11 +436,14 @@ class KqTools:
     def __3_日常查看各统计报表(self):
         pass
 
-    def browser_lesson_data(self, course_name, lesson_names=None, user_id2s=None):
-        return self.kqdb.browser_lesson_data(course_name, lesson_names, user_id2s)
+    def browser_lesson_data(self, course_name, lesson_names=None, user_id2s=None, user_alias_map=None):
+        return self.kqdb.browser_lesson_data(course_name, lesson_names, user_id2s,
+                                             user_alias_map=user_alias_map)
 
-    def browser_clockin_data(self, course_name, clockin_names, user_id2s=None, titles=None, filter=None):
-        return self.kqdb.browser_clockin_data(course_name, clockin_names, user_id2s, titles, filter)
+    def browser_clockin_data(self, course_name, clockin_names, user_id2s=None, titles=None, filter=None,
+                             user_alias_map=None):
+        return self.kqdb.browser_clockin_data(course_name, clockin_names, user_id2s, titles, filter,
+                                              user_alias_map=user_alias_map)
 
     def browser_weipay_data(self, voucher_ids):
         return self.kqdb.browser_weipay_data(voucher_ids)
