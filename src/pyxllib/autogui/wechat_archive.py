@@ -350,6 +350,7 @@ class WeChatArchive:
         loaded_since_last_read = False
         pending_prefix_count = 0
         first_read = True
+        last_inserted = 1
 
         with self._connect() as conn:
             with self._wechat_session(lock=lock) as wx:
@@ -372,62 +373,69 @@ class WeChatArchive:
                     if effective_savepic or effective_savevideo or effective_savefile or effective_savevoice:
                         self._configure_media_save_path()
 
-                    read_prefix_count = pending_prefix_count
-                    read_prefix_overlap = prefix_read_overlap
-                    if first_read and initial_top_prefix_count:
-                        if jump_to_loaded_top:
-                            self._jump_to_loaded_message_top(wx)
-                        read_prefix_count = int(initial_top_prefix_count)
-                        read_prefix_overlap = 0
-                    wx_messages = self._get_loaded_messages(
-                        wx,
-                        savepic=effective_savepic,
-                        savevideo=effective_savevideo,
-                        savefile=effective_savefile,
-                        savevoice=effective_savevoice,
-                        parseurl=parseurl,
-                        prefix_count=read_prefix_count,
-                        prefix_overlap=read_prefix_overlap,
-                    )
-                    first_read = False
-                    pending_prefix_count = 0
-                    records = normalize_wx_messages(wx_messages, chat_info["chat_name"])
-                    inserted = self._insert_messages(conn, account_id, chat_id, records)
-                    conn.commit()
+                    should_read = first_read or pending_prefix_count != 0 or until == "loaded"
+                    if should_read:
+                        read_prefix_count = pending_prefix_count
+                        read_prefix_overlap = prefix_read_overlap
+                        if first_read and initial_top_prefix_count:
+                            if jump_to_loaded_top:
+                                self._jump_to_loaded_message_top(wx)
+                            read_prefix_count = int(initial_top_prefix_count)
+                            read_prefix_overlap = 0
+                        wx_messages = self._get_loaded_messages(
+                            wx,
+                            savepic=effective_savepic,
+                            savevideo=effective_savevideo,
+                            savefile=effective_savefile,
+                            savevoice=effective_savevoice,
+                            parseurl=parseurl,
+                            prefix_count=read_prefix_count,
+                            prefix_overlap=read_prefix_overlap,
+                        )
+                        first_read = False
+                        pending_prefix_count = 0
+                        records = normalize_wx_messages(wx_messages, chat_info["chat_name"])
+                        inserted = self._insert_messages(conn, account_id, chat_id, records)
+                        last_inserted = inserted
+                        conn.commit()
 
-                    total_seen += len(records)
-                    total_inserted += inserted
+                        total_seen += len(records)
+                        total_inserted += inserted
 
-                    fingerprints = [row["fingerprint"] for row in records]
-                    oldest = fingerprints[0] if fingerprints else None
-                    newest = fingerprints[-1] if fingerprints else None
-                    screen = _sha1_text(_json_dumps(fingerprints))
-                    if oldest and (oldest == previous_oldest or screen == previous_screen):
-                        no_progress += 1
+                        fingerprints = [row["fingerprint"] for row in records]
+                        oldest = fingerprints[0] if fingerprints else None
+                        newest = fingerprints[-1] if fingerprints else None
+                        screen = _sha1_text(_json_dumps(fingerprints))
+                        if oldest and (oldest == previous_oldest or screen == previous_screen):
+                            no_progress += 1
+                        else:
+                            no_progress = 0
+                        previous_oldest = oldest
+                        previous_screen = screen
+
+                        self._update_sync_state(
+                            conn,
+                            chat_id,
+                            oldest_fingerprint=oldest,
+                            newest_fingerprint=newest,
+                            loaded_count=total_seen,
+                            scroll_count=scroll_count,
+                            reached_top=reached_top,
+                            last_error=last_error,
+                        )
+                        conn.commit()
+
+                        if until == "loaded":
+                            break
+                        if max_scrolls is not None and scroll_count >= max_scrolls:
+                            break
+                        if max_no_progress is not None and no_progress >= max_no_progress:
+                            last_error = "no progress while loading history"
+                            break
                     else:
-                        no_progress = 0
-                    previous_oldest = oldest
-                    previous_screen = screen
-
-                    self._update_sync_state(
-                        conn,
-                        chat_id,
-                        oldest_fingerprint=oldest,
-                        newest_fingerprint=newest,
-                        loaded_count=total_seen,
-                        scroll_count=scroll_count,
-                        reached_top=reached_top,
-                        last_error=last_error,
-                    )
-                    conn.commit()
-
-                    if until == "loaded":
-                        break
-                    if max_scrolls is not None and scroll_count >= max_scrolls:
-                        break
-                    if max_no_progress is not None and no_progress >= max_no_progress:
-                        last_error = "no progress while loading history"
-                        break
+                        inserted = last_inserted
+                        if max_scrolls is not None and scroll_count >= max_scrolls:
+                            break
 
                     if jump_to_loaded_top:
                         self._jump_to_loaded_message_top(wx)
@@ -455,10 +463,16 @@ class WeChatArchive:
                             last_error = None
                             stop_after_load = True
                             break
-                        if loaded is True:
+                        if loaded is True or loaded is None:
                             loaded_since_last_read = True
-                            if before_count is not None and after_count is not None and after_count > before_count:
+                            if (
+                                    before_count is not None
+                                    and after_count is not None
+                                    and after_count > before_count
+                                    and pending_prefix_count >= 0):
                                 pending_prefix_count += after_count - before_count
+                            else:
+                                pending_prefix_count = -1
                         if max_scrolls is not None and scroll_count >= max_scrolls:
                             break
                     if stop_after_load:

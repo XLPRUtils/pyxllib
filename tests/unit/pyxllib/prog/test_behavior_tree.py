@@ -1,6 +1,7 @@
 import datetime
 import inspect
 import json
+import os
 from pathlib import Path
 
 import pytest
@@ -474,6 +475,28 @@ def test_node_daily_uses_action_name_as_default_label(tmp_path):
     runner = BehaviorTreeRunner(Root(Action(task).daily("05:00")), tmp_path / "state.json")
 
     assert runner.root.children[0].path == "Root/task"
+
+
+def test_save_state_retries_busy_state_file(monkeypatch, tmp_path):
+    state_path = tmp_path / "state.json"
+    runner = BehaviorTreeRunner(Root(Action(lambda: None)), state_path)
+    runner.state["blackboard"]["value"] = 1
+    real_replace = os.replace
+    attempts = []
+
+    def flaky_replace(src, dst):
+        attempts.append((src, dst))
+        if len(attempts) < 3:
+            raise PermissionError("busy")
+        return real_replace(src, dst)
+
+    monkeypatch.setattr("pyxllib.prog.behavior_tree.os.replace", flaky_replace)
+    monkeypatch.setattr("pyxllib.prog.behavior_tree.time.sleep", lambda seconds: None)
+
+    runner.save_state()
+
+    assert len(attempts) == 3
+    assert json.loads(state_path.read_text(encoding="utf-8"))["blackboard"]["value"] == 1
 
 
 def test_timeout_is_handled_as_retryable_error(tmp_path):

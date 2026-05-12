@@ -55,6 +55,14 @@ class FakeWx:
         return True
 
 
+class UncertainLoadWx(FakeWx):
+    def LoadMoreMessage(self, interval=0.3):
+        if self.page_index + 1 >= len(self.pages):
+            return False
+        self.page_index += 1
+        return None
+
+
 def test_parse_wechat_time_common_labels():
     now = datetime(2026, 5, 10, 16, 30, 0)
 
@@ -147,6 +155,29 @@ def test_full_chat_loads_until_top(tmp_path):
     finally:
         conn.close()
     assert contents == ["15:02", "new", "14:00", "old"]
+
+
+def test_full_chat_reads_after_uncertain_load(tmp_path):
+    db_path = tmp_path / "wechat.sqlite"
+    wx = UncertainLoadWx(
+        [
+            [
+                FakeMsg("time", "15:02", time="15:02"),
+                FakeMsg("self", "new", sender="Self", msg_id="new"),
+            ],
+            [
+                FakeMsg("time", "14:00", time="14:00"),
+                FakeMsg("friend", "old", sender="文件传输助手", msg_id="old"),
+            ],
+        ]
+    )
+    archive = WeChatArchive(db_path, wx=wx)
+
+    result = archive.pull_chat("文件传输助手", until="top", max_scrolls=2)
+
+    assert result["reached_top"] is True
+    assert result["scroll_count"] == 2
+    assert result["inserted"] == 4
 
 
 def test_sync_incremental_reads_tail_without_duplicates(tmp_path):

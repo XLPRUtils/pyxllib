@@ -1042,7 +1042,15 @@ class BehaviorTreeRunner:
             json.dump(self.state, f, ensure_ascii=False, indent=2)
             f.flush()
             os.fsync(f.fileno())
-        os.replace(tmp_path, self.state_path)
+        for attempt in range(10):
+            try:
+                os.replace(tmp_path, self.state_path)
+                return
+            except PermissionError:
+                if attempt == 9:
+                    self.logger.warning("save_state skipped because state file is busy: %s", self.state_path)
+                    return
+                time.sleep(0.2)
 
     def node_state(self, node: Node) -> Dict[str, Any]:
         state_root = self.state if node.persist else self.memory_state
