@@ -1274,12 +1274,46 @@ class WeChatArchive:
         if self.wx is not None:
             return _NullWechatContext(self.wx)
         if not lock:
-            from pyxllib.autogui.wxautolib import WeChat
+            return _NullWechatContext(self._create_wechat())
+        return self._locked_wechat_session()
 
-            return _NullWechatContext(WeChat())
-        from pyxllib.autogui.wxautolib import WeChatSingletonLock
+    @contextmanager
+    def _locked_wechat_session(self):
+        from pyxllib.prog.filelock import get_autogui_lock
 
-        return WeChatSingletonLock(self.lock_timeout)
+        lock = get_autogui_lock(timeout=self.lock_timeout)
+        lock.acquire()
+        try:
+            wx = self._create_wechat()
+            if hasattr(wx, "_show"):
+                wx._show()
+            yield wx
+        finally:
+            lock.release()
+
+    def _create_wechat(self):
+        from pyxllib.autogui.wxautolib import WeChat
+
+        try:
+            return WeChat()
+        except Exception as init_error:
+            try:
+                from wxautox.elements import WeChatBase
+                original = WeChatBase._get_now_msgid
+            except Exception:
+                raise init_error
+
+            def safe_get_now_msgid(*args, **kwargs):
+                try:
+                    return original(*args, **kwargs)
+                except Exception:
+                    return []
+
+            WeChatBase._get_now_msgid = safe_get_now_msgid
+            try:
+                return WeChat()
+            finally:
+                WeChatBase._get_now_msgid = original
 
     def _configure_media_save_path(self):
         os.makedirs(self.media_dir, exist_ok=True)
