@@ -662,7 +662,7 @@ return [...new Set(rows)].slice(0, 20);
 
         return False
 
-    def 填写密码与验证码(self, tab, submit_file=None):
+    def 填写密码与验证码(self, tab, submit_file=None, sms_timeout=300):
         inputs = tab.eles('tag:input@@class=real-input')
         passwd = XlEnv.get(f'XL_KQ_PAY_PASSWORD_{self.user}', decoding=True) or XlEnv.get('XL_KQ_PAY_PASSWORD', decoding=True)
         if passwd:
@@ -670,8 +670,13 @@ return [...new Set(rows)].slice(0, 20);
         if len(inputs) > 1:
             tab('tag:a@@text():发送短信').click()
             time.sleep(10)
-            with get_autogui_lock():
-                vcode = KqWechat.从懒人转发获得短信内容()
+            try:
+                with get_autogui_lock():
+                    vcode = KqWechat.从懒人转发获得短信内容(timeout=sms_timeout)
+            except TimeoutError as err:
+                raise TimeoutError(
+                    f'微信支付短信验证码等待超过{sms_timeout}s，返款未提交：submit_file={submit_file!s}'
+                ) from err
             inputs[1].input(vcode, clear=True)
         time.sleep(1)
         tab('tag:a@@text()=确定@@class=btn btn-primary align-center').click()

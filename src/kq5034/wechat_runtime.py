@@ -58,8 +58,20 @@ class KqWechat:
         image.Close()
 
     @staticmethod
-    def 从懒人转发获得短信内容(time_window=5, check_interval=1):
+    def 从懒人转发获得短信内容(time_window=5, check_interval=1, timeout=300):
+        """等待懒人转发的微信支付短信验证码，超时后抛异常交给外层重试。
+
+        :param int time_window: 短信来电时间的有效窗口，单位分钟。
+        :param float check_interval: 轮询微信消息的间隔，单位秒。
+        :param timeout: 等待超时时间，单位秒；传入None表示不限制等待时间。
+        :return str: 6位短信验证码。
+        """
         from datetime import datetime, timedelta
+
+        if check_interval <= 0:
+            raise ValueError(f'check_interval必须大于0：{check_interval!r}')
+        if timeout is not None and timeout < 0:
+            raise ValueError(f'timeout不能为负数：{timeout!r}')
 
         def extract_verification_code(text):
             """从文本中提取6位验证码"""
@@ -95,14 +107,25 @@ class KqWechat:
         wx = KqWechat.创建微信实例()
         wx.ChatWith('懒人信息转发服务')
 
+        deadline = None if timeout is None else time.monotonic() + timeout
         while True:
             # 取到最后条短信内容
             messages = wx.GetAllMessage()
-            content = messages[-1].info[0]
+            try:
+                content = messages[-1].info[0] if messages else ''
+            except (AttributeError, IndexError, TypeError):
+                content = ''
             # 新短信提醒来电号码：验证码【644651】95017(微信支付)来电时间：2025-04-02 09:21:27
 
             # 验证是否符合格式，符合则返回值，否则等待接收短信
             if valid_code := validate_message(content, time_window):
                 return valid_code
 
-            time.sleep(check_interval)
+            now = time.monotonic()
+            if deadline is not None and now >= deadline:
+                raise TimeoutError(f'等待懒人信息转发服务短信验证码超时：timeout={timeout}s，time_window={time_window}min')
+
+            if deadline is None:
+                time.sleep(check_interval)
+            else:
+                time.sleep(min(check_interval, max(0, deadline - now)))
