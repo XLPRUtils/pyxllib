@@ -359,10 +359,28 @@ def resolve_params(*models, mode="pass"):
     return decorator
 
 
+IN_PROCESS_PADDLEOCR_WEBSITE = "process-paddleocr"
+IN_PROCESS_PADDLEOCR_ALIASES = frozenset({
+    IN_PROCESS_PADDLEOCR_WEBSITE,
+    "in-process-paddleocr",
+    "process_paddleocr",
+    "local",  # legacy alias
+})
+
+
+def is_in_process_paddleocr(website):
+    """判断 MAIN_WEBSITE 是否表示当前进程内直接加载 PaddleOCR。
+
+    :param website: MAIN_WEBSITE 环境变量值。
+    :return: 命中进程内 PaddleOCR 别名则返回 True。
+    """
+    return str(website or "").strip().lower() in IN_PROCESS_PADDLEOCR_ALIASES
+
+
 @run_once()
 def get_xlapi():
     website = os.getenv("MAIN_WEBSITE")
-    if website == "local":
+    if is_in_process_paddleocr(website):
         from pyxlpr.ai.clientlib import LocalOcrClient
         return LocalOcrClient()
 
@@ -1400,6 +1418,8 @@ class AnShape(_AnShapePupil):
         default_text,
         locate_params: LocateParams,
         caller_depth_from_find_img=None,
+        *,
+        log_failure=True,
     ):
         """[内部辅助] Anchor 模式：原位校验
 
@@ -1429,9 +1449,8 @@ class AnShape(_AnShapePupil):
         diff = ImageTools.img_distance(img_to_compare, target_img, LocateParams=locate_params)
         conf = 1.0 - diff
 
-        self._locate_log_info(f"{self.total_name()} {conf:.0%}", caller_depth_from_find_img)
-
         if conf > locate_params.confidence:
+            self._locate_log_info(f"{self.total_name()} {conf:.0%}", caller_depth_from_find_img)
             if target_rect:
                 # [关键修改] 返回子对象，而不是 self
                 # 构造一个新的 Shape 代表这个被校验通过的子区域
@@ -1446,6 +1465,9 @@ class AnShape(_AnShapePupil):
             else:
                 # 校验的是自身
                 return self
+
+        if log_failure:
+            self._locate_log_info(f"{self.total_name()} {conf:.0%}", caller_depth_from_find_img)
 
         return None
 
@@ -1486,6 +1508,10 @@ class AnShape(_AnShapePupil):
         height, width = scope_shot.shape[:2]
         search_rect = self._expand_local_rect(anchor_rect, width, height, locate_params.anchor_fallback_margin)
         if search_rect is None:
+            self._locate_log_info(
+                f"{self.total_name()} fallback invalid",
+                caller_depth_from_find_img,
+            )
             return None
 
         sx, sy, sw, sh = search_rect
@@ -1498,7 +1524,7 @@ class AnShape(_AnShapePupil):
         )
 
         self._locate_log_info(
-            f"{self.total_name()} anchor_fallback {score:.0%}",
+            f"{self.total_name()} fallback {score:.0%}",
             caller_depth_from_find_img,
         )
         if not local_rect or score <= locate_params.confidence:
@@ -1583,12 +1609,14 @@ class AnShape(_AnShapePupil):
         if not scan:
             # --- Anchor Mode ---
             caller_depth_from_find_img = self._external_caller_depth_from_here()
+            fallback_may_run = locate_params.anchor_fallback and (target_rect is not None or self.parent is not None)
             res = self._verify_anchor_mode(
                 target_img,
                 target_rect,
                 default_text,
                 locate_params,
                 caller_depth_from_find_img,
+                log_failure=not fallback_may_run,
             )
             if res:
                 return res
