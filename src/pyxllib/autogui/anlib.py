@@ -26,6 +26,8 @@ import random
 import re
 import datetime
 import ctypes
+import ipaddress
+import urllib.parse
 from itertools import product
 from collections import UserDict
 from typing import Literal
@@ -377,6 +379,25 @@ def is_in_process_paddleocr(website):
     return str(website or "").strip().lower() in IN_PROCESS_PADDLEOCR_ALIASES
 
 
+def is_local_priu_ocr_host(website):
+    """判断 MAIN_WEBSITE 是否指向本机或局域网 OCR 服务。"""
+    value = str(website or "").strip()
+    if not value:
+        return False
+    if not value.startswith(("http://", "https://")):
+        value = f"http://{value}"
+    hostname = urllib.parse.urlparse(value).hostname
+    if not hostname:
+        return False
+    if hostname.lower() == "localhost":
+        return True
+    try:
+        ip = ipaddress.ip_address(hostname)
+    except ValueError:
+        return False
+    return ip.is_loopback or ip.is_private
+
+
 @run_once()
 def get_xlapi():
     website = os.getenv("MAIN_WEBSITE")
@@ -385,7 +406,10 @@ def get_xlapi():
         return LocalOcrClient()
 
     xlapi = XlAiClient(auto_login=False, check=False)
-    xlapi.login_priu(os.getenv("XL_API_PRIU_TOKEN"), website)
+    # CodeYun OCR exposes /api/services/ocr/predict but may not expose the legacy
+    # /healthz endpoint used by login_priu(check=True). The caller is responsible
+    # for probing local OCR before setting MAIN_WEBSITE, so skip that stale check.
+    xlapi.login_priu(os.getenv("XL_API_PRIU_TOKEN"), website, check=not is_local_priu_ocr_host(website))
     return xlapi
 
 

@@ -1142,12 +1142,71 @@ class XlAiClient:
 
     def common_ocr(self, image, **options):
         """ 通用文字识别 """
-        options.update({'image': self._priu_read_image(image, b64encode=True)})
-        r = requests.post(f'{self._priu_host}/api/common_ocr', headers=self._priu_header,
-                          json=options)
-        assert r.status_code == 200, f'{r.status_code=}'
+        shape_type = options.pop('shape_type', 'rectangle')
+        nested_options = self._merge_common_ocr_options(options)
+        image_data = self._priu_read_image(image, b64encode=True)
+
+        data = {
+            'image': image_data,
+            'shape_type': shape_type,
+            'options': nested_options,
+        }
+        r = requests.post(f'{self._priu_host}/api/services/ocr/predict', headers=self._priu_header,
+                          json=data)
+        if r.status_code in {404, 405}:
+            legacy_data = {}
+            if isinstance(nested_options, dict):
+                legacy_data.update(nested_options)
+            elif nested_options:
+                legacy_data['options'] = nested_options
+            legacy_data['image'] = image_data
+            r = requests.post(f'{self._priu_host}/api/common_ocr', headers=self._priu_header,
+                              json=legacy_data)
+        if r.status_code != 200:
+            raise requests.exceptions.ConnectionError(r.text)
         res = json.loads(r.text)
+        if isinstance(res, dict) and res.get('ok') and isinstance(res.get('document'), dict):
+            return self._normalize_common_ocr_document(res['document'])
         return res
+
+    @staticmethod
+    def _merge_common_ocr_options(options):
+        """合并 common_ocr 的 options 参数，避免修改调用方传入的字典。"""
+        options = dict(options)
+        nested_options = options.pop('options', None)
+        if nested_options is None:
+            return options
+        if isinstance(nested_options, dict):
+            merged_options = dict(nested_options)
+            merged_options.update(options)
+            return merged_options
+        if options:
+            raise TypeError('common_ocr options must be a dict when mixed with keyword options')
+        return nested_options
+
+    @staticmethod
+    def _normalize_common_ocr_document(document):
+        """兼容旧 common_ocr：客户端继续返回可直接取 label['text'] 的 LabelMe 字典。"""
+        if not isinstance(document, dict):
+            return document
+        for shape in document.get('shapes', []) or []:
+            if not isinstance(shape, dict):
+                continue
+            label = shape.get('label')
+            if isinstance(label, str):
+                shape['label'] = XlAiClient._normalize_common_ocr_label(label)
+        return document
+
+    @staticmethod
+    def _normalize_common_ocr_label(label):
+        """把 LabelMe 的字符串 label 转成旧 common_ocr 的字典 label。"""
+        try:
+            parsed_label = json.loads(label)
+        except json.JSONDecodeError:
+            return {'text': label}
+        if isinstance(parsed_label, dict):
+            return parsed_label
+        return {'text': str(parsed_label)}
 
     def ocr2texts(self, image, mode='common_ocr', **options):
         """ 通用的识别一张图的所有文本
@@ -1157,7 +1216,10 @@ class XlAiClient:
         """
         texts = []  # 因图片太小等各种原因，没有识别到结果，默认就设空值
         try:
-            d = self.priu_api(mode, image, options=options)
+            if mode == 'common_ocr':
+                d = self.common_ocr(image, **options)
+            else:
+                d = self.priu_api(mode, image, options=options)
             if 'shapes' in d:
                 texts = [sp['label']['text'] for sp in d['shapes']]
         except requests.exceptions.ConnectionError:
