@@ -1,10 +1,15 @@
 """KQ5034 业务编排入口。"""
 
+import csv
+import hashlib
+import io
+
 from .common import *  # noqa: F403
 from .db import KqBook, KqDb, get_kqdb, get_用户列表
 from .order_ops import find_order_in_db, sync_kqbook_order_sheet
 from .weipay import Weipay
-from .xiaoetong import XiaoetongApi, XiaoetongWeb
+from .xiaoetong import LiveLessonUserListEmpty, XiaoetongApi, XiaoetongWeb
+
 
 class KqTools:
     root = xlhome_dir('data/m2112kq5034')
@@ -207,6 +212,15 @@ class KqTools:
         row['next_update'] = next_time
         return row['next_update']
 
+    def _延后直播课用户列表重试(self, row, err):
+        retry_at = datetime.datetime.now() + datetime.timedelta(hours=1)
+        logger.warning(f'直播课用户列表暂无数据，延后重试：lesson={row["lesson_name"]} '
+                       f'next_update={retry_at:%Y-%m-%d %H:%M:%S} err={err}')
+        self.kqdb.update_row('lesson_table',
+                             {'next_update': retry_at},
+                             {'lesson_id': row['lesson_id']},
+                             commit=True)
+
     def update_lesson_data_table(self, shop1=False, shop2=False):
         """ 更新学习数据表
 
@@ -242,12 +256,19 @@ class KqTools:
 
                     try:
                         file = self.xe2.export_lesson_data(row)
+                    except LiveLessonUserListEmpty as e:
+                        self._延后直播课用户列表重试(row, e)
+                        continue
                     except DrissionPage.errors.PageDisconnectedError:
                         logger.warning('DrissionPage连接断开，尝试重启浏览器')
                         if self._xe2:
                             self._xe2.quit()
                             self._xe2 = None
-                        file = self.xe2.export_lesson_data(row)
+                        try:
+                            file = self.xe2.export_lesson_data(row)
+                        except LiveLessonUserListEmpty as e:
+                            self._延后直播课用户列表重试(row, e)
+                            continue
 
                     imported_count = 0
                     if file is not None:
@@ -490,22 +511,104 @@ class KqTools:
         lines2 = []
         for line in lines:
             # 注意：支持自动过滤掉空行、无效的订单号格式数据
-            line2 = line.strip() if line else ''
+            line2 = str(line).strip() if line else ''
             if re.match(r'\w{6}-\w{7}-\w{4},', line2) or re.match(r'MA\d{22},', line2):
                 lines2.append(line2)
 
         return lines2
 
+    @staticmethod
+    def _读取返款促学金CSV字段(line):
+        try:
+            parts = next(csv.reader([str(line)]))
+        except csv.Error as e:
+            raise ValueError(f'返款促学金CSV格式错误：{line!r}') from e
+
+        if len(parts) < 4:
+            raise ValueError(f'返款促学金配置格式错误：{line!r}')
+        return parts
+
     @classmethod
-    def 自动返款促学金(cls, lines, weipay=None):
+    def 解析返款促学金行(cls, line):
+        """解析一条返款促学金CSV配置行。"""
+        parts = cls._读取返款促学金CSV字段(line)
+
+        amount_text = parts[1].strip()
+        try:
+            amount = float(amount_text)
+        except ValueError as e:
+            raise ValueError(f'返款促学金金额格式错误：{line!r}') from e
+
+        return {
+            '订单号': parts[0].strip().lstrip("`'"),
+            '金额': amount,
+            '标题': parts[2].strip(),
+            '业务单号': parts[3].strip(),
+            'raw': str(line),
+        }
+
+    @classmethod
+    def _生成强制返款批次标记(cls, now=None):
+        now = now or datetime.datetime.now()
+        return f'r{now:%y%m%d%H%M%S}{now.microsecond // 1000:03d}'
+
+    @classmethod
+    def _规范化强制返款批次标记(cls, force_tag):
+        raw_tag = str(force_tag or cls._生成强制返款批次标记()).strip()
+        force_tag = re.sub(r'[^0-9A-Za-z_-]+', '_', raw_tag).strip('_')
+        if not force_tag:
+            digest = hashlib.sha1(raw_tag.encode('utf-8')).hexdigest()[:8]
+            force_tag = f'tag_{digest}'
+        if len(force_tag) > 32:
+            digest = hashlib.sha1(force_tag.encode('utf-8')).hexdigest()[:8]
+            force_tag = f'{force_tag[:23]}_{digest}'
+        return force_tag
+
+    @staticmethod
+    def _追加返款业务单号后缀(business_order, suffix, *, max_len=64):
+        business_order = str(business_order or '').strip()
+        suffix = str(suffix or '').strip()
+        if len(suffix) > 32:
+            digest = hashlib.sha1(suffix.encode('utf-8')).hexdigest()[:8]
+            suffix = f'{suffix[:23]}_{digest}'
+        candidate = f'{business_order}_{suffix}'
+        if len(candidate) <= max_len:
+            return candidate
+
+        digest = hashlib.sha1(business_order.encode('utf-8')).hexdigest()[:8]
+        tail = f'_{digest}_{suffix}'
+        return f'{business_order[:max_len - len(tail)]}{tail}'
+
+    @classmethod
+    def _重写返款促学金业务单号(cls, line, suffix):
+        parts = cls._读取返款促学金CSV字段(line)
+        parts[3] = cls._追加返款业务单号后缀(parts[3], suffix)
+        buffer = io.StringIO()
+        csv.writer(buffer, lineterminator='').writerow(parts)
+        return buffer.getvalue()
+
+    @classmethod
+    def 自动返款促学金(cls, lines, weipay=None, *, force_submit=False, force_tag=None):
+        """生成并提交返款CSV。
+
+        force_submit=True 是危险开口，会为本次提交重写CSV文件名和每条返款业务单号。
+        """
         # 1 解析行数据
         lines2 = cls.过滤有效返款促学金(lines)
         # 空数据就不用继续处理了
         if not lines2:
             return {'submitted': False, 'completed': False, 'reason': 'no_lines'}
 
+        if force_submit:
+            force_tag = cls._规范化强制返款批次标记(force_tag)
+            logger.warning(
+                f'启用强制返款提交：将重写CSV文件名和{len(lines2)}条返款业务单号，'
+                f'force_tag={force_tag}'
+            )
+            lines2 = [cls._重写返款促学金业务单号(line, force_tag) for line in lines2]
+
         # 2 计算标题
-        titles = {x.split(',')[2] for x in lines2}
+        titles = {cls.解析返款促学金行(x)['标题'] for x in lines2}
         if len(titles) == 1:
             title = titles.pop()
         else:
@@ -516,14 +619,24 @@ class KqTools:
         subdir_name = f'{today.year}年{today.month:02}月'
         dfmt = today.strftime('%y%m%d')
         minute_tag = datetime.datetime.now().strftime('%H%M')
-        file = cls.root / '返款表' / subdir_name / f'd{dfmt}-{minute_tag}-{title}.csv'
-        if file.exists():
+        if force_submit:
             second_tag = datetime.datetime.now().strftime('%H%M%S')
-            file = cls.root / '返款表' / subdir_name / f'd{dfmt}-{second_tag}-{title}.csv'
+            file = cls.root / '返款表' / subdir_name / f'd{dfmt}-{second_tag}-{force_tag}-{title}.csv'
+        else:
+            file = cls.root / '返款表' / subdir_name / f'd{dfmt}-{minute_tag}-{title}.csv'
+            if file.exists():
+                second_tag = datetime.datetime.now().strftime('%H%M%S')
+                file = cls.root / '返款表' / subdir_name / f'd{dfmt}-{second_tag}-{title}.csv'
         file.parent.mkdir(parents=True, exist_ok=True)
         file.write_text('\n'.join(lines2))
 
         # 4 自动执行返款
         if weipay is None:
             weipay = Weipay(['考勤后台'])
-        return weipay.request_file_refund(file)
+        result = weipay.request_file_refund(file)
+        if isinstance(result, dict):
+            result.setdefault('file', str(file))
+            result['force_submit'] = bool(force_submit)
+            if force_submit and force_tag:
+                result['force_tag'] = force_tag
+        return result

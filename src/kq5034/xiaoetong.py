@@ -2,6 +2,11 @@
 
 from .common import *  # noqa: F403
 
+
+class LiveLessonUserListEmpty(RuntimeError):
+    """直播课用户列表页面已加载，但当前没有可导出的用户数据。"""
+
+
 class XiaoetongApi:
     """ 小鹅通api """
 
@@ -654,10 +659,10 @@ return true;
     def __1_导出各种表格数据(self):
         pass
 
-    def download_last_file(self, match_keywords=None, exclude_task_names=None):
+    def download_last_file(self, match_keywords=None, exclude_task_names=None, **kwargs):
         """ 去数据中心等着下载最新的生成的数据文件
         """
-        return self._取生成器返回值(self.iter_download_last_file(match_keywords, exclude_task_names))
+        return self._取生成器返回值(self.iter_download_last_file(match_keywords, exclude_task_names, **kwargs))
 
     def iter_download_last_file(self, match_keywords=None, exclude_task_names=None, *,
                                 poll_seconds=60, max_wait_seconds=None, refresh_every_checks=5,
@@ -1005,6 +1010,14 @@ return true;
         except Exception as e:
             return f'<body text error: {e}>'
 
+    def _直播课用户列表为空(self, tab):
+        if self._统计直播用户列表行数(tab) > 0:
+            return False
+
+        summary = self._直播课用户页摘要(tab, max_chars=1500)
+        empty_markers = ('暂无内容', '暂无数据', '无数据')
+        return '导出列表' in summary and any(x in summary for x in empty_markers)
+
     def _等待直播课用户导出按钮(self, tab, row, work_url):
         """小鹅通直播用户页经常慢加载；必须等到导出入口出现，不能把空壳 DOM 当作空数据。"""
         lesson = row.get('lesson_name', row.get('lesson_id2', ''))
@@ -1114,6 +1127,9 @@ return fetch('/xe.data-user-behavior.live.user_list_filter/1.0.0', {
             if len(items) >= total or not rows:
                 break
             page += 1
+
+        if not items and not total:
+            raise LiveLessonUserListEmpty(f'直播课用户列表接口返回0条：lesson={lesson} lesson_id2={lesson_id2}')
 
         safe_name = re.sub(r'[\\/:*?"<>|\r\n]+', '_', lesson or lesson_id2)
         download_dir = Path.home() / 'Downloads' / '_xlproject_temp_downloads'
@@ -1238,6 +1254,13 @@ return fetch('/xe.data-user-behavior.live.user_list_filter/1.0.0', {
                     file = self._导出直播课用户列表接口CSV(tab, row)
                     return self._store_runtime_cached_file(cache_key, file) if download else file
 
+                if self._直播课用户列表为空(tab):
+                    summary = self._直播课用户页摘要(tab, max_chars=300)
+                    raise LiveLessonUserListEmpty(
+                        f'直播课用户列表暂无数据：lesson={row.get("lesson_name", lesson_id2)} '
+                        f'url={tab.url} body={summary!r}'
+                    )
+
                 # 正常导出数据
                 btn.click(by_js=True)
                 tab.wait(5)
@@ -1253,7 +1276,7 @@ return fetch('/xe.data-user-behavior.live.user_list_filter/1.0.0', {
 
             if download:
                 tab.wait(5)
-                file = self.download_last_file(exclude_task_names=existing_exports)
+                file = self.download_last_file(exclude_task_names=existing_exports, max_wait_seconds=20 * 60)
                 if not file:
                     raise RuntimeError(f'课次导出已提交但未下载到文件：lesson={row.get("lesson_name", "")} url={url}')
                 # bug: 这个要考虑后缀.csv等的影响，以及dp自带的下载，逻辑有些不同

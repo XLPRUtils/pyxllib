@@ -1239,25 +1239,33 @@ ORDER BY ldt.lesson_id DESC;
             except ValueError as e2:
                 logger.info(f"Excel读取失败: {file}, {e1}")
                 logger.info(f"CSV读取失败: {file}, {e2}")
-                return  # 结束函数执行
+                return 0  # 结束函数执行
             except Exception as e2:
                 logger.info(f"Excel读取失败: {file}, {e1}")
                 logger.info(f"CSV读取异常: {file}, {e2}")
-                return
+                return 0
         except Exception as e1:
             logger.info(f"Excel读取异常: {file}, {e1}")
-            return
+            return 0
 
         recognized_cols = [col for col in df.columns if col in zhname2en]
         if not recognized_cols:
             logger.info(f"打卡文件表头异常，已跳过覆盖: {file}, cols={list(df.columns)}")
-            return
+            return 0
+        clockin_detail_cols = {
+            '发布时间', '动态内容', '动态标题', '动态类型',
+            '是否补打卡', '打卡日历', '打卡时间', '所属主题', '日记链接', '文字内容',
+            '所属作业', '任务名称',
+        }
+        if not any(col in df.columns for col in clockin_detail_cols):
+            logger.info(f"打卡文件缺少明细字段，已跳过覆盖: {file}, cols={list(df.columns)}")
+            return 0
         if df.empty and existing_count:
             logger.info(
                 f"打卡文件为空，已跳过覆盖已有数据: {file}, "
                 f"clockin_id={clockin_id}, existing_count={existing_count}"
             )
-            return
+            return 0
 
         custom_fillna(df, '', numeric_fill_value='')
 
@@ -1272,7 +1280,7 @@ ORDER BY ldt.lesson_id DESC;
                 for ext_col in ['图片内容', '语音内容', '视频内容']:
                     if ext_col in row:
                         text += f'\n{ext_col}：' + str(row[ext_col])
-                row['文字内容'] = text
+                df.at[idx, '文字内容'] = text
 
         # 2 新文件已确认可读，再覆盖旧数据
         self.execute(f'DELETE FROM clockin_data_table WHERE clockin_id={clockin_id}')
@@ -1288,6 +1296,7 @@ ORDER BY ldt.lesson_id DESC;
             self.insert_row('clockin_data_table', row2, commit=-1)
         # with TicToc('更新打卡数据'):
         self.commit_all()
+        return len(df)
 
     def refine_clockin_data(self):
         # 1 数据去重
@@ -1359,24 +1368,34 @@ ORDER BY ldt.lesson_id DESC;
 
         # 1.2 分用户统计打卡次数
         def count_func(items):
+            items = items.copy()
+            items['update_title'] = items['update_title'].fillna('').astype(str)
+
             # 去掉update_title以"测试-"为前缀的情况
-            items = items[~items['update_title'].str.startswith('测试-')]
+            items = items[~items['update_title'].str.startswith('测试-', na=False)]
             if titles:  # 只能在指定titles名称内
                 items = items[items['update_title'].isin(titles)]
                 # 这种情况下，每种名字只能算一次
                 items = items.drop_duplicates(subset=['update_title'])
             # items转正常的df结构
-            items = items[['task_date', 'update_title']]
+            items = items[['task_date', 'update_title', 'publish_time']]
 
-            # 增加一个辅助列，是task_date和update_title的拼接
-            cnt = 0
-            tags = []
-            for _, row in items.iterrows():
-                if not row['task_date']:
-                    row['task_date'] = cnt
-                    cnt += 1
-                tags.append(str(row['task_date']) + row['update_title'])
-            items['task_date_title'] = tags
+            def build_clockin_key(row):
+                """优先按打卡任务日去重；任务日缺失时退回到发布时间日期。"""
+                task_date = row['task_date']
+                title = row['update_title']
+                if not pd.isna(task_date) and str(task_date).strip():
+                    return f'task:{task_date}|{title}'
+
+                publish_time = row['publish_time']
+                if not pd.isna(publish_time):
+                    publish_time = pd.to_datetime(publish_time, errors='coerce')
+                    if not pd.isna(publish_time):
+                        return f'publish:{publish_time.date()}|{title}'
+
+                return f'row:{row.name}|{title}'
+
+            items['task_date_title'] = items.apply(build_clockin_key, axis=1)
 
             # 按照task_date_title分组，每组取第一个
             items = items.drop_duplicates(subset='task_date_title', keep='first')
