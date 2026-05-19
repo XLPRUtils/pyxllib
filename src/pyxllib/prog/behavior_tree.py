@@ -23,6 +23,7 @@ True
 
 from __future__ import annotations
 
+import calendar
 import datetime
 import inspect
 import json
@@ -48,6 +49,7 @@ __all__ = [
     "IdleUntilNextWake",
     "MemorySelector",
     "MemorySequence",
+    "Monthly",
     "NextWake",
     "Node",
     "Once",
@@ -159,6 +161,52 @@ def _resolve_anchor(anchor: str, base_time: datetime.datetime) -> datetime.datet
     elif target <= base_time:
         target += datetime.timedelta(days=1)
     return target
+
+
+def _parse_clock(anchor: str) -> Tuple[int, int, int]:
+    text = str(anchor).strip()
+    match = _TIME_RE.match(text)
+    if not match or match.group(1):
+        raise ValueError(f"invalid clock anchor: {anchor!r}")
+
+    hour, minute, second = int(match.group(2)), int(match.group(3)), int(match.group(4) or 0)
+    if not (0 <= hour <= 23 and 0 <= minute <= 59 and 0 <= second <= 59):
+        raise ValueError(f"invalid clock anchor: {anchor!r}")
+    return hour, minute, second
+
+
+def _add_months(year: int, month: int, offset: int) -> Tuple[int, int]:
+    value = (year * 12 + (month - 1)) + offset
+    return value // 12, value % 12 + 1
+
+
+def _compute_next_monthly_time(
+    day: int,
+    anchor: str = "00:00",
+    *,
+    base_time: Optional[datetime.datetime] = None,
+) -> datetime.datetime:
+    """计算下一个每月固定日期时间，目标月没有该日期时跳过。
+
+    :param int day: 每月触发的日期，范围是 1 到 31。
+    :param str anchor: 当天触发时刻，格式为 ``HH:MM`` 或 ``HH:MM:SS``。
+    :param base_time: 计算基准时间，默认使用当前时间。
+    :return datetime.datetime: 严格晚于基准时间的下一次触发时间。
+    """
+    day = int(day)
+    if not 1 <= day <= 31:
+        raise ValueError(f"invalid monthly day: {day!r}")
+
+    current = (base_time or datetime.datetime.now()).replace(microsecond=0)
+    hour, minute, second = _parse_clock(anchor)
+    for offset in range(0, 480):
+        year, month = _add_months(current.year, current.month, offset)
+        if day > calendar.monthrange(year, month)[1]:
+            continue
+        target = current.replace(year=year, month=month, day=day, hour=hour, minute=minute, second=second)
+        if target > current:
+            return target
+    raise RuntimeError(f"failed to compute next monthly time: day={day}, anchor={anchor!r}")
 
 
 def _compute_next_time(
@@ -278,6 +326,12 @@ class TreeContext:
         self.next_run_at = run_at
         return NextWake(run_at)
 
+    def next_monthly_time(self, day: int, anchor: str = "00:00", *, base_time=None) -> NextWake:
+        base = _parse_time(base_time) if base_time is not None else self.now()
+        run_at = _compute_next_monthly_time(day, anchor, base_time=base)
+        self.next_run_at = run_at
+        return NextWake(run_at)
+
     def node_state(self, node: "Node") -> Dict[str, Any]:
         return self.runner.node_state(node)
 
@@ -355,6 +409,30 @@ class Node:
     ) -> "Daily":
         return Daily(
             *anchors,
+            child=self,
+            label=label or self.default_label(),
+            persist=persist,
+            default_next_time=default_next_time,
+            start=start,
+            enabled=enabled,
+            on_schedule=on_schedule,
+        )
+
+    def monthly(
+        self,
+        day: int,
+        anchor: str = "00:00",
+        *,
+        label: Optional[str] = None,
+        persist: bool = True,
+        default_next_time=None,
+        start: str = "run",
+        enabled: bool = True,
+        on_schedule: Optional[Callable[[TreeContext, datetime.datetime], None]] = None,
+    ) -> "Monthly":
+        return Monthly(
+            day,
+            anchor,
             child=self,
             label=label or self.default_label(),
             persist=persist,
@@ -822,6 +900,71 @@ class Daily(_TimeDecorator):
         status = self.child.tick(ctx)
         if status != Status.RUNNING:
             next_run_at = ctx.next_run_at or _compute_next_time(*self.anchors, base_time=ctx.now())
+            self._set_next_run_at(ctx, next_run_at)
+        return self._record(status)
+
+
+class Monthly(_TimeDecorator):
+    """每月指定日期和时间触发的时间装饰器，默认持久化下一次时间。"""
+
+    def __init__(
+        self,
+        day: int,
+        anchor: Any = "00:00",
+        *args: Any,
+        child: Optional[Node] = None,
+        label: Optional[str] = None,
+        persist: bool = True,
+        default_next_time=None,
+        start: str = "run",
+        enabled: bool = True,
+        on_schedule: Optional[Callable[[TreeContext, datetime.datetime], None]] = None,
+    ):
+        if isinstance(anchor, Node):
+            if child is not None or args:
+                raise TypeError("Monthly accepts only one child node")
+            child = anchor
+            anchor = "00:00"
+        elif args:
+            if child is not None or len(args) != 1 or not isinstance(args[0], Node):
+                raise TypeError("Monthly requires a child node")
+            child = args[0]
+        if child is None:
+            raise TypeError("Monthly requires a child node")
+        self.day = int(day)
+        self.anchor = str(anchor)
+        _compute_next_monthly_time(self.day, self.anchor)
+        super().__init__(
+            child,
+            label=label,
+            persist=persist,
+            default_next_time=default_next_time,
+            start=start,
+            enabled=enabled,
+            on_schedule=on_schedule,
+        )
+
+    def default_label(self) -> str:
+        return self.label or f"Monthly[{self.day},{self.anchor}]"
+
+    def _default_initial_next_run_at(self, ctx: TreeContext) -> datetime.datetime:
+        if self.start.endswith("next"):
+            return _compute_next_monthly_time(self.day, self.anchor, base_time=ctx.now())
+        return ctx.now()
+
+    def tick(self, ctx: TreeContext) -> Status:
+        if not self.enabled:
+            return self._record(Status.SKIP)
+
+        next_run_at = self._ensure_next_run_at(ctx)
+
+        if next_run_at > ctx.now():
+            return self._record(Status.SKIP)
+
+        ctx.next_run_at = None
+        status = self.child.tick(ctx)
+        if status != Status.RUNNING:
+            next_run_at = ctx.next_run_at or _compute_next_monthly_time(self.day, self.anchor, base_time=ctx.now())
             self._set_next_run_at(ctx, next_run_at)
         return self._record(status)
 

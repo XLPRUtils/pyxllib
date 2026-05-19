@@ -10,7 +10,7 @@
 - `Status`：`SUCCESS`、`FAILURE`、`RUNNING`、`SKIP`。
 - `Action`：包装普通函数或生成器函数。
 - `Sequence`、`Selector`、`MemorySelector` 等组合节点。
-- `Daily`、`Every`、`DynamicTime`、`Window` 等时间节点。
+- `Daily`、`Monthly`、`Every`、`DynamicTime`、`Window` 等时间节点。
 - `Retry`、`Timeout` 等通用保护节点。
 - `BehaviorTreeRunner`：运行、保存状态、空闲等待。
 
@@ -75,6 +75,14 @@ def task(ctx):
 Action(日常助手).daily("05:00", "12:00", "18:00", "00:00")
 ```
 
+`Monthly` 用于“每月某日某时”这类不应每天检查的任务：
+
+```python
+Action(考勤汇总模板).monthly(27, "00:00", start="next")
+```
+
+月份没有目标日期时会跳过该月，例如每月 31 日不会落到 2 月最后一天。
+
 首次没有状态时，默认立即给节点一次检查机会。这避免给每种触发机制设计“逆 next_time”。如果首次不想补跑，或需要忽略旧状态重置调度，可以用 `start`：
 
 ```python
@@ -102,7 +110,7 @@ Action(task).daily("05:00", default_next_time="2026-04-27 05:00:00")
 DynamicTime(Action(仙府寻访仙侣), fallback_seconds=1800)
 ```
 
-业务函数可以用 `ctx.next_time(...)` 或在业务封装里写入 `ctx.next_run_at` 来决定下一次唤醒。
+业务函数可以用 `ctx.next_time(...)`、`ctx.next_monthly_time(...)` 或在业务封装里写入 `ctx.next_run_at` 来决定下一次唤醒。
 
 如果业务项目需要把行为树的下一次时间同步到自己的兼容状态字段，可以使用 `on_schedule`：
 

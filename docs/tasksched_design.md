@@ -45,7 +45,7 @@ scheduler = TaskScheduler(state_path="scheduler_state.json")
 - `next_run_at <= now`：task 可以创建或恢复 job。
 - `next_run_at > now`：task 暂不运行。
 
-`task(default_next_time=...)`、`daily`、`every`、`retry`、`ctx.next_time` 本质上都是在设置下一次 `next_run_at`。
+`task(default_next_time=...)`、`daily`、`monthly`、`every`、`retry`、`ctx.next_time`、`ctx.next_monthly_time` 本质上都是在设置下一次 `next_run_at`。
 
 ## 3. API 设计
 
@@ -131,6 +131,7 @@ def 需要上下文的任务(ctx):
 
 ```python
 scheduler.task(日常助手).daily("00:00", "05:00", "12:00", "18:00")
+scheduler.task(考勤汇总模板).monthly(27, "00:00")
 scheduler.task(托管重连).every(minutes=5)
 scheduler.task(长流程任务).daily("05:00").timeout(minutes=20)
 ```
@@ -143,11 +144,13 @@ min(next_time("00:00"), next_time("05:00"), next_time("12:00"), next_time("18:00
 
 `every(...)` 表示固定间隔运行。
 
+`monthly(day, anchor)` 表示每月指定日期和时间运行；月份没有目标日期时跳过该月，例如每月 31 日不会落到 2 月最后一天。
+
 `timeout(...)` 表示单个 job 的最长允许运行时间。它不改变 task 的触发时间，只保护已经启动的运行实例。
 
 ### 3.5 动态下次时间
 
-业务运行后才能知道下次时间时，任务函数通过 `ctx.next_time(...)` 写回调度结果。
+业务运行后才能知道下次时间时，任务函数通过 `ctx.next_time(...)` 或 `ctx.next_monthly_time(...)` 写回调度结果。
 
 ```python
 def 仙府寻访仙侣(ctx):
@@ -165,6 +168,7 @@ ctx.next_time("05:00")
 ctx.next_time("05:00", "12:00", "18:00", "00:00")
 ctx.next_time(seconds=60)
 ctx.next_time("05:00", minutes=10)
+ctx.next_monthly_time(31, "00:00")
 ```
 
 多个锚点时取最近的未来时间。

@@ -109,6 +109,39 @@ def test_existing_next_run_at_is_loaded_from_state_file(tmp_path):
     assert state["next_run_at"] == "2026-04-26 05:00:00"
 
 
+def test_monthly_schedule_chooses_next_monthly_anchor(tmp_path):
+    clock = FakeClock("2026-04-26 04:00:00")
+    events = []
+    scheduler = TaskScheduler(tmp_path / "state.json", now_func=clock)
+
+    def task():
+        events.append("run")
+
+    scheduler.task(task, default_next_time=lambda s: s.next_monthly_time(27, "00:00")).monthly(27, "00:00")
+
+    state = next(iter(scheduler.state["tasks"].values()))
+    assert state["next_run_at"] == "2026-04-27 00:00:00"
+
+    clock.advance(hours=20)
+    assert scheduler.run_once()
+    assert events == ["run"]
+    assert state["next_run_at"] == "2026-05-27 00:00:00"
+
+
+def test_ctx_can_override_next_monthly_time(tmp_path):
+    clock = FakeClock("2026-01-30 04:00:00")
+    scheduler = TaskScheduler(tmp_path / "state.json", now_func=clock)
+
+    def task(ctx):
+        return ctx.next_monthly_time(31, "00:00")
+
+    scheduler.task(task).monthly(27, "00:00")
+
+    assert scheduler.run_once()
+    state = next(iter(scheduler.state["tasks"].values()))
+    assert state["next_run_at"] == "2026-01-31 00:00:00"
+
+
 def test_generator_yield_allows_upstream_task_to_preempt_and_resume_downstream(tmp_path):
     clock = FakeClock("2026-04-25 00:00:00")
     events = []

@@ -10,6 +10,7 @@
 它不依赖 APScheduler，也不理解具体业务，只负责按时间和 task 顺序推进 callable。
 """
 
+import calendar
 import datetime
 import inspect
 import json
@@ -99,6 +100,52 @@ def _resolve_anchor(anchor: str, base_time: datetime.datetime) -> datetime.datet
     elif target <= base_time:
         target += datetime.timedelta(days=1)
     return target
+
+
+def _parse_clock(anchor: str) -> Tuple[int, int, int]:
+    text = str(anchor).strip()
+    match = _TIME_RE.match(text)
+    if not match or match.group(1):
+        raise ValueError(f"invalid clock anchor: {anchor!r}")
+
+    hour, minute, second = int(match.group(2)), int(match.group(3)), int(match.group(4) or 0)
+    if not (0 <= hour <= 23 and 0 <= minute <= 59 and 0 <= second <= 59):
+        raise ValueError(f"invalid clock anchor: {anchor!r}")
+    return hour, minute, second
+
+
+def _add_months(year: int, month: int, offset: int) -> Tuple[int, int]:
+    value = (year * 12 + (month - 1)) + offset
+    return value // 12, value % 12 + 1
+
+
+def _compute_next_monthly_time(
+    day: int,
+    anchor: str = "00:00",
+    *,
+    base_time: Optional[datetime.datetime] = None,
+) -> datetime.datetime:
+    """计算下一个每月固定日期时间，目标月没有该日期时跳过。
+
+    :param int day: 每月触发的日期，范围是 1 到 31。
+    :param str anchor: 当天触发时刻，格式为 ``HH:MM`` 或 ``HH:MM:SS``。
+    :param base_time: 计算基准时间，默认使用当前时间。
+    :return datetime.datetime: 严格晚于基准时间的下一次触发时间。
+    """
+    day = int(day)
+    if not 1 <= day <= 31:
+        raise ValueError(f"invalid monthly day: {day!r}")
+
+    current = (base_time or datetime.datetime.now()).replace(microsecond=0)
+    hour, minute, second = _parse_clock(anchor)
+    for offset in range(0, 480):
+        year, month = _add_months(current.year, current.month, offset)
+        if day > calendar.monthrange(year, month)[1]:
+            continue
+        target = current.replace(year=year, month=month, day=day, hour=hour, minute=minute, second=second)
+        if target > current:
+            return target
+    raise RuntimeError(f"failed to compute next monthly time: day={day}, anchor={anchor!r}")
 
 
 def _compute_next_time(
@@ -206,6 +253,12 @@ class TaskContext:
         self.next_run_at = run_at
         return NextRun(run_at)
 
+    def next_monthly_time(self, day: int, anchor: str = "00:00", *, base_time=None) -> NextRun:
+        base = _parse_time(base_time) if base_time is not None else self.scheduler.now()
+        run_at = _compute_next_monthly_time(day, anchor, base_time=base)
+        self.next_run_at = run_at
+        return NextRun(run_at)
+
 
 @dataclass
 class TaskSpec:
@@ -223,6 +276,8 @@ class TaskSpec:
     takes_ctx: bool = False
     schedule_kind: Optional[str] = None
     daily_anchors: Tuple[str, ...] = ()
+    monthly_day: Optional[int] = None
+    monthly_anchor: str = "00:00"
     every_seconds: Optional[float] = None
     retry_seconds: Optional[float] = None
     timeout_seconds: Optional[float] = None
@@ -236,6 +291,14 @@ class TaskSpec:
             raise ValueError("daily() requires at least one anchor")
         self.schedule_kind = "daily"
         self.daily_anchors = tuple(str(x) for x in anchors)
+        self.scheduler.save_state()
+        return self
+
+    def monthly(self, day: int, anchor: str = "00:00") -> "TaskSpec":
+        _compute_next_monthly_time(day, anchor, base_time=self.scheduler.now())
+        self.schedule_kind = "monthly"
+        self.monthly_day = int(day)
+        self.monthly_anchor = str(anchor)
         self.scheduler.save_state()
         return self
 
@@ -264,6 +327,10 @@ class TaskSpec:
         base = (base_time or self.scheduler.now()).replace(microsecond=0)
         if self.schedule_kind == "daily":
             return _compute_next_time(*self.daily_anchors, base_time=base)
+        if self.schedule_kind == "monthly":
+            if self.monthly_day is None:
+                return None
+            return _compute_next_monthly_time(self.monthly_day, self.monthly_anchor, base_time=base)
         if self.schedule_kind == "every":
             return base + datetime.timedelta(seconds=self.every_seconds or 0)
         return None
@@ -321,6 +388,10 @@ class TaskScheduler:
             minutes=minutes,
             seconds=seconds,
         )
+
+    def next_monthly_time(self, day: int, anchor: str = "00:00", *, base_time=None) -> datetime.datetime:
+        base = _parse_time(base_time) if base_time is not None else self.now()
+        return _compute_next_monthly_time(day, anchor, base_time=base)
 
     def load_state(self) -> Dict[str, Any]:
         if self.state_path.exists():

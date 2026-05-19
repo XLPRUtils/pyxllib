@@ -13,6 +13,7 @@ from pyxllib.prog.behavior_tree import (
     Every,
     IdleUntilNextWake,
     MemorySelector,
+    Monthly,
     Once,
     ReactiveSelector,
     Retry,
@@ -132,6 +133,73 @@ def test_daily_start_next_waits_until_next_anchor(tmp_path):
     assert runner.run_once() == Status.SUCCESS
     assert events == ["run"]
     assert daily_state["next_run_at"] == "2026-04-27 05:00:00"
+
+
+def test_monthly_start_next_waits_until_monthly_anchor(tmp_path):
+    clock = FakeClock("2026-04-26 04:00:00")
+    events = []
+    state_path = tmp_path / "state.json"
+
+    runner = BehaviorTreeRunner(
+        Root(Action(lambda: events.append("run")).monthly(27, "00:00", start="next")),
+        state_path,
+        now_func=clock,
+    )
+
+    assert runner.run_once() == Status.SKIP
+    assert events == []
+    monthly_state = next(v for v in runner.state["nodes"].values() if "next_run_at" in v)
+    assert monthly_state["next_run_at"] == "2026-04-27 00:00:00"
+
+    clock.advance(hours=20)
+    assert runner.run_once() == Status.SUCCESS
+    assert events == ["run"]
+    assert monthly_state["next_run_at"] == "2026-05-27 00:00:00"
+
+
+def test_monthly_skips_month_without_requested_day(tmp_path):
+    clock = FakeClock("2026-01-30 04:00:00")
+    events = []
+    runner = BehaviorTreeRunner(
+        Root(Action(lambda: events.append("run")).monthly(31, "00:00", start="next")),
+        tmp_path / "state.json",
+        now_func=clock,
+    )
+
+    assert runner.run_once() == Status.SKIP
+    monthly_state = next(v for v in runner.state["nodes"].values() if "next_run_at" in v)
+    assert monthly_state["next_run_at"] == "2026-01-31 00:00:00"
+
+    clock.advance(days=1, hours=20)
+    assert runner.run_once() == Status.SUCCESS
+    assert events == ["run"]
+    assert monthly_state["next_run_at"] == "2026-03-31 00:00:00"
+
+
+def test_monthly_class_accepts_positional_child(tmp_path):
+    clock = FakeClock("2026-04-26 04:00:00")
+    events = []
+    runner = BehaviorTreeRunner(
+        Root(Monthly(27, "00:00", Action(lambda: events.append("run")), start="next")),
+        tmp_path / "state.json",
+        now_func=clock,
+    )
+
+    assert runner.run_once() == Status.SKIP
+    assert events == []
+
+
+def test_ctx_can_override_next_monthly_time(tmp_path):
+    clock = FakeClock("2026-01-30 04:00:00")
+    runner = BehaviorTreeRunner(
+        Root(Action(lambda ctx: ctx.next_monthly_time(31, "00:00")).monthly(27, "00:00")),
+        tmp_path / "state.json",
+        now_func=clock,
+    )
+
+    assert runner.run_once() == Status.SUCCESS
+    monthly_state = next(v for v in runner.state["nodes"].values() if "next_run_at" in v)
+    assert monthly_state["next_run_at"] == "2026-01-31 00:00:00"
 
 
 def test_daily_start_reset_run_ignores_existing_state(tmp_path):
