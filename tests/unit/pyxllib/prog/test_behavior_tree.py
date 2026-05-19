@@ -10,6 +10,7 @@ from pyxllib.prog.behavior_tree import (
     Action,
     BehaviorTreeRunner,
     Daily,
+    DynamicTime,
     Every,
     IdleUntilNextWake,
     MemorySelector,
@@ -49,6 +50,29 @@ def test_action_supports_generator_and_releases_control(tmp_path):
 
     assert runner.run_once() == Status.RUNNING
     assert runner.run_once() == Status.SUCCESS
+    assert events == ["start", "end"]
+
+
+def test_dynamic_time_persists_next_run_while_child_is_running(tmp_path):
+    clock = FakeClock("2026-04-26 00:00:00")
+    events = []
+
+    def task(ctx):
+        events.append("start")
+        ctx.next_run_at = ctx.now() + datetime.timedelta(hours=1)
+        yield
+        events.append("end")
+        return ctx.next_time(seconds=7200)
+
+    runner = BehaviorTreeRunner(Root(DynamicTime(Action(task))), tmp_path / "state.json", now_func=clock)
+
+    assert runner.run_once() == Status.RUNNING
+    state = next(v for v in runner.state["nodes"].values() if "next_run_at" in v)
+    assert state["next_run_at"] == "2026-04-26 01:00:00"
+
+    assert runner.run_once() == Status.SUCCESS
+    state = next(v for v in runner.state["nodes"].values() if "next_run_at" in v)
+    assert state["next_run_at"] == "2026-04-26 02:00:00"
     assert events == ["start", "end"]
 
 

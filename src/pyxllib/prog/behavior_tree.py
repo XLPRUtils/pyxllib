@@ -1050,15 +1050,20 @@ class DynamicTime(_TimeDecorator):
         if not self.enabled:
             return self._record(Status.SKIP)
 
-        if self._state_next_run_at(ctx) is None:
-            self._set_next_run_at(ctx, self._initial_next_run_at(ctx))
+        next_run_at = self._state_next_run_at(ctx)
+        if next_run_at is None:
+            next_run_at = self._initial_next_run_at(ctx)
+            self._set_next_run_at(ctx, next_run_at)
 
-        if self._state_next_run_at(ctx) > ctx.now():
+        if next_run_at > ctx.now() and not self.child.is_active(ctx):
             return self._record(Status.SKIP)
 
         ctx.next_run_at = None
         status = self.child.tick(ctx)
-        if status != Status.RUNNING:
+        if status == Status.RUNNING:
+            if ctx.next_run_at is not None:
+                self._set_next_run_at(ctx, ctx.next_run_at)
+        else:
             if ctx.next_run_at is not None:
                 self._set_next_run_at(ctx, ctx.next_run_at)
             elif self.fallback_seconds is not None:
