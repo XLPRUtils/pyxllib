@@ -1142,6 +1142,15 @@ class XlAiClient:
 
     def common_ocr(self, image, **options):
         """ 通用文字识别 """
+        request_timeout = options.pop('request_timeout', None)
+        if request_timeout is None:
+            request_timeout = float(os.getenv('XL_API_PRIU_TIMEOUT', '30'))
+        else:
+            request_timeout = float(request_timeout)
+        request_retries = int(options.pop('request_retries', os.getenv('XL_API_PRIU_RETRIES', '1')))
+        request_retry_interval = float(
+            options.pop('request_retry_interval', os.getenv('XL_API_PRIU_RETRY_INTERVAL', '1'))
+        )
         shape_type = options.pop('shape_type', 'rectangle')
         nested_options = self._merge_common_ocr_options(options)
         image_data = self._priu_read_image(image, b64encode=True)
@@ -1151,8 +1160,13 @@ class XlAiClient:
             'shape_type': shape_type,
             'options': nested_options,
         }
-        r = requests.post(f'{self._priu_host}/api/services/ocr/predict', headers=self._priu_header,
-                          json=data)
+        r = self._common_ocr_post(
+            '/api/services/ocr/predict',
+            data,
+            timeout=request_timeout,
+            retries=request_retries,
+            retry_interval=request_retry_interval,
+        )
         if r.status_code in {404, 405}:
             legacy_data = {}
             if isinstance(nested_options, dict):
@@ -1160,14 +1174,37 @@ class XlAiClient:
             elif nested_options:
                 legacy_data['options'] = nested_options
             legacy_data['image'] = image_data
-            r = requests.post(f'{self._priu_host}/api/common_ocr', headers=self._priu_header,
-                              json=legacy_data)
+            r = self._common_ocr_post(
+                '/api/common_ocr',
+                legacy_data,
+                timeout=request_timeout,
+                retries=request_retries,
+                retry_interval=request_retry_interval,
+            )
         if r.status_code != 200:
             raise requests.exceptions.ConnectionError(r.text)
         res = json.loads(r.text)
         if isinstance(res, dict) and res.get('ok') and isinstance(res.get('document'), dict):
             return self._normalize_common_ocr_document(res['document'])
         return res
+
+    def _common_ocr_post(self, path, data, *, timeout, retries, retry_interval):
+        attempts = max(1, int(retries) + 1)
+        last_exc = None
+        for index in range(attempts):
+            try:
+                return requests.post(
+                    f'{self._priu_host}{path}',
+                    headers=self._priu_header,
+                    json=data,
+                    timeout=timeout,
+                )
+            except (requests.exceptions.ConnectionError, requests.exceptions.Timeout) as exc:
+                last_exc = exc
+                if index + 1 >= attempts:
+                    break
+                time.sleep(max(0.0, float(retry_interval)))
+        raise requests.exceptions.ConnectionError(last_exc)
 
     @staticmethod
     def _merge_common_ocr_options(options):
