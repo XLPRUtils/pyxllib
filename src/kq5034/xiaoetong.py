@@ -285,6 +285,8 @@ class XiaoetongWeb(DpWebBase):
 
     @staticmethod
     def _标准化店铺(shop):
+        if isinstance(shop, str) and shop.strip().isdigit():
+            shop = int(shop.strip())
         if isinstance(shop, int):
             shop = ['5034山中薪', '宗门学府'][shop - 1]
         shop_id = 1 if shop == '5034山中薪' else 2 if shop == '宗门学府' else None
