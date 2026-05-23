@@ -799,6 +799,25 @@ ORDER BY ldt.lesson_id DESC;
         if not rows:
             return '', -1
 
+        unique_rows = {}
+        for row in rows:
+            unique_rows[row['user_id2']] = row
+        rows = list(unique_rows.values())
+
+        def norm(x):
+            return str(x or '').strip()
+
+        for field in ('user_nickname', 'name'):
+            if len(rows) <= 1 or not 昵称:
+                break
+            matched_rows = [
+                row for row in rows
+                if any(norm(row.get(field)) == norm(name) for name in 昵称)
+            ]
+            if len(matched_rows) == 1:
+                rows = matched_rows
+                break
+
         # 暂时跳过候选项不唯一的
         if len(rows) > 1:
             return '', len(rows)
