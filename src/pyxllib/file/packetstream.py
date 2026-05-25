@@ -140,6 +140,47 @@ def extract_tcp_stream_payloads_with_tshark(
     return bytes(client), bytes(server)
 
 
+def list_tcp_streams_with_tshark(
+    pcap: Union[str, Path],
+    *,
+    host: str = "",
+    tshark: Union[str, Path] = r"C:\Program Files\Wireshark\tshark.exe",
+) -> List[Dict[str, Any]]:
+    """Return TCP stream ids and rough payload byte counts from a capture."""
+
+    display_filter = "tcp.len > 0"
+    if host:
+        display_filter = f"ip.addr == {host} && {display_filter}"
+    cmd = [
+        str(tshark),
+        "-r",
+        str(pcap),
+        "-Y",
+        display_filter,
+        "-T",
+        "fields",
+        "-e",
+        "tcp.stream",
+        "-e",
+        "tcp.len",
+    ]
+    text = subprocess.check_output(cmd, text=True, encoding="utf-8", errors="replace")
+    streams: Dict[int, Dict[str, Any]] = {}
+    for line in text.splitlines():
+        parts = line.split("\t")
+        if not parts or not parts[0]:
+            continue
+        try:
+            stream = int(parts[0])
+            length = int(parts[1] or 0) if len(parts) > 1 else 0
+        except ValueError:
+            continue
+        item = streams.setdefault(stream, {"stream": stream, "packets": 0, "payload_bytes": 0})
+        item["packets"] += 1
+        item["payload_bytes"] += length
+    return sorted(streams.values(), key=lambda item: (item["payload_bytes"], item["packets"]), reverse=True)
+
+
 @dataclass
 class LuaPacketClassInfo:
     name: str

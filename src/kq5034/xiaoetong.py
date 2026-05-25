@@ -437,7 +437,7 @@ return true;
 
     @staticmethod
     def _标准化下载名(name):
-        return re.sub(r'\s+', '', name or '')
+        return re.sub(r'[\s+_:：]+', '', name or '')
 
     @staticmethod
     def _取生成器返回值(generator):
@@ -459,11 +459,18 @@ return true;
     @staticmethod
     def _查找本地下载文件(file_name, download_dir, *, newer_than_ts=None):
         candidates = []
+        normalized_file_name = XiaoetongWeb._标准化下载名(file_name)
         for d in XiaoetongWeb._下载文件候选目录(download_dir):
             if not d.exists():
                 continue
             for path in d.iterdir():
-                if path.name == file_name or path.name.startswith(file_name):
+                normalized_path_name = XiaoetongWeb._标准化下载名(path.name)
+                if (
+                        path.name == file_name
+                        or path.name.startswith(file_name)
+                        or normalized_path_name == normalized_file_name
+                        or normalized_path_name.startswith(normalized_file_name)
+                ):
                     candidates.append(path)
 
         existing = []
