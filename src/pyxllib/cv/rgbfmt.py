@@ -1643,3 +1643,131 @@ def hash_text_to_std_color(text, *, tone='dark', color_range=2):
 
 def hash_text_to_hex_color(text, *, tone='dark', color_range=2, lower=False):
     return hash_text_to_std_color(text, tone=tone, color_range=color_range).to_hex(lower=lower)
+
+
+def to_bgr_frame(frame, source_format='auto'):
+    """把截图/图片帧统一转换为 OpenCV 常用的 uint8 BGR 三通道矩阵。
+
+    :param frame: numpy.ndarray 或 PIL.Image
+    :param source_format:
+        auto: ndarray 三通道默认已是 BGR，四通道默认 BGRA；PIL 图片按 RGB/RGBA 处理
+        bgr/rgb/bgra/rgba/gray: 显式声明输入通道格式
+    """
+    import cv2
+    import numpy as np
+
+    if frame is None:
+        raise ValueError('图片为空')
+
+    pil_mode = None
+    if hasattr(frame, 'mode') and hasattr(frame, '__array__'):
+        pil_mode = str(getattr(frame, 'mode', '') or '').upper()
+        arr = np.asarray(frame)
+    else:
+        arr = np.asarray(frame)
+
+    if arr.size == 0:
+        raise ValueError('图片为空')
+    if arr.dtype != np.uint8:
+        arr = np.clip(arr, 0, 255).astype(np.uint8)
+
+    fmt = str(source_format or 'auto').strip().lower()
+    if fmt == 'auto':
+        if pil_mode in {'RGB', 'RGBA', 'L'}:
+            fmt = {'RGB': 'rgb', 'RGBA': 'rgba', 'L': 'gray'}[pil_mode]
+        elif arr.ndim == 2:
+            fmt = 'gray'
+        elif arr.ndim == 3 and arr.shape[2] == 4:
+            fmt = 'bgra'
+        elif arr.ndim == 3 and arr.shape[2] == 3:
+            fmt = 'bgr'
+        else:
+            raise ValueError(f'无法自动识别图片通道格式: shape={arr.shape!r}')
+
+    if fmt == 'gray':
+        if arr.ndim == 3:
+            arr = arr[:, :, 0]
+        return cv2.cvtColor(arr, cv2.COLOR_GRAY2BGR)
+
+    if arr.ndim != 3:
+        raise ValueError(f'{fmt} 图片必须是三维矩阵: shape={arr.shape!r}')
+
+    channels = arr.shape[2]
+    if fmt == 'bgr':
+        if channels < 3:
+            raise ValueError(f'BGR 图片至少需要 3 个通道: shape={arr.shape!r}')
+        return arr[:, :, :3].copy()
+    if fmt == 'rgb':
+        if channels < 3:
+            raise ValueError(f'RGB 图片至少需要 3 个通道: shape={arr.shape!r}')
+        return cv2.cvtColor(arr[:, :, :3], cv2.COLOR_RGB2BGR)
+    if fmt == 'bgra':
+        if channels != 4:
+            raise ValueError(f'BGRA 图片需要 4 个通道: shape={arr.shape!r}')
+        return cv2.cvtColor(arr, cv2.COLOR_BGRA2BGR)
+    if fmt == 'rgba':
+        if channels != 4:
+            raise ValueError(f'RGBA 图片需要 4 个通道: shape={arr.shape!r}')
+        return cv2.cvtColor(arr, cv2.COLOR_RGBA2BGR)
+
+    raise ValueError(f'不支持的图片通道格式: {source_format!r}')
+
+
+def encode_jpeg_bytes(frame, quality=82, source_format='auto'):
+    """按统一通道规则编码 JPEG，返回 bytes。"""
+    import cv2
+
+    bgr = to_bgr_frame(frame, source_format=source_format)
+    quality = max(1, min(100, int(quality)))
+    ok, encoded = cv2.imencode('.jpg', bgr, [int(cv2.IMWRITE_JPEG_QUALITY), quality])
+    if not ok:
+        raise RuntimeError('JPEG 编码失败')
+    return encoded.tobytes()
+
+
+def jpeg_roundtrip_frame(frame, quality=82, source_format='auto', *, return_bytes=False):
+    """把帧走一遍 JPEG 编码/解码，模拟“保存截图后再读取”的像素状态。
+
+    这个函数适合“当前实时帧”和“已保存 jpg 截图”做逐像素容差比较前使用。
+    """
+    import cv2
+    import numpy as np
+
+    data = encode_jpeg_bytes(frame, quality=quality, source_format=source_format)
+    decoded = cv2.imdecode(np.frombuffer(data, dtype=np.uint8), cv2.IMREAD_COLOR)
+    if decoded is None:
+        raise RuntimeError('JPEG 解码失败')
+    if return_bytes:
+        return decoded, data
+    return decoded
+
+
+def normalize_for_saved_jpeg_match(frame, quality=82, source_format='auto', *, return_bytes=False):
+    """规范化当前帧，用于和已保存 JPEG 截图进行匹配。"""
+    return jpeg_roundtrip_frame(frame, quality=quality, source_format=source_format, return_bytes=return_bytes)
+
+
+def compare_bgr_pixel_tolerance(reference_frame, current_frame, pixel_tolerance=5, *, resize=True):
+    """按单通道像素容差比较两张 BGR 图片，返回百分比分数和 0~1 分数。
+
+    判定规则：同一像素的 B/G/R 每个通道绝对差值都 <= pixel_tolerance，才算该像素匹配。
+    """
+    import cv2
+    import numpy as np
+
+    reference = to_bgr_frame(reference_frame, source_format='bgr')
+    current = to_bgr_frame(current_frame, source_format='bgr')
+    if reference.size == 0 or current.size == 0:
+        raise ValueError('匹配框裁剪结果为空')
+
+    ref_height, ref_width = reference.shape[:2]
+    if current.shape[:2] != (ref_height, ref_width):
+        if not resize:
+            raise ValueError('两张图片尺寸不一致')
+        current = cv2.resize(current, (ref_width, ref_height), interpolation=cv2.INTER_AREA)
+
+    tolerance = max(0, min(255, int(pixel_tolerance if pixel_tolerance is not None else 5)))
+    channel_diff = np.abs(reference.astype(np.int16) - current.astype(np.int16))
+    matched = np.all(channel_diff <= tolerance, axis=2)
+    score = float(np.mean(matched))
+    return int(round(score * 100)), score
