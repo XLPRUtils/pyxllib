@@ -536,6 +536,55 @@ class WeChatDbStorage:
     def root(self) -> Path:
         return self.paths.root
 
+    def _sync_state_path(self) -> Path:
+        return self.root.parent / "sync_state.json"
+
+    def _load_sync_state(self) -> dict[str, Any]:
+        path = self._sync_state_path()
+        if not path.exists():
+            return {}
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+            return payload if isinstance(payload, dict) else {}
+        except Exception:
+            return {}
+
+    def _save_sync_state(self, state: dict[str, Any]) -> None:
+        state["updated_at"] = int(time.time())
+        path = self._sync_state_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_suffix(path.suffix + ".tmp")
+        tmp.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
+        tmp.replace(path)
+
+    def _update_sync_state(self, **updates: Any) -> None:
+        state = self._load_sync_state()
+        state.update(updates)
+        self._save_sync_state(state)
+
+    def _file_fingerprint(self, path: Path) -> dict[str, Any]:
+        stat = path.stat()
+        return {
+            "size": stat.st_size,
+            "mtime_ns": stat.st_mtime_ns,
+        }
+
+    def _same_fingerprint(self, left: dict[str, Any] | None, right: dict[str, Any] | None) -> bool:
+        if not left or not right:
+            return False
+        return left.get("size") == right.get("size") and left.get("mtime_ns") == right.get("mtime_ns")
+
+    def _valid_wechat_account_root(self, path: Path | None) -> Path | None:
+        if not path:
+            return None
+        try:
+            candidate = path.expanduser()
+        except RuntimeError:
+            return None
+        if (candidate / "msg").exists() and (candidate / "db_storage").exists():
+            return candidate
+        return None
+
     def status(self) -> dict[str, Any]:
         dbs = {
             "contact": self.paths.contact,
@@ -644,6 +693,10 @@ class WeChatDbStorage:
 
     def _wechat_account_root(self) -> Path | None:
         candidates: list[Path] = []
+        state = self._load_sync_state()
+        cached_account_root = self._valid_wechat_account_root(Path(str(state.get("live_account_root")))) if state.get("live_account_root") else None
+        if cached_account_root:
+            return cached_account_root
         if self.root.name == "db_storage":
             candidates.append(self.root.parent)
         env_path = (os.environ.get("CODEYUN_WECHAT_ACCOUNT_ROOT") or "").strip()
@@ -672,8 +725,10 @@ class WeChatDbStorage:
             finally:
                 conn.close()
         for candidate in candidates:
-            if (candidate / "msg").exists():
-                return candidate
+            valid = self._valid_wechat_account_root(candidate)
+            if valid:
+                self._update_sync_state(live_account_root=os.fspath(valid))
+                return valid
         return None
 
     def _raw_snapshot_db_storage(self, live_account_root: Path) -> Path:
@@ -692,34 +747,61 @@ class WeChatDbStorage:
         if not source_root.exists():
             raise WeChatDbError(f"本机微信 db_storage 不存在：{source_root}")
         target_root = self._raw_snapshot_db_storage(live_account_root)
+        state = self._load_sync_state()
+        live_db_files = dict(state.get("live_db_files") or {})
         copied = 0
         unchanged = 0
+        removed = 0
         errors: list[str] = []
         for source in source_root.rglob("*"):
             if not source.is_file():
                 continue
             rel = source.relative_to(source_root)
+            rel_key = rel.as_posix()
             target = target_root / rel
             target.parent.mkdir(parents=True, exist_ok=True)
             try:
-                source_stat = source.stat()
-                target_stat = target.stat() if target.exists() else None
-                if (
-                    target_stat
-                    and target_stat.st_size == source_stat.st_size
-                    and int(target_stat.st_mtime) == int(source_stat.st_mtime)
-                ):
+                source_fingerprint = self._file_fingerprint(source)
+                target_fingerprint = self._file_fingerprint(target) if target.exists() else None
+                cached = live_db_files.get(rel_key)
+                if self._same_fingerprint(source_fingerprint, target_fingerprint):
+                    if not self._same_fingerprint(source_fingerprint, cached):
+                        live_db_files[rel_key] = {
+                            **source_fingerprint,
+                            "source": os.fspath(source),
+                            "target": os.fspath(target),
+                        }
                     unchanged += 1
                     continue
-                shutil.copy2(source, target)
+                tmp = target.with_suffix(target.suffix + ".copying")
+                tmp.unlink(missing_ok=True)
+                shutil.copy2(source, tmp)
+                tmp.replace(target)
+                live_db_files[rel_key] = {
+                    **source_fingerprint,
+                    "source": os.fspath(source),
+                    "target": os.fspath(target),
+                }
                 copied += 1
             except Exception as exc:
                 errors.append(f"{rel}: {type(exc).__name__}: {exc}")
+        if target_root.exists():
+            source_rels = {path.relative_to(source_root).as_posix() for path in source_root.rglob("*") if path.is_file()}
+            for rel_key in list(live_db_files):
+                if rel_key not in source_rels:
+                    live_db_files.pop(rel_key, None)
+                    removed += 1
+        state["live_account_root"] = os.fspath(live_account_root)
+        state["live_db_storage"] = os.fspath(source_root)
+        state["raw_snapshot_db_storage"] = os.fspath(target_root)
+        state["live_db_files"] = live_db_files
+        self._save_sync_state(state)
         return {
             "source": os.fspath(source_root),
             "target": os.fspath(target_root),
             "copied": copied,
             "unchanged": unchanged,
+            "removed": removed,
             "errors": errors[:20],
             "error_count": len(errors),
         }
@@ -727,29 +809,56 @@ class WeChatDbStorage:
     def _decrypt_snapshot_dbs(self, live_account_root: Path) -> dict[str, Any]:
         source_root = self._raw_snapshot_db_storage(live_account_root)
         matches = self._db_key_matches()
+        state = self._load_sync_state()
+        decrypted_dbs = dict(state.get("decrypted_dbs") or {})
         decrypted = 0
+        unchanged = 0
         skipped = 0
         failed: list[str] = []
         for source in sorted(source_root.rglob("*.db")):
             rel = source.relative_to(source_root)
-            rel_key = str(rel)
-            key_info = matches.get(rel_key) or matches.get(rel_key.replace("/", "\\"))
+            rel_key = rel.as_posix()
+            key_info = matches.get(str(rel)) or matches.get(rel_key) or matches.get(rel_key.replace("/", "\\"))
             if not key_info:
                 skipped += 1
                 continue
             target = self.root / rel
             try:
-                ok = decrypt_wechat_v4_db(source, target, key_info["key_hex"], key_info.get("mode") or "raw-derived-key")
+                source_fingerprint = self._file_fingerprint(source)
+                mode = key_info.get("mode") or "raw-derived-key"
+                previous = decrypted_dbs.get(rel_key)
+                if (
+                    target.exists()
+                    and previous
+                    and self._same_fingerprint(source_fingerprint, previous.get("source_fingerprint"))
+                    and previous.get("key_hex") == key_info["key_hex"]
+                    and previous.get("mode") == mode
+                ):
+                    unchanged += 1
+                    continue
+                ok = decrypt_wechat_v4_db(source, target, key_info["key_hex"], mode)
                 if ok:
+                    decrypted_dbs[rel_key] = {
+                        "source": os.fspath(source),
+                        "target": os.fspath(target),
+                        "source_fingerprint": source_fingerprint,
+                        "target_fingerprint": self._file_fingerprint(target),
+                        "key_hex": key_info["key_hex"],
+                        "mode": mode,
+                        "decrypted_at": int(time.time()),
+                    }
                     decrypted += 1
                 else:
                     failed.append(f"{rel}: decrypt-failed")
             except Exception as exc:
                 failed.append(f"{rel}: {type(exc).__name__}: {exc}")
+        state["decrypted_dbs"] = decrypted_dbs
+        self._save_sync_state(state)
         return {
             "source": os.fspath(source_root),
             "target": os.fspath(self.root),
             "decrypted": decrypted,
+            "unchanged": unchanged,
             "skipped": skipped,
             "failed": failed[:20],
             "failed_count": len(failed),
@@ -758,21 +867,21 @@ class WeChatDbStorage:
     def export_all_resources(self) -> dict[str, Any]:
         export_root = self._resource_export_root()
         before = len([path for path in export_root.rglob("*") if path.is_file()]) if export_root.exists() else 0
-        chats = self.list_chats(limit=1000)
-        scanned = 0
-        errors: list[str] = []
-        for chat in chats:
-            username = chat.get("username")
-            if not username:
-                continue
-            try:
-                self._resource_summary(str(username), export=True)
-                scanned += 1
-            except Exception as exc:
-                errors.append(f"{chat.get('name') or username}: {type(exc).__name__}: {exc}")
+        try:
+            exported = self._export_resource_files(decode_missing=True)
+            errors: list[str] = []
+        except Exception as exc:
+            exported = {}
+            errors = [f"{type(exc).__name__}: {exc}"]
         after = len([path for path in export_root.rglob("*") if path.is_file()]) if export_root.exists() else 0
+        unique_downloads = {
+            str(item.get("download_name") or item.get("file_name") or "")
+            for item in exported.values()
+            if item.get("download_name") or item.get("file_name")
+        }
         return {
-            "scanned_chats": scanned,
+            "scanned_chats": 0,
+            "resource_items": len(unique_downloads),
             "exported_files": after,
             "new_files": max(0, after - before),
             "errors": errors[:20],
@@ -878,6 +987,11 @@ class WeChatDbStorage:
     def _wechat_v4_image_xor_key(self, account_root: Path) -> int:
         if self._image_xor_key_cache is not None:
             return self._image_xor_key_cache
+        state = self._load_sync_state()
+        image_state = state.get("image_decode") or {}
+        if isinstance(image_state.get("xor_key"), int):
+            self._image_xor_key_cache = int(image_state["xor_key"])
+            return self._image_xor_key_cache
         cache_key = os.fspath(account_root.resolve())
         if cache_key in _WECHAT_IMAGE_XOR_KEY_CACHE:
             self._image_xor_key_cache = _WECHAT_IMAGE_XOR_KEY_CACHE[cache_key]
@@ -905,6 +1019,11 @@ class WeChatDbStorage:
                     if key1 == key2:
                         self._image_xor_key_cache = key1
                         _WECHAT_IMAGE_XOR_KEY_CACHE[cache_key] = key1
+                        state = self._load_sync_state()
+                        image_state = dict(state.get("image_decode") or {})
+                        image_state["xor_key"] = key1
+                        state["image_decode"] = image_state
+                        self._save_sync_state(state)
                         return key1
                 except OSError:
                     continue
@@ -917,8 +1036,25 @@ class WeChatDbStorage:
             return self._image_aes_key_cache
         attach_dir = account_root / "msg" / "attach"
         templates = _find_wechat_v4_image_templates(attach_dir)
+        state = self._load_sync_state()
+        image_state = dict(state.get("image_decode") or {})
+        cached_hex = str(image_state.get("aes_key_hex") or "")
+        if cached_hex:
+            try:
+                cached_key = bytes.fromhex(cached_hex)
+                if len(cached_key) == 16 and _verify_wechat_v4_image_aes_key(cached_key, templates):
+                    self._image_aes_key_cache = cached_key
+                    self._image_aes_key_scanned = True
+                    return cached_key
+            except ValueError:
+                pass
         self._image_aes_key_cache = _scan_windows_weixin_image_aes_key(templates)
         self._image_aes_key_scanned = True
+        if self._image_aes_key_cache:
+            image_state["aes_key_hex"] = self._image_aes_key_cache.hex()
+            image_state["aes_key_verified_at"] = int(time.time())
+            state["image_decode"] = image_state
+            self._save_sync_state(state)
         return self._image_aes_key_cache
 
     def _relative_media_path(self, row: dict[str, Any], dirs: dict[int, str], media_kind: str) -> Path | None:
@@ -955,14 +1091,14 @@ class WeChatDbStorage:
             exported = self._load_exported_resource_manifest()
             _WECHAT_EXPORTED_RESOURCE_CACHE[cache_key] = (time.time(), exported)
             return exported
+        exported = self._load_exported_resource_manifest()
         account_root = self._wechat_account_root()
         if not account_root:
-            return {}
+            return exported
         dirs = self._hardlink_dirs()
         export_root = self._resource_export_root()
-        exported: dict[str, dict[str, Any]] = {}
-        image_xor_key = self._wechat_v4_image_xor_key(account_root) if decode_missing else 0
-        image_aes_key = self._wechat_v4_image_dynamic_aes_key(account_root) if decode_missing else None
+        image_xor_key: int | None = None
+        image_aes_key: bytes | None = None
         for table, media_kind in [
             ("image_hardlink_info_v4", "image"),
             ("video_hardlink_info_v4", "video"),
@@ -979,16 +1115,32 @@ class WeChatDbStorage:
                 prefix = f"{md5_text[:8]}_" if md5_text else ""
                 original_file_name = str(row.get("file_name") or relative_path.name)
                 target_name = f"{prefix}{relative_path.name}"
+                cached_item = exported.get(md5_text) or exported.get(original_file_name) or exported.get(target_name)
+                cached_stored_path = str(cached_item.get("stored_path") or "") if cached_item else ""
+                if cached_item and cached_stored_path and Path(cached_stored_path).exists():
+                    exported[str(cached_item["file_name"])] = cached_item
+                    exported[original_file_name] = cached_item
+                    if md5_text:
+                        exported[md5_text] = cached_item
+                    size = int(cached_item.get("size") or row.get("file_size") or 0)
+                    if size:
+                        exported[f"size:{size}"] = cached_item
+                        exported[f"size:{size + 31}"] = cached_item
+                    continue
                 target = export_root / media_kind / target_name
                 decoded_from_dat = False
                 if media_kind == "image" and relative_path.suffix.lower() == ".dat":
                     decoded = self._existing_exported_image(export_root / media_kind, prefix, relative_path.stem)
                     if not decoded and decode_missing:
+                        if image_xor_key is None:
+                            image_xor_key = self._wechat_v4_image_xor_key(account_root)
+                        if image_aes_key is None:
+                            image_aes_key = self._wechat_v4_image_dynamic_aes_key(account_root)
                         decoded = _decode_wechat_v4_image_dat(
                             source,
                             export_root / media_kind,
                             f"{prefix}{relative_path.stem}",
-                            image_xor_key,
+                            image_xor_key or 0,
                             image_aes_key,
                         )
                     if decoded:
