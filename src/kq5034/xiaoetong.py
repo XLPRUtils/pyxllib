@@ -824,6 +824,7 @@ return true;
         """ 导出指定的打卡数据文件 """
         cache_key = None
         expected_download_name = ''
+        existing_exports = None
         if 'community_admin' in url:  # 禅宗打卡
             if start_date is None:  # 开始时间可以设置为一年前
                 start_date = (datetime.datetime.now() - datetime.timedelta(days=365)).strftime('%Y-%m-%d')
@@ -845,6 +846,8 @@ return true;
             tab.wait(3)
             pane, _ = self._等待禅宗打卡导出按钮(tab)
             expected_download_name = self._提取禅宗打卡导出名(tab)
+            if download and expected_download_name:
+                existing_exports = self._列出下载中心任务名([expected_download_name])
             # 等待按钮变为可点击状态
             btn = pane('tag:button@@class:ss-button@@text():导出')(
                 'tag:span@@text():导出').wait.clickable()
@@ -916,9 +919,13 @@ return true;
             raise NotImplementedError
 
         if download:
-            tab.wait(3)
+            tab.wait(10 if existing_exports is not None else 3)
             # tab.close()
-            file = self.download_last_file([expected_download_name] if expected_download_name else None)
+            file = self.download_last_file(
+                [expected_download_name] if expected_download_name else None,
+                exclude_task_names=existing_exports,
+                max_wait_seconds=20 * 60 if existing_exports is not None else None,
+            )
             if file and expected_download_name:
                 if self._标准化下载名(expected_download_name) not in self._标准化下载名(file.name):
                     logger.warning(f'禅宗打卡导出文件名校验失败：expect={expected_download_name} got={file.name} url={url}')

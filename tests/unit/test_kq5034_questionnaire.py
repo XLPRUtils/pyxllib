@@ -8,6 +8,7 @@ from kq5034.questionnaire import (
     _读取CodeYun问卷提醒数据,
     分析问卷滞留记录,
     提醒问卷数据,
+    问卷滞留提醒发送目标,
 )
 
 
@@ -33,6 +34,37 @@ def test_分析问卷滞留记录支持分组和未分组():
     assert result['梵呗']['items'] == ['20260415梵呗初阶：3']
     assert result['未分组']['items'] == ['20260422未知课程：4']
     assert result['禅宗']['items'] == []
+
+
+def test_分析问卷滞留记录格式化链接对象课程名():
+    df = pd.DataFrame(
+        {
+            '序号': [664, 665, 666, 663, 667, 668, 669, 670, 671],
+            '1、所属课程': [
+                {'value': '20260301禅宗46期五阶', 'link': {'url': 'https://www.kdocs.cn/l/ctMnRgPB3Hm4'}},
+                {'value': '20260301禅宗46期五阶', 'link': {'url': 'https://www.kdocs.cn/l/ctMnRgPB3Hm4'}},
+                {'value': '20260308禅宗8期4.5阶', 'link': {'url': 'https://www.kdocs.cn/l/cjEE1jEybxRO'}},
+                {'value': '20260308禅宗8期4.5阶', 'link': {'url': 'https://www.kdocs.cn/l/copnS6juyN2T'}},
+                {'value': '20260412禅宗12期一阶', 'link': {'url': 'https://www.kdocs.cn/l/copnS6juyN2T'}},
+                {'value': '20260412禅宗12期一阶', 'link': {'url': 'https://www.kdocs.cn/l/copnS6juyN2T'}},
+                {'value': '20260412禅宗12期一阶', 'link': {'url': 'https://www.kdocs.cn/l/copnS6juyN2T'}},
+                {'value': '20260412禅宗12期一阶', 'link': {'url': 'https://www.kdocs.cn/l/copnS6juyN2T'}},
+                {'value': '20260412禅宗12期一阶', 'link': {'url': 'https://www.kdocs.cn/l/copnS6juyN2T'}},
+            ],
+            '处理状态': [''] * 9,
+        }
+    )
+
+    result = 分析问卷滞留记录(df)
+
+    assert result['禅宗']['items'] == [
+        '20260301禅宗46期五阶：664,665',
+        '20260308禅宗8期4.5阶：663,666',
+        '20260412禅宗12期一阶：667,668,669,670,671',
+    ]
+    assert '1. 20260301禅宗46期五阶：664,665' in result['禅宗']['message']
+    assert "{'value'" not in result['禅宗']['message']
+    assert 'https://www.kdocs.cn' not in result['禅宗']['message']
 
 
 def test_读取CodeYun问卷提醒数据支持分页(monkeypatch):
@@ -140,7 +172,7 @@ def test_提醒问卷数据禅宗同清单非周日不重复发送(monkeypatch, 
     提醒问卷数据(api_url=api_url, state_path=state_path, today=datetime.datetime(2026, 5, 9, 9))
 
     assert len(sent) == 1
-    assert sent[0][0] == '禅宗修道考勤管理'
+    assert sent[0][0] == 问卷滞留提醒发送目标['禅宗']
 
 
 def test_提醒问卷数据禅宗周日同清单仍发送(monkeypatch, tmp_path):
@@ -170,4 +202,4 @@ def test_提醒问卷数据禅宗周日同清单仍发送(monkeypatch, tmp_path)
     提醒问卷数据(api_url=api_url, state_path=state_path, today=datetime.date(2026, 5, 10))
 
     assert len(sent) == 2
-    assert [x[0] for x in sent] == ['禅宗修道考勤管理', '禅宗修道考勤管理']
+    assert [x[0] for x in sent] == [问卷滞留提醒发送目标['禅宗'], 问卷滞留提醒发送目标['禅宗']]

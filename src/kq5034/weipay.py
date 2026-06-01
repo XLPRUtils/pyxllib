@@ -1246,10 +1246,21 @@ return [...document.querySelectorAll('table')].filter(isVisible).map((table, tab
             return {'submitted': True, 'completed': False, 'status_text': marker.get('status_text', ''), 'reason': 'submit_marker_exists', 'marker': marker}
         tab = self.tab
         tab.get('https://pay.weixin.qq.com/index.php/xphp/cbatchrefund/batch_refund#/pages/index/index')
+        upload_button = tab.ele('tag:a@@title=上传文件', timeout=30)
+        upload_button.click.to_upload(file)
         tab.wait(2)
-        tab('tag:a@@title=上传文件').click.to_upload(file)
-        tab.wait(2)
-        tab('tag:a@@text():确定@@class=btn btn-primary@@href=javascript:void(0);').click()
+        confirm_button = None
+        for button in tab.eles('tag:a@@text():确定', timeout=10):
+            try:
+                width, height = button.rect.size
+            except Exception:
+                continue
+            if width > 0 and height > 0:
+                confirm_button = button
+                break
+        if confirm_button is None:
+            raise RuntimeError('微信支付批量退款页未找到可见的“确定”按钮')
+        confirm_button.click()
         tab.wait(2)
         submit_started_at = pd.Timestamp.now()
         popup_confirmed = self.填写密码与验证码(tab, submit_file=file)

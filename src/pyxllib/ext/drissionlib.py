@@ -24,7 +24,7 @@ except ModuleNotFoundError:
 
 try:
     import DrissionPage
-    from DrissionPage import ChromiumPage, Chromium
+    from DrissionPage import ChromiumPage, Chromium, ChromiumOptions
     from DrissionPage._pages.chromium_base import ChromiumBase
     from DrissionPage._pages.chromium_tab import ChromiumTab
     import DrissionPage.errors
@@ -32,6 +32,7 @@ except ModuleNotFoundError:
     DrissionPage = lazy_import('DrissionPage')
     ChromiumPage = lazy_import('from DrissionPage import ChromiumPage')
     Chromium = lazy_import('from DrissionPage import Chromium')
+    ChromiumOptions = lazy_import('from DrissionPage import ChromiumOptions')
     ChromiumBase = lazy_import('from DrissionPage._pages.chromium_base import ChromiumBase')
     ChromiumTab = lazy_import('from DrissionPage._pages.chromium_tab import ChromiumTab')
 
@@ -223,13 +224,26 @@ class DpWebBase:
     """ 基于dp开发的爬虫工具的一个基础类 """
 
     def __init__(self, url=None, *, base_url=None):
-        self.browser = Chromium()
+        self.browser = self._create_chromium()
         self.browser.set.download_path(tempfile.gettempdir())
 
         parsed_url = urlparse(url)
         root_url = f"{parsed_url.scheme}://{parsed_url.netloc}"  # 构建基础 URL
         self.tab: XlTab = self.browser.new_tab(url)
         self.base_url = base_url or root_url  # 使用基础 URL 作为 base_url，后续同域名网站去重用
+
+    @staticmethod
+    def _create_chromium():
+        try:
+            return Chromium()
+        except Exception as exc:
+            options = ChromiumOptions()
+            address = getattr(options, 'address', None)
+            if address:
+                logger.warning(f'DrissionPage Chromium() 初始化失败，改用显式地址重试：{address}，error={exc!r}')
+                options.set_address(address)
+                return Chromium(options)
+            raise
 
     def close_if_exceeds_min_tabs(self, min_tabs_to_keep=1):
         """ 检查同网站的tab数量，如果超过最小保留数量则关闭当前页面 """
