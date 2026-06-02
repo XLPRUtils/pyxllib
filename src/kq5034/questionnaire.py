@@ -9,6 +9,7 @@ import json
 import os
 import re
 from pathlib import Path
+from urllib.parse import urlsplit, urlunsplit
 
 import pandas as pd
 import requests
@@ -29,6 +30,10 @@ import requests
 CodeYun问卷数据接口 = os.getenv(
     'KQ5034_CODEYUN_QUESTIONNAIRE_DATA_URL',
     'https://code4101.com/api/attendance/wjx-data',
+)
+CodeYun问卷数据表接口 = os.getenv(
+    'KQ5034_CODEYUN_QUESTIONNAIRE_SHEET_URL',
+    '',
 )
 CodeYun问卷数据页大小 = 100
 
@@ -157,38 +162,126 @@ def _转文本(value):
     return str(value).strip()
 
 
+def _默认CodeYun问卷数据表接口(api_url):
+    if CodeYun问卷数据表接口:
+        return CodeYun问卷数据表接口
+
+    parsed = urlsplit(api_url)
+    if parsed.scheme and parsed.netloc:
+        return urlunsplit((parsed.scheme, parsed.netloc, '/api/note-sheets/sheets/5', '', ''))
+    return 'https://code4101.com/api/note-sheets/sheets/5'
+
+
+def _问卷提醒行(seq, course_name, process_status):
+    seq = _转整数(seq, 0)
+    if not seq:
+        return None
+    return {
+        '序号': seq,
+        '1、所属课程': _转文本(course_name),
+        '处理状态': _转文本(process_status),
+    }
+
+
+def _表格行取值(row, columns, header):
+    if isinstance(row, dict):
+        return row.get(header, '')
+    if not isinstance(row, (list, tuple)):
+        return ''
+    try:
+        index = columns.index(header)
+    except ValueError:
+        return ''
+    return row[index] if index < len(row) else ''
+
+
+def _读取CodeYun问卷提醒表格数据(sheet_url, page_size=CodeYun问卷数据页大小):
+    rows = []
+    page = 1
+
+    while True:
+        resp = requests.get(
+            sheet_url,
+            params={
+                'paginate': 'true',
+                'page': page,
+                'page_size': page_size,
+                'include_workbook_context': 'false',
+            },
+            timeout=(5, 20),
+        )
+        resp.raise_for_status()
+        payload = resp.json()
+        document_json = payload.get('document_json') or {}
+        columns = [_转文本(column) for column in (document_json.get('columns') or [])]
+        page_rows = document_json.get('rows') or []
+
+        for row in page_rows:
+            item = _问卷提醒行(
+                _表格行取值(row, columns, '序号'),
+                _表格行取值(row, columns, '课程'),
+                _表格行取值(row, columns, '处理状态'),
+            )
+            if item is not None:
+                rows.append(item)
+
+        pagination = payload.get('pagination') or {}
+        page_count = _转整数(pagination.get('page_count'), 0)
+        if page_count and page >= page_count:
+            break
+        if not page_count and len(page_rows) < page_size:
+            break
+
+        page += 1
+        if page > 100:
+            raise RuntimeError('CodeYun 问卷提醒表格分页超过 100 页，疑似接口异常')
+
+    if not rows:
+        return pd.DataFrame(columns=['序号', '1、所属课程', '处理状态'])
+
+    df = pd.DataFrame(rows)
+    df = df.drop_duplicates(subset=['序号'], keep='last')
+    _fill_text_na(df, '')
+    return df
+
+
 def _读取CodeYun问卷提醒数据(api_url=CodeYun问卷数据接口, page_size=CodeYun问卷数据页大小):
     """从 CodeYun 接口分页读取问卷提醒所需字段。"""
 
     rows = []
     page = 1
 
-    while True:
-        resp = requests.get(
-            api_url,
-            params={'page': page, 'page_size': page_size, 'process_status': '__empty__'},
-            timeout=(5, 20),
+    try:
+        while True:
+            resp = requests.get(
+                api_url,
+                params={'page': page, 'page_size': page_size, 'process_status': '__empty__'},
+                timeout=(5, 20),
+            )
+            resp.raise_for_status()
+            payload = resp.json()
+            items = payload.get('items') or []
+
+            for item in items:
+                row = _问卷提醒行(
+                    item.get('seq'),
+                    item.get('course_name'),
+                    item.get('process_status'),
+                )
+                if row is not None:
+                    rows.append(row)
+
+            if len(items) < page_size:
+                break
+
+            page += 1
+            if page > 100:
+                raise RuntimeError('CodeYun 问卷提醒分页超过 100 页，疑似接口异常')
+    except requests.RequestException:
+        return _读取CodeYun问卷提醒表格数据(
+            _默认CodeYun问卷数据表接口(api_url),
+            page_size=page_size,
         )
-        resp.raise_for_status()
-        payload = resp.json()
-        items = payload.get('items') or []
-
-        for item in items:
-            seq = _转整数(item.get('seq'), 0)
-            if not seq:
-                continue
-            rows.append({
-                '序号': seq,
-                '1、所属课程': _转文本(item.get('course_name')),
-                '处理状态': _转文本(item.get('process_status')),
-            })
-
-        if len(items) < page_size:
-            break
-
-        page += 1
-        if page > 100:
-            raise RuntimeError('CodeYun 问卷提醒分页超过 100 页，疑似接口异常')
 
     if not rows:
         return pd.DataFrame(columns=['序号', '1、所属课程', '处理状态'])

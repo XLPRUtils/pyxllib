@@ -823,6 +823,26 @@ ORDER BY ldt.lesson_id DESC;
             return '', len(rows)
 
         x = rows[0]
+        is_phone_import_placeholder = (
+            str(x.get('from_channel') or '') == 'B端手机号导入'
+            and str(x.get('is_seal') or '').startswith('待注册')
+            and not x.get('name')
+            and str(x.get('user_nickname') or '').startswith('手机尾号')
+        )
+        if is_phone_import_placeholder and 昵称:
+            name_candidates = self.exec2dict(
+                'SELECT * FROM user_table '
+                f'WHERE shop_id={shop_id} '
+                'AND is_seal != \'已注销\' '
+                'AND is_seal NOT LIKE %s '
+                'AND (user_nickname = ANY(%s) OR name = ANY(%s))',
+                ['待注册%', 昵称, 昵称],
+            ).fetchall()
+            unique_candidates = {row['user_id2']: row for row in name_candidates}
+            if len(unique_candidates) == 1:
+                candidate = next(iter(unique_candidates.values()))
+                return candidate['user_id2'], 95
+
         return x['user_id2'], 90
 
     def __3_各网课定制的不同进度算法(self):
