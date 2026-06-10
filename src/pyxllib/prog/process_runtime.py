@@ -216,6 +216,26 @@ def process_candidates_for_command(command):
     return process_candidates_by_name(candidate_process_names_for_command(command))
 
 
+def root_process_records(records, *, pid_key="pid", parent_pid_key="parent_pid"):
+    """Return records whose parent pid is not also present in the record set."""
+
+    pids = set()
+    for item in records:
+        try:
+            pids.add(int(item[pid_key]))
+        except (KeyError, TypeError, ValueError):
+            continue
+    roots = []
+    for item in records:
+        try:
+            parent_pid = int(item.get(parent_pid_key) or -1)
+        except (AttributeError, TypeError, ValueError):
+            parent_pid = -1
+        if parent_pid not in pids:
+            roots.append(item)
+    return roots
+
+
 def terminate_process_tree(pid, timeout=5.0):
     import psutil
 

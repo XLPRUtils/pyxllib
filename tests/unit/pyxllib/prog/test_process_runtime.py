@@ -31,6 +31,20 @@ def test_windows_process_candidates_by_name_falls_back_to_psutil(monkeypatch):
     assert any(proc.pid == os.getpid() for proc in processes)
 
 
+def test_root_process_records_excludes_children():
+    records = [
+        {"pid": 1, "parent_pid": 0, "name": "root-a"},
+        {"pid": 2, "parent_pid": 1, "name": "child-a"},
+        {"pid": 3, "parent_pid": 99, "name": "root-b"},
+        {"pid": "bad", "parent_pid": 1, "name": "invalid-pid"},
+    ]
+
+    assert process_runtime.root_process_records(records) == [
+        {"pid": 1, "parent_pid": 0, "name": "root-a"},
+        {"pid": 3, "parent_pid": 99, "name": "root-b"},
+    ]
+
+
 def test_terminate_process_tree_tolerates_access_denied_wait(monkeypatch):
     import psutil
 
