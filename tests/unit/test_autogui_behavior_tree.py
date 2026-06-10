@@ -232,12 +232,14 @@ def test_behavior_tree_find_view_empty_group_ignores_nested_identity_shapes():
     assert runtime.find_view("任意分组") is view
 
 
-def test_behavior_tree_shape_load_delegates_scroll_window_to_runtime():
+def test_behavior_tree_shape_load_delegates_scroll_window_to_runtime(monkeypatch):
     image = _image("邮件", "0121.png", [
         {"id": "list", "title": "邮件清单2", "x": 0.1, "y": 0.2, "w": 0.4, "h": 0.5, "contentDirection": "down"}
     ])
     shape = View(image).get_shape("邮件清单2")
     calls = []
+    sleeps = []
+    monkeypatch.setattr("pyxllib.autogui.runtime.time.sleep", lambda seconds: sleeps.append(seconds))
 
     class FakeRuntime(Runtime):
         def __init__(self):
@@ -270,6 +272,7 @@ def test_behavior_tree_shape_load_delegates_scroll_window_to_runtime():
     assert shape is not None
     assert list(shape.load(runtime, ratio=0.6, duration=2.0)) == [1]
     assert calls == [("邮件清单2", 0.6, 2.0)]
+    assert sleeps == [2.0]
     assert runtime.attrs["load_new"] is True
 
 

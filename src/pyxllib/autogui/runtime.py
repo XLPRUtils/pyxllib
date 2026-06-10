@@ -103,9 +103,10 @@ class Runtime:
             return
         before = self.shape_load_signature(shape)
         self.drag_shape_content(shape, ratio=ratio, duration=duration)
-        yield 1
+        time.sleep(2.0)
         after = self.shape_load_signature(shape)
         attrs["load_new"] = self.shape_content_loaded_new(shape, before, after)
+        yield 1
 
     def drag_shape_content(self, shape: Shape, *, ratio: float = 0.5, duration: float = 1.5) -> Any:
         raise NotImplementedError
