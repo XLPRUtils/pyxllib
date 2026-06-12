@@ -16,6 +16,8 @@
 
 账号、课程、微信、WPS、AnLib、OCR、世界主页、图片识别等都属于业务层，不进入通用行为树框架。
 
+GUI 自动化里的静态帧、shape、滚动窗口和浮动条目模板属于 `pyxllib.autogui.behavior_tree` 的相邻基础设施，不属于本文件讨论的调度行为树内核。真实业务案例见 [autogui 浮动模板定位案例](./autogui_floating_template_case.md)。
+
 ## 2. 最小示例
 
 ```python
