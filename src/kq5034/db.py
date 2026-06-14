@@ -390,11 +390,13 @@ class KqDb(XlprDb):
         else:
             logger.warning("注意：当前为测试模式(commit=False)，数据未写入数据库。")
 
-    def 添加禅宗课次配置数据(self, course_name, week_num, courses):
+    def 添加禅宗课次配置数据(self, course_name, week_num, courses, *, week_date_offsets=None):
         """
         :param course_name: 课程名称，例如'd250629禅宗9期一阶'
         :param week_num: 持续周数
         :param courses: 课次数据
+        :param week_date_offsets: 特殊排课偏移，格式为 {周次: 偏移天数}。
+            例如 {13: 7, 14: 7} 表示课次仍叫第13/14周，但业务日期整体顺延7天。
         :return:
 
 
@@ -410,15 +412,21 @@ class KqDb(XlprDb):
         formatted_str = f"20{course_name[1:3]}-{course_name[3:5]}-{course_name[5:7]}"
         start_date = datetime.strptime(formatted_str, "%Y-%m-%d")
         # print(start_date)  # 输出: 2025-06-29 00:00:00
-        end_date = start_date + timedelta(weeks=week_num)
+        week_date_offsets = week_date_offsets or {}
+        max_offset_days = max(week_date_offsets.values(), default=0)
+        end_date = start_date + timedelta(weeks=week_num, days=max_offset_days)
 
         # 2 遍历课程数据
         def update_row(week_id, prefix, name, lesson_id2, video_duration):
+            date_offset_days = week_date_offsets.get(week_id, 0)
+            scheduled_start_date = start_date + timedelta(weeks=week_id - 1, days=date_offset_days)
+            scheduled_next_update = start_date + timedelta(weeks=week_id, days=date_offset_days)
+
             # 1 配置数据条目
             row = {
-                'start_date': (start_date + timedelta(weeks=week_id - 1)).strftime("%Y%m%d %H:%M:%S"),
+                'start_date': scheduled_start_date.strftime("%Y%m%d %H:%M:%S"),
                 'end_date': end_date.strftime("%Y%m%d %H:%M:%S"),
-                'next_update': (start_date + timedelta(weeks=week_id)).strftime("%Y%m%d %H:%M:%S"),
+                'next_update': scheduled_next_update.strftime("%Y%m%d %H:%M:%S"),
                 'lesson_id2': lesson_id2,
                 'lesson_name': f'{prefix}={name}',
                 'shop_id': 2,
@@ -427,7 +435,7 @@ class KqDb(XlprDb):
                 row['video_duration'] = video_duration * 60  # 分钟转换成秒数
 
             # 2 提前抓取所有匹配前缀的数据库条目
-            existing_lessons = self.execute("SELECT lesson_id, lesson_name FROM lesson_table "
+            existing_lessons = self.execute("SELECT lesson_id, lesson_name, next_update FROM lesson_table "
                                             f"WHERE lesson_name LIKE '{prefix}=%'").fetchall()
 
             # 3 查找匹配的条目
@@ -459,7 +467,7 @@ class KqDb(XlprDb):
             matched_lesson_id = None
             current_lesson_name = row['lesson_name']  # 完整的原始名称
 
-            for lesson_id, db_lesson_name in existing_lessons:
+            for lesson_id, db_lesson_name, db_next_update in existing_lessons:
                 # 提取数据库中的name部分（去掉prefix=前缀）
                 if '=' in db_lesson_name:
                     db_name = db_lesson_name.split('=', 1)[1]  # 只按第一个=分割
@@ -467,6 +475,10 @@ class KqDb(XlprDb):
                     # 检查当前lesson_name是否包含数据库中的name，并考虑数字匹配的严谨性
                     if is_name_match(current_lesson_name, db_name):
                         matched_lesson_id = lesson_id
+                        if db_next_update:
+                            configured_next_update = datetime.strptime(row['next_update'], "%Y%m%d %H:%M:%S")
+                            if db_next_update > configured_next_update:
+                                row['next_update'] = db_next_update
                         break
 
             # 4 根据匹配结果决定插入还是更新
@@ -1698,7 +1710,7 @@ ORDER BY ldt.lesson_id DESC;
 
         self.insert_row('lesson_data_table', row, commit=True)
 
-    def 禅宗从旧课程继承配置(self, old_course_name, new_course_name):
+    def 禅宗从旧课程继承配置(self, old_course_name, new_course_name, *, week_date_offsets=None):
         from datetime import datetime
 
         # 1 从self的lesson_table，找lesson_name以old_lesson_prefix为前缀的数据，按lesson_id排序
@@ -1735,7 +1747,9 @@ ORDER BY ldt.lesson_id DESC;
             ),
             default=0  # 当old_lessons为空或没有匹配项时，返回0
         )
-        end_date = start_date + timedelta(weeks=max_week + 10)
+        week_date_offsets = week_date_offsets or {}
+        max_offset_days = max(week_date_offsets.values(), default=0)
+        end_date = start_date + timedelta(weeks=max_week + 10, days=max_offset_days)
 
         # 4 从旧课程参考配置，设置新课程数据
         new_lesson_prefix = f'{new_course_name}-'
@@ -1755,8 +1769,13 @@ ORDER BY ldt.lesson_id DESC;
             # 从lesson_name正则匹配出"第\d+周"
             week_str = re.search(r'第(\d+)周', new_lesson['lesson_name']).group(1)
             week = int(week_str)
-            new_lesson['start_date'] = (start_date + timedelta(weeks=week - 1)).strftime('%Y-%m-%d %H:%M:%S')
-            new_lesson['next_update'] = (start_date + timedelta(weeks=week)).strftime('%Y-%m-%d %H:%M:%S')
+            date_offset_days = week_date_offsets.get(week, 0)
+            new_lesson['start_date'] = (
+                start_date + timedelta(weeks=week - 1, days=date_offset_days)
+            ).strftime('%Y-%m-%d %H:%M:%S')
+            new_lesson['next_update'] = (
+                start_date + timedelta(weeks=week, days=date_offset_days)
+            ).strftime('%Y-%m-%d %H:%M:%S')
 
             new_lessons.append(new_lesson)
 

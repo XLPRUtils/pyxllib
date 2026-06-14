@@ -1308,14 +1308,27 @@ return fetch('/xe.data-user-behavior.live.user_list_filter/1.0.0', {
     def __2_从网页获得某些信息(self):
         pass
 
-    def search_lesson_links(self, name, live_status=None, maxn=-1):
+    @staticmethod
+    def _提取直播课课号(text):
+        match = re.search(r'(?:堂|第)\s*0*(\d+)\s*(?:课)?', str(text or ''))
+        return int(match.group(1)) if match else None
+
+    def search_lesson_links(self, name, live_status=None, maxn=-1, sort_by_lesson_number=False,
+                            expected_count=None, required_title_keywords=None):
         """
         :param name: 课程名称
         :param str live_status: 直播状态：全部状态，未开始，直播中，已结束
         :param maxn: 获取的最多条目数
+        :param bool sort_by_lesson_number: 是否按标题中的课号升序返回；小鹅通列表默认常是倒序。
+        :param expected_count: 期望课次数；用于防止关键词命中相似课程后误写入配置表。
+        :param required_title_keywords: 标题必须包含的关键词，可以是字符串或字符串列表。
         :return: 使用 yield 逐条返回查询结果
         """
         tab = self.switch_shop()
+        if isinstance(required_title_keywords, str):
+            required_title_keywords = [required_title_keywords]
+        required_title_keywords = [str(x) for x in (required_title_keywords or []) if str(x)]
+        should_collect = sort_by_lesson_number or expected_count is not None or required_title_keywords
 
         # 1 配置要访问的 url
         # 小鹅通直播列表页是 hash 路由，查询参数必须放在 '#/list' 后面。
@@ -1340,6 +1353,7 @@ return fetch('/xe.data-user-behavior.live.user_list_filter/1.0.0', {
         url = f"https://admin.xiaoe-tech.com/t/live#/list?{urlencode(params)}"
         tab.get(url)
 
+        rows = []
         count = 0
         # 2 遍历所有页
         while True:
@@ -1356,15 +1370,23 @@ return fetch('/xe.data-user-behavior.live.user_list_filter/1.0.0', {
                 row = {
                     'lesson_name': title,
                     'lesson_id': course_id,
+                    'lesson_id2': course_id,
                 }
 
-                # 使用 yield 返回结果
-                yield row
+                if required_title_keywords and not all(x in title for x in required_title_keywords):
+                    tab2.close()
+                    continue
+
+                if should_collect:
+                    rows.append(row)
+                else:
+                    # 使用 yield 返回结果
+                    yield row
                 count += 1
 
                 tab2.close()
 
-                if maxn > 0 and count >= maxn:
+                if maxn > 0 and count >= maxn and not should_collect:
                     # 已达到最大条目数
                     return
 
@@ -1376,6 +1398,21 @@ return fetch('/xe.data-user-behavior.live.user_list_filter/1.0.0', {
                 break
             else:
                 next_page_li.click()
+
+        if should_collect:
+            if expected_count is not None and len(rows) != expected_count:
+                raise RuntimeError(
+                    f'检索课程链接数量不符合预期：name={name!r}, expected_count={expected_count}, '
+                    f'actual_count={len(rows)}, lessons={[x.get("lesson_name") for x in rows]}'
+                )
+
+            def sort_key(row):
+                lesson_number = self._提取直播课课号(row.get('lesson_name'))
+                return (lesson_number is None, lesson_number or 0, str(row.get('lesson_name') or ''))
+
+            result_rows = sorted(rows, key=sort_key) if sort_by_lesson_number else rows
+            for row in result_rows[:maxn if maxn > 0 else None]:
+                yield row
 
     def get_leeson_playback_settings(self, lesson_id2):
         """ 设置课次的回放配置情况
@@ -1484,6 +1521,7 @@ return fetch('/xe.data-user-behavior.live.user_list_filter/1.0.0', {
 
             # 2 检查每周子课次清单
             task_cfgs = []
+            chapter_div.scroll.to_see()
             tasks = chapter('t:div@@aria-label=checkbox-group').eles('t:div@@class=task')
             if not tasks:
                 chapter_div.click()  # 确保展开该章节
@@ -1492,12 +1530,15 @@ return fetch('/xe.data-user-behavior.live.user_list_filter/1.0.0', {
             # 3 保存课次的名称、链接
             for task in tasks:
                 name = task('t:span@@class:ss-popover__reference').text
-                tab2 = task('t:span@@text()=数据').click.for_new_tab()
+                data_ele = task('t:span@@text()=数据')
+                data_ele.scroll.to_see()
+                tab2 = data_ele.click.for_new_tab(timeout=10)
                 url = tab2.url
                 tab2.close()
                 task_cfgs.append([name, url])
 
             courses[chapter_name] = task_cfgs
+            chapter_div.scroll.to_see()
             chapter_div.click()  # 折叠该章节
 
         return courses

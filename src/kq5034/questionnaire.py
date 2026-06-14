@@ -8,6 +8,7 @@ import datetime
 import json
 import os
 import re
+import time
 from pathlib import Path
 from urllib.parse import urlsplit, urlunsplit
 
@@ -36,6 +37,9 @@ CodeYun问卷数据表接口 = os.getenv(
     '',
 )
 CodeYun问卷数据页大小 = 100
+CodeYun问卷请求超时秒数 = int(os.getenv('KQ5034_CODEYUN_QUESTIONNAIRE_TIMEOUT_SECONDS') or '60')
+CodeYun问卷请求重试次数 = int(os.getenv('KQ5034_CODEYUN_QUESTIONNAIRE_RETRY_COUNT') or '3')
+CodeYun问卷请求重试间隔秒数 = float(os.getenv('KQ5034_CODEYUN_QUESTIONNAIRE_RETRY_DELAY_SECONDS') or '3')
 
 
 def _默认问卷提醒状态文件():
@@ -195,12 +199,40 @@ def _表格行取值(row, columns, header):
     return row[index] if index < len(row) else ''
 
 
+def _CodeYun问卷请求GET(url, *, params):
+    attempts = max(1, CodeYun问卷请求重试次数)
+    last_exc = None
+    for attempt in range(attempts):
+        try:
+            resp = requests.get(
+                url,
+                params=params,
+                timeout=CodeYun问卷请求超时秒数,
+            )
+            if 500 <= resp.status_code < 600 and attempt + 1 < attempts:
+                time.sleep(CodeYun问卷请求重试间隔秒数)
+                continue
+            resp.raise_for_status()
+            return resp
+        except requests.RequestException as exc:
+            status_code = getattr(getattr(exc, 'response', None), 'status_code', None)
+            if status_code is not None and 400 <= int(status_code) < 500:
+                raise
+            last_exc = exc
+            if attempt + 1 >= attempts:
+                raise
+            time.sleep(CodeYun问卷请求重试间隔秒数)
+    if last_exc is not None:
+        raise last_exc
+    raise RuntimeError('CodeYun 问卷请求未返回结果')
+
+
 def _读取CodeYun问卷提醒表格数据(sheet_url, page_size=CodeYun问卷数据页大小):
     rows = []
     page = 1
 
     while True:
-        resp = requests.get(
+        resp = _CodeYun问卷请求GET(
             sheet_url,
             params={
                 'paginate': 'true',
@@ -208,9 +240,7 @@ def _读取CodeYun问卷提醒表格数据(sheet_url, page_size=CodeYun问卷数
                 'page_size': page_size,
                 'include_workbook_context': 'false',
             },
-            timeout=(5, 20),
         )
-        resp.raise_for_status()
         payload = resp.json()
         document_json = payload.get('document_json') or {}
         columns = [_转文本(column) for column in (document_json.get('columns') or [])]
@@ -253,12 +283,10 @@ def _读取CodeYun问卷提醒数据(api_url=CodeYun问卷数据接口, page_siz
 
     try:
         while True:
-            resp = requests.get(
+            resp = _CodeYun问卷请求GET(
                 api_url,
                 params={'page': page, 'page_size': page_size, 'process_status': '__empty__'},
-                timeout=(5, 20),
             )
-            resp.raise_for_status()
             payload = resp.json()
             items = payload.get('items') or []
 
