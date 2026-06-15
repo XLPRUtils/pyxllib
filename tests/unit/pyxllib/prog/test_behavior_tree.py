@@ -399,6 +399,70 @@ def test_with_services_do_not_wake_idle_tree_without_business_work(monkeypatch, 
     assert events == ["guard", "business", "guard"]
 
 
+def test_with_services_continues_when_guard_yields_zero(tmp_path):
+    events = []
+
+    def guard():
+        events.append("guard")
+        yield 0
+
+    def business():
+        events.append("business")
+
+    runner = BehaviorTreeRunner(
+        Root(WithServices(Every(60, child=Action(business)), Action(guard))),
+        tmp_path / "state.json",
+    )
+
+    assert runner.run_once() == Status.SUCCESS
+    assert events == ["guard", "business"]
+
+
+def test_with_services_stops_tick_when_guard_yields_action_power(tmp_path):
+    events = []
+
+    def guard():
+        events.append("guard-click")
+        yield 1
+        events.append("guard-idle")
+        yield 0
+
+    def business():
+        events.append("business")
+
+    runner = BehaviorTreeRunner(
+        Root(WithServices(Every(60, child=Action(business)), Action(guard))),
+        tmp_path / "state.json",
+    )
+
+    assert runner.run_once() == Status.RUNNING
+    assert events == ["guard-click"]
+    assert runner.run_once() == Status.SUCCESS
+    assert events == ["guard-click", "guard-idle", "business"]
+
+
+def test_with_services_uses_action_budget_before_business(tmp_path):
+    events = []
+
+    def guard():
+        events.append("guard-1")
+        yield 1
+        events.append("guard-2")
+        yield 1
+
+    def business():
+        events.append("business")
+
+    runner = BehaviorTreeRunner(
+        Root(WithServices(Every(60, child=Action(business)), Action(guard))),
+        tmp_path / "state.json",
+        action_budget=3,
+    )
+
+    assert runner.run_once() == Status.SUCCESS
+    assert events == ["guard-1", "guard-2", "business"]
+
+
 def test_memory_selector_continues_running_child(tmp_path):
     events = []
 

@@ -260,6 +260,12 @@ def _coerce_status(value: Any) -> Status:
     return Status.SUCCESS
 
 
+def _action_cost(value: Any) -> float:
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return max(0.0, float(value))
+    return 0.0
+
+
 def _source_location(filename: str, lineno: int, function: str) -> _SourceLocation:
     return _SourceLocation(filename, lineno, function)
 
@@ -309,6 +315,21 @@ class TreeContext:
         self.next_run_at = None
         self._slept = False
         self.trace_interrupt = None
+        self.action_budget = float(runner.action_budget)
+        self.action_cost = 0.0
+        self.last_yield_value = _MISSING
+
+    @property
+    def remaining_action_budget(self) -> float:
+        return max(0.0, self.action_budget - self.action_cost)
+
+    def consume_action(self, cost: Any) -> float:
+        value = _action_cost(cost)
+        self.action_cost += value
+        return value
+
+    def has_action_budget(self) -> bool:
+        return self.remaining_action_budget > 0
 
     def now(self) -> datetime.datetime:
         return self.runner.now()
@@ -515,6 +536,8 @@ class Action(Node):
         self.generator = None
 
     def tick(self, ctx: TreeContext) -> Status:
+        ctx.last_yield_value = _MISSING
+
         if self.generator is None:
             result = self.func(ctx, *self.args, **self.kwargs) if self.takes_ctx else self.func(*self.args, **self.kwargs)
             if isinstance(result, NextWake):
@@ -525,7 +548,9 @@ class Action(Node):
             self.generator = result
 
         try:
-            ctx.runner._advance_generator(self.generator)
+            yielded = ctx.runner._advance_generator(self.generator)
+            ctx.last_yield_value = yielded
+            ctx.consume_action(yielded)
             if ctx.runner.trace >= 2:
                 ctx.trace_interrupt = _TraceInterrupt("yield", _suspended_generator_location(self.generator), self.path)
             return self._record(Status.RUNNING)
@@ -1111,9 +1136,30 @@ class WithServices(Node):
             return self._record(Status.SKIP)
 
         for service in self.services:
-            status = service.tick(ctx)
-            if status in (Status.SUCCESS, Status.RUNNING, Status.FAILURE):
-                return self._record(status)
+            service_started_active = service.is_active(ctx)
+            service_start_cost = ctx.action_cost
+            service_yielded_zero = False
+            while True:
+                before_cost = ctx.action_cost
+                status = service.tick(ctx)
+                if status == Status.FAILURE:
+                    return self._record(status)
+                if not ctx.has_action_budget():
+                    return self._record(Status.RUNNING if status in (Status.SUCCESS, Status.RUNNING) else status)
+                if status == Status.RUNNING:
+                    if ctx.action_cost > before_cost:
+                        continue
+                    if isinstance(ctx.last_yield_value, (int, float)) and not isinstance(ctx.last_yield_value, bool) and ctx.last_yield_value == 0:
+                        service_yielded_zero = True
+                        continue
+                    return self._record(Status.RUNNING)
+                if status == Status.SUCCESS and not (
+                    service_started_active
+                    or service_yielded_zero
+                    or ctx.action_cost > service_start_cost
+                ):
+                    return self._record(status)
+                break
         return self._record(self.child.tick(ctx))
 
 
@@ -1148,12 +1194,23 @@ class IdleUntilNextWake(Node):
 class BehaviorTreeRunner:
     """行为树运行器。"""
 
-    def __init__(self, root: Node, state_path=None, *, trace=0, log_path=None, now_func=None, on_error=None):
+    def __init__(
+        self,
+        root: Node,
+        state_path=None,
+        *,
+        trace=0,
+        log_path=None,
+        now_func=None,
+        on_error=None,
+        action_budget: float = 1.0,
+    ):
         self.root = root
         self.state_path = Path(state_path) if state_path is not None else None
         self.trace = int(trace)
         self.now_func = now_func
         self.on_error = on_error
+        self.action_budget = max(0.0, float(action_budget))
         self.state = self.load_state()
         self.memory_state = {"nodes": {}, "blackboard": {}}
         self.logger = self._create_logger(log_path)
@@ -1238,10 +1295,9 @@ class BehaviorTreeRunner:
                 if not ctx._slept:
                     time.sleep(tick_seconds)
 
-    def _advance_generator(self, generator: GeneratorType) -> None:
+    def _advance_generator(self, generator: GeneratorType) -> Any:
         if self.trace < 2:
-            next(generator)
-            return
+            return next(generator)
 
         self._last_generator_return_locations = []
         previous_trace = sys.gettrace()
@@ -1253,7 +1309,7 @@ class BehaviorTreeRunner:
 
         sys.settrace(trace_func)
         try:
-            next(generator)
+            return next(generator)
         finally:
             sys.settrace(previous_trace)
 
