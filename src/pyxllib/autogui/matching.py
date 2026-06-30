@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import time
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
-from typing import Any, Callable, Mapping
+from typing import Any, Callable
 
-from .model import MatchRole, View, normalize_match_role
+from .model import MatchRole, View, image_number, normalize_match_role
 
 
 SceneScoreFunc = Callable[[dict[str, Any], dict[str, Any], str], float]
@@ -14,6 +16,28 @@ ShapeScoreFunc = Callable[[dict[str, Any], dict[str, Any], dict[str, Any], str],
 ShapeOcrScoreFunc = Callable[[dict[str, Any], dict[str, Any], dict[str, Any], str], float]
 DetailLogFunc = Callable[[str], None]
 ImagePredicateFunc = Callable[[dict[str, Any]], bool]
+
+
+def _layer_order_value(image: dict[str, Any], fallback: int) -> tuple[float, int]:
+    raw = image.get("layerOrder")
+    if isinstance(raw, bool):
+        return float(fallback), fallback
+    if isinstance(raw, (int, float)):
+        return float(raw), fallback
+    text = str(raw or "").strip()
+    try:
+        return float(text), fallback
+    except ValueError:
+        return float(fallback), fallback
+
+
+def _format_elapsed_seconds(seconds: float) -> str:
+    seconds = max(0.0, float(seconds))
+    if seconds < 60.0:
+        return f"{seconds:.2f}秒"
+    minutes = int(seconds // 60)
+    remaining = seconds - minutes * 60
+    return f"{minutes}分{remaining:05.2f}秒"
 
 
 @dataclass(frozen=True)
@@ -59,7 +83,7 @@ class SceneScorer:
             for shape in View(image).get_shapes(include_groups=False)
             if shape.is_scene_identity
         ]
-        return max(scores) if scores else 0.0
+        return min(scores) if scores else 0.0
 
 
 @dataclass(frozen=True)
@@ -70,10 +94,412 @@ class SceneRecognizer:
     threshold_for_scene_id: SceneThresholdFunc
     image_for_key: ImageForKeyFunc | None = None
     threshold_for_key: KeyThresholdFunc | None = None
-    key_priorities: Mapping[str, int] | None = None
+    max_parallel_workers: int = 32
+    max_candidate_batch_size: int = 16
+
+    def _scene_tree_nodes(self, tree: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """把资产树投影为 root layer 队列 + frame/subframe structure。
+
+        `layer` 只参与 root frame 的全局识别队列；image.children 中的
+        image 才构成 frame/subframe 的树形细化关系。
+        """
+
+        nodes: list[dict[str, Any]] = []
+
+        def folder_layer(item: dict[str, Any], fallback: int) -> int:
+            raw = item.get("layer")
+            if raw is None:
+                title = str(item.get("title") or "").strip().lower()
+                if title in {"layer 1", "layer1", "l1"}:
+                    return 1
+                if title in {"layer 2", "layer2", "l2"}:
+                    return 2
+                if title in {"layer 3", "layer3", "l3"}:
+                    return 3
+                return fallback
+            return View({"layer": raw}).layer
+
+        def visit(items: list[dict[str, Any]], parent_ids: tuple[int, ...], depth: int, layer: int) -> None:
+            for item in items:
+                if not isinstance(item, dict):
+                    continue
+                if item.get("type") == "folder":
+                    next_layer = folder_layer(item, layer)
+                    children = item.get("children")
+                    if isinstance(children, list):
+                        visit([child for child in children if isinstance(child, dict)], parent_ids, depth, next_layer)
+                    continue
+                if item.get("type") == "image":
+                    scene_id = image_number(item)
+                    current_parent_ids = parent_ids
+                    current_depth = depth
+                    if scene_id is not None:
+                        view = View(item)
+                        frame_layer = int(view.layer if item.get("layer") is not None else layer)
+                        nodes.append({
+                            "scene_id": int(scene_id),
+                            "image": item,
+                            "parent_ids": parent_ids,
+                            "depth": depth,
+                            "layer": frame_layer,
+                            "layer_order": _layer_order_value(item, len(nodes))[0],
+                            "order": len(nodes),
+                        })
+                        current_parent_ids = (*parent_ids, int(scene_id))
+                        current_depth = depth + 1
+                    children = item.get("children")
+                    if isinstance(children, list):
+                        visit([child for child in children if isinstance(child, dict)], current_parent_ids, current_depth, layer)
+                    continue
+
+        visit(tree, (), 0, 3)
+        return nodes
+
+    def _scene_tree_candidate_ids(
+        self,
+        ctx: dict[str, Any],
+        *,
+        preferred_scene_ids: list[int] | None = None,
+    ) -> list[int]:
+        tree = ctx.get("asset_tree")
+        if not isinstance(tree, list):
+            return []
+        nodes = self._scene_tree_nodes(tree)
+        existing = {
+            int(scene_id)
+            for scene_id, image in (ctx.get("images") or {}).items()
+            if isinstance(image, dict)
+        }
+        by_id = {int(node["scene_id"]): node for node in nodes if int(node["scene_id"]) in existing}
+        def preferred_candidates() -> list[int]:
+            candidates: list[int] = []
+            preferred = [int(scene_id) for scene_id in preferred_scene_ids if int(scene_id) in by_id]
+            preferred_set = set(preferred)
+            for scene_id in preferred:
+                node = by_id[scene_id]
+                for parent_id in node["parent_ids"]:
+                    if parent_id in by_id and parent_id not in candidates:
+                        candidates.append(parent_id)
+                if scene_id not in candidates:
+                    candidates.append(scene_id)
+                for child in nodes:
+                    if int(child["scene_id"]) in candidates:
+                        continue
+                    if any(parent_id in preferred_set for parent_id in child["parent_ids"]):
+                        child_id = int(child["scene_id"])
+                        if child_id in by_id:
+                            candidates.append(child_id)
+            return candidates
+
+        result: list[int] = []
+        if preferred_scene_ids:
+            result.extend(preferred_candidates())
+        roots = sorted(
+            [node for node in nodes if not node["parent_ids"] and int(node["scene_id"]) in existing],
+            key=lambda node: (float(node.get("layer_order", node["order"])), int(node["order"])),
+        )
+        for layer in (1, 2, 3):
+            for root in roots:
+                if int(root["layer"]) != layer:
+                    continue
+                root_id = int(root["scene_id"])
+                for node in nodes:
+                    scene_id = int(node["scene_id"])
+                    if scene_id not in existing or scene_id in result:
+                        continue
+                    if scene_id == root_id or root_id in [int(parent_id) for parent_id in node["parent_ids"]]:
+                        result.append(scene_id)
+        return result
 
     def scene_matches_id(self, scene_id: int, score: float) -> bool:
         return float(score) >= float(self.threshold_for_scene_id(scene_id))
+
+    def _weak_similarity_scene(self, ctx: dict[str, Any], scene_id: int) -> bool:
+        image = (ctx.get("images") or {}).get(int(scene_id))
+        if not isinstance(image, dict):
+            return False
+        if int(View(image).layer) != 3:
+            return False
+        return not any(shape.is_scene_identity for shape in View(image).get_shapes(include_groups=False))
+
+    def _score_scene_candidates(
+        self,
+        ctx: dict[str, Any],
+        frame_data_url: str,
+        scene_ids: list[int],
+    ) -> dict[int, float]:
+        images = ctx.get("images") or {}
+        ids = [int(scene_id) for scene_id in scene_ids if isinstance(images.get(int(scene_id)), dict)]
+        if not ids:
+            return {}
+
+        def score(scene_id: int) -> tuple[int, float]:
+            image = images.get(int(scene_id))
+            if not isinstance(image, dict):
+                return int(scene_id), 0.0
+            return int(scene_id), float(self.score_image(ctx, image, frame_data_url))
+
+        if len(ids) <= 1:
+            return dict(score(scene_id) for scene_id in ids)
+        workers = max(1, min(len(ids), int(self.max_parallel_workers or 1)))
+        with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="scene-match") as executor:
+            return dict(executor.map(score, ids))
+
+    def identify_scene_tree_number(
+        self,
+        ctx: dict[str, Any],
+        frame_data_url: str,
+        *,
+        preferred_scene_ids: list[int] | None = None,
+        trace: list[dict[str, Any]] | None = None,
+    ) -> tuple[int | None, float]:
+        def emit(event: dict[str, Any]) -> None:
+            if trace is not None:
+                trace.append(event)
+
+        flat_candidate_ids = self._scene_tree_candidate_ids(ctx, preferred_scene_ids=preferred_scene_ids)
+        if not flat_candidate_ids:
+            emit({
+                "event": "fallback_flat",
+                "reason": "asset_tree_candidates_empty",
+                "preferred_scene_ids": [int(item) for item in preferred_scene_ids or []],
+            })
+            return self.identify_scene_number(ctx, frame_data_url, preferred_scene_ids=preferred_scene_ids, trace=trace)
+        images = ctx.get("images") or {}
+        tree = ctx.get("asset_tree") if isinstance(ctx.get("asset_tree"), list) else []
+        node_by_id = {
+            int(node["scene_id"]): node
+            for node in self._scene_tree_nodes(tree)
+        }
+        children_by_parent: dict[int | None, list[int]] = {}
+        for scene_id in flat_candidate_ids:
+            node = node_by_id.get(int(scene_id))
+            if node is None:
+                continue
+            parent_ids = [int(parent_id) for parent_id in node["parent_ids"] if int(parent_id) in node_by_id]
+            parent_id = parent_ids[-1] if parent_ids else None
+            children_by_parent.setdefault(parent_id, []).append(int(scene_id))
+        score_by_id: dict[int, float] = {}
+
+        def score_ordered(scene_ids: list[int]) -> list[tuple[int, float]]:
+            scores = self._score_scene_candidates(ctx, frame_data_url, scene_ids)
+            score_by_id.update(scores)
+            return [(int(scene_id), float(scores.get(int(scene_id), 0.0))) for scene_id in scene_ids]
+
+        def describe_candidate(scene_id: int, score: float) -> dict[str, Any]:
+            node = node_by_id.get(int(scene_id), {})
+            image = images.get(int(scene_id)) if isinstance(images, dict) else None
+            return {
+                "scene_id": int(scene_id),
+                "title": str(image.get("title") or "") if isinstance(image, dict) else "",
+                "score": round(float(score), 3),
+                "threshold": round(float(self.threshold_for_scene_id(int(scene_id))), 3),
+                "matched": self.scene_matches_id(int(scene_id), float(score)),
+                "weak": self._weak_similarity_scene(ctx, int(scene_id)),
+                "layer": int(node.get("layer", 3) or 3),
+                "parent_ids": [int(parent_id) for parent_id in node.get("parent_ids", [])],
+            }
+
+        def match_ordered_candidates(
+            scene_ids: list[int],
+            *,
+            stage: str,
+            parent_id: int | None = None,
+            select_best_score: bool = False,
+        ) -> list[tuple[int, float]]:
+            """并行评分同一候选组，返回按配置顺序命中的显式场景。
+
+            这里故意不是“最高分获胜”：候选顺序由 layerOrder 或调用方
+            的候选列表表达。只有整组没有任何显式场景身份候选时，才允许
+            layer3 无身份帧用最高全图相似度兜底。父场景下的 children
+            属于同一粗场景的细分变体，允许按分数选择更明确的子帧。
+            """
+            started_at = time.perf_counter()
+            explicit_matches: list[tuple[int, float]] = []
+            weak_matches: list[tuple[int, float]] = []
+            scored: list[tuple[int, float]] = []
+            batch_size = max(1, min(len(scene_ids) or 1, int(self.max_candidate_batch_size or len(scene_ids) or 1)))
+            has_explicit_candidate = any(not self._weak_similarity_scene(ctx, scene_id) for scene_id in scene_ids)
+            stopped_early = False
+            for batch_index, offset in enumerate(range(0, len(scene_ids), batch_size), start=1):
+                batch_ids = scene_ids[offset : offset + batch_size]
+                batch_started_at = time.perf_counter()
+                batch_scored = score_ordered(batch_ids)
+                batch_elapsed = time.perf_counter() - batch_started_at
+                scored.extend(batch_scored)
+                batch_explicit_matches: list[tuple[int, float]] = []
+                batch_weak_matches: list[tuple[int, float]] = []
+                for scene_id, score in batch_scored:
+                    if not self.scene_matches_id(scene_id, score):
+                        continue
+                    if self._weak_similarity_scene(ctx, scene_id):
+                        batch_weak_matches.append((scene_id, score))
+                    else:
+                        batch_explicit_matches.append((scene_id, score))
+                explicit_matches.extend(batch_explicit_matches)
+                weak_matches.extend(batch_weak_matches)
+                emit({
+                    "event": "candidate_batch",
+                    "stage": stage,
+                    "parent_id": parent_id,
+                    "batch_index": batch_index,
+                    "batch_count": (len(scene_ids) + batch_size - 1) // batch_size,
+                    "max_parallel_workers": max(1, int(self.max_parallel_workers or 1)),
+                    "candidate_ids": [int(scene_id) for scene_id in batch_ids],
+                    "candidate_count": len(batch_ids),
+                    "elapsed_seconds": round(float(batch_elapsed), 3),
+                    "elapsed_text": _format_elapsed_seconds(batch_elapsed),
+                    "matched_ids": [int(scene_id) for scene_id, _score in [*batch_explicit_matches, *batch_weak_matches]],
+                    "candidates": [describe_candidate(scene_id, score) for scene_id, score in batch_scored],
+                })
+                if has_explicit_candidate and batch_explicit_matches and not select_best_score:
+                    stopped_early = True
+                    break
+            selected: list[tuple[int, float]]
+            selection_rule: str
+            if has_explicit_candidate:
+                if select_best_score and explicit_matches:
+                    selected = [max(explicit_matches, key=lambda item: item[1])]
+                    selection_rule = "best_score_explicit_match"
+                else:
+                    selected = explicit_matches
+                    selection_rule = "ordered_batched_first_explicit_match"
+            elif weak_matches:
+                selected = [max(weak_matches, key=lambda item: item[1])]
+                selection_rule = "batched_weak_fallback_best_score"
+            else:
+                selected = []
+                selection_rule = "no_match"
+            elapsed = time.perf_counter() - started_at
+            emit({
+                "event": "candidate_group",
+                "stage": stage,
+                "parent_id": parent_id,
+                "candidate_ids": [int(scene_id) for scene_id in scene_ids],
+                "candidate_count": len(scene_ids),
+                "selection_rule": selection_rule,
+                "has_explicit_candidate": bool(has_explicit_candidate),
+                "batch_size": batch_size,
+                "batch_count": (len(scene_ids) + batch_size - 1) // batch_size,
+                "max_parallel_workers": max(1, int(self.max_parallel_workers or 1)),
+                "processed_count": len(scored),
+                "stopped_early": stopped_early,
+                "elapsed_seconds": round(float(elapsed), 3),
+                "elapsed_text": _format_elapsed_seconds(elapsed),
+                "candidates": [describe_candidate(scene_id, score) for scene_id, score in scored],
+                "selected_ids": [int(scene_id) for scene_id, _score in selected],
+            })
+            return selected
+
+        def refine_frame_tree(scene_id: int, score: float, allowed_ids: set[int] | None = None) -> tuple[int | None, float]:
+            """父 frame 命中后，只沿 children 继续细化。
+
+            子 frame 的 `layer` 不再触发全局 layer 扫描；如果没有子节点
+            命中，就停留在已经命中的 parent frame。
+            """
+            if not self.scene_matches_id(int(scene_id), float(score)):
+                return None, float(score)
+            emit({
+                "event": "refine_enter",
+                "scene_id": int(scene_id),
+                "score": round(float(score), 3),
+                "allowed_ids": sorted(int(item) for item in allowed_ids) if allowed_ids is not None else None,
+            })
+            best_id = int(scene_id)
+            best_score = float(score)
+            children = children_by_parent.get(int(scene_id), [])
+            if allowed_ids is not None:
+                children = [child_id for child_id in children if int(child_id) in allowed_ids]
+            for child_id, child_score in match_ordered_candidates(children, stage="children", parent_id=int(scene_id), select_best_score=True):
+                matched_id, matched_score = refine_frame_tree(child_id, child_score, allowed_ids=allowed_ids)
+                if matched_id is None:
+                    continue
+                best_id = matched_id
+                best_score = min(float(score), float(matched_score))
+                break
+            if best_id == int(scene_id):
+                emit({
+                    "event": "refine_stop_at_parent",
+                    "scene_id": int(scene_id),
+                    "reason": "no_child_matched",
+                })
+            else:
+                emit({
+                    "event": "refine_child_selected",
+                    "parent_id": int(scene_id),
+                    "selected_scene_id": int(best_id),
+                    "score": round(float(best_score), 3),
+                })
+            return best_id, best_score
+
+        root_ids = children_by_parent.get(None, [])
+        root_layer_groups: list[tuple[str, list[int], set[int] | None]] = []
+        preferred_root_set: set[int] = set()
+        if preferred_scene_ids:
+            preferred_allowed: list[int] = []
+            preferred = [int(scene_id) for scene_id in preferred_scene_ids if int(scene_id) in node_by_id]
+            preferred_set = set(preferred)
+            for preferred_id in preferred:
+                node = node_by_id[preferred_id]
+                for parent_id in node["parent_ids"]:
+                    if int(parent_id) in node_by_id and int(parent_id) not in preferred_allowed:
+                        preferred_allowed.append(int(parent_id))
+                if preferred_id not in preferred_allowed:
+                    preferred_allowed.append(preferred_id)
+                for child in node_by_id.values():
+                    child_id = int(child["scene_id"])
+                    if child_id in preferred_allowed:
+                        continue
+                    if any(int(parent_id) in preferred_set for parent_id in child["parent_ids"]):
+                        preferred_allowed.append(child_id)
+            preferred_allowed_set = set(preferred_allowed)
+            preferred_roots: list[int] = []
+            for preferred_id in preferred_scene_ids:
+                node = node_by_id.get(int(preferred_id))
+                if node is None:
+                    continue
+                root_id = int(node["parent_ids"][0]) if node["parent_ids"] else int(preferred_id)
+                if root_id in node_by_id and root_id not in preferred_roots:
+                    preferred_roots.append(root_id)
+            preferred_root_set = set(preferred_roots)
+            # 调用方候选是 layer0：先尝试候选所在 root 及其树形子结构。
+            root_layer_groups.append(("layer0", [scene_id for scene_id in root_ids if int(scene_id) in preferred_roots], preferred_allowed_set))
+        # 只有 root frame 参与 Layer 1 -> Layer 2 -> Layer 3 的阻断式全局队列。
+        root_layer_groups.extend(
+            [
+                (f"layer{layer}", [
+                    scene_id
+                    for scene_id in root_ids
+                    if int(scene_id) not in preferred_root_set
+                    and int(node_by_id.get(int(scene_id), {}).get("layer", 3)) == layer
+                ], None)
+                for layer in (1, 2, 3)
+            ]
+        )
+        emit({
+            "event": "root_layer_queue",
+            "preferred_scene_ids": [int(item) for item in preferred_scene_ids or []],
+            "flat_candidate_ids": [int(item) for item in flat_candidate_ids],
+            "groups": [
+                {"stage": stage, "root_ids": [int(item) for item in root_group], "allowed_ids": sorted(int(item) for item in allowed_ids) if allowed_ids is not None else None}
+                for stage, root_group, allowed_ids in root_layer_groups
+            ],
+        })
+        for stage, root_group, allowed_ids in root_layer_groups:
+            for root_id, root_score in match_ordered_candidates(root_group, stage=stage):
+                matched_id, matched_score = refine_frame_tree(root_id, root_score, allowed_ids=allowed_ids)
+                if matched_id is not None:
+                    emit({
+                        "event": "final",
+                        "scene_id": int(matched_id),
+                        "score": round(float(matched_score), 3),
+                        "matched_root_id": int(root_id),
+                        "matched_root_stage": stage,
+                    })
+                    return matched_id, matched_score
+        fallback_score = max(score_by_id.values()) if score_by_id else 0.0
+        emit({"event": "final", "scene_id": None, "score": round(float(fallback_score), 3)})
+        return None, fallback_score
 
     def identify_scene_number(
         self,
@@ -81,32 +507,54 @@ class SceneRecognizer:
         frame_data_url: str,
         *,
         preferred_scene_ids: list[int] | None = None,
+        trace: list[dict[str, Any]] | None = None,
     ) -> tuple[int | None, float]:
+        def emit(event: dict[str, Any]) -> None:
+            if trace is not None:
+                trace.append(event)
+
         images = ctx.get("images") or {}
         if not isinstance(images, dict):
+            emit({"event": "flat_final", "scene_id": None, "score": 0.0, "reason": "images_missing"})
             return None, 0.0
-        candidates: list[tuple[int, float, int]] = []
+        candidate_ids: list[int] = []
         if preferred_scene_ids:
-            for order, scene_id in enumerate(preferred_scene_ids):
-                image = images.get(scene_id)
+            for scene_id in preferred_scene_ids:
+                image = images.get(int(scene_id))
                 if isinstance(image, dict):
-                    candidates.append((int(scene_id), float(self.score_image(ctx, image, frame_data_url)), int(order)))
+                    candidate_ids.append(int(scene_id))
         else:
             for scene_id, image in images.items():
                 if isinstance(image, dict):
-                    candidates.append((int(scene_id), float(self.score_image(ctx, image, frame_data_url)), int(scene_id)))
-        candidates.sort(
-            key=(
-                (lambda item: (item[1], -item[2]))
-                if preferred_scene_ids
-                else (lambda item: (item[1], -item[0]))
-            ),
-            reverse=True,
-        )
-        if not candidates:
+                    candidate_ids.append(int(scene_id))
+        if not candidate_ids:
+            emit({"event": "flat_final", "scene_id": None, "score": 0.0, "reason": "candidate_ids_empty"})
             return None, 0.0
-        scene_id, score, _order = candidates[0]
-        return (scene_id, score) if self.scene_matches_id(scene_id, score) else (None, score)
+        score_by_id = self._score_scene_candidates(ctx, frame_data_url, candidate_ids)
+        emit({
+            "event": "flat_candidate_group",
+            "preferred_scene_ids": [int(item) for item in preferred_scene_ids or []],
+            "candidate_ids": [int(item) for item in candidate_ids],
+            "selection_rule": "ordered_first_match",
+            "candidates": [
+                {
+                    "scene_id": int(scene_id),
+                    "title": str(images.get(int(scene_id), {}).get("title") or "") if isinstance(images.get(int(scene_id)), dict) else "",
+                    "score": round(float(score_by_id.get(int(scene_id), 0.0)), 3),
+                    "threshold": round(float(self.threshold_for_scene_id(int(scene_id))), 3),
+                    "matched": self.scene_matches_id(int(scene_id), float(score_by_id.get(int(scene_id), 0.0))),
+                }
+                for scene_id in candidate_ids
+            ],
+        })
+        for scene_id in candidate_ids:
+            score = float(score_by_id.get(int(scene_id), 0.0))
+            if self.scene_matches_id(int(scene_id), score):
+                emit({"event": "flat_final", "scene_id": int(scene_id), "score": round(float(score), 3)})
+                return int(scene_id), score
+        fallback_score = max(score_by_id.values()) if score_by_id else 0.0
+        emit({"event": "flat_final", "scene_id": None, "score": round(float(fallback_score), 3)})
+        return None, fallback_score
 
     def scene_matches_key(self, key: str, score: float) -> bool:
         if not key:
@@ -117,14 +565,30 @@ class SceneRecognizer:
     def identify_scene_key(self, ctx: dict[str, Any], frame_data_url: str, *, keys: list[str]) -> tuple[str, float]:
         if self.image_for_key is None:
             raise RuntimeError("SceneRecognizer 缺少 image_for_key，无法按 key 识别场景")
-        priorities = dict(self.key_priorities or {})
-        candidates: list[tuple[str, float]] = []
+        ordered_keys: list[str] = []
+        images_by_key: dict[str, dict[str, Any]] = {}
         for key in keys:
             image = self.image_for_key(ctx, key)
             if image is not None:
-                candidates.append((key, float(self.score_image(ctx, image, frame_data_url))))
-        candidates.sort(key=lambda item: (item[1], priorities.get(item[0], 0)), reverse=True)
-        return candidates[0] if candidates else ("", 0.0)
+                ordered_keys.append(key)
+                images_by_key[key] = image
+        if not ordered_keys:
+            return "", 0.0
+
+        def score(key: str) -> tuple[str, float]:
+            return key, float(self.score_image(ctx, images_by_key[key], frame_data_url))
+
+        if len(ordered_keys) <= 1:
+            score_by_key = dict(score(key) for key in ordered_keys)
+        else:
+            workers = max(1, min(len(ordered_keys), int(self.max_parallel_workers or 1)))
+            with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="scene-key-match") as executor:
+                score_by_key = dict(executor.map(score, ordered_keys))
+        for key in ordered_keys:
+            key_score = float(score_by_key.get(key, 0.0))
+            if self.scene_matches_key(key, key_score):
+                return key, key_score
+        return "", max(score_by_key.values()) if score_by_key else 0.0
 
 
 

@@ -24,6 +24,7 @@ from .matching import (
 from .model import (
     CurView,
     DbView,
+    FrameLayer,
     MatchRole,
     Shape,
     View,
@@ -31,7 +32,9 @@ from .model import (
     frame_size,
     image_number,
     index_images,
+    normalize_frame_layer,
     normalize_match_role,
+    normalize_scene_identity_scope,
 )
 from .navigation import SceneNavigator
 from .runtime import Runtime
@@ -43,6 +46,7 @@ __all__ = [
     "ImageForKeyFunc",
     "ImagePredicateFunc",
     "KeyThresholdFunc",
+    "FrameLayer",
     "MatchRole",
     "CurView",
     "DbView",
@@ -61,5 +65,7 @@ __all__ = [
     "frame_size",
     "image_number",
     "index_images",
+    "normalize_frame_layer",
     "normalize_match_role",
+    "normalize_scene_identity_scope",
 ]

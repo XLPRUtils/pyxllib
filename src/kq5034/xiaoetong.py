@@ -818,6 +818,7 @@ return true;
                 ['用户列表导出'],
                 exclude_task_names=existing_exports,
                 refresh_every_checks=5,
+                max_wait_seconds=20 * 60,
             ))
 
     def export_clockin_data(self, url, download=True, start_date=None, end_date=None):

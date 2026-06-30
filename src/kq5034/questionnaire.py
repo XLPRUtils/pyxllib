@@ -14,6 +14,7 @@ from urllib.parse import urlsplit, urlunsplit
 
 import pandas as pd
 import requests
+from loguru import logger
 
 问卷滞留提醒头部 = '【问卷滞留问题】 https://code4101.com/sheet/5'
 问卷滞留提醒分组 = {
@@ -40,6 +41,10 @@ CodeYun问卷数据页大小 = 100
 CodeYun问卷请求超时秒数 = int(os.getenv('KQ5034_CODEYUN_QUESTIONNAIRE_TIMEOUT_SECONDS') or '60')
 CodeYun问卷请求重试次数 = int(os.getenv('KQ5034_CODEYUN_QUESTIONNAIRE_RETRY_COUNT') or '3')
 CodeYun问卷请求重试间隔秒数 = float(os.getenv('KQ5034_CODEYUN_QUESTIONNAIRE_RETRY_DELAY_SECONDS') or '3')
+
+
+class CodeYun问卷临时不可用(RuntimeError):
+    """CodeYun 问卷服务临时不可用，调度层可跳过本轮提醒。"""
 
 
 def _默认问卷提醒状态文件():
@@ -227,6 +232,15 @@ def _CodeYun问卷请求GET(url, *, params):
     raise RuntimeError('CodeYun 问卷请求未返回结果')
 
 
+def _是CodeYun问卷临时不可用(exc):
+    if isinstance(exc, (requests.ConnectionError, requests.Timeout)):
+        return True
+
+    response = getattr(exc, 'response', None)
+    status_code = getattr(response, 'status_code', None)
+    return status_code is not None and 500 <= int(status_code) < 600
+
+
 def _读取CodeYun问卷提醒表格数据(sheet_url, page_size=CodeYun问卷数据页大小):
     rows = []
     page = 1
@@ -305,11 +319,18 @@ def _读取CodeYun问卷提醒数据(api_url=CodeYun问卷数据接口, page_siz
             page += 1
             if page > 100:
                 raise RuntimeError('CodeYun 问卷提醒分页超过 100 页，疑似接口异常')
-    except requests.RequestException:
-        return _读取CodeYun问卷提醒表格数据(
-            _默认CodeYun问卷数据表接口(api_url),
-            page_size=page_size,
-        )
+    except requests.RequestException as exc:
+        if not _是CodeYun问卷临时不可用(exc):
+            raise
+        try:
+            return _读取CodeYun问卷提醒表格数据(
+                _默认CodeYun问卷数据表接口(api_url),
+                page_size=page_size,
+            )
+        except requests.RequestException as fallback_exc:
+            if _是CodeYun问卷临时不可用(fallback_exc):
+                raise CodeYun问卷临时不可用(str(fallback_exc)) from fallback_exc
+            raise
 
     if not rows:
         return pd.DataFrame(columns=['序号', '1、所属课程', '处理状态'])
@@ -386,7 +407,15 @@ def 提醒问卷数据(api_url=CodeYun问卷数据接口, *, state_path=None, to
 
     from .common import wechat_lock_send
 
-    df = _读取CodeYun问卷提醒数据(api_url=api_url)
+    try:
+        df = _读取CodeYun问卷提醒数据(api_url=api_url)
+    except CodeYun问卷临时不可用 as exc:
+        logger.warning(f"CodeYun 问卷提醒服务暂不可用，跳过本轮提醒：{exc}")
+        return {
+            name: {'items': [], 'message': '【CodeYun问卷接口暂不可用，已跳过本轮提醒】'}
+            for name in 问卷滞留提醒分组
+        }
+
     groups = 分析问卷滞留记录(df)
     today = _规范问卷提醒日期(today)
     state_path = state_path or _默认问卷提醒状态文件()

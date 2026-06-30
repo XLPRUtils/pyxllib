@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from .matching import ImagePredicateFunc
-from .model import flatten_shapes, image_number
+from .model import View, flatten_shapes, image_number
 
 
 @dataclass(frozen=True)
@@ -74,7 +74,7 @@ class SceneNavigator:
                 continue
             if child.get("type") == "image":
                 number = image_number(child)
-                if number is not None:
+                if number is not None and View(child).layer in {1, 2}:
                     result.append(number)
             result.extend(self.collect_folder_image_numbers(child))
         return result
@@ -126,7 +126,7 @@ class SceneNavigator:
                     continue
                 if item.get("type") == "image" and str(item.get("title") or "").strip() == target:
                     number = image_number(item)
-                    if number is not None and number not in found:
+                    if number is not None and View(item).layer in {1, 2} and number not in found:
                         found.append(number)
                 children = item.get("children")
                 if isinstance(children, list):
@@ -169,7 +169,8 @@ class SceneNavigator:
                     current_parent_folder_title = str(item.get("title") or "").strip() or parent_folder_title
                 if item.get("type") == "image":
                     source_id = image_number(item)
-                    if source_id is not None:
+                    is_scene = View(item).layer in {1, 2}
+                    if source_id is not None and is_scene:
                         for shape in flatten_shapes(item.get("shapes")):
                             if shape.get("kind") == "group":
                                 continue
@@ -188,7 +189,8 @@ class SceneNavigator:
                                     "shape": shape,
                                     "target_ids": target_ids,
                                 })
-                    current_parent_image = item
+                    if is_scene:
+                        current_parent_image = item
                 children = item.get("children")
                 if isinstance(children, list):
                     visit([child for child in children if isinstance(child, dict)], current_parent_image, current_parent_folder_title)
@@ -224,7 +226,7 @@ class SceneNavigator:
             for item in items:
                 if not isinstance(item, dict):
                     continue
-                if item.get("type") == "image" and is_confirmation_image(item):
+                if item.get("type") == "image" and View(item).layer in {1, 2} and is_confirmation_image(item):
                     scene_id = image_number(item)
                     if scene_id is not None and scene_id not in result:
                         result.append(scene_id)

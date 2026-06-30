@@ -75,7 +75,7 @@ class Weipay(DpWebBase):
                 time.sleep(3)
         return recive_msg
 
-    def _fill_visible_inputs(self, tab, values, *, minimum_count=None):
+    def _fill_visible_inputs(self, tab, values, *, minimum_count=None, timeout=45):
         values = [str(v) for v in values]
         minimum_count = minimum_count or len(values)
         js = r"""
@@ -116,9 +116,28 @@ if (inputs.length) {
 }
 return 'OK';
 """
-        result = tab.run_js(js, json.dumps(values, ensure_ascii=False), minimum_count)
-        if result != 'OK':
-            raise RuntimeError(f'页面输入框填写失败：{result}')
+        deadline = time.time() + timeout
+        last_result = None
+        while time.time() < deadline:
+            result = tab.run_js(js, json.dumps(values, ensure_ascii=False), minimum_count)
+            if result == 'OK':
+                return
+            last_result = result
+            if not str(result).startswith('BAD_INPUTS:'):
+                break
+            time.sleep(1)
+
+        try:
+            title = tab.title
+        except Exception:
+            title = ''
+        try:
+            body_text = self._normalize_page_text(tab('tag:body').text)[:200]
+        except Exception:
+            body_text = ''
+        raise RuntimeError(
+            f'页面输入框填写失败：{last_result} url={tab.url} title={title!r} body={body_text!r}'
+        )
 
     @staticmethod
     def _snapshot_download_dir():

@@ -14,6 +14,18 @@ class MatchRole(IntEnum):
     decisive = 2
 
 
+class FrameLayer(IntEnum):
+    """frame 所在的目录层。
+
+    layer 只表达 frame 归入哪条目录识别队列；frame/subframe 的父子关系由
+    image.children 表达，两者不能混用。
+    """
+
+    layer1 = 1
+    layer2 = 2
+    layer3 = 3
+
+
 def normalize_match_role(value: Any, default: MatchRole = MatchRole.off) -> MatchRole:
     """把前端/旧数据中的匹配角色归一成 :class:`MatchRole`。"""
 
@@ -43,6 +55,55 @@ def normalize_match_role(value: Any, default: MatchRole = MatchRole.off) -> Matc
         "2": MatchRole.decisive,
     }
     return aliases.get(text, default)
+
+
+def normalize_scene_identity_scope(value: Any, default: str = "none") -> str:
+    """兼容旧标注里的局部/全局 shape scope。"""
+
+    text = str(value or "").strip().lower()
+    aliases = {
+        "": default,
+        "none": "none",
+        "off": "none",
+        "false": "none",
+        "无": "none",
+        "0": "none",
+        "local": "local",
+        "局": "local",
+        "1": "local",
+        "global": "global",
+        "全": "global",
+        "2": "global",
+    }
+    return aliases.get(text, default)
+
+
+def normalize_frame_layer(value: Any, default: int = 3) -> int:
+    """把 frame.layer 归一成 1/2/3。"""
+
+    if isinstance(value, bool):
+        return 1 if value else 3
+    if isinstance(value, int):
+        return min(3, max(1, value))
+    text = str(value or "").strip().lower()
+    aliases = {
+        "": default,
+        "layer1": 1,
+        "layer 1": 1,
+        "l1": 1,
+        "主": 1,
+        "layer2": 2,
+        "layer 2": 2,
+        "l2": 2,
+        "次": 2,
+        "layer3": 3,
+        "layer 3": 3,
+        "l3": 3,
+        "素材": 3,
+    }
+    if text in aliases:
+        return int(aliases[text])
+    return min(3, max(1, int(text))) if text.isdecimal() else min(3, max(1, int(default)))
 
 
 @dataclass(frozen=True)
@@ -93,6 +154,13 @@ class Shape:
     def scene_identity_role(self) -> MatchRole:
         legacy_default = MatchRole.required if bool(self.raw.get("isSceneIdentity")) else MatchRole.off
         return normalize_match_role(self.raw.get("sceneIdentityRole"), legacy_default)
+
+    @property
+    def scene_identity_scope(self) -> str:
+        value = normalize_scene_identity_scope(self.raw.get("sceneIdentityScope"), "")
+        if value:
+            return value
+        return "local" if self.is_scene_identity else "none"
 
     @property
     def image_match_role(self) -> MatchRole:
@@ -239,6 +307,13 @@ class View:
             if any((contains and target in shape.title) or (not contains and shape.title == target) for target in titles):
                 return shape
         return None
+
+    @property
+    def layer(self) -> int:
+        """当前 frame 所属目录 layer。"""
+
+        raw = self.raw if isinstance(self.raw, dict) else {}
+        return normalize_frame_layer(raw.get("layer"), 3)
 
     def is_match(self, runtime: Any, *, include_descendants: bool = True) -> bool:
         """借助场景标识 shape 判断 runtime 当前画面是否匹配当前 view。"""
