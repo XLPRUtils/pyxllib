@@ -104,26 +104,76 @@ class KqWechat:
 
             return code if is_recent_time(time_str, time_window) else None
 
+        service_name = '懒人信息转发服务'
+
+        def message_text(message):
+            """兼容 wxautox 的 Message 对象；短信文本可能在 sender/info 中。"""
+            if message is None:
+                return ''
+            if isinstance(message, str):
+                return message
+            parts = []
+            for attr in ('sender', 'content', 'text'):
+                value = getattr(message, attr, None)
+                if value:
+                    parts.append(str(value))
+            try:
+                info = message.info
+            except Exception:
+                info = None
+            if isinstance(info, (list, tuple)):
+                parts.extend(str(x) for x in info if x)
+            elif info:
+                parts.append(str(info))
+            if not parts:
+                parts.append(str(message))
+            return ' '.join(dict.fromkeys(parts))
+
+        def collect_current_chat_texts(wx):
+            """只读目标聊天当前已加载消息，避免 GetSession 递归扫描整棵会话树。"""
+            texts = []
+            try:
+                messages = wx.GetAllMessage()
+            except Exception as exc:
+                logger.warning(f'读取微信短信转发会话消息失败：{exc!r}')
+                return texts
+            for message in reversed(messages):
+                text = message_text(message)
+                if '验证码' in text or '95017' in text:
+                    texts.append(text)
+            return texts
+
         wx = KqWechat.创建微信实例()
-        wx.ChatWith('懒人信息转发服务')
+        chat_opened = False
+        last_error = None
 
         deadline = None if timeout is None else time.monotonic() + timeout
         while True:
-            # 取到最后条短信内容
-            messages = wx.GetAllMessage()
-            try:
-                content = messages[-1].info[0] if messages else ''
-            except (AttributeError, IndexError, TypeError):
-                content = ''
             # 新短信提醒来电号码：验证码【644651】95017(微信支付)来电时间：2025-04-02 09:21:27
+            if not chat_opened:
+                try:
+                    wx.ChatWith(service_name, timeout=5, exact=False)
+                    chat_opened = True
+                except Exception as exc:
+                    last_error = exc
+                    logger.warning(f'打开微信短信转发会话失败：{exc!r}')
+            if chat_opened:
+                for content in collect_current_chat_texts(wx):
+                    if valid_code := validate_message(content, time_window):
+                        logger.info('微信支付短信验证码已从微信目标会话消息获取')
+                        return valid_code
 
-            # 验证是否符合格式，符合则返回值，否则等待接收短信
-            if valid_code := validate_message(content, time_window):
-                return valid_code
+            # 若目标会话读取失败，重置后下一轮重新打开，避免长期停在错误聊天。
+            if not chat_opened:
+                for content in collect_current_chat_texts(wx):
+                    if valid_code := validate_message(content, time_window):
+                        logger.info('微信支付短信验证码已从当前微信会话消息获取')
+                        return valid_code
 
             now = time.monotonic()
             if deadline is not None and now >= deadline:
-                raise TimeoutError(f'等待懒人信息转发服务短信验证码超时：timeout={timeout}s，time_window={time_window}min')
+                detail = f'，last_error={last_error!r}' if last_error else ''
+                raise TimeoutError(f'等待懒人信息转发服务短信验证码超时：timeout={timeout}s，time_window={time_window}min{detail}')
 
             if deadline is None:
                 time.sleep(check_interval)

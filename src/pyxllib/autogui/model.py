@@ -310,10 +310,17 @@ class View:
 
     @property
     def layer(self) -> int:
-        """当前 frame 所属目录 layer。"""
+        """当前 scene 的有效识别层。
+
+        资产树只保存源事实：显式 layer1 标记、shape 场景标识和节点顺序。
+        layer2/layer3 是派生结果：有场景标识的普通 scene 进 layer2，
+        没有场景标识的素材/弱帧进 layer3。
+        """
 
         raw = self.raw if isinstance(self.raw, dict) else {}
-        return normalize_frame_layer(raw.get("layer"), 3)
+        if normalize_frame_layer(raw.get("layer"), 3) == 1:
+            return 1
+        return 2 if any(shape.is_scene_identity for shape in self.get_shapes(include_groups=False)) else 3
 
     def is_match(self, runtime: Any, *, include_descendants: bool = True) -> bool:
         """借助场景标识 shape 判断 runtime 当前画面是否匹配当前 view。"""

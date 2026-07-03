@@ -58,6 +58,23 @@ class Weipay(DpWebBase):
         self.tab = self.browser.latest_tab
         return self.tab
 
+    @staticmethod
+    def _clear_page_selection(tab):
+        js = r"""
+try {
+  const selection = window.getSelection && window.getSelection();
+  if (selection) selection.removeAllRanges();
+  if (document.selection && document.selection.empty) document.selection.empty();
+  return true;
+} catch (err) {
+  return false;
+}
+"""
+        try:
+            return bool(tab.run_js(js))
+        except Exception:
+            return False
+
     def get_recive(self, content):
         with WeChatSingletonLock(120) as wx:
             recive_msg = None
@@ -81,6 +98,11 @@ class Weipay(DpWebBase):
         js = r"""
 const values = JSON.parse(arguments[0] || '[]');
 const minimumCount = arguments[1] || values.length;
+try {
+  const selection = window.getSelection && window.getSelection();
+  if (selection) selection.removeAllRanges();
+  if (document.selection && document.selection.empty) document.selection.empty();
+} catch (err) {}
 const isVisible = (el) => {
   if (!el) return false;
   let p = el;
@@ -114,6 +136,11 @@ for (let i = 0; i < values.length; i++) {
 if (inputs.length) {
   document.body.click();
 }
+try {
+  const selection = window.getSelection && window.getSelection();
+  if (selection) selection.removeAllRanges();
+  if (document.selection && document.selection.empty) document.selection.empty();
+} catch (err) {}
 return 'OK';
 """
         deadline = time.time() + timeout
@@ -440,6 +467,11 @@ return `${hiddenAncestor ? 1 : 0}|${rect.width}|${rect.height}|${zIndex}`;
         js = r"""
 const el = this;
 if (!el) return false;
+try {
+  const selection = window.getSelection && window.getSelection();
+  if (selection) selection.removeAllRanges();
+  if (document.selection && document.selection.empty) document.selection.empty();
+} catch (err) {}
 ['mouseover', 'mousedown', 'mouseup', 'click'].forEach((name) => {
   el.dispatchEvent(new MouseEvent(name, {bubbles: true, cancelable: true, view: window}));
 });
@@ -471,7 +503,7 @@ const isVisible = (el) => {
 const dialogs = [...document.querySelectorAll('.dialog')].filter(isVisible);
 const dialog = dialogs.find((node) => {
   const text = normalize(node.innerText || node.textContent);
-  return text.includes('????') || text.includes('?????????');
+  return text.includes('\u63d0\u4ea4\u6210\u529f') || text.includes('\u9000\u6b3e\u7533\u8bf7\u5df2\u63d0\u4ea4\u6210\u529f');
 });
 if (!dialog) return '';
 const selectors = [
@@ -494,12 +526,188 @@ return '';
         except Exception:
             return ''
 
+    def _has_visible_weipay_security_dialog(self, tab):
+        js = r"""
+const normalize = (value) => String(value || '').replace(/\s+/g, ' ').trim();
+const isVisible = (el) => {
+  if (!el) return false;
+  let p = el;
+  while (p) {
+    const style = getComputedStyle(p);
+    const cls = (p.className || '').toString();
+    if (cls.includes('hide') || style.display === 'none' || style.visibility === 'hidden') return false;
+    p = p.parentElement;
+  }
+  const rect = el.getBoundingClientRect();
+  return rect.width > 0 && rect.height > 0;
+};
+const dialogs = [...document.querySelectorAll('.dialog,.el-dialog,.el-message-box,.modal,[role="dialog"]')].filter(isVisible);
+const dialog = dialogs.find((node) => normalize(node.innerText || node.textContent).includes('\u5b89\u5168\u9a8c\u8bc1'));
+return dialog ? normalize(dialog.innerText || dialog.textContent).slice(0, 300) : '';
+"""
+        try:
+            return str(tab.run_js(js) or '').strip()
+        except Exception:
+            return ''
+
+    def _click_visible_element_js(self, ele):
+        js = r"""
+const el = this;
+if (!el) return false;
+try {
+  const selection = window.getSelection && window.getSelection();
+  if (selection) selection.removeAllRanges();
+  if (document.selection && document.selection.empty) document.selection.empty();
+} catch (err) {}
+try {
+  el.scrollIntoView({block: 'center', inline: 'center'});
+} catch (err) {}
+const rect = el.getBoundingClientRect();
+const x = rect.left + rect.width / 2;
+const y = rect.top + rect.height / 2;
+for (const name of ['mouseover', 'mousemove', 'mousedown', 'mouseup', 'click']) {
+  el.dispatchEvent(new MouseEvent(name, {
+    bubbles: true,
+    cancelable: true,
+    view: window,
+    clientX: x,
+    clientY: y,
+  }));
+}
+if (typeof el.click === 'function') el.click();
+return true;
+"""
+        try:
+            return bool(ele.run_js(js))
+        except Exception:
+            return False
+
+    def _wait_after_weipay_confirm_click(self, tab, *, timeout=20):
+        deadline = time.time() + timeout
+        last_body = ''
+        while time.time() < deadline:
+            try:
+                body_text = self._normalize_page_text(tab('tag:body').text)
+            except Exception:
+                body_text = ''
+            last_body = body_text
+            if '提交成功' in body_text or '退款申请已提交成功' in body_text:
+                if self.尝试点击返款提交后的提示按钮(tab, timeout=3):
+                    return {'ok': True, 'reason': 'submit_success_popup', 'body': body_text[:300]}
+                return {'ok': True, 'reason': 'submit_success_visible', 'body': body_text[:300]}
+            if '/cbatchrefund/refund#/pages/refund_list/refund_list' in str(getattr(tab, 'url', '')):
+                return {'ok': True, 'reason': 'refund_result_page', 'body': body_text[:300]}
+            if not self._has_visible_weipay_security_dialog(tab):
+                # The risk-control dialog may close before the success dialog is rendered.
+                time.sleep(0.5)
+                try:
+                    body_text = self._normalize_page_text(tab('tag:body').text)
+                except Exception:
+                    body_text = ''
+                last_body = body_text or last_body
+                if '提交成功' in body_text or '退款申请已提交成功' in body_text:
+                    if self.尝试点击返款提交后的提示按钮(tab, timeout=3):
+                        return {'ok': True, 'reason': 'submit_success_popup', 'body': body_text[:300]}
+                    return {'ok': True, 'reason': 'submit_success_visible', 'body': body_text[:300]}
+            time.sleep(0.5)
+        return {'ok': False, 'reason': 'confirm_click_no_downstream_signal', 'body': last_body[:300]}
+
+    def _click_weipay_confirm_and_wait(self, tab, confirm_action, *, submit_file=None, timeout=20):
+        errors = []
+        strategies = [
+            ('native', lambda: confirm_action.click()),
+            ('dom-events', lambda: self._dom_click(confirm_action)),
+            ('center-js', lambda: self._click_visible_element_js(confirm_action)),
+            ('by-js', lambda: confirm_action.click(by_js=True)),
+        ]
+        for name, clicker in strategies:
+            self._clear_page_selection(tab)
+            try:
+                result = clicker()
+                if result is False:
+                    errors.append(f'{name}: false')
+                    continue
+            except Exception as exc:
+                errors.append(f'{name}: {exc!r}')
+                continue
+            state = self._wait_after_weipay_confirm_click(tab, timeout=timeout)
+            if state.get('ok'):
+                logger.info(f'微信支付安全验证确认按钮点击成功：strategy={name} reason={state.get("reason")} file={submit_file!s}')
+                return state
+            logger.warning(
+                f'微信支付安全验证确认按钮点击后未观察到下游信号，尝试下一种：'
+                f'strategy={name} file={submit_file!s} state={state!r}'
+            )
+        try:
+            body_text = self._normalize_page_text(tab('tag:body').text)
+        except Exception:
+            body_text = ''
+        visible_actions = self._snapshot_visible_action_texts(tab)
+        raise RuntimeError(
+            '微信支付确认弹窗提交按钮点击后未进入成功状态'
+            f'，submit_file={submit_file!s} errors={errors} visible_actions={visible_actions} body={body_text[:300]!r}'
+        )
+
+    def _click_weipay_security_confirm_once(self, tab, *, submit_file=None):
+        self._clear_page_selection(tab)
+        confirm_action = self._find_visible_confirm_action(tab, timeout=10)
+        if confirm_action is None:
+            visible_actions = self._snapshot_visible_action_texts(tab)
+            raise RuntimeError(
+                '微信支付确认弹窗未找到可见的提交按钮'
+                f'，submit_file={submit_file!s} visible_actions={visible_actions}'
+            )
+        errors = []
+        for name, clicker in [
+            ('native', lambda: confirm_action.click()),
+            ('dom-events', lambda: self._dom_click(confirm_action)),
+            ('center-js', lambda: self._click_visible_element_js(confirm_action)),
+            ('by-js', lambda: confirm_action.click(by_js=True)),
+        ]:
+            self._clear_page_selection(tab)
+            try:
+                result = clicker()
+                if result is False:
+                    errors.append(f'{name}: false')
+                    continue
+                logger.info(f'微信支付安全验证确认按钮已点击：strategy={name} file={submit_file!s}')
+                return True
+            except Exception as exc:
+                errors.append(f'{name}: {exc!r}')
+        raise RuntimeError(f'微信支付确认弹窗提交按钮点击失败，submit_file={submit_file!s} errors={errors}')
+
+    def _wait_weipay_security_input_count(self, tab, *, minimum_count=1, timeout=20):
+        deadline = time.time() + timeout
+        last_inputs = []
+        while time.time() < deadline:
+            inputs = self._find_visible_dialog_inputs(tab)
+            last_inputs = inputs
+            if len(inputs) >= minimum_count:
+                return inputs
+            try:
+                body_text = self._normalize_page_text(tab('tag:body').text)
+            except Exception:
+                body_text = ''
+            if '提交成功' in body_text or '退款申请已提交成功' in body_text:
+                return []
+            time.sleep(0.5)
+        logger.warning(
+            f'等待微信支付安全验证输入框数量超时：minimum_count={minimum_count} '
+            f'current_count={len(last_inputs)}'
+        )
+        return last_inputs
+
     def _click_visible_text_action_js(self, tab, texts):
         if not texts:
             return ''
 
         js = r"""
 const targets = arguments[0] || [];
+try {
+  const selection = window.getSelection && window.getSelection();
+  if (selection) selection.removeAllRanges();
+  if (document.selection && document.selection.empty) document.selection.empty();
+} catch (err) {}
 const normalize = (value) => String(value || '').replace(/\s+/g, ' ').trim();
 const isVisible = (el) => {
   if (!el) return false;
@@ -613,12 +821,599 @@ return [...new Set(rows)].slice(0, 20);
                 return target
         return ''
 
+    def _find_visible_upload_action(self, tab, *, timeout=30):
+        deadline = time.time() + timeout
+        self._clear_page_selection(tab)
+        js = r"""
+return (() => {
+  const wanted = ['选择文件', '上传文件', '上传'];
+  try {
+    const selection = window.getSelection && window.getSelection();
+    if (selection) selection.removeAllRanges();
+    if (document.selection && document.selection.empty) document.selection.empty();
+  } catch (err) {}
+  const nodes = [...document.querySelectorAll('a,button,label,span,div,[role="button"]')];
+  for (const node of document.querySelectorAll('[data-kq-upload-action]')) {
+    node.removeAttribute('data-kq-upload-action');
+  }
+  const isVisible = (node) => {
+    const rect = node.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0) return false;
+    for (let cur = node; cur; cur = cur.parentElement) {
+      const style = getComputedStyle(cur);
+      if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') return false;
+    }
+    return true;
+  };
+  const scoreTag = (node) => ({A: 50, BUTTON: 40, LABEL: 30, SPAN: 20, DIV: 10}[node.tagName] || 0);
+  const scored = [];
+  for (const node of nodes) {
+    if (!isVisible(node)) continue;
+    const text = (node.innerText || node.value || node.getAttribute('aria-label') || node.getAttribute('title') || '').trim();
+    if (!wanted.some(x => text === x || text.includes(x))) continue;
+    const rect = node.getBoundingClientRect();
+    scored.push([scoreTag(node), rect.width * rect.height, node]);
+  }
+  if (!scored.length) return false;
+  scored.sort((a, b) => (b[0] - a[0]) || (b[1] - a[1]));
+  scored[0][2].setAttribute('data-kq-upload-action', '1');
+  return true;
+})();
+"""
+        try:
+            if tab.run_js(js):
+                ele = tab.ele('css:[data-kq-upload-action="1"]', timeout=1)
+                if ele:
+                    return ele
+        except Exception:
+            pass
+        locators = [
+            'tag:a@@title=上传文件',
+            'tag:a@@text()=选择文件',
+            'tag:a@@text():选择文件',
+            'tag:button@@text()=选择文件',
+            'tag:button@@text():选择文件',
+            'tag:label@@text()=选择文件',
+            'tag:label@@text():选择文件',
+            'tag:button@@text()=选择文件',
+            'tag:a@@text()=选择文件',
+            'tag:label@@text()=选择文件',
+            'tag:span@@text()=选择文件',
+            'tag:div@@text()=选择文件',
+            'tag:button@@text():选择文件',
+            'tag:a@@text():选择文件',
+            'tag:label@@text():选择文件',
+            'tag:span@@text():选择文件',
+            'tag:div@@text():选择文件',
+            'tag:a@@title=上传文件',
+            'tag:button@@title=上传文件',
+            'tag:label@@title=上传文件',
+            'tag:div@@title=上传文件',
+            'tag:span@@title=上传文件',
+            'tag:a@@text()=上传文件',
+            'tag:button@@text()=上传文件',
+            'tag:label@@text()=上传文件',
+            'tag:span@@text()=上传文件',
+            'tag:div@@text()=上传文件',
+            'tag:a@@text():上传文件',
+            'tag:button@@text():上传文件',
+            'tag:label@@text():上传文件',
+            'tag:span@@text():上传文件',
+            'tag:div@@text():上传文件',
+            'tag:a@@text()=上传',
+            'tag:button@@text()=上传',
+            'tag:label@@text()=上传',
+            'tag:span@@text()=上传',
+            'tag:div@@text()=上传',
+            'tag:a@@text():上传',
+            'tag:button@@text():上传',
+            'tag:label@@text():上传',
+            'tag:span@@text():上传',
+            'tag:div@@text():上传',
+        ]
+
+        while time.time() < deadline:
+            candidates = []
+            for order, locator in enumerate(locators):
+                try:
+                    for ele in tab.eles(locator):
+                        state = self._get_element_render_state(ele)
+                        if state['hidden_ancestor'] or state['width'] <= 0 or state['height'] <= 0:
+                            continue
+                        tag_name = ''
+                        try:
+                            tag_name = str(ele.tag).lower()
+                        except Exception:
+                            pass
+                        tag_score = {'a': 50, 'button': 40, 'label': 30, 'span': 20, 'div': 10}.get(tag_name, 0)
+                        candidates.append((tag_score, -order, state['z_index'], state['width'] * state['height'], ele, locator))
+                except Exception:
+                    continue
+            if candidates:
+                candidates.sort(key=lambda item: (item[0], item[1], item[2], item[3]), reverse=True)
+                return candidates[0][4]
+            time.sleep(1)
+        return None
+
+    def _count_file_inputs_with_files(self, tab):
+        js = r"""
+const rows = [];
+for (const node of document.querySelectorAll('input[type="file"]')) {
+  const files = node.files ? node.files.length : 0;
+  const text = String(node.value || '');
+  rows.push({files, value: text, accept: String(node.accept || ''), className: String(node.className || '')});
+}
+return rows;
+"""
+        try:
+            return tab.run_js(js) or []
+        except Exception:
+            return []
+
+    def _has_uploaded_file(self, tab):
+        states = self._count_file_inputs_with_files(tab)
+        return any(int(item.get('files') or 0) > 0 for item in states if isinstance(item, dict))
+
+    def _has_selected_upload_file(self, tab, file):
+        file_name = Path(file).name
+        if not file_name:
+            return False
+        js = r"""
+const fileName = arguments[0];
+const norm = value => String(value || '').replace(/\s+/g, ' ').trim();
+const selectors = ['#upload-button', '.file-upload', '.form-item', '.content-bd'];
+for (const selector of selectors) {
+  for (const node of document.querySelectorAll(selector)) {
+    if (norm(node.innerText || node.textContent).includes(fileName)) return true;
+  }
+}
+return norm(document.body && (document.body.innerText || document.body.textContent)).includes(fileName);
+"""
+        try:
+            return bool(tab.run_js(js, file_name))
+        except Exception:
+            return False
+
+    def _find_file_input(self, tab):
+        locators = [
+            'tag:input@@type=file@@class:el-upload__input',
+            'tag:input@@type=file',
+        ]
+        for locator in locators:
+            try:
+                elements = tab.eles(locator)
+            except Exception:
+                continue
+            if elements:
+                return elements[0]
+        return None
+
+    def _dispatch_file_input_change(self, tab):
+        js = r"""
+const isVisible = (el) => {
+  if (!el) return false;
+  let p = el;
+  while (p) {
+    const style = getComputedStyle(p);
+    const cls = (p.className || '').toString();
+    if (cls.includes('hide') || style.display === 'none' || style.visibility === 'hidden' || Number(style.opacity) === 0) {
+      return false;
+    }
+    p = p.parentElement;
+  }
+  const rect = el.getBoundingClientRect();
+  return rect.width > 0 && rect.height > 0;
+};
+for (const input of document.querySelectorAll('input[type="file"]')) {
+  const host = input.closest('.el-upload,.upload-wrapper,[class*="upload"]') || input.parentElement;
+  if (host && !isVisible(host)) continue;
+  if (!input.files || !input.files.length) continue;
+  input.dispatchEvent(new Event('input', {bubbles: true}));
+  input.dispatchEvent(new Event('change', {bubbles: true}));
+  return true;
+}
+return false;
+"""
+        try:
+            return bool(tab.run_js(js))
+        except Exception:
+            return False
+
+    def _wait_upload_bound(self, tab, file=None, timeout=5):
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            if self._has_uploaded_file(tab):
+                self._dispatch_file_input_change(tab)
+                return True
+            if file is not None and self._has_selected_upload_file(tab, file):
+                return True
+            time.sleep(0.5)
+        return False
+
+    def _upload_via_file_input(self, tab, file):
+        try:
+            anchor = tab.ele('tag:a@@title=上传文件', timeout=1)
+        except Exception:
+            anchor = None
+        input_ele = self._find_file_input(tab)
+        strategies = []
+        if input_ele is not None:
+            strategies.append((
+                'input.set_file_input',
+                lambda: (input_ele._set_file_input(str(file)), self._dispatch_file_input_change(tab)),
+            ))
+        if anchor is not None and self._is_element_really_visible(anchor):
+            strategies.extend([
+                ('anchor.to_upload', lambda: anchor.click.to_upload(file)),
+                ('anchor.to_upload(by_js)', lambda: anchor.click.to_upload(file, by_js=True)),
+                ('anchor.click', lambda: (tab.set.upload_files(file), anchor.click(), tab.wait.upload_paths_inputted())),
+                ('anchor.click(by_js)', lambda: (tab.set.upload_files(file), anchor.click(by_js=True), tab.wait.upload_paths_inputted())),
+            ])
+        if input_ele is not None:
+            strategies.extend([
+                ('input.click(by_js)', lambda: (tab.set.upload_files(file), input_ele.click(by_js=True), tab.wait.upload_paths_inputted())),
+                ('input.click', lambda: (tab.set.upload_files(file), input_ele.click(), tab.wait.upload_paths_inputted())),
+            ])
+
+        for name, action in strategies:
+            try:
+                action()
+                if self._wait_upload_bound(tab, file=file, timeout=6):
+                    logger.info(f'微信支付上传文件成功：strategy={name} file={str(file)!r}')
+                    return True
+                logger.warning(f'微信支付上传后页面未显示目标文件：strategy={name} file={str(file)!r}')
+            except Exception as exc:
+                logger.warning(f'微信支付上传策略失败，尝试下一种：strategy={name} file={str(file)!r} error={exc}')
+        return False
+
+    def _find_visible_dialog_inputs(self, tab):
+        js = r"""
+const input = this;
+const normalize = (value) => String(value || '').replace(/\s+/g, ' ').trim();
+const isVisible = (el) => {
+  if (!el) return false;
+  for (let p = el; p; p = p.parentElement) {
+    const style = getComputedStyle(p);
+    const cls = (p.className || '').toString();
+    if (/(^|\s)hide(\s|$)/.test(cls) || style.display === 'none' || style.visibility === 'hidden') return false;
+  }
+  const rect = el.getBoundingClientRect();
+  return rect.width > 0 && rect.height > 0;
+};
+if (!input || input.disabled || input.readOnly) return null;
+const dialog = input.closest('.dialog,.el-dialog,.el-message-box,.modal,[role="dialog"]');
+if (!dialog || !isVisible(dialog)) return null;
+if (!normalize(dialog.innerText || dialog.textContent).includes('\u5b89\u5168\u9a8c\u8bc1')) return null;
+const rect = input.getBoundingClientRect();
+const formItem = input.closest('.form-item') || input.parentElement;
+return {
+  type: String(input.type || '').toLowerCase(),
+  class_name: String(input.className || ''),
+  placeholder: normalize(input.getAttribute('placeholder') || ''),
+  parent_text: normalize(formItem && (formItem.innerText || formItem.textContent)),
+  width: rect.width,
+  height: rect.height,
+};
+"""
+        candidates = []
+        try:
+            inputs = tab.eles('tag:input')
+        except Exception:
+            inputs = []
+        for ele in inputs:
+            try:
+                row = ele.run_js(js)
+            except Exception:
+                continue
+            if not isinstance(row, dict):
+                continue
+            candidates.append({
+                'ele': ele,
+                'z_index': 0,
+                'area': float(row.get('width') or 0) * float(row.get('height') or 0),
+                'type': row.get('type') or '',
+                'class_name': row.get('class_name') or '',
+                'placeholder': row.get('placeholder') or '',
+                'parent_text': row.get('parent_text') or '',
+            })
+        return candidates
+
+    def _fill_weipay_risk_real_inputs(self, tab, values, *, minimum_count=None):
+        """Fill WeChat Pay's transparent six-digit risk-control inputs.
+
+        The visible six small boxes are disabled display inputs. The actual
+        Vue-bound controls are ``input.real-input`` with opacity 0.
+        """
+        values = [str(v or '') for v in values]
+        minimum_count = minimum_count or len(values)
+        js = r"""
+const values = JSON.parse(arguments[0] || '[]');
+const minimumCount = arguments[1] || values.length;
+const normalize = (value) => String(value || '').replace(/\s+/g, ' ').trim();
+const isVisible = (el) => {
+  if (!el) return false;
+  let p = el;
+  while (p) {
+    const style = getComputedStyle(p);
+    const cls = (p.className || '').toString();
+    if (cls.includes('hide') || style.display === 'none' || style.visibility === 'hidden') return false;
+    p = p.parentElement;
+  }
+  const rect = el.getBoundingClientRect();
+  return rect.width > 0 && rect.height > 0;
+};
+try {
+  const selection = window.getSelection && window.getSelection();
+  if (selection) selection.removeAllRanges();
+  if (document.selection && document.selection.empty) document.selection.empty();
+} catch (err) {}
+const dialogs = [...document.querySelectorAll('.dialog')].filter(isVisible)
+  .filter((node) => normalize(node.innerText || node.textContent).includes('\u5b89\u5168\u9a8c\u8bc1'));
+const dialog = dialogs[dialogs.length - 1];
+if (!dialog) return {ok: false, reason: 'NO_SECURITY_DIALOG', count: 0, lens: []};
+const inputs = [...dialog.querySelectorAll('input.real-input')].filter((el) => !el.disabled && !el.readOnly);
+if (inputs.length < minimumCount) {
+  return {ok: false, reason: 'BAD_INPUT_COUNT', count: inputs.length, lens: inputs.map((el) => String(el.value || '').length)};
+}
+const descriptor = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value');
+const setter = descriptor && descriptor.set;
+for (let i = 0; i < values.length; i += 1) {
+  const input = inputs[i];
+  const value = String(values[i] || '').slice(0, Number(input.maxLength || 6) || 6);
+  if (!value) continue;
+  input.focus();
+  input.click();
+  if (setter) setter.call(input, '');
+  else input.value = '';
+  input.dispatchEvent(new Event('input', {bubbles: true}));
+  if (setter) setter.call(input, value);
+  else input.value = value;
+  input.dispatchEvent(new InputEvent('input', {bubbles: true, inputType: 'insertText', data: value}));
+  input.dispatchEvent(new Event('change', {bubbles: true}));
+  input.dispatchEvent(new KeyboardEvent('keyup', {bubbles: true, key: value.slice(-1) || '0'}));
+}
+const lens = inputs.map((el, i) => ({
+  i,
+  len: String(el.value || '').length,
+  parent: normalize((el.closest('.form-item') && el.closest('.form-item').innerText) || ''),
+}));
+return {ok: lens.slice(0, values.length).every((item, i) => item.len === String(values[i] || '').slice(0, 6).length), count: inputs.length, lens};
+"""
+        try:
+            result = tab.run_js(js, json.dumps(values, ensure_ascii=False), minimum_count)
+        except Exception as exc:
+            logger.warning(f'微信支付安全验证 real-input 填写失败：error={exc!r}')
+            return None
+        if isinstance(result, dict) and result.get('ok'):
+            return result
+        logger.warning(f'微信支付安全验证 real-input 填写未确认成功：result={result!r}')
+        return None
+
+    def _click_weipay_risk_send_sms(self, tab, *, timeout=8):
+        send_btn = self._find_visible_text_action(tab, ['发送短信', '发送验证码', '获取验证码'])
+        if send_btn is None:
+            logger.warning('微信支付确认弹窗未找到明显的发送短信按钮')
+            return False
+        clicked = False
+        try:
+            send_btn.click()
+            clicked = True
+        except Exception:
+            if self._dom_click(send_btn):
+                clicked = True
+            else:
+                try:
+                    send_btn.click(by_js=True)
+                    clicked = True
+                except Exception:
+                    clicked = False
+        if not clicked:
+            return False
+
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            try:
+                body_text = self._normalize_page_text(tab('tag:body').text)
+            except Exception:
+                body_text = ''
+            if any(x in body_text for x in ['重新发送', '获取验证码', '验证码已发送']):
+                return True
+            time.sleep(0.5)
+        return False
+
+    def _find_visible_confirm_action(self, tab, *, timeout=10):
+        deadline = time.time() + timeout
+        self._clear_page_selection(tab)
+        js = r"""
+return (() => {
+  const wanted = ['确定', '确认', '提交'];
+  try {
+    const selection = window.getSelection && window.getSelection();
+    if (selection) selection.removeAllRanges();
+    if (document.selection && document.selection.empty) document.selection.empty();
+  } catch (err) {}
+  for (const node of document.querySelectorAll('[data-kq-confirm-action]')) {
+    node.removeAttribute('data-kq-confirm-action');
+  }
+  const isVisible = (node) => {
+    const rect = node.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0) return false;
+    for (let cur = node; cur; cur = cur.parentElement) {
+      const style = getComputedStyle(cur);
+      const cls = (cur.className || '').toString();
+      if (cls.includes('hide') || style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') return false;
+    }
+    return true;
+  };
+  const zIndexOf = (node) => {
+    let best = 0;
+    for (let cur = node; cur; cur = cur.parentElement) {
+      const zi = Number.parseInt(getComputedStyle(cur).zIndex || '0', 10);
+      if (!Number.isNaN(zi)) best = Math.max(best, zi);
+    }
+    return best;
+  };
+  const scored = [];
+  for (const node of document.querySelectorAll('a,button,div,span,[role="button"]')) {
+    if (!isVisible(node)) continue;
+    const text = (node.innerText || node.value || node.getAttribute('aria-label') || node.getAttribute('title') || '').trim();
+    if (!wanted.some(x => text === x || text.includes(x))) continue;
+    const rect = node.getBoundingClientRect();
+    const inDialog = node.closest('.dialog,.el-dialog,.el-message-box,.modal,.layui-layer,.ui-dialog,[role="dialog"],.popups') ? 1 : 0;
+    const cls = (node.className || '').toString();
+    const actionable = ['A', 'BUTTON'].includes(node.tagName) || node.getAttribute('role') === 'button' || /(^|\s)(btn|button|primary|submit)(\s|$)/i.test(cls) ? 1 : 0;
+    const exact = wanted.includes(text) ? 1 : 0;
+    const compact = text.length <= 8 ? 1 : 0;
+    scored.push([inDialog, exact, actionable, compact, zIndexOf(node), -(rect.width * rect.height), node]);
+  }
+  if (!scored.length) return false;
+  scored.sort((a, b) => (b[0] - a[0]) || (b[1] - a[1]) || (b[2] - a[2]) || (b[3] - a[3]) || (b[4] - a[4]) || (b[5] - a[5]));
+  scored[0][6].setAttribute('data-kq-confirm-action', '1');
+  return true;
+})();
+"""
+        try:
+            if tab.run_js(js):
+                ele = tab.ele('css:[data-kq-confirm-action="1"]', timeout=1)
+                if ele:
+                    return ele
+        except Exception:
+            pass
+        locators = [
+            'tag:a@@text()=确定',
+            'tag:button@@text()=确定',
+            'tag:div@@text()=确定',
+            'tag:span@@text()=确定',
+            'tag:a@@text():确定',
+            'tag:button@@text():确定',
+            'tag:div@@text():确定',
+            'tag:span@@text():确定',
+            'tag:a@@text()=确认',
+            'tag:button@@text()=确认',
+            'tag:div@@text()=确认',
+            'tag:span@@text()=确认',
+            'tag:a@@text():确认',
+            'tag:button@@text():确认',
+            'tag:div@@text():确认',
+            'tag:span@@text():确认',
+            'tag:a@@text()=提交',
+            'tag:button@@text()=提交',
+            'tag:div@@text()=提交',
+            'tag:span@@text()=提交',
+            'tag:a@@text():提交',
+            'tag:button@@text():提交',
+            'tag:div@@text():提交',
+            'tag:span@@text():提交',
+            'tag:a@@class=btn btn-primary align-center@@text()=确定',
+            'tag:button@@class=btn btn-primary align-center@@text()=确定',
+        ]
+        while time.time() < deadline:
+            candidates = []
+            for locator in locators:
+                try:
+                    for ele in tab.eles(locator):
+                        state = self._get_element_render_state(ele)
+                        if state['hidden_ancestor'] or state['width'] <= 0 or state['height'] <= 0:
+                            continue
+                        candidates.append((state['z_index'], state['width'] * state['height'], ele))
+                except Exception:
+                    continue
+            if candidates:
+                candidates.sort(key=lambda item: (item[0], item[1]), reverse=True)
+                return candidates[0][2]
+            time.sleep(1)
+        return None
+
+    def _find_visible_text_action(self, tab, texts):
+        self._clear_page_selection(tab)
+        js = rf"""
+return (() => {{
+  const wanted = {json.dumps(list(texts), ensure_ascii=False)};
+  try {{
+    const selection = window.getSelection && window.getSelection();
+    if (selection) selection.removeAllRanges();
+    if (document.selection && document.selection.empty) document.selection.empty();
+  }} catch (err) {{}}
+  const nodes = [...document.querySelectorAll('a,button,label,span,div,[role="button"]')];
+  for (const node of document.querySelectorAll('[data-kq-text-action]')) {{
+    node.removeAttribute('data-kq-text-action');
+  }}
+  const isVisible = (node) => {{
+    const rect = node.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0) return false;
+    for (let cur = node; cur; cur = cur.parentElement) {{
+      const style = getComputedStyle(cur);
+      if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') return false;
+    }}
+    return true;
+  }};
+  const scored = [];
+  for (const node of nodes) {{
+    if (!isVisible(node)) continue;
+    const text = (node.innerText || node.value || node.getAttribute('aria-label') || node.getAttribute('title') || '').trim();
+    if (!wanted.some(x => text === x || text.includes(x))) continue;
+    const rect = node.getBoundingClientRect();
+    const cls = (node.className || '').toString();
+    const inDialog = node.closest('.dialog,.el-dialog,.el-message-box,.modal,.layui-layer,.ui-dialog,[role="dialog"],.popups') ? 1 : 0;
+    const actionable = ['A', 'BUTTON', 'LABEL'].includes(node.tagName) || node.getAttribute('role') === 'button' || /(^|\s)(btn|button|primary|send|sms)(\s|$)/i.test(cls) ? 1 : 0;
+    const exact = wanted.includes(text) ? 1 : 0;
+    const compact = text.length <= 12 ? 1 : 0;
+    scored.push([inDialog, exact, actionable, compact, Number.parseInt(getComputedStyle(node).zIndex || '0', 10) || 0, -(rect.width * rect.height), node]);
+  }}
+  if (!scored.length) return false;
+  scored.sort((a, b) => (b[0] - a[0]) || (b[1] - a[1]) || (b[2] - a[2]) || (b[3] - a[3]) || (b[4] - a[4]) || (b[5] - a[5]));
+  scored[0][6].setAttribute('data-kq-text-action', '1');
+  return true;
+}})();
+"""
+        try:
+            if tab.run_js(js):
+                ele = tab.ele('css:[data-kq-text-action="1"]', timeout=1)
+                if ele:
+                    return ele
+        except Exception:
+            pass
+        locators = []
+        for target in texts:
+            locators.extend([
+                f'tag:a@@text()={target}',
+                f'tag:button@@text()={target}',
+                f'tag:label@@text()={target}',
+                f'tag:span@@text()={target}',
+                f'tag:div@@text()={target}',
+                f'tag:a@@text():{target}',
+                f'tag:button@@text():{target}',
+                f'tag:label@@text():{target}',
+                f'tag:span@@text():{target}',
+                f'tag:div@@text():{target}',
+            ])
+        candidates = []
+        for locator in locators:
+            try:
+                for ele in tab.eles(locator):
+                    state = self._get_element_render_state(ele)
+                    if state['hidden_ancestor'] or state['width'] <= 0 or state['height'] <= 0:
+                        continue
+                    candidates.append((state['z_index'], state['width'] * state['height'], ele))
+            except Exception:
+                continue
+        if not candidates:
+            return None
+        candidates.sort(key=lambda item: (item[0], item[1]), reverse=True)
+        return candidates[0][2]
+
     def _raise_if_weipay_auth_invalid(self, body_text):
         text = self._normalize_page_text(body_text)
         if any(x in text for x in ['请使用微信扫码登录', '二维码失效', '微信扫一扫登录', '请扫码登录', '登录超时，请重新登录']):
             raise RuntimeError('微信支付登录态已失效，请重新扫码登录后再执行批量退款')
         if '暂时无该功能权限' in text and '请联系本商户员工管理员' in text:
             raise RuntimeError('微信支付当前登录态缺少访问权限，请重新扫码或完成安全验证后再试')
+        if any(x in text for x in ['你没有操作此功能的权限', '你没有此页面的查看操作权限', '所需权限', '请联系本商户员工管理员修改权限']):
+            raise RuntimeError('微信支付当前账号缺少退款操作权限，请使用具备权限的商户员工管理员或超级管理员账号')
+        if any(x in text for x in ['你不是超级管理员', '请用超级管理员帐号登录执行此操作']):
+            raise RuntimeError('微信支付当前账号不是超级管理员，无法执行该退款操作，请切换超级管理员账号后再试')
+        if '安全验证' in text and '进入账户概况' in text:
+            raise RuntimeError('微信支付当前流程被安全验证拦截，请先在本机完成安全验证后再执行批量退款')
         if '当前商户号还未开通资金账户' in text and '无法查看资金账单' in text:
             raise RuntimeError('微信支付当前商户号未开通资金账户，无法下载资金账单')
 
@@ -682,12 +1477,103 @@ return [...new Set(rows)].slice(0, 20);
         return False
 
     def 填写密码与验证码(self, tab, submit_file=None, sms_timeout=300):
-        inputs = tab.eles('tag:input@@class=real-input')
-        passwd = XlEnv.get(f'XL_KQ_PAY_PASSWORD_{self.user}', decoding=True) or XlEnv.get('XL_KQ_PAY_PASSWORD', decoding=True)
-        if passwd:
-            inputs[0].input(passwd, clear=True)
-        if len(inputs) > 1:
-            tab('tag:a@@text():发送短信').click()
+        self._clear_page_selection(tab)
+        inputs = self._find_visible_dialog_inputs(tab)
+        try:
+            page_user = self._normalize_page_text(tab('tag:a@@class=username').text)
+        except Exception:
+            page_user = ''
+        page_user_key = (page_user or '').split('@')[0]
+        password_keys = []
+        if self.user:
+            password_keys.append(f'XL_KQ_PAY_PASSWORD_{self.user}')
+        if page_user_key and page_user_key != self.user:
+            password_keys.append(f'XL_KQ_PAY_PASSWORD_{page_user_key}')
+        password_keys.append('XL_KQ_PAY_PASSWORD')
+        passwd = ''
+        for key in password_keys:
+            passwd = XlEnv.get(key, decoding=True)
+            if passwd:
+                break
+        if not passwd:
+            user_hint = page_user_key or str(self.user or '')
+            raise RuntimeError(
+                '微信支付安全验证需要操作密码，但本机未配置密码环境变量'
+                f'，请配置 XL_KQ_PAY_PASSWORD_{user_hint} 或 XL_KQ_PAY_PASSWORD 后重试，submit_file={submit_file!s}'
+            )
+        if not inputs:
+            visible_actions = self._snapshot_visible_action_texts(tab)
+            try:
+                body_text = self._normalize_page_text(tab('tag:body').text)
+            except Exception:
+                body_text = ''
+            if '安全验证' not in body_text:
+                self._raise_if_weipay_auth_invalid(body_text)
+            raise RuntimeError(
+                '微信支付提交确认弹窗未找到可见输入框'
+                f'，submit_file={submit_file!s} visible_actions={visible_actions} body={body_text[:300]!r}'
+            )
+
+        password_input = None
+        sms_input = None
+        for item in inputs:
+            text = f"{item['type']} {item['class_name']} {item['placeholder']} {item.get('parent_text', '')}".lower()
+            if password_input is None and any(x in text for x in ['password', 'passwd', 'pay', '密码']):
+                password_input = item['ele']
+                continue
+            if sms_input is None and any(x in text for x in ['sms', 'code', '验证码', '短信']):
+                sms_input = item['ele']
+
+        if password_input is None:
+            password_input = inputs[0]['ele']
+        if sms_input is None and len(inputs) > 1:
+            for item in inputs:
+                if item['ele'] is not password_input:
+                    sms_input = item['ele']
+                    break
+
+        if not self._fill_weipay_risk_real_inputs(tab, [passwd], minimum_count=1):
+            logger.warning(f'微信支付操作密码 real-input 填充失败，回退到可见输入：submit_file={submit_file!s}')
+            self._clear_page_selection(tab)
+            password_input.input(passwd, clear=True)
+
+        if sms_input is None:
+            self._click_weipay_security_confirm_once(tab, submit_file=submit_file)
+            inputs = self._wait_weipay_security_input_count(tab, minimum_count=2, timeout=20)
+            password_input = None
+            sms_input = None
+            for item in inputs:
+                text = f"{item['type']} {item['class_name']} {item['placeholder']} {item.get('parent_text', '')}".lower()
+                if password_input is None and any(x in text for x in ['password', 'passwd', 'pay', '密码']):
+                    password_input = item['ele']
+                    continue
+                if sms_input is None and any(x in text for x in ['sms', 'code', '验证码', '短信']):
+                    sms_input = item['ele']
+            if sms_input is None and len(inputs) > 1:
+                sms_input = inputs[-1]['ele']
+            if sms_input is None:
+                try:
+                    body_text = self._normalize_page_text(tab('tag:body').text)
+                except Exception:
+                    body_text = ''
+                if '提交成功' in body_text or '退款申请已提交成功' in body_text:
+                    popup_confirmed = self.尝试点击返款提交后的提示按钮(tab)
+                    if popup_confirmed and submit_file is not None:
+                        self._save_batch_refund_submit_marker(
+                            submit_file,
+                            stage='submit_success_popup',
+                            status_text='提交成功',
+                        )
+                    return popup_confirmed
+                raise RuntimeError(
+                    '微信支付操作密码确认后未进入短信验证阶段'
+                    f'，submit_file={submit_file!s} body={body_text[:300]!r}'
+                )
+
+        if sms_input is not None:
+            self._clear_page_selection(tab)
+            if not self._click_weipay_risk_send_sms(tab):
+                logger.warning(f'微信支付确认弹窗未找到明显的发送短信按钮，继续等待验证码：submit_file={submit_file!s}')
             time.sleep(10)
             try:
                 with get_autogui_lock():
@@ -696,16 +1582,28 @@ return [...new Set(rows)].slice(0, 20);
                 raise TimeoutError(
                     f'微信支付短信验证码等待超过{sms_timeout}s，返款未提交：submit_file={submit_file!s}'
                 ) from err
-            inputs[1].input(vcode, clear=True)
+            if not self._fill_weipay_risk_real_inputs(tab, [passwd or '', vcode], minimum_count=2):
+                logger.warning(f'微信支付验证码 real-input 填充失败，回退到旧定位：submit_file={submit_file!s}')
+                self._clear_page_selection(tab)
+                sms_input.input(vcode, clear=True)
         time.sleep(1)
-        tab('tag:a@@text()=确定@@class=btn btn-primary align-center').click()
-        if submit_file is not None:
+        self._clear_page_selection(tab)
+        confirm_action = self._find_visible_confirm_action(tab, timeout=10)
+        if confirm_action is None:
+            visible_actions = self._snapshot_visible_action_texts(tab)
+            raise RuntimeError(
+                '微信支付确认弹窗未找到可见的提交按钮'
+                f'，submit_file={submit_file!s} visible_actions={visible_actions}'
+            )
+        click_state = self._click_weipay_confirm_and_wait(tab, confirm_action, submit_file=submit_file)
+        popup_confirmed = bool(click_state.get('ok'))
+        if popup_confirmed and submit_file is not None:
             self._save_batch_refund_submit_marker(
                 submit_file,
-                stage='submit_clicked',
-                status_text='已点击提交，等待后续确认',
+                stage=click_state.get('reason') or 'submit_confirmed',
+                status_text=click_state.get('body') or '提交成功',
             )
-        return self.尝试点击返款提交后的提示按钮(tab)
+        return popup_confirmed
 
     @staticmethod
     def _parse_trade_search_result_html(html):
@@ -1265,9 +2163,24 @@ return [...document.querySelectorAll('table')].filter(isVisible).map((table, tab
             return {'submitted': True, 'completed': False, 'status_text': marker.get('status_text', ''), 'reason': 'submit_marker_exists', 'marker': marker}
         tab = self.tab
         tab.get('https://pay.weixin.qq.com/index.php/xphp/cbatchrefund/batch_refund#/pages/index/index')
-        upload_button = tab.ele('tag:a@@title=上传文件', timeout=30)
-        upload_button.click.to_upload(file)
+        upload_button = self._find_visible_upload_action(tab, timeout=30)
+        if upload_button is None:
+            visible_actions = self._snapshot_visible_action_texts(tab)
+            raise RuntimeError(
+                '微信支付批量退款页未找到可见的文件选择入口'
+                f'，url={tab.url} title={tab.title} visible_actions={visible_actions}'
+            )
+        uploaded = self._upload_via_file_input(tab, file)
+        if not uploaded:
+            upload_button.click.to_upload(file)
         tab.wait(2)
+        file_input_states = self._count_file_inputs_with_files(tab)
+        if not (self._has_uploaded_file(tab) or self._has_selected_upload_file(tab, file)):
+            visible_actions = self._snapshot_visible_action_texts(tab)
+            raise RuntimeError(
+                '微信支付页面未接收到上传文件'
+                f'，file={str(file)!r} visible_actions={visible_actions} file_inputs={file_input_states}'
+            )
         confirm_button = None
         for button in tab.eles('tag:a@@text():确定', timeout=10):
             try:
@@ -1288,7 +2201,7 @@ return [...document.querySelectorAll('table')].filter(isVisible).map((table, tab
         result = self.wait_batch_refund_completion(
             submit_started_at=submit_started_at,
             file_name=str(file),
-            submit_confirmed=True,
+            submit_confirmed=bool(popup_confirmed),
         )
         if result and result.get('submitted'):
             self._save_batch_refund_submit_marker(file, stage=result.get('reason', 'submitted'), status_text=result.get('status_text', ''))

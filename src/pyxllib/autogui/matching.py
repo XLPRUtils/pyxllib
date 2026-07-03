@@ -18,19 +18,6 @@ DetailLogFunc = Callable[[str], None]
 ImagePredicateFunc = Callable[[dict[str, Any]], bool]
 
 
-def _layer_order_value(image: dict[str, Any], fallback: int) -> tuple[float, int]:
-    raw = image.get("layerOrder")
-    if isinstance(raw, bool):
-        return float(fallback), fallback
-    if isinstance(raw, (int, float)):
-        return float(raw), fallback
-    text = str(raw or "").strip()
-    try:
-        return float(text), fallback
-    except ValueError:
-        return float(fallback), fallback
-
-
 def _format_elapsed_seconds(seconds: float) -> str:
     seconds = max(0.0, float(seconds))
     if seconds < 60.0:
@@ -106,28 +93,14 @@ class SceneRecognizer:
 
         nodes: list[dict[str, Any]] = []
 
-        def folder_layer(item: dict[str, Any], fallback: int) -> int:
-            raw = item.get("layer")
-            if raw is None:
-                title = str(item.get("title") or "").strip().lower()
-                if title in {"layer 1", "layer1", "l1"}:
-                    return 1
-                if title in {"layer 2", "layer2", "l2"}:
-                    return 2
-                if title in {"layer 3", "layer3", "l3"}:
-                    return 3
-                return fallback
-            return View({"layer": raw}).layer
-
-        def visit(items: list[dict[str, Any]], parent_ids: tuple[int, ...], depth: int, layer: int) -> None:
+        def visit(items: list[dict[str, Any]], parent_ids: tuple[int, ...], depth: int) -> None:
             for item in items:
                 if not isinstance(item, dict):
                     continue
                 if item.get("type") == "folder":
-                    next_layer = folder_layer(item, layer)
                     children = item.get("children")
                     if isinstance(children, list):
-                        visit([child for child in children if isinstance(child, dict)], parent_ids, depth, next_layer)
+                        visit([child for child in children if isinstance(child, dict)], parent_ids, depth)
                     continue
                 if item.get("type") == "image":
                     scene_id = image_number(item)
@@ -135,24 +108,22 @@ class SceneRecognizer:
                     current_depth = depth
                     if scene_id is not None:
                         view = View(item)
-                        frame_layer = int(view.layer if item.get("layer") is not None else layer)
                         nodes.append({
                             "scene_id": int(scene_id),
                             "image": item,
                             "parent_ids": parent_ids,
                             "depth": depth,
-                            "layer": frame_layer,
-                            "layer_order": _layer_order_value(item, len(nodes))[0],
+                            "layer": int(view.layer),
                             "order": len(nodes),
                         })
                         current_parent_ids = (*parent_ids, int(scene_id))
                         current_depth = depth + 1
                     children = item.get("children")
                     if isinstance(children, list):
-                        visit([child for child in children if isinstance(child, dict)], current_parent_ids, current_depth, layer)
+                        visit([child for child in children if isinstance(child, dict)], current_parent_ids, current_depth)
                     continue
 
-        visit(tree, (), 0, 3)
+        visit(tree, (), 0)
         return nodes
 
     def _scene_tree_candidate_ids(
@@ -196,7 +167,7 @@ class SceneRecognizer:
             result.extend(preferred_candidates())
         roots = sorted(
             [node for node in nodes if not node["parent_ids"] and int(node["scene_id"]) in existing],
-            key=lambda node: (float(node.get("layer_order", node["order"])), int(node["order"])),
+            key=lambda node: int(node["order"]),
         )
         for layer in (1, 2, 3):
             for root in roots:
@@ -309,7 +280,7 @@ class SceneRecognizer:
         ) -> list[tuple[int, float]]:
             """并行评分同一候选组，返回按配置顺序命中的显式场景。
 
-            这里故意不是“最高分获胜”：候选顺序由 layerOrder 或调用方
+            这里故意不是“最高分获胜”：候选顺序由资产树遍历顺序或调用方
             的候选列表表达。只有整组没有任何显式场景身份候选时，才允许
             layer3 无身份帧用最高全图相似度兜底。父场景下的 children
             属于同一粗场景的细分变体，允许按分数选择更明确的子帧。

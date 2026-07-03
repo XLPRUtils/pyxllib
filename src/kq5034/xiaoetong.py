@@ -192,6 +192,14 @@ class XiaoetongApi:
 
 
 class XiaoetongWeb(DpWebBase):
+    用户列表导出关键词 = (
+        '用户列表导出',
+        '用户导出列表',
+        '用户列表',
+        '用户导出',
+        '用户管理导出',
+    )
+
     """ 网页版的小鹅通爬虫 """
 
     _CACHE_MISS = object()
@@ -782,6 +790,7 @@ return true;
     def iter_export_user_list(self, search_name=None, download=True):
         """生成器版导出用户清单，导出等待过程可逐步观察。"""
         tab = self.tab
+        export_keywords = list(self.用户列表导出关键词)
 
         yield '用户列表导出：打开用户列表页'
         tab.get('https://admin.xiaoe-tech.com/t/user_manage/index#/user_list/list')
@@ -791,8 +800,9 @@ return true;
             tab('tag:input@@placeholder=请输入昵称/备注名搜索').input(str(search_name), clear=True)
             tab('tag:span@@text()=筛选').click()
 
-        existing_exports = self._列出下载中心任务名(['用户列表导出']) if download else set()
-        task_records = self._列出下载中心任务记录(['用户列表导出']) if download else []
+        existing_exports = self._列出下载中心任务名(export_keywords) if download else []
+        existing_download_tasks = self._列出下载中心任务名() if download else []
+        task_records = self._列出下载中心任务记录(export_keywords) if download else []
         processing_tasks = [x for x in task_records if ('处理中' in x['status'] or '任务撤回' in x['action_text']) and not x['can_download']]
         if processing_tasks:
             processing_tasks.sort(key=lambda x: x['apply_time'], reverse=True)
@@ -814,12 +824,27 @@ return true;
 
         if download:
             tab.wait(3)
-            return (yield from self.iter_download_last_file(
-                ['用户列表导出'],
-                exclude_task_names=existing_exports,
-                refresh_every_checks=5,
-                max_wait_seconds=20 * 60,
-            ))
+            try:
+                return (yield from self.iter_download_last_file(
+                    export_keywords,
+                    exclude_task_names=existing_exports,
+                    refresh_every_checks=5,
+                    max_wait_seconds=20 * 60,
+                ))
+            except RuntimeError as exc:
+                # 小鹅通下载中心偶发调整任务名；优先按历史关键词匹配，失效时退回“新增可下载任务”识别。
+                if '未找到匹配任务' not in str(exc):
+                    raise
+                logger.warning(
+                    '用户列表导出任务名未命中历史关键词，回退到按新增下载任务识别：'
+                    f'keywords={export_keywords} err={exc}'
+                )
+                yield '用户列表导出：关键词未命中，回退到新增下载任务识别'
+                return (yield from self.iter_download_last_file(
+                    exclude_task_names=existing_download_tasks,
+                    refresh_every_checks=5,
+                    max_wait_seconds=10 * 60,
+                ))
 
     def export_clockin_data(self, url, download=True, start_date=None, end_date=None):
         """ 导出指定的打卡数据文件 """
