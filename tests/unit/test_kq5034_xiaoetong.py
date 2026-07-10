@@ -17,6 +17,8 @@ class _FakeLabel:
 
 
 class _FakeTab:
+    url = 'https://admin.xiaoe-tech.com/t/live_management#/userOperation?id=123&tabName=UserManage'
+
     def get(self, *_args, **_kwargs):
         return None
 
@@ -60,3 +62,43 @@ def test_iter_export_user_list_falls_back_when_download_center_task_name_changes
         (list(XiaoetongWeb.用户列表导出关键词), ['旧导出A'], 20 * 60),
         (None, ['旧导出A', '旧导出B'], 10 * 60),
     ]
+
+
+def test_export_lesson_data_uses_longer_download_wait_for_large_exports(monkeypatch):
+    web = XiaoetongWeb.__new__(XiaoetongWeb)
+    web.tab = _FakeTab()
+    web.exist_files = set()
+
+    class _FakeTempTab:
+        def __enter__(self):
+            return web.tab
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+    monkeypatch.setattr(web, '_make_runtime_cache_key', lambda *args, **kwargs: 'lesson-cache-key')
+    monkeypatch.setattr(web, '_restore_runtime_cached_file', lambda *args, **kwargs: XiaoetongWeb._CACHE_MISS)
+    monkeypatch.setattr(web, '_store_runtime_cached_file', lambda _key, file: file)
+    monkeypatch.setattr(web, '临时工作标签页', lambda *args, **kwargs: _FakeTempTab())
+    monkeypatch.setattr(web, '_等待直播课用户导出按钮', lambda *args, **kwargs: _FakeButton())
+    monkeypatch.setattr(web, '_直播课用户列表为空', lambda *args, **kwargs: False)
+
+    calls = []
+
+    def fake_download_last_file(*args, **kwargs):
+        calls.append((args, kwargs))
+        return Path('C:/tmp/lesson-export.csv')
+
+    monkeypatch.setattr(web, 'download_last_file', fake_download_last_file)
+
+    result = web.export_lesson_data({'lesson_id2': '28969108', 'lesson_name': '测试课次'})
+
+    assert result == Path('C:/tmp/lesson-export.csv')
+    assert calls == [(
+        (),
+        {
+            'exclude_task_names': [],
+            'max_wait_seconds': 20 * 60,
+            'download_wait_seconds': XiaoetongWeb._lesson_export_download_wait_seconds,
+        },
+    )]

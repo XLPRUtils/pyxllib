@@ -206,6 +206,7 @@ class XiaoetongWeb(DpWebBase):
     _EMPTY_EXPORT = object()
     _runtime_export_cache = {}
     _runtime_export_cache_ttl = datetime.timedelta(hours=2)
+    _lesson_export_download_wait_seconds = 15 * 60
     _live_lesson_wait_seconds = 60
     _live_lesson_max_attempts = 3
     _live_user_list_page_size = 100
@@ -1318,7 +1319,11 @@ return fetch('/xe.data-user-behavior.live.user_list_filter/1.0.0', {
 
             if download:
                 tab.wait(5)
-                file = self.download_last_file(exclude_task_names=existing_exports, max_wait_seconds=20 * 60)
+                file = self.download_last_file(
+                    exclude_task_names=existing_exports,
+                    max_wait_seconds=20 * 60,
+                    download_wait_seconds=self._lesson_export_download_wait_seconds,
+                )
                 if not file:
                     raise RuntimeError(f'课次导出已提交但未下载到文件：lesson={row.get("lesson_name", "")} url={url}')
                 # bug: 这个要考虑后缀.csv等的影响，以及dp自带的下载，逻辑有些不同
