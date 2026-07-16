@@ -102,8 +102,8 @@ def _patch_drissionpage_download_move():
             ]
             source = next((p for p in candidates if is_recent_download_file(p)), None)
             if source is None:
-                logger.warning(f'DrissionPage下载完成但临时文件缺失，未找到兜底文件：{mission.name} err={err}')
-                self.set_done(mission, 'canceled')
+                # 新版 Chrome 偶发直接把文件落到系统 Downloads 根目录，临时文件事件会先于最终文件可见。
+                logger.warning(f'DrissionPage下载完成但临时文件缺失，暂不取消任务，等待外层轮询兜底：{mission.name} err={err}')
                 return
 
             try:

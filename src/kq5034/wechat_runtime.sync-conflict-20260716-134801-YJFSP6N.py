@@ -20,7 +20,7 @@ _微信二级窗口类名 = {
     'SessionChatRoomDetailWnd',
     'SnsWnd',
 }
-_微信二级窗口名称 = {'微信支付商家助手', '商家助手'}
+_微信二级窗口名称 = {'微信支付商家助手'}
 
 
 def _微信二维码诊断目录(stage):
@@ -60,11 +60,10 @@ def _控件属性(ctrl):
     return data
 
 
-def _微信顶层窗口角色(data, *, main_process_ids=None):
-    main_process_ids = {x for x in (main_process_ids or set()) if x}
+def _微信顶层窗口角色(ctrl):
+    data = _控件属性(ctrl)
     name = str(data.get('Name') or '')
     class_name = str(data.get('ClassName') or '')
-    process_id = data.get('ProcessId')
 
     if class_name in _微信主窗口类名:
         return 'main'
@@ -76,51 +75,27 @@ def _微信顶层窗口角色(data, *, main_process_ids=None):
     # 避免误关用户正常打开的 Chrome 或其他 Chromium 程序。
     if class_name == 'Chrome_WidgetWin_0' and name == '微信':
         return 'secondary:wechat-browser'
-    if process_id in main_process_ids:
-        return 'secondary:same-process'
     return ''
 
 
 def _列出微信顶层窗口():
-    changed_timeout = False
     try:
-        try:
-            uia.SetGlobalSearchTimeout(1)
-            changed_timeout = True
-        except Exception:
-            pass
         root = uia.GetRootControl()
         controls = list(root.GetChildren())
     except Exception as exc:
         logger.warning(f'列出微信顶层窗口失败：{exc!r}')
         return []
-    finally:
-        if changed_timeout:
-            try:
-                uia.SetGlobalSearchTimeout(10)
-            except Exception:
-                pass
-
-    rows = []
-    main_process_ids = set()
-    for ctrl in controls:
-        try:
-            data = _控件属性(ctrl)
-            data['control'] = ctrl
-            rows.append(data)
-            if str(data.get('ClassName') or '') in _微信主窗口类名 and data.get('ProcessId'):
-                main_process_ids.add(data.get('ProcessId'))
-        except Exception as exc:
-            logger.warning(f'读取顶层窗口属性失败：{exc!r}')
 
     windows = []
-    for data in rows:
+    for ctrl in controls:
         try:
-            role = _微信顶层窗口角色(data, main_process_ids=main_process_ids)
+            role = _微信顶层窗口角色(ctrl)
             if not role:
                 continue
+            data = _控件属性(ctrl)
             data['role'] = role
-            data['summary'] = _控件摘要(data['control'])
+            data['summary'] = _控件摘要(ctrl)
+            data['control'] = ctrl
             windows.append(data)
         except Exception as exc:
             logger.warning(f'识别微信顶层窗口失败：{exc!r}')
@@ -441,12 +416,13 @@ def _规范化微信支付商家助手窗口(ctrl):
     try:
         rect = ctrl.BoundingRectangle
         screen_width, screen_height = pyautogui.size()
-        if not (
+        outside = (
             rect.left < 0
             or rect.top < 0
             or rect.right > screen_width
             or rect.bottom > screen_height
-        ):
+        )
+        if not outside:
             return ctrl
         logger.info(
             '微信支付扫码登录：商家助手窗口超出桌面，先激活并最大化 '
@@ -467,21 +443,6 @@ class KqWechat:
         """ wxautox 初始化时会直接 print，某些控制台环境下会触发 stdout flush 异常 """
         with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
             return WeChat()
-
-    @staticmethod
-    def 诊断微信窗口状态():
-        windows = []
-        for item in _列出微信顶层窗口():
-            item.pop('control', None)
-            windows.append(item)
-        return {
-            'window_count': len(windows),
-            'windows': windows,
-        }
-
-    @staticmethod
-    def 重置微信二维码窗口状态(close_seconds=3):
-        return _重置微信二维码窗口状态(close_seconds=close_seconds)
 
     @staticmethod
     def 扫码登录微信支付(user, *, assume_current_chat=False):
@@ -564,7 +525,6 @@ class KqWechat:
         logger.info(f'微信支付扫码登录：准备打开二维码图片 user={user!r} assume_current_chat={assume_current_chat}')
         try:
             image = None
-            _重置微信二维码窗口状态(close_seconds=3)
             wx = KqWechat.创建微信实例()
             if assume_current_chat:
                 try:
@@ -629,10 +589,6 @@ class KqWechat:
                 pyautogui.click(*calculate_relative_point(ltrb, 650))
         except Exception as exc:
             _采集微信二维码诊断('扫码登录微信支付失败', exc)
-            try:
-                _重置微信二维码窗口状态(close_seconds=3)
-            except Exception as reset_exc:
-                logger.warning(f'微信支付扫码登录失败后重置窗口状态失败：{reset_exc!r}')
             raise
         finally:
             watchdog.cancel()

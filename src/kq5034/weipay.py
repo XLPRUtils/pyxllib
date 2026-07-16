@@ -19,9 +19,17 @@ class Weipay(DpWebBase):
     def login(self, users=None):
         tab = self.tab
         if tab.url != 'https://pay.weixin.qq.com/index.php/core/info':
+            raw_timeout = os.getenv('KQ_WEIPAY_LOGIN_TIMEOUT_SECONDS', '240')
+            try:
+                login_timeout = max(30, int(float(raw_timeout)))
+            except (TypeError, ValueError):
+                login_timeout = 240
+            login_deadline = time.time() + login_timeout
             tab.get('https://pay.weixin.qq.com')
             message_sent = False
             while tab.url != 'https://pay.weixin.qq.com/index.php/core/info':
+                if time.time() >= login_deadline:
+                    raise TimeoutError(f'微信支付登录超时：等待 {login_timeout} 秒后仍未进入商户首页')
                 div = tab('tag:div@@class=qrcode-img')
                 try:
                     is_invalid = div('tag:div@@class=alt@@text():二维码失效', timeout=3)
@@ -41,7 +49,7 @@ class Weipay(DpWebBase):
                         wechat_lock_send(user, '考勤工作需要，快帮我扫码登录微信支付', files=[file])
                     time.sleep(5)
                     with get_autogui_lock():
-                        KqWechat.扫码登录微信支付(users[0])
+                        KqWechat.扫码登录微信支付(users[0], assume_current_chat=True)
                 else:
                     print('>> 请扫码登录首页后，程序会自动继续运行...')
                 message_sent = True

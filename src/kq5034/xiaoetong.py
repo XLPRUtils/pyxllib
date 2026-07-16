@@ -556,8 +556,21 @@ return true;
         raise RuntimeError(f'下载文件等待超时：task={file_name} timeout={timeout_seconds}s')
 
     def _提取下载中心任务名(self, row):
-        first_td = row('tag:td', timeout=0.5)
-        return first_td.text if first_td else row.text.split('\n', 1)[0]
+        tds = row.eles('tag:td')
+        texts = [(td.text or '').strip() for td in tds]
+
+        for text in texts:
+            if not text:
+                continue
+            if re.search(r'\.(csv|xlsx?|zip|txt|json)(?:\s|$)', text, flags=re.IGNORECASE):
+                return text
+
+        # 小鹅通近版把首列改成任务ID，文件名落在后续列；兜底时优先跳过纯数字列。
+        for text in texts:
+            if text and not text.isdigit():
+                return text
+
+        return texts[0] if texts else row.text.split('\n', 1)[0]
 
     def _列出下载中心任务名(self, match_keywords=None):
         """读取当前下载中心里可下载的任务名，用于过滤旧任务。"""
@@ -594,17 +607,17 @@ return true;
             records = []
             for row in rows:
                 tds = row.eles('tag:td')
-                if len(tds) < 9:
+                if len(tds) < 4:
                     continue
 
-                task_name = (tds[0].text or '').strip()
+                task_name = self._提取下载中心任务名(row)
                 normalized_name = self._标准化下载名(task_name)
                 if match_keywords and not any(x in normalized_name for x in match_keywords):
                     continue
 
-                status = (tds[6].text or '').strip()
-                action_text = (tds[8].text or '').strip()
-                apply_time = (tds[5].text or '').strip()
+                status = (tds[-3].text or '').strip() if len(tds) >= 3 else ''
+                action_text = (tds[-1].text or '').strip() if len(tds) >= 1 else ''
+                apply_time = (tds[-4].text or '').strip() if len(tds) >= 4 else ''
                 can_download = bool(row('tag:button@@text():下载', timeout=0.3)) or '下载' in action_text
                 records.append({
                     'name': task_name,
@@ -624,7 +637,7 @@ return true;
             text = tab.run_js('return document.querySelector("#sub_app_container")?.innerText || ""') or ''
 
         ignore_lines = {
-            '详情', '任务数据', '编辑', '删除', '编辑|删除', '全部',
+            '详情', '任务数据', '编辑', '删除', '编辑|删除', '编辑|分享|删除', '全部',
             '已完成成员', '未完成成员', '完成情况', '参与人数', '已完成', '未完成', '完成率（%）',
             '无数据', '动态详情', '分享',
         }
@@ -632,6 +645,8 @@ return true;
         for line in text.splitlines():
             line = line.strip()
             if not line or line in ignore_lines or line.startswith('任务时间：'):
+                continue
+            if '|' in line and any(action in line for action in ('编辑', '分享', '删除')):
                 continue
             if len(line) <= 40:
                 lines.append(line)
@@ -648,6 +663,13 @@ return true;
             return line
 
         return ''
+
+    def _提取已生成下载文件名(self, tab):
+        text = ''
+        with contextlib.suppress(Exception):
+            text = tab.run_js('return document.body.innerText || ""') or ''
+        match = re.search(r'已生成【([^】]+)】', text)
+        return match.group(1).strip() if match else ''
 
     def _等待禅宗打卡导出按钮(self, tab, *, max_attempts=4):
         """ 禅宗打卡页偶发空白或加载慢，重试刷新直到导出按钮出现。 """
@@ -847,10 +869,11 @@ return true;
                     max_wait_seconds=10 * 60,
                 ))
 
-    def export_clockin_data(self, url, download=True, start_date=None, end_date=None):
+    def export_clockin_data(self, url, download=True, start_date=None, end_date=None,
+                            expected_download_name=None, exclude_existing_download_tasks=True):
         """ 导出指定的打卡数据文件 """
         cache_key = None
-        expected_download_name = ''
+        expected_download_name = expected_download_name or ''
         existing_exports = None
         if 'community_admin' in url:  # 禅宗打卡
             if start_date is None:  # 开始时间可以设置为一年前
@@ -866,15 +889,38 @@ return true;
             if cached_file is not self._CACHE_MISS:
                 return cached_file
 
+        if download and expected_download_name:
+            download_dir = Path.home() / 'Downloads' / '_xlproject_temp_downloads'
+            recent_file = self._查找本地下载文件(
+                expected_download_name,
+                download_dir,
+                newer_than_ts=time.time() - 2 * 60 * 60,
+            )
+            if recent_file is not None and self._文件已稳定(recent_file):
+                logger.info(f'复用近期本地打卡导出文件：expect={expected_download_name} file={recent_file}')
+                return XlPath(recent_file)
+
         # tab = self.browser.new_tab()
         tab = self.tab.get2(url)
 
         if 'community_admin' in url:  # 禅宗打卡
             tab.wait(3)
             pane, _ = self._等待禅宗打卡导出按钮(tab)
-            expected_download_name = self._提取禅宗打卡导出名(tab)
+            page_text = ''
+            with contextlib.suppress(Exception):
+                page_text = tab.run_js('return document.querySelector("#sub_app_container")?.innerText || ""') or ''
+            if '暂无数据' in page_text or '无数据' in page_text:
+                logger.info(f'禅宗打卡页暂无可导出数据：url={tab.url}')
+                if cache_key is not None:
+                    self._store_runtime_cached_file(cache_key, None)
+                return None
+            if not expected_download_name:
+                expected_download_name = self._提取禅宗打卡导出名(tab)
             if download and expected_download_name:
-                existing_exports = self._列出下载中心任务名([expected_download_name])
+                existing_exports = (
+                    self._列出下载中心任务名([expected_download_name])
+                    if exclude_existing_download_tasks else []
+                )
             # 等待按钮变为可点击状态
             btn = pane('tag:button@@class:ss-button@@text():导出')(
                 'tag:span@@text():导出').wait.clickable()
@@ -911,7 +957,18 @@ return true;
             if confirm_btn:
                 confirm_btn.click()  # 这是两个不同的"确认"按钮
             tab('tag:button@@class=el-button el-button--primary@@text():导出').click()
+            tab.wait(3)
+            generated_download_name = self._提取已生成下载文件名(tab)
+            if generated_download_name:
+                expected_download_name = generated_download_name
+                existing_exports = []
         elif 'diaryList' in url:  # 日历打卡（日历打卡多了一个字段"打卡天数"）
+            existing_download_tasks = self._列出下载中心任务名() if download else []
+            if download and expected_download_name:
+                existing_exports = (
+                    self._列出下载中心任务名([expected_download_name])
+                    if exclude_existing_download_tasks else []
+                )
             try:
                 page_text = tab.run_js('return document.body.innerText') or ''
             except Exception:
@@ -947,13 +1004,32 @@ return true;
 
         if download:
             tab.wait(10 if existing_exports is not None else 3)
+            if 'community_admin' in url:
+                generated_download_name = self._提取已生成下载文件名(tab)
+                if generated_download_name:
+                    expected_download_name = generated_download_name
+                    existing_exports = []
             # tab.close()
-            file = self.download_last_file(
-                [expected_download_name] if expected_download_name else None,
-                exclude_task_names=existing_exports,
-                max_wait_seconds=20 * 60 if existing_exports is not None else None,
-            )
-            if file and expected_download_name:
+            strict_name_check = bool(expected_download_name)
+            try:
+                file = self.download_last_file(
+                    [expected_download_name] if expected_download_name else None,
+                    exclude_task_names=existing_exports,
+                    max_wait_seconds=20 * 60 if existing_exports is not None else None,
+                )
+            except RuntimeError as exc:
+                if 'diaryList' not in url or '未找到匹配任务' not in str(exc):
+                    raise
+                logger.warning(
+                    '日历打卡导出任务名未命中配置名，回退到按新增下载任务识别：'
+                    f'expected={expected_download_name} err={exc}'
+                )
+                strict_name_check = False
+                file = self.download_last_file(
+                    exclude_task_names=existing_download_tasks,
+                    max_wait_seconds=10 * 60,
+                )
+            if file and expected_download_name and strict_name_check:
                 if self._标准化下载名(expected_download_name) not in self._标准化下载名(file.name):
                     logger.warning(f'禅宗打卡导出文件名校验失败：expect={expected_download_name} got={file.name} url={url}')
                     file = None
