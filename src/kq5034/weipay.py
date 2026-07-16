@@ -2,58 +2,556 @@
 """微信支付最小可用实现。"""
 
 import json
+import os
+import subprocess
+import sys
 import tempfile
+import time
+from datetime import datetime as _datetime
 from pathlib import Path
 
 from .common import *  # noqa: F403
 from .wechat_runtime import KqWechat
 
 
+def _weipay_login_trace_path():
+    trace_path = os.getenv('KQ_WEIPAY_LOGIN_TRACE_JSONL')
+    if not trace_path:
+        return None
+    return Path(trace_path)
+
+
+def _append_weipay_login_trace(event, **data):
+    """Append a machine-readable login event when trace output is enabled."""
+    trace_path = _weipay_login_trace_path()
+    if not trace_path:
+        return
+    payload = {
+        'ts': _datetime.now().isoformat(timespec='seconds'),
+        'event': event,
+        **data,
+    }
+    try:
+        trace_path.parent.mkdir(parents=True, exist_ok=True)
+        with trace_path.open('a', encoding='utf-8') as f:
+            f.write(json.dumps(payload, ensure_ascii=False, default=str) + '\n')
+    except Exception as exc:
+        logger.warning(f'微信支付登录追踪日志写入失败：event={event!r} path={trace_path!s} error={exc!r}')
+
+
+def _weipay_login_probe_root(probe_dir=None):
+    root = (
+        probe_dir
+        or os.getenv('KQ_WEIPAY_LOGIN_PROBE_DIR')
+        or Path(tempfile.gettempdir()) / 'codeyun' / 'kq5034' / 'weipay_login_probe'
+    )
+    return Path(root)
+
+
+def _write_json(path, data):
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(data, ensure_ascii=False, indent=2, default=str), encoding='utf-8')
+
+
 class Weipay(DpWebBase):
+    base_url = 'https://pay.weixin.qq.com'
+
     def __init__(self, users=None):
-        super().__init__('https://pay.weixin.qq.com')
+        self.browser = self._create_chromium()
+        self.browser.set.download_path(tempfile.gettempdir())
+        self.base_url = type(self).base_url
+        self.tab = self._复用或新建微信支付标签页()
         self.user = None
         if users:
             self.login(users)
 
+    @staticmethod
+    def _是微信支付网址(url):
+        try:
+            return urlparse(str(url or '')).netloc == 'pay.weixin.qq.com'
+        except Exception:
+            return False
+
+    def _复用或新建微信支付标签页(self):
+        """Prefer an existing WeChat Pay tab instead of opening a new tab per run."""
+        try:
+            for tab in self.browser.get_tabs():
+                if self._是微信支付网址(getattr(tab, 'url', '')):
+                    tab_id = getattr(tab, 'tab_id', None)
+                    if tab_id:
+                        try:
+                            self.browser.activate_tab(tab_id)
+                        except Exception:
+                            pass
+                    logger.info(f'微信支付复用已有标签页：url={getattr(tab, "url", "")}')
+                    return tab
+        except Exception as exc:
+            logger.warning(f'微信支付查找可复用标签页失败，改为新建标签页：{exc!r}')
+        logger.info('微信支付未找到可复用标签页，创建新标签页')
+        return self.browser.new_tab(self.base_url)
+
+    @staticmethod
+    def 清理重复微信支付标签页(browser=None, *, keep_tab_id=None, min_tabs_to_keep=1, reason=''):
+        """Close duplicate pay.weixin.qq.com tabs and keep one working tab for later reuse."""
+        if browser is None:
+            browser = Chromium()
+        min_tabs_to_keep = max(1, int(min_tabs_to_keep or 1))
+        keep_tab_ids = {str(keep_tab_id)} if keep_tab_id else set()
+
+        try:
+            target_infos = browser._run_cdp('Target.getTargets').get('targetInfos', [])
+        except Exception as exc:
+            logger.warning(f'微信支付重复标签页清理失败：无法读取CDP目标，reason={reason!r} error={exc!r}')
+            return {
+                'status': 'failed',
+                'reason': reason,
+                'error': repr(exc),
+                'before_count': 0,
+                'closed_count': 0,
+                'kept_count': 0,
+            }
+
+        tabs = []
+        for info in target_infos:
+            if info.get('type') != 'page':
+                continue
+            tab_id = info.get('targetId')
+            url = info.get('url') or ''
+            if not tab_id or not Weipay._是微信支付网址(url):
+                continue
+            tabs.append({
+                'tab_id': str(tab_id),
+                'url': url,
+                'title': info.get('title') or '',
+            })
+
+        if len(tabs) <= min_tabs_to_keep:
+            return {
+                'status': 'ok',
+                'reason': reason,
+                'before_count': len(tabs),
+                'closed_count': 0,
+                'kept_count': len(tabs),
+                'closed': [],
+                'kept': tabs,
+            }
+
+        def keep_priority(tab):
+            url = tab['url']
+            if '/index.php/core/info' in url:
+                return 0
+            if '/index.php/core/refundquery' in url or '/index.php/core/trade/' in url or '/cbatchrefund/' in url:
+                return 1
+            if url.rstrip('/') == 'https://pay.weixin.qq.com':
+                return 9
+            return 5
+
+        keep_candidates = tabs if keep_tab_ids else sorted(tabs, key=keep_priority)
+        kept_ids = set()
+        for tab in tabs:
+            if tab['tab_id'] in keep_tab_ids and len(kept_ids) < min_tabs_to_keep:
+                kept_ids.add(tab['tab_id'])
+        for tab in keep_candidates:
+            if len(kept_ids) >= min_tabs_to_keep:
+                break
+            kept_ids.add(tab['tab_id'])
+
+        closed = []
+        errors = []
+        for tab in tabs:
+            if tab['tab_id'] in kept_ids:
+                continue
+            try:
+                browser._run_cdp('Target.closeTarget', targetId=tab['tab_id'])
+                closed.append(tab)
+            except Exception as exc:
+                errors.append({**tab, 'error': repr(exc)})
+                logger.warning(f'关闭微信支付重复标签页失败：tab={tab} error={exc!r}')
+
+        kept = [tab for tab in tabs if tab['tab_id'] in kept_ids]
+        if closed:
+            extra = f'，原因={reason}' if reason else ''
+            logger.info(f'已关闭微信支付重复标签页：{len(closed)}个{extra}')
+        return {
+            'status': 'ok' if not errors else 'partial',
+            'reason': reason,
+            'before_count': len(tabs),
+            'closed_count': len(closed),
+            'kept_count': len(kept),
+            'closed': closed,
+            'kept': kept,
+            'errors': errors,
+        }
+
+    def close_if_exceeds_min_tabs(self, min_tabs_to_keep=1):
+        return self.清理重复微信支付标签页(
+            self.browser,
+            keep_tab_id=getattr(self.tab, 'tab_id', None),
+            min_tabs_to_keep=min_tabs_to_keep,
+            reason='Weipay自动收尾',
+        )
+
+    @staticmethod
+    def _reset_wechat_qrcode_windows_for_login(close_seconds=3, timeout=15):
+        """Reset WeChat QR windows in an isolated process so UIA hangs cannot block login."""
+        payload = json.dumps({'close_seconds': close_seconds}, ensure_ascii=False)
+        cmd = [
+            sys.executable,
+            '-c',
+            (
+                'from kq5034.wechat_runtime import KqWechat; '
+                'import json, sys; '
+                'kw=json.loads(sys.argv[1]); '
+                'print(json.dumps(KqWechat.快速重置微信二维码窗口状态(**kw), ensure_ascii=False, default=str))'
+            ),
+            payload,
+        ]
+        env = os.environ.copy()
+        env.update({
+            'PYTHONUTF8': '1',
+            'PYTHONIOENCODING': 'utf-8',
+        })
+        try:
+            result = subprocess.run(
+                cmd,
+                env=env,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                encoding='utf-8',
+                errors='replace',
+                timeout=timeout,
+            )
+        except subprocess.TimeoutExpired as exc:
+            logger.warning(f'微信二维码窗口状态重置子进程超时，继续登录流程：timeout={timeout}s')
+            return {
+                'status': 'timeout',
+                'timeout': timeout,
+                'stdout_tail': (exc.stdout or '')[-2000:],
+                'stderr_tail': (exc.stderr or '')[-2000:],
+            }
+
+        if result.stderr:
+            logger.info(f'微信二维码窗口状态重置子进程 stderr：{result.stderr[-2000:]}')
+        if result.returncode != 0:
+            logger.warning(
+                f'微信二维码窗口状态重置子进程失败，继续登录流程：'
+                f'exit_code={result.returncode} stdout={result.stdout[-2000:]!r}'
+            )
+            return {
+                'status': 'failed',
+                'exit_code': result.returncode,
+                'stdout_tail': result.stdout[-2000:],
+                'stderr_tail': result.stderr[-2000:],
+            }
+
+        try:
+            return json.loads(result.stdout.strip().splitlines()[-1])
+        except Exception:
+            return {
+                'status': 'bad_output',
+                'stdout_tail': result.stdout[-2000:],
+                'stderr_tail': result.stderr[-2000:],
+            }
+
     def login(self, users=None):
         tab = self.tab
+        login_started_at = time.perf_counter()
+        _append_weipay_login_trace(
+            'login_enter',
+            users=users,
+            initial_url=getattr(tab, 'url', None),
+        )
         if tab.url != 'https://pay.weixin.qq.com/index.php/core/info':
-            raw_timeout = os.getenv('KQ_WEIPAY_LOGIN_TIMEOUT_SECONDS', '240')
+            raw_qr_timeout = os.getenv(
+                'KQ_WEIPAY_QRCODE_LIFETIME_SECONDS',
+                os.getenv('KQ_WECHAT_QRCODE_TIMEOUT_SECONDS', '55'),
+            )
             try:
-                login_timeout = max(30, int(float(raw_timeout)))
+                qr_timeout = min(60, max(20, int(float(raw_qr_timeout))))
             except (TypeError, ValueError):
-                login_timeout = 240
-            login_deadline = time.time() + login_timeout
-            tab.get('https://pay.weixin.qq.com')
-            message_sent = False
-            while tab.url != 'https://pay.weixin.qq.com/index.php/core/info':
-                if time.time() >= login_deadline:
-                    raise TimeoutError(f'微信支付登录超时：等待 {login_timeout} 秒后仍未进入商户首页')
-                div = tab('tag:div@@class=qrcode-img')
+                qr_timeout = 55
+            raw_timeout = os.getenv('KQ_WEIPAY_LOGIN_TIMEOUT_SECONDS', str(qr_timeout + 20))
+            try:
+                login_timeout = min(90, max(qr_timeout, int(float(raw_timeout))))
+            except (TypeError, ValueError):
+                login_timeout = qr_timeout + 20
+            raw_attempts = os.getenv('KQ_WEIPAY_LOGIN_MAX_ATTEMPTS', '5')
+            try:
+                max_attempts = max(1, int(float(raw_attempts)))
+            except (TypeError, ValueError):
+                max_attempts = 5
+
+            last_error = None
+            for attempt in range(1, max_attempts + 1):
+                attempt_started_at = time.perf_counter()
+                login_deadline = time.time() + login_timeout
+                logger.info(
+                    f'微信支付登录扫码尝试开始：attempt={attempt}/{max_attempts} '
+                    f'qrcode_timeout={qr_timeout}s timeout={login_timeout}s'
+                )
+                _append_weipay_login_trace(
+                    'attempt_start',
+                    attempt=attempt,
+                    max_attempts=max_attempts,
+                    qrcode_timeout=qr_timeout,
+                    login_timeout=login_timeout,
+                    current_url=getattr(tab, 'url', None),
+                )
                 try:
-                    is_invalid = div('tag:div@@class=alt@@text():二维码失效', timeout=3)
-                except DrissionPage.errors.ContextLostError:
-                    is_invalid = None
-                if is_invalid:
-                    logger.info(self.get_recive('二维码已过期，请发送任意消息，重新触发获取最新二维码'))
+                    reset_result = self._reset_wechat_qrcode_windows_for_login(close_seconds=3, timeout=15)
+                    logger.info(f'微信支付登录扫码前已重置微信二维码窗口状态：{reset_result}')
+                    _append_weipay_login_trace('wechat_reset_before_scan', attempt=attempt, result=reset_result)
+                except Exception as exc:
+                    logger.warning(f'微信支付登录扫码前重置微信二维码窗口状态失败，继续尝试：{exc!r}')
+                    _append_weipay_login_trace('wechat_reset_before_scan_failed', attempt=attempt, error=repr(exc))
+
+                tab.get('https://pay.weixin.qq.com')
+                _append_weipay_login_trace('pay_page_opened', attempt=attempt, url=getattr(tab, 'url', None))
+                message_sent = False
+                while tab.url != 'https://pay.weixin.qq.com/index.php/core/info':
+                    remaining = login_deadline - time.time()
+                    if remaining <= 0:
+                        last_error = TimeoutError(
+                            f'微信支付登录超时：attempt={attempt}/{max_attempts} '
+                            f'等待 {login_timeout} 秒后仍未进入商户首页'
+                        )
+                        break
+
+                    try:
+                        div = tab('tag:div@@class=qrcode-img', timeout=max(1, min(5, remaining)))
+                        is_invalid = (
+                            div('tag:div@@class=alt@@text():二维码失效', timeout=max(1, min(3, remaining)))
+                            if div
+                            else None
+                        )
+                    except DrissionPage.errors.ContextLostError:
+                        is_invalid = None
+                        _append_weipay_login_trace('qrcode_status_context_lost', attempt=attempt)
+                    except Exception as exc:
+                        logger.warning(f'微信支付登录二维码状态读取失败，继续等待：{exc!r}')
+                        _append_weipay_login_trace('qrcode_status_read_failed', attempt=attempt, error=repr(exc))
+                        is_invalid = None
+                    if is_invalid:
+                        logger.info(self.get_recive('二维码已过期，请发送任意消息，重新触发获取最新二维码'))
+                        _append_weipay_login_trace('qrcode_invalid_refresh', attempt=attempt)
+                        tab.refresh()
+                        message_sent = False
+                    if message_sent:
+                        time.sleep(max(0.5, min(5, remaining)))
+                        continue
+
+                    try:
+                        div = tab('tag:div@@id=IDQrcodeImg', timeout=max(1, min(5, remaining)))
+                        file = div('tag:img').save(XlPath.tempdir(), 'qrcode')
+                        _append_weipay_login_trace(
+                            'qrcode_saved',
+                            attempt=attempt,
+                            file=str(file),
+                            remaining_seconds=round(remaining, 3),
+                        )
+                        if users:
+                            for user in users:
+                                wechat_lock_send(user, '考勤工作需要，快帮我扫码登录微信支付', files=[file])
+                            _append_weipay_login_trace('qrcode_sent_to_wechat', attempt=attempt, users=users, file=str(file))
+                            time.sleep(max(0.5, min(3, remaining)))
+                            old_qrcode_timeout = os.environ.get('KQ_WECHAT_QRCODE_TIMEOUT_SECONDS')
+                            os.environ['KQ_WECHAT_QRCODE_TIMEOUT_SECONDS'] = str(qr_timeout)
+                            try:
+                                with get_autogui_lock(timeout=20, force_break_timeout=10):
+                                    _append_weipay_login_trace('wechat_scan_start', attempt=attempt, user=users[0])
+                                    KqWechat.扫码登录微信支付(users[0], assume_current_chat=True)
+                                    _append_weipay_login_trace('wechat_scan_done', attempt=attempt, user=users[0])
+                            finally:
+                                if old_qrcode_timeout is None:
+                                    os.environ.pop('KQ_WECHAT_QRCODE_TIMEOUT_SECONDS', None)
+                                else:
+                                    os.environ['KQ_WECHAT_QRCODE_TIMEOUT_SECONDS'] = old_qrcode_timeout
+
+                            post_login_deadline = time.time() + min(10, max(3, login_deadline - time.time()))
+                            while tab.url != 'https://pay.weixin.qq.com/index.php/core/info' and time.time() < post_login_deadline:
+                                time.sleep(1)
+                            if tab.url != 'https://pay.weixin.qq.com/index.php/core/info':
+                                _append_weipay_login_trace(
+                                    'post_scan_homepage_timeout',
+                                    attempt=attempt,
+                                    url=getattr(tab, 'url', None),
+                                )
+                                raise TimeoutError(
+                                    f'微信支付二维码本轮未登录成功：attempt={attempt}/{max_attempts} '
+                                    f'qrcode_timeout={qr_timeout}s url={tab.url!r}'
+                                )
+                        else:
+                            print('>> 请扫码登录首页后，程序会自动继续运行...')
+                        message_sent = True
+                    except Exception as exc:
+                        last_error = exc
+                        logger.warning(
+                            f'微信支付扫码登录尝试失败，准备重置后重试：'
+                            f'attempt={attempt}/{max_attempts} error={exc!r}'
+                        )
+                        _append_weipay_login_trace(
+                            'attempt_exception',
+                            attempt=attempt,
+                            elapsed_seconds=round(time.perf_counter() - attempt_started_at, 3),
+                            url=getattr(tab, 'url', None),
+                            error=repr(exc),
+                        )
+                        break
+
+                if tab.url == 'https://pay.weixin.qq.com/index.php/core/info':
+                    try:
+                        reset_result = self._reset_wechat_qrcode_windows_for_login(close_seconds=3, timeout=15)
+                        logger.info(f'微信支付登录成功后已清理微信二维码窗口状态：{reset_result}')
+                        _append_weipay_login_trace('wechat_reset_after_success', attempt=attempt, result=reset_result)
+                    except Exception as exc:
+                        logger.warning(f'微信支付登录成功后清理微信二维码窗口状态失败：{exc!r}')
+                        _append_weipay_login_trace('wechat_reset_after_success_failed', attempt=attempt, error=repr(exc))
+                    _append_weipay_login_trace(
+                        'attempt_success',
+                        attempt=attempt,
+                        elapsed_seconds=round(time.perf_counter() - attempt_started_at, 3),
+                        final_url=getattr(tab, 'url', None),
+                    )
+                    break
+
+                try:
+                    reset_result = self._reset_wechat_qrcode_windows_for_login(close_seconds=3, timeout=15)
+                    logger.warning(
+                        f'微信支付登录扫码尝试未成功，已重置微信二维码窗口状态：'
+                        f'attempt={attempt}/{max_attempts} reset={reset_result}'
+                    )
+                    _append_weipay_login_trace(
+                        'attempt_failed_reset',
+                        attempt=attempt,
+                        result=reset_result,
+                        last_error=repr(last_error),
+                    )
+                except Exception as exc:
+                    logger.warning(
+                        f'微信支付登录扫码尝试未成功，且重置微信二维码窗口状态失败：'
+                        f'attempt={attempt}/{max_attempts} error={exc!r}'
+                    )
+                    _append_weipay_login_trace(
+                        'attempt_failed_reset_failed',
+                        attempt=attempt,
+                        error=repr(exc),
+                        last_error=repr(last_error),
+                    )
+                try:
                     tab.refresh()
-                    message_sent = False
-                if message_sent:
-                    time.sleep(5)
-                    continue
-                div = tab('tag:div@@id=IDQrcodeImg')
-                file = div('tag:img').save(XlPath.tempdir(), 'qrcode')
-                if users:
-                    for user in users:
-                        wechat_lock_send(user, '考勤工作需要，快帮我扫码登录微信支付', files=[file])
-                    time.sleep(5)
-                    with get_autogui_lock():
-                        KqWechat.扫码登录微信支付(users[0], assume_current_chat=True)
-                else:
-                    print('>> 请扫码登录首页后，程序会自动继续运行...')
-                message_sent = True
+                except Exception:
+                    pass
+                if attempt >= max_attempts:
+                    raise TimeoutError(
+                        f'微信支付登录失败：已重试 {max_attempts} 轮，'
+                        f'单个二维码最多 {qr_timeout} 秒，每轮最多 {login_timeout} 秒，'
+                        '仍未进入商户首页'
+                    ) from last_error
+                time.sleep(3)
         self.user = tab('tag:a@@class=username').text.split('@')[0]
+        _append_weipay_login_trace(
+            'login_finish',
+            user=self.user,
+            final_url=getattr(tab, 'url', None),
+            elapsed_seconds=round(time.perf_counter() - login_started_at, 3),
+        )
+
+    @staticmethod
+    def 微信支付登录稳定性探针(users=None, *, probe_dir=None, raise_on_failure=False):
+        """Run a login-only probe and persist machine-readable evidence for outer agents."""
+        if users is None:
+            users = ['考勤后台']
+        elif isinstance(users, str):
+            users = [users]
+        else:
+            users = list(users)
+
+        root = _weipay_login_probe_root(probe_dir)
+        root.mkdir(parents=True, exist_ok=True)
+        run_id = f'{_datetime.now().strftime("%Y%m%d-%H%M%S")}-{os.getpid()}'
+        trace_path = root / f'{run_id}.events.jsonl'
+        result_path = root / f'{run_id}.result.json'
+        history_path = root / 'history.jsonl'
+
+        started_at = _datetime.now().isoformat(timespec='seconds')
+        started_perf = time.perf_counter()
+        old_trace_path = os.environ.get('KQ_WEIPAY_LOGIN_TRACE_JSONL')
+        os.environ['KQ_WEIPAY_LOGIN_TRACE_JSONL'] = str(trace_path)
+
+        result = {
+            'run_id': run_id,
+            'started_at': started_at,
+            'status': 'running',
+            'success': False,
+            'users': users,
+            'probe_dir': str(root),
+            'trace_path': str(trace_path),
+            'result_path': str(result_path),
+            'history_path': str(history_path),
+        }
+        captured_exc = None
+
+        _append_weipay_login_trace('probe_start', run_id=run_id, users=users)
+        try:
+            t0 = time.perf_counter()
+            result['reset_before'] = KqWechat.快速重置微信二维码窗口状态(close_seconds=3)
+            result['reset_before_seconds'] = round(time.perf_counter() - t0, 3)
+
+            weipay = Weipay(users)
+            result['status'] = 'ok'
+            result['success'] = True
+            result['user'] = weipay.user
+            result['tab_url'] = getattr(weipay.tab, 'url', None)
+            try:
+                result['tab_title'] = getattr(weipay.tab, 'title', None)
+            except Exception as exc:
+                result['tab_title_error'] = repr(exc)
+            _append_weipay_login_trace(
+                'probe_success',
+                run_id=run_id,
+                user=result.get('user'),
+                tab_url=result.get('tab_url'),
+            )
+        except Exception as exc:
+            captured_exc = exc
+            result['status'] = 'failed'
+            result['success'] = False
+            result['error_type'] = type(exc).__name__
+            result['error'] = repr(exc)
+            _append_weipay_login_trace('probe_failed', run_id=run_id, error_type=type(exc).__name__, error=repr(exc))
+        finally:
+            try:
+                t0 = time.perf_counter()
+                result['reset_after'] = KqWechat.快速重置微信二维码窗口状态(close_seconds=3)
+                result['reset_after_seconds'] = round(time.perf_counter() - t0, 3)
+            except Exception as exc:
+                result['reset_after_error'] = repr(exc)
+                _append_weipay_login_trace('probe_reset_after_failed', run_id=run_id, error=repr(exc))
+
+            result['finished_at'] = _datetime.now().isoformat(timespec='seconds')
+            result['total_seconds'] = round(time.perf_counter() - started_perf, 3)
+            _append_weipay_login_trace(
+                'probe_finish',
+                run_id=run_id,
+                status=result['status'],
+                success=result['success'],
+                total_seconds=result['total_seconds'],
+            )
+
+            if old_trace_path is None:
+                os.environ.pop('KQ_WEIPAY_LOGIN_TRACE_JSONL', None)
+            else:
+                os.environ['KQ_WEIPAY_LOGIN_TRACE_JSONL'] = old_trace_path
+
+            _write_json(result_path, result)
+            with history_path.open('a', encoding='utf-8') as f:
+                f.write(json.dumps(result, ensure_ascii=False, default=str) + '\n')
+
+        if captured_exc is not None and raise_on_failure:
+            raise captured_exc
+        return result
 
     def 重连标签页(self):
         try:

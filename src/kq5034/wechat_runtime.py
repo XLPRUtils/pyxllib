@@ -2,6 +2,8 @@
 
 import subprocess
 import threading
+import ctypes
+from ctypes import wintypes
 
 from .common import *  # noqa: F403
 from pyxllib.prog import process_runtime
@@ -21,6 +23,7 @@ _微信二级窗口类名 = {
     'SnsWnd',
 }
 _微信二级窗口名称 = {'微信支付商家助手', '商家助手'}
+_微信支付商家助手窗口标题 = {'微信支付商家助手', '商家助手'}
 
 
 def _微信二维码诊断目录(stage):
@@ -79,6 +82,187 @@ def _微信顶层窗口角色(data, *, main_process_ids=None):
     if process_id in main_process_ids:
         return 'secondary:same-process'
     return ''
+
+
+def _枚举Win32顶层窗口():
+    user32 = ctypes.windll.user32
+    enum_proc_type = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+
+    class Rect(ctypes.Structure):
+        _fields_ = [
+            ('left', ctypes.c_long),
+            ('top', ctypes.c_long),
+            ('right', ctypes.c_long),
+            ('bottom', ctypes.c_long),
+        ]
+
+    def window_text(hwnd):
+        length = user32.GetWindowTextLengthW(hwnd)
+        buf = ctypes.create_unicode_buffer(length + 1)
+        user32.GetWindowTextW(hwnd, buf, length + 1)
+        return buf.value
+
+    def class_name(hwnd):
+        buf = ctypes.create_unicode_buffer(256)
+        user32.GetClassNameW(hwnd, buf, 256)
+        return buf.value
+
+    rows = []
+
+    def callback(hwnd, _lparam):
+        if not user32.IsWindowVisible(hwnd):
+            return True
+        rect = Rect()
+        user32.GetWindowRect(hwnd, ctypes.byref(rect))
+        pid = wintypes.DWORD()
+        user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+        rows.append({
+            'hwnd': int(hwnd),
+            'title': window_text(hwnd),
+            'class': class_name(hwnd),
+            'pid': int(pid.value),
+            'rect': [rect.left, rect.top, rect.right, rect.bottom],
+        })
+        return True
+
+    user32.EnumWindows(enum_proc_type(callback), 0)
+    return rows
+
+
+def _关闭微信支付商家助手Win32(*, timeout_ms=3000):
+    """关闭微信小程序宿主窗口；这类窗口有时不在微信主进程内，UIA 同进程兜底抓不到。"""
+    user32 = ctypes.windll.user32
+    wm_close = 0x0010
+    smto_abort_if_hung = 0x0002
+    closed = []
+    for item in _枚举Win32顶层窗口():
+        title = str(item.get('title') or '')
+        class_name = str(item.get('class') or '')
+        if class_name != 'Chrome_WidgetWin_0':
+            continue
+        if title not in _微信支付商家助手窗口标题 and '商家助手' not in title:
+            continue
+        result = ctypes.c_size_t()
+        ok = user32.SendMessageTimeoutW(
+            wintypes.HWND(item['hwnd']),
+            wm_close,
+            0,
+            0,
+            smto_abort_if_hung,
+            max(300, int(timeout_ms)),
+            ctypes.byref(result),
+        )
+        record = dict(item)
+        record['send_message_timeout_ok'] = bool(ok)
+        closed.append(record)
+    if closed:
+        logger.info(f'Win32已请求关闭微信支付商家助手窗口：{closed}')
+    return closed
+
+
+def _微信二维码链路Win32角色(item):
+    title = str(item.get('title') or '')
+    class_name = str(item.get('class') or '')
+
+    if class_name in _微信主窗口类名:
+        return ''
+    if class_name in _微信二级窗口类名:
+        return f'secondary:{class_name}'
+    if class_name == 'Chrome_WidgetWin_0':
+        if title in _微信支付商家助手窗口标题 or '商家助手' in title:
+            return 'secondary:wechat-pay-helper'
+        if title == '微信':
+            return 'secondary:wechat-browser'
+    return ''
+
+
+def _关闭微信二维码链路Win32(*, timeout_ms=1000):
+    """用 Win32 快速关闭二维码识别链路窗口，避免 UIA 枚举卡住登录主流程。"""
+    user32 = ctypes.windll.user32
+    wm_close = 0x0010
+    smto_abort_if_hung = 0x0002
+    closed = []
+    for item in _枚举Win32顶层窗口():
+        role = _微信二维码链路Win32角色(item)
+        if not role:
+            continue
+        result = ctypes.c_size_t()
+        ok = user32.SendMessageTimeoutW(
+            wintypes.HWND(item['hwnd']),
+            wm_close,
+            0,
+            0,
+            smto_abort_if_hung,
+            max(300, int(timeout_ms)),
+            ctypes.byref(result),
+        )
+        record = dict(item)
+        record['role'] = role
+        record['send_message_timeout_ok'] = bool(ok)
+        closed.append(record)
+    if closed:
+        logger.info(f'Win32已请求关闭微信二维码链路窗口：{closed}')
+    return closed
+
+
+def _存在微信支付商家助手Win32():
+    return any(
+        _微信二维码链路Win32角色(item) == 'secondary:wechat-pay-helper'
+        for item in _枚举Win32顶层窗口()
+    )
+
+
+def _微信图片预览Win32窗口():
+    previews = [
+        item for item in _枚举Win32顶层窗口()
+        if str(item.get('class') or '') == 'ImagePreviewWnd'
+    ]
+    previews.sort(
+        key=lambda item: (
+            (item['rect'][2] - item['rect'][0]) * (item['rect'][3] - item['rect'][1]),
+            item.get('hwnd') or 0,
+        ),
+        reverse=True,
+    )
+    return previews[0] if previews else None
+
+
+def _快速重置微信二维码窗口状态(*, close_seconds=3, timeout_ms=1000):
+    """只用 Win32 关闭二维码图片预览、小程序/商家助手等窗口，保留微信主窗口。"""
+    deadline = time.time() + max(0.5, float(close_seconds))
+    closed = []
+    remaining = []
+    while True:
+        closed.extend(_关闭微信二维码链路Win32(timeout_ms=timeout_ms))
+        time.sleep(0.15)
+        remaining = []
+        for item in _枚举Win32顶层窗口():
+            role = _微信二维码链路Win32角色(item)
+            if role:
+                record = dict(item)
+                record['role'] = role
+                remaining.append(record)
+        if not remaining or time.time() >= deadline:
+            break
+
+    kept = [
+        item for item in _枚举Win32顶层窗口()
+        if str(item.get('class') or '') in _微信主窗口类名
+    ]
+    result = {
+        'closed_count': len(closed),
+        'closed': closed,
+        'kept_count': len(kept),
+        'kept': kept,
+        'remaining_count': len(remaining),
+        'remaining': remaining,
+    }
+    if closed or remaining:
+        logger.info(
+            '微信二维码窗口状态快速重置：'
+            f'closed={len(closed)} remaining={len(remaining)} kept={len(kept)}'
+        )
+    return result
 
 
 def _列出微信顶层窗口():
@@ -156,6 +340,7 @@ def _关闭微信二级窗口(ctrl, *, wait=0.5):
 def _重置微信二维码窗口状态(*, close_seconds=3):
     """只保留微信主窗口，关闭图片预览、商家助手等二维码链路二级窗口。"""
     deadline = time.time() + max(0.5, float(close_seconds))
+    win32_closed = _关闭微信二维码链路Win32()
     closed = []
     errors = []
     kept = []
@@ -180,19 +365,25 @@ def _重置微信二维码窗口状态(*, close_seconds=3):
                 errors.append(record)
         time.sleep(0.2)
 
+    win32_closed.extend(_关闭微信二维码链路Win32(timeout_ms=1000))
     remain = []
     for item in _列出微信顶层窗口():
         item.pop('control', None)
         remain.append(item)
     result = {
+        'win32_closed_count': len(win32_closed),
+        'win32_closed': win32_closed,
         'closed_count': len(closed),
         'closed': closed,
         'errors': errors,
         'kept_count': len(kept),
         'remaining': remain,
     }
-    if closed or errors:
-        logger.info(f'微信二维码窗口状态重置：closed={len(closed)} errors={len(errors)} remaining={len(remain)}')
+    if win32_closed or closed or errors:
+        logger.info(
+            '微信二维码窗口状态重置：'
+            f'win32_closed={len(win32_closed)} closed={len(closed)} errors={len(errors)} remaining={len(remain)}'
+        )
     return result
 
 
@@ -283,12 +474,6 @@ def _微信图片二维码按钮候选(image):
 
     tools_box = getattr(image, 'ToolsBox', None)
     if tools_box is not None:
-        for name in ('识别图中二维码', '識别圖中QR Code', 'Extract QR Code'):
-            try:
-                ctrl = tools_box.ButtonControl(Name=name)
-                candidates.append((f'ToolsBox.ButtonControl({name})', ctrl))
-            except Exception:
-                pass
         try:
             for ctrl in tools_box.GetChildren():
                 name = getattr(ctrl, 'Name', '') or ''
@@ -384,6 +569,19 @@ def _点击匹配控件(root, keywords, *, control_types=None):
     return False
 
 
+def _控件树文本(root, *, max_nodes=300):
+    texts = []
+    for ctrl in _遍历控件树(root, max_nodes=max_nodes):
+        for attr in ('Name', 'Value'):
+            try:
+                value = getattr(ctrl, attr, '') or ''
+            except Exception:
+                value = ''
+            if value:
+                texts.append(str(value))
+    return ' '.join(dict.fromkeys(texts))
+
+
 def _启动微信二维码诊断看门狗(stage, *, timeout=90):
     def capture():
         try:
@@ -398,8 +596,15 @@ def _启动微信二维码诊断看门狗(stage, *, timeout=90):
 
 
 def _点击微信图片识别二维码(image, *, timeout=20):
+    timeout = min(8, max(3, float(timeout)))
+    try:
+        fallback_delay = min(3, max(0.8, float(os.getenv('KQ_WECHAT_QRCODE_COORDINATE_FALLBACK_DELAY_SECONDS', '1.2'))))
+    except (TypeError, ValueError):
+        fallback_delay = 1.2
+    started_at = time.time()
     deadline = time.time() + timeout
     last_error = None
+    clicked_coordinate_fallback = False
     while time.time() < deadline:
         for label, ctrl in _微信图片二维码按钮候选(image):
             try:
@@ -410,7 +615,19 @@ def _点击微信图片识别二维码(image, *, timeout=20):
                 return
             except Exception as exc:
                 last_error = exc
-        time.sleep(1)
+        if not clicked_coordinate_fallback and time.time() - started_at >= fallback_delay:
+            try:
+                rect = image.api.BoundingRectangle
+                width = rect.right - rect.left
+                x = rect.left + min(374, max(40, width - 40))
+                y = rect.top + 16
+                logger.info(f'微信支付扫码登录：使用图片预览工具栏坐标兜底点击识别二维码 x={x} y={y}')
+                pyautogui.click(x, y)
+                clicked_coordinate_fallback = True
+                return
+            except Exception as exc:
+                last_error = exc
+        time.sleep(0.5)
 
     diag_dir = _采集微信二维码诊断('识别图中二维码按钮失败', last_error)
     raise RuntimeError(f'微信图片未找到“识别图中二维码”按钮，诊断目录：{diag_dir}') from last_error
@@ -434,6 +651,82 @@ def _等待微信支付商家助手窗口(*, timeout=45, raise_on_timeout=True):
         return None
     diag_dir = _采集微信二维码诊断('微信支付商家助手窗口失败', last_error)
     raise RuntimeError(f'微信支付商家助手窗口未出现，诊断目录：{diag_dir}') from last_error
+
+
+def _等待微信图片预览或商家助手(*, timeout=8, stable_seconds=0.8, raise_on_timeout=True):
+    """等待打开二维码后的下一稳定状态：图片预览就绪，或微信已自动拉起商家助手。"""
+    timeout = max(2.0, float(timeout))
+    stable_seconds = max(0.2, float(stable_seconds))
+    deadline = time.time() + timeout
+    last_rect = None
+    stable_since = None
+    last_error = None
+
+    while time.time() < deadline:
+        if _存在微信支付商家助手Win32():
+            ct1 = _等待微信支付商家助手窗口(timeout=2, raise_on_timeout=False)
+            if ct1 is not None:
+                logger.info('微信支付扫码登录：打开二维码后已自动出现商家助手窗口')
+                return None, ct1
+
+        preview = _微信图片预览Win32窗口()
+        if preview is not None:
+            rect = preview.get('rect') or [0, 0, 0, 0]
+            width = rect[2] - rect[0]
+            height = rect[3] - rect[1]
+            if width > 200 and height > 200:
+                now = time.time()
+                if rect == last_rect:
+                    if stable_since is not None and now - stable_since >= stable_seconds:
+                        try:
+                            image = WeChatImage()
+                            logger.info(f'微信支付扫码登录：二维码图片预览已稳定 rect={rect}')
+                            return image, None
+                        except Exception as exc:
+                            last_error = exc
+                            logger.warning(f'微信支付扫码登录：图片预览窗口已出现但 WeChatImage 初始化未就绪：{exc!r}')
+                else:
+                    last_rect = list(rect)
+                    stable_since = now
+
+        time.sleep(0.2)
+
+    if not raise_on_timeout:
+        return None, None
+    diag_dir = _采集微信二维码诊断('微信二维码图片预览未稳定', last_error)
+    raise RuntimeError(f'微信二维码图片预览未稳定，诊断目录：{diag_dir}') from last_error
+
+
+def _打开最近微信二维码图片(wx, *, max_messages=8, open_timeout=4, stable_seconds=0.6):
+    messages = wx.GetAllMessage()
+    if not messages:
+        diag_dir = _采集微信二维码诊断('微信会话无消息')
+        raise RuntimeError(f'微信会话没有可点击消息，诊断目录：{diag_dir}')
+
+    last_error = None
+    tried = 0
+    for offset, msg in enumerate(reversed(messages[-max(1, int(max_messages)):]), start=1):
+        tried += 1
+        try:
+            msg.click()
+        except Exception as exc:
+            last_error = exc
+            continue
+
+        image, ct1 = _等待微信图片预览或商家助手(
+            timeout=open_timeout,
+            stable_seconds=stable_seconds,
+            raise_on_timeout=False,
+        )
+        if image is not None or ct1 is not None:
+            return image, ct1, {
+                'message_offset_from_end': offset,
+                'tried_messages': tried,
+            }
+        _快速重置微信二维码窗口状态(close_seconds=1)
+
+    diag_dir = _采集微信二维码诊断('最近消息未打开二维码图片', last_error)
+    raise RuntimeError(f'最近 {tried} 条消息未打开二维码图片，诊断目录：{diag_dir}') from last_error
 
 
 def _规范化微信支付商家助手窗口(ctrl):
@@ -484,15 +777,179 @@ class KqWechat:
         return _重置微信二维码窗口状态(close_seconds=close_seconds)
 
     @staticmethod
+    def 快速重置微信二维码窗口状态(close_seconds=3):
+        return _快速重置微信二维码窗口状态(close_seconds=close_seconds)
+
+    @staticmethod
+    def 单测微信二维码打开识别关闭(user=None, *, repeat=3, assume_current_chat=True):
+        raw_timeout = os.getenv('KQ_WECHAT_QRCODE_PROBE_TIMEOUT_SECONDS', '90')
+        try:
+            timeout = max(20, int(float(raw_timeout)))
+        except (TypeError, ValueError):
+            timeout = 90
+
+        payload = json.dumps({
+            'user': user,
+            'repeat': repeat,
+            'assume_current_chat': assume_current_chat,
+        }, ensure_ascii=False)
+        cmd = [
+            sys.executable,
+            '-c',
+            (
+                'from kq5034.wechat_runtime import KqWechat; '
+                'import json, sys; '
+                'kw=json.loads(sys.argv[1]); '
+                'print(json.dumps(KqWechat._单测微信二维码打开识别关闭本进程(**kw), ensure_ascii=False))'
+            ),
+            payload,
+        ]
+        env = os.environ.copy()
+        env.update({
+            'PYTHONUTF8': '1',
+            'PYTHONIOENCODING': 'utf-8',
+        })
+        proc = subprocess.Popen(
+            cmd,
+            env=env,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            encoding='utf-8',
+            errors='replace',
+        )
+        try:
+            stdout, stderr = proc.communicate(timeout=timeout)
+        except subprocess.TimeoutExpired as exc:
+            process_runtime.terminate_process_tree(proc.pid, timeout=3)
+            try:
+                stdout, stderr = proc.communicate(timeout=5)
+            except Exception:
+                try:
+                    proc.kill()
+                except OSError:
+                    pass
+                stdout, stderr = '', ''
+            diag_dir = _采集微信二维码诊断('单测_微信二维码打开识别关闭子进程超时', exc, include_uia=False)
+            return {
+                'status': 'timeout',
+                'timeout': timeout,
+                'diag_dir': str(diag_dir),
+                'stdout_tail': stdout[-2000:],
+                'stderr_tail': stderr[-2000:],
+            }
+
+        if proc.returncode != 0:
+            diag_dir = _采集微信二维码诊断('单测_微信二维码打开识别关闭子进程失败', include_uia=False)
+            return {
+                'status': 'failed',
+                'exit_code': proc.returncode,
+                'diag_dir': str(diag_dir),
+                'stdout_tail': stdout[-2000:],
+                'stderr_tail': stderr[-2000:],
+            }
+
+        try:
+            result = json.loads(stdout.strip().splitlines()[-1])
+        except Exception:
+            result = {'status': 'bad_output', 'stdout_tail': stdout[-2000:], 'stderr_tail': stderr[-2000:]}
+        if stderr:
+            result['stderr_tail'] = stderr[-4000:]
+        result.setdefault('status', 'ok')
+        return result
+
+    @staticmethod
+    def _单测微信二维码打开识别关闭本进程(user=None, *, repeat=3, assume_current_chat=True):
+        repeat = min(10, max(1, int(repeat)))
+        result = {
+            'status': 'ok',
+            'user': user,
+            'repeat': repeat,
+            'rounds': [],
+        }
+        total_started = time.perf_counter()
+        wx = KqWechat.创建微信实例()
+        if user:
+            wx.ChatWith(user)
+        elif not assume_current_chat:
+            raise ValueError('user 为空时必须 assume_current_chat=True')
+
+        for index in range(1, repeat + 1):
+            row = {'round': index}
+            round_started = time.perf_counter()
+            image = None
+            try:
+                t0 = time.perf_counter()
+                row['reset_before'] = _快速重置微信二维码窗口状态(close_seconds=2)
+                row['reset_before_seconds'] = round(time.perf_counter() - t0, 3)
+
+                if user:
+                    t0 = time.perf_counter()
+                    wx.ChatWith(user)
+                    row['open_chat_seconds'] = round(time.perf_counter() - t0, 3)
+                else:
+                    try:
+                        row['current_chat'] = str(wx.CurrentChat())
+                    except Exception as exc:
+                        row['current_chat_error'] = repr(exc)
+
+                t0 = time.perf_counter()
+                image, ct1, open_meta = _打开最近微信二维码图片(wx)
+                row.update(open_meta)
+                row['open_and_stabilize_seconds'] = round(time.perf_counter() - t0, 3)
+                row['auto_helper'] = ct1 is not None
+
+                if ct1 is None:
+                    t0 = time.perf_counter()
+                    _点击微信图片识别二维码(image)
+                    row['recognize_click_seconds'] = round(time.perf_counter() - t0, 3)
+                    t0 = time.perf_counter()
+                    ct1 = _等待微信支付商家助手窗口(timeout=15, raise_on_timeout=False)
+                    row['wait_helper_seconds'] = round(time.perf_counter() - t0, 3)
+                else:
+                    row['recognize_click_seconds'] = 0
+                    row['wait_helper_seconds'] = 0
+
+                row['helper_detected'] = ct1 is not None
+                row['success'] = ct1 is not None
+                if ct1 is not None:
+                    try:
+                        rect = ct1.BoundingRectangle
+                        row['helper_rect'] = [rect.left, rect.top, rect.right, rect.bottom]
+                    except Exception as exc:
+                        row['helper_rect_error'] = repr(exc)
+            except Exception as exc:
+                row['success'] = False
+                row['error'] = repr(exc)
+            finally:
+                try:
+                    if image is not None:
+                        image.Close()
+                except Exception as exc:
+                    row['image_close_error'] = repr(exc)
+                t0 = time.perf_counter()
+                row['reset_after'] = _快速重置微信二维码窗口状态(close_seconds=3)
+                row['reset_after_seconds'] = round(time.perf_counter() - t0, 3)
+                row['round_seconds'] = round(time.perf_counter() - round_started, 3)
+                result['rounds'].append(row)
+
+        result['success_count'] = sum(1 for row in result['rounds'] if row.get('success'))
+        result['total_seconds'] = round(time.perf_counter() - total_started, 3)
+        successful = [row['round_seconds'] for row in result['rounds'] if row.get('success')]
+        if successful:
+            result['avg_success_round_seconds'] = round(sum(successful) / len(successful), 3)
+        return result
+
+    @staticmethod
     def 扫码登录微信支付(user, *, assume_current_chat=False):
         if os.getenv('KQ_WECHAT_QRCODE_CHILD') == '1':
             return KqWechat._扫码登录微信支付本进程(user, assume_current_chat=assume_current_chat)
 
-        raw_timeout = os.getenv('KQ_WECHAT_QRCODE_TIMEOUT_SECONDS', '180')
+        raw_timeout = os.getenv('KQ_WECHAT_QRCODE_TIMEOUT_SECONDS', '55')
         try:
-            timeout = max(30, int(float(raw_timeout)))
+            timeout = min(60, max(20, int(float(raw_timeout))))
         except (TypeError, ValueError):
-            timeout = 180
+            timeout = 55
 
         cmd = [
             sys.executable,
@@ -541,6 +998,11 @@ class KqWechat:
                 logger.warning(f'微信支付扫码登录子进程超时 stdout：{stdout[-4000:]}')
             if stderr:
                 logger.warning(f'微信支付扫码登录子进程超时 stderr：{stderr[-4000:]}')
+            try:
+                reset_result = _快速重置微信二维码窗口状态(close_seconds=3)
+                logger.warning(f'微信支付扫码登录子进程超时后已重置微信二维码窗口状态：{reset_result}')
+            except Exception as reset_exc:
+                logger.warning(f'微信支付扫码登录子进程超时后重置微信二维码窗口状态失败：{reset_exc!r}')
             raise TimeoutError(f'微信支付扫码登录子进程超时：timeout={timeout}s，诊断目录：{diag_dir}') from exc
 
         if proc.returncode != 0:
@@ -553,18 +1015,25 @@ class KqWechat:
 
         if stdout:
             logger.info(f'微信支付扫码登录子进程 stdout：{stdout[-2000:]}')
+        if stderr:
+            logger.info(f'微信支付扫码登录子进程 stderr：{stderr[-4000:]}')
 
     @staticmethod
     def _扫码登录微信支付本进程(user, *, assume_current_chat=False):
         """
         :param user: 微信群名/图片二维码存放的群位置
         """
-        watchdog = _启动微信二维码诊断看门狗('扫码登录微信支付卡住', timeout=90)
+        raw_watchdog_timeout = os.getenv('KQ_WECHAT_QRCODE_TIMEOUT_SECONDS', '55')
+        try:
+            watchdog_timeout = min(45, max(15, int(float(raw_watchdog_timeout)) - 5))
+        except (TypeError, ValueError):
+            watchdog_timeout = 45
+        watchdog = _启动微信二维码诊断看门狗('扫码登录微信支付卡住', timeout=watchdog_timeout)
         # 0 打开图片
         logger.info(f'微信支付扫码登录：准备打开二维码图片 user={user!r} assume_current_chat={assume_current_chat}')
         try:
             image = None
-            _重置微信二维码窗口状态(close_seconds=3)
+            _快速重置微信二维码窗口状态(close_seconds=2)
             wx = KqWechat.创建微信实例()
             if assume_current_chat:
                 try:
@@ -590,9 +1059,21 @@ class KqWechat:
             # 新版微信可能在打开图片后自动识别二维码并直接拉起商家助手，
             # 此时 ImagePreviewWnd 已关闭。先认最终状态，避免把成功误判成
             # “找不到识别图中二维码按钮”。
-            ct1 = _等待微信支付商家助手窗口(timeout=3, raise_on_timeout=False)
+            raw_preview_timeout = os.getenv('KQ_WECHAT_IMAGE_PREVIEW_READY_TIMEOUT_SECONDS', '8')
+            raw_preview_stable = os.getenv('KQ_WECHAT_IMAGE_PREVIEW_STABLE_SECONDS', '0.8')
+            try:
+                preview_timeout = min(20, max(3, float(raw_preview_timeout)))
+            except (TypeError, ValueError):
+                preview_timeout = 8
+            try:
+                preview_stable = min(3, max(0.3, float(raw_preview_stable)))
+            except (TypeError, ValueError):
+                preview_stable = 0.8
+            image, ct1 = _等待微信图片预览或商家助手(
+                timeout=preview_timeout,
+                stable_seconds=preview_stable,
+            )
             if ct1 is None:
-                image = WeChatImage()
                 logger.info('微信支付扫码登录：点击微信图片“识别图中二维码”')
                 _点击微信图片识别二维码(image)
 
@@ -610,7 +1091,7 @@ class KqWechat:
             if ct1 is None:
                 ct1 = _等待微信支付商家助手窗口(timeout=15, raise_on_timeout=False)
             if ct1 is None:
-                return
+                raise RuntimeError('微信支付商家助手窗口未出现，二维码可能已失效或微信识别未完成')
 
             # 3 点击进入商店，以及点击退出小程序窗口
             ct1 = _规范化微信支付商家助手窗口(ct1)
@@ -618,11 +1099,27 @@ class KqWechat:
             ltrb = [rect.left, rect.top, rect.right, rect.bottom]
             logger.info(f'微信支付扫码登录：微信支付商家助手窗口位置={ltrb}')
             clicked_semantic = False
-            clicked_semantic |= _点击匹配控件(ct1, ['1599622041', '武陵禅寺客堂'])
-            if clicked_semantic:
-                time.sleep(3)
-            clicked_semantic |= _点击匹配控件(ct1, ['刷新', '重新获取', '重新加载'], control_types={'ButtonControl'})
+            raw_helper_ready_timeout = os.getenv('KQ_WECHAT_PAY_HELPER_READY_TIMEOUT_SECONDS', '8')
+            try:
+                helper_ready_timeout = min(15, max(3, int(float(raw_helper_ready_timeout))))
+            except (TypeError, ValueError):
+                helper_ready_timeout = 8
+            helper_ready_deadline = time.time() + helper_ready_timeout
+            while time.time() < helper_ready_deadline:
+                assistant_text = _控件树文本(ct1, max_nodes=500)
+                if any(key in assistant_text for key in ('系统繁忙', '网络繁忙', '稍后再试', '服务异常')):
+                    raise RuntimeError(f'微信支付商家助手异常页面：{assistant_text[:300]!r}')
+                clicked_semantic = _点击匹配控件(ct1, ['1599622041', '武陵禅寺客堂'])
+                if clicked_semantic:
+                    time.sleep(3)
+                    break
+                clicked_semantic = _点击匹配控件(ct1, ['刷新', '重新获取', '重新加载'], control_types={'ButtonControl'})
+                if clicked_semantic:
+                    time.sleep(3)
+                    continue
+                time.sleep(1)
             if not clicked_semantic:
+                _采集微信二维码诊断('微信支付商家助手未命中语义控件')
                 logger.info('微信支付扫码登录：未命中语义控件，回退到经验坐标点击')
                 pyautogui.click(*calculate_relative_point(ltrb, 300))
                 time.sleep(5)
@@ -630,7 +1127,7 @@ class KqWechat:
         except Exception as exc:
             _采集微信二维码诊断('扫码登录微信支付失败', exc)
             try:
-                _重置微信二维码窗口状态(close_seconds=3)
+                _快速重置微信二维码窗口状态(close_seconds=3)
             except Exception as reset_exc:
                 logger.warning(f'微信支付扫码登录失败后重置窗口状态失败：{reset_exc!r}')
             raise
