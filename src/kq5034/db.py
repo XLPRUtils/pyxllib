@@ -967,7 +967,8 @@ ORDER BY ldt.lesson_id DESC;
         items.sort_values('update_time', inplace=True)
         custom_fillna(items, 0, numeric_fill_value=0)  # d250629, 这步运行非常慢，但我现在不敢贸然去掉
 
-        # 如果播放时间超过半小时，或者study_state显示已完成，进度也强制改为100
+        # 修道班只有平台明确显示已完成或实际进度达到100%，才算完整看完。
+        # 累计观看时长只能用于展示，不能替代完成状态、也不能触发返款。
         def 更新单条进度(item):
             # 这段isna的判断应该是不需要的，但以防万一先留着
             if pd.isna(item['cum_seconds']):
@@ -975,7 +976,7 @@ ORDER BY ldt.lesson_id DESC;
             if pd.isna(item['progress']):
                 item['progress'] = 0
 
-            if item['progress'] < 100 and (item['cum_seconds'] >= 1800 or '已完成' in item['study_state']):
+            if item['progress'] < 100 and '已完成' in str(item['study_state']):
                 item['progress'] = 100
 
             return item
@@ -1013,7 +1014,7 @@ ORDER BY ldt.lesson_id DESC;
         # 4 未完成情况下的进度展示
         progress, cum_seconds = x['progress'], x['cum_seconds']
         if progress:
-            return f'进度{progress}%'
+            return f'进度{int(float(progress) + 0.5)}%'
         elif cum_seconds:
             return f'观看{cum_seconds // 60}分钟'
         else:

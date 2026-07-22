@@ -87,7 +87,7 @@ class SceneRecognizer:
     def _scene_tree_nodes(self, tree: list[dict[str, Any]]) -> list[dict[str, Any]]:
         """把资产树投影为 root layer 队列 + frame/subframe structure。
 
-        `layer` 只参与 root frame 的全局识别队列；image.children 中的
+        `layer` 只参与 root frame 的默认识别候选队列；image.children 中的
         image 才构成 frame/subframe 的树形细化关系。
         """
 
@@ -142,41 +142,29 @@ class SceneRecognizer:
             if isinstance(image, dict)
         }
         by_id = {int(node["scene_id"]): node for node in nodes if int(node["scene_id"]) in existing}
-        def preferred_candidates() -> list[int]:
-            candidates: list[int] = []
-            preferred = [int(scene_id) for scene_id in preferred_scene_ids if int(scene_id) in by_id]
-            preferred_set = set(preferred)
-            for scene_id in preferred:
-                node = by_id[scene_id]
-                for parent_id in node["parent_ids"]:
-                    if parent_id in by_id and parent_id not in candidates:
-                        candidates.append(parent_id)
-                if scene_id not in candidates:
-                    candidates.append(scene_id)
-                for child in nodes:
-                    if int(child["scene_id"]) in candidates:
-                        continue
-                    if any(parent_id in preferred_set for parent_id in child["parent_ids"]):
-                        child_id = int(child["scene_id"])
-                        if child_id in by_id:
-                            candidates.append(child_id)
-            return candidates
-
         result: list[int] = []
-        if preferred_scene_ids:
-            result.extend(preferred_candidates())
+        if preferred_scene_ids is not None:
+            return list(dict.fromkeys(
+                int(scene_id)
+                for scene_id in preferred_scene_ids
+                if int(scene_id) in by_id
+            ))
         roots = sorted(
             [node for node in nodes if not node["parent_ids"] and int(node["scene_id"]) in existing],
             key=lambda node: int(node["order"]),
         )
-        for layer in (1, 2, 3):
+        for layer in (1, 2):
             for root in roots:
                 if int(root["layer"]) != layer:
                     continue
                 root_id = int(root["scene_id"])
                 for node in nodes:
                     scene_id = int(node["scene_id"])
-                    if scene_id not in existing or scene_id in result:
+                    if (
+                        scene_id not in existing
+                        or scene_id in result
+                        or int(node.get("layer", 3)) > 2
+                    ):
                         continue
                     if scene_id == root_id or root_id in [int(parent_id) for parent_id in node["parent_ids"]]:
                         result.append(scene_id)
@@ -224,6 +212,16 @@ class SceneRecognizer:
         preferred_scene_ids: list[int] | None = None,
         trace: list[dict[str, Any]] | None = None,
     ) -> tuple[int | None, float]:
+        if preferred_scene_ids is not None:
+            # Layer 0 is the caller's exact dynamic candidate list.  Asset-tree
+            # parentage must not add ancestors, descendants, or default scenes.
+            return self.identify_scene_number(
+                ctx,
+                frame_data_url,
+                preferred_scene_ids=preferred_scene_ids,
+                trace=trace,
+            )
+
         def emit(event: dict[str, Any]) -> None:
             if trace is not None:
                 trace.append(event)
@@ -365,7 +363,7 @@ class SceneRecognizer:
         def refine_frame_tree(scene_id: int, score: float, allowed_ids: set[int] | None = None) -> tuple[int | None, float]:
             """父 frame 命中后，只沿 children 继续细化。
 
-            子 frame 的 `layer` 不再触发全局 layer 扫描；如果没有子节点
+            子 frame 的 `layer` 不再触发默认 layer 扫描；如果没有子节点
             命中，就停留在已经命中的 parent frame。
             """
             if not self.scene_matches_id(int(scene_id), float(score)):
@@ -405,46 +403,15 @@ class SceneRecognizer:
 
         root_ids = children_by_parent.get(None, [])
         root_layer_groups: list[tuple[str, list[int], set[int] | None]] = []
-        preferred_root_set: set[int] = set()
-        if preferred_scene_ids:
-            preferred_allowed: list[int] = []
-            preferred = [int(scene_id) for scene_id in preferred_scene_ids if int(scene_id) in node_by_id]
-            preferred_set = set(preferred)
-            for preferred_id in preferred:
-                node = node_by_id[preferred_id]
-                for parent_id in node["parent_ids"]:
-                    if int(parent_id) in node_by_id and int(parent_id) not in preferred_allowed:
-                        preferred_allowed.append(int(parent_id))
-                if preferred_id not in preferred_allowed:
-                    preferred_allowed.append(preferred_id)
-                for child in node_by_id.values():
-                    child_id = int(child["scene_id"])
-                    if child_id in preferred_allowed:
-                        continue
-                    if any(int(parent_id) in preferred_set for parent_id in child["parent_ids"]):
-                        preferred_allowed.append(child_id)
-            preferred_allowed_set = set(preferred_allowed)
-            preferred_roots: list[int] = []
-            for preferred_id in preferred_scene_ids:
-                node = node_by_id.get(int(preferred_id))
-                if node is None:
-                    continue
-                root_id = int(node["parent_ids"][0]) if node["parent_ids"] else int(preferred_id)
-                if root_id in node_by_id and root_id not in preferred_roots:
-                    preferred_roots.append(root_id)
-            preferred_root_set = set(preferred_roots)
-            # 调用方候选是 layer0：先尝试候选所在 root 及其树形子结构。
-            root_layer_groups.append(("layer0", [scene_id for scene_id in root_ids if int(scene_id) in preferred_roots], preferred_allowed_set))
-        # 只有 root frame 参与 Layer 1 -> Layer 2 -> Layer 3 的阻断式全局队列。
+        # 默认只扫描 root frame 的 Layer 1 -> Layer 2 候选队列。
         root_layer_groups.extend(
             [
                 (f"layer{layer}", [
                     scene_id
                     for scene_id in root_ids
-                    if int(scene_id) not in preferred_root_set
-                    and int(node_by_id.get(int(scene_id), {}).get("layer", 3)) == layer
+                    if int(node_by_id.get(int(scene_id), {}).get("layer", 3)) == layer
                 ], None)
-                for layer in (1, 2, 3)
+                for layer in (1, 2)
             ]
         )
         emit({
@@ -489,14 +456,14 @@ class SceneRecognizer:
             emit({"event": "flat_final", "scene_id": None, "score": 0.0, "reason": "images_missing"})
             return None, 0.0
         candidate_ids: list[int] = []
-        if preferred_scene_ids:
+        if preferred_scene_ids is not None:
             for scene_id in preferred_scene_ids:
                 image = images.get(int(scene_id))
                 if isinstance(image, dict):
                     candidate_ids.append(int(scene_id))
         else:
             for scene_id, image in images.items():
-                if isinstance(image, dict):
+                if isinstance(image, dict) and int(View(image).layer) <= 2:
                     candidate_ids.append(int(scene_id))
         if not candidate_ids:
             emit({"event": "flat_final", "scene_id": None, "score": 0.0, "reason": "candidate_ids_empty"})

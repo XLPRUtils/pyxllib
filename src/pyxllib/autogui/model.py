@@ -57,27 +57,6 @@ def normalize_match_role(value: Any, default: MatchRole = MatchRole.off) -> Matc
     return aliases.get(text, default)
 
 
-def normalize_scene_identity_scope(value: Any, default: str = "none") -> str:
-    """兼容旧标注里的局部/全局 shape scope。"""
-
-    text = str(value or "").strip().lower()
-    aliases = {
-        "": default,
-        "none": "none",
-        "off": "none",
-        "false": "none",
-        "无": "none",
-        "0": "none",
-        "local": "local",
-        "局": "local",
-        "1": "local",
-        "global": "global",
-        "全": "global",
-        "2": "global",
-    }
-    return aliases.get(text, default)
-
-
 def normalize_frame_layer(value: Any, default: int = 3) -> int:
     """把 frame.layer 归一成 1/2/3。"""
 
@@ -127,8 +106,19 @@ class Shape:
         return self.raw
 
     @property
-    def content_direction(self) -> str:
-        value = self.raw.get("contentDirection", self.raw.get("content_direction", self.raw.get("内容方向", "")))
+    def load_direction(self) -> str:
+        """窗口继续加载内容的方向，而不是底层拖拽手势方向。"""
+
+        value = self.raw.get(
+            "loadDirection",
+            self.raw.get(
+                "load_direction",
+                self.raw.get(
+                    "窗口加载方向",
+                    self.raw.get("contentDirection", self.raw.get("content_direction", self.raw.get("内容方向", ""))),
+                ),
+            ),
+        )
         text = str(value or "").strip().lower()
         aliases = {
             "": "",
@@ -147,6 +137,12 @@ class Shape:
         return aliases.get(text, text)
 
     @property
+    def content_direction(self) -> str:
+        """兼容旧调用；新代码使用 :attr:`load_direction`."""
+
+        return self.load_direction
+
+    @property
     def is_scene_identity(self) -> bool:
         return self.scene_identity_role is not MatchRole.off
 
@@ -154,13 +150,6 @@ class Shape:
     def scene_identity_role(self) -> MatchRole:
         legacy_default = MatchRole.required if bool(self.raw.get("isSceneIdentity")) else MatchRole.off
         return normalize_match_role(self.raw.get("sceneIdentityRole"), legacy_default)
-
-    @property
-    def scene_identity_scope(self) -> str:
-        value = normalize_scene_identity_scope(self.raw.get("sceneIdentityScope"), "")
-        if value:
-            return value
-        return "local" if self.is_scene_identity else "none"
 
     @property
     def image_match_role(self) -> MatchRole:

@@ -1,5 +1,6 @@
 """微信桌面运行时相关实现。"""
 
+import json
 import subprocess
 import threading
 import ctypes
@@ -24,6 +25,46 @@ _微信二级窗口类名 = {
 }
 _微信二级窗口名称 = {'微信支付商家助手', '商家助手'}
 _微信支付商家助手窗口标题 = {'微信支付商家助手', '商家助手'}
+
+
+class _Win32RectProxy:
+    def __init__(self, rect):
+        self.left, self.top, self.right, self.bottom = rect
+
+
+class _Win32HelperControl:
+    """微信小程序宿主窗口的轻量控件代理，避免 UIA 枚举 Chromium 子树卡死。"""
+
+    ControlTypeName = 'PaneControl'
+    AutomationId = ''
+
+    def __init__(self, item):
+        self._item = dict(item)
+        self.Name = str(item.get('title') or '微信支付商家助手')
+        self.ClassName = str(item.get('class') or 'Chrome_WidgetWin_0')
+        self.NativeWindowHandle = item.get('hwnd')
+        self.ProcessId = item.get('pid')
+
+    @property
+    def BoundingRectangle(self):
+        return _Win32RectProxy(self._item.get('rect') or [0, 0, 0, 0])
+
+    def GetRuntimeId(self):
+        return [int(self.NativeWindowHandle or 0)]
+
+    def GetChildren(self):
+        return []
+
+    def activate(self):
+        hwnd = self.NativeWindowHandle
+        if not hwnd:
+            return
+        user32 = ctypes.windll.user32
+        try:
+            user32.ShowWindow(wintypes.HWND(hwnd), 9)
+            user32.SetForegroundWindow(wintypes.HWND(hwnd))
+        except Exception as exc:
+            logger.warning(f'激活微信支付商家助手Win32窗口失败：hwnd={hwnd} err={exc!r}')
 
 
 def _微信二维码诊断目录(stage):
@@ -176,6 +217,21 @@ def _微信二维码链路Win32角色(item):
     return ''
 
 
+def _微信支付商家助手Win32窗口():
+    helpers = [
+        item for item in _枚举Win32顶层窗口()
+        if _微信二维码链路Win32角色(item) == 'secondary:wechat-pay-helper'
+    ]
+    helpers.sort(
+        key=lambda item: (
+            (item['rect'][2] - item['rect'][0]) * (item['rect'][3] - item['rect'][1]),
+            item.get('hwnd') or 0,
+        ),
+        reverse=True,
+    )
+    return helpers[0] if helpers else None
+
+
 def _关闭微信二维码链路Win32(*, timeout_ms=1000):
     """用 Win32 快速关闭二维码识别链路窗口，避免 UIA 枚举卡住登录主流程。"""
     user32 = ctypes.windll.user32
@@ -205,11 +261,35 @@ def _关闭微信二维码链路Win32(*, timeout_ms=1000):
     return closed
 
 
+def _关闭微信图片预览Win32(*, timeout_ms=1000):
+    """只关闭二维码图片预览窗口，保留已经拉起的商家助手小程序。"""
+    user32 = ctypes.windll.user32
+    wm_close = 0x0010
+    smto_abort_if_hung = 0x0002
+    closed = []
+    for item in _枚举Win32顶层窗口():
+        if str(item.get('class') or '') != 'ImagePreviewWnd':
+            continue
+        result = ctypes.c_size_t()
+        ok = user32.SendMessageTimeoutW(
+            wintypes.HWND(item['hwnd']),
+            wm_close,
+            0,
+            0,
+            smto_abort_if_hung,
+            max(300, int(timeout_ms)),
+            ctypes.byref(result),
+        )
+        record = dict(item)
+        record['send_message_timeout_ok'] = bool(ok)
+        closed.append(record)
+    if closed:
+        logger.info(f'Win32已请求关闭微信二维码图片预览窗口：{closed}')
+    return closed
+
+
 def _存在微信支付商家助手Win32():
-    return any(
-        _微信二维码链路Win32角色(item) == 'secondary:wechat-pay-helper'
-        for item in _枚举Win32顶层窗口()
-    )
+    return _微信支付商家助手Win32窗口() is not None
 
 
 def _微信图片预览Win32窗口():
@@ -582,6 +662,224 @@ def _控件树文本(root, *, max_nodes=300):
     return ' '.join(dict.fromkeys(texts))
 
 
+def _控件矩形(ctrl):
+    rect = ctrl.BoundingRectangle
+    return [rect.left, rect.top, rect.right, rect.bottom]
+
+
+def _激活微信支付商家助手窗口(ctrl, *, reason=''):
+    try:
+        if isinstance(ctrl, _Win32HelperControl):
+            ctrl.activate()
+        else:
+            UiCtrlNode(ctrl, build_depth=1).activate()
+    except Exception as exc:
+        logger.warning(f'微信支付扫码登录：激活商家助手窗口失败 reason={reason!r} err={exc!r}')
+
+
+def _点击窗口比例位置(ctrl, x_ratio, y_ratio, *, label):
+    _激活微信支付商家助手窗口(ctrl, reason=label)
+    ltrb = _控件矩形(ctrl)
+    left, top, right, bottom = ltrb
+    width = max(1, right - left)
+    height = max(1, bottom - top)
+    x = left + width * x_ratio
+    y = top + height * y_ratio
+    logger.info(f'微信支付扫码登录：{label}，按窗口比例点击 x={x:.1f} y={y:.1f} ratio={[x_ratio, y_ratio]} window={ltrb}')
+    pyautogui.click(x, y)
+    return True
+
+
+def _ocr_result_payload(result):
+    if hasattr(result, 'json'):
+        try:
+            return result.json.get('res') or {}
+        except Exception:
+            return {}
+    return result if isinstance(result, dict) else {}
+
+
+def _OCR标注文本(label):
+    if isinstance(label, dict):
+        return str(label.get('text') or label.get('label') or '')
+    text = str(label or '')
+    if text.startswith('{'):
+        try:
+            payload = json.loads(text)
+        except Exception:
+            return text
+        if isinstance(payload, dict):
+            return str(payload.get('text') or payload.get('label') or '')
+    return text
+
+
+def _OCR标注框(points):
+    try:
+        xs = [float(point[0]) for point in points]
+        ys = [float(point[1]) for point in points]
+    except Exception:
+        return None
+    if not xs or not ys:
+        return None
+    return [min(xs), min(ys), max(xs), max(ys)]
+
+
+def _微信支付OCR文本框列表(payload):
+    payload = _ocr_result_payload(payload)
+    rows = []
+    for text, box in zip(payload.get('rec_texts') or [], payload.get('rec_boxes') or []):
+        try:
+            x1, y1, x2, y2 = [float(v) for v in box[:4]]
+        except Exception:
+            continue
+        rows.append({'text': str(text or ''), 'box': [x1, y1, x2, y2]})
+
+    document = payload.get('document') if isinstance(payload.get('document'), dict) else payload
+    for shape in document.get('shapes') or []:
+        if not isinstance(shape, dict):
+            continue
+        box = _OCR标注框(shape.get('points') or [])
+        if not box:
+            continue
+        rows.append({'text': _OCR标注文本(shape.get('label')), 'box': box})
+    return rows
+
+
+def _微信支付商家助手截图(left, top, width, height):
+    try:
+        from pyxllib.autogui.anlib import _screenshot_region
+
+        return _screenshot_region([int(left), int(top), width, height])
+    except Exception as exc:
+        logger.warning(f'微信支付扫码登录：AnLib多屏截图失败，退回pyautogui截图：{exc!r}')
+        return pyautogui.screenshot(region=[int(left), int(top), width, height])
+
+
+def _微信支付商户行OCR匹配(rows):
+    matches = []
+    for row in rows:
+        text = str(row.get('text') or '').replace(' ', '')
+        if not text or not any(key in text for key in ('武陵禅寺客堂', '客堂', '1599622041')):
+            continue
+        x1, y1, x2, y2 = row['box']
+        matches.append({
+            'text': text,
+            'box': [x1, y1, x2, y2],
+            'score': (2 if '1599622041' in text else 0) + (3 if '武陵禅寺客堂' in text else 1 if '客堂' in text else 0),
+        })
+    if not matches:
+        return None
+    return sorted(matches, key=lambda item: (-item['score'], item['box'][1], item['box'][0]))[0]
+
+
+def _微信支付商户行OCR文本框(ctrl):
+    _激活微信支付商家助手窗口(ctrl, reason='OCR识别微信支付商户行')
+    left, top, right, bottom = _控件矩形(ctrl)
+    width = max(1, int(right - left))
+    height = max(1, int(bottom - top))
+    if width < 200 or height < 200:
+        return None
+
+    raw_timeout = os.getenv('KQ_WECHAT_PAY_MERCHANT_OCR_TIMEOUT_SECONDS', '8')
+    try:
+        timeout = min(15.0, max(2.0, float(raw_timeout)))
+    except (TypeError, ValueError):
+        timeout = 8.0
+
+    last_texts = []
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        try:
+            screenshot = _微信支付商家助手截图(left, top, width, height)
+        except Exception as exc:
+            logger.warning(f'微信支付扫码登录：商户选择页截图失败，转入坐标兜底：{exc!r}')
+            return None
+
+        try:
+            from pyxllib.autogui.anlib import get_xlapi
+
+            rows = _微信支付OCR文本框列表(get_xlapi().common_ocr(screenshot, request_timeout=5, request_retries=0))
+        except Exception as exc:
+            logger.warning(f'微信支付扫码登录：common_ocr识别商户选择页失败，尝试本地PaddleOCR：{exc!r}')
+            rows = []
+
+        last_texts = [row['text'] for row in rows if row.get('text')]
+        best = _微信支付商户行OCR匹配(rows)
+        if best:
+            logger.info(f"微信支付扫码登录：OCR命中商户行 text={best['text']!r} box={best['box']!r}")
+            return {
+                'window': [left, top, right, bottom],
+                'width': width,
+                'height': height,
+                **best,
+            }
+
+        time.sleep(0.5)
+
+    try:
+        screenshot = _微信支付商家助手截图(left, top, width, height)
+        from pyxllib.ai.ocr import ocr_text
+
+        rows = _微信支付OCR文本框列表(ocr_text(screenshot, model='basic'))
+        last_texts = [row['text'] for row in rows if row.get('text')]
+        best = _微信支付商户行OCR匹配(rows)
+        if best:
+            logger.info(f"微信支付扫码登录：本地PaddleOCR命中商户行 text={best['text']!r} box={best['box']!r}")
+            return {
+                'window': [left, top, right, bottom],
+                'width': width,
+                'height': height,
+                **best,
+            }
+    except Exception as exc:
+        logger.warning(f'微信支付扫码登录：商户选择页本地PaddleOCR失败，转入坐标兜底：{exc!r}')
+
+    if last_texts:
+        logger.info(f'微信支付扫码登录：OCR等待超时仍未命中客堂商户行，识别文本={last_texts[:12]!r}')
+    return None
+
+def _点击微信支付商户行OCR(ctrl):
+    match = _微信支付商户行OCR文本框(ctrl)
+    if not match:
+        return False
+    left, top, right, bottom = match['window']
+    width = match['width']
+    _x1, y1, _x2, y2 = match['box']
+    click_x = left + width * 0.86
+    click_y = top + (y1 + y2) / 2
+    logger.info(f'微信支付扫码登录：按OCR商户行点击 x={click_x:.1f} y={click_y:.1f} text={match["text"]!r}')
+    pyautogui.click(click_x, click_y)
+    return True
+
+
+def _点击微信支付商户行(ctrl):
+    """选择“武陵禅寺客堂 / 1599622041”商户。
+
+    微信小程序窗口有时只能拿到 Win32 顶层代理，UIA 子树为空；此时必须
+    明确点击商户选择页的卡片行，不能把该状态当成扫码失败后重试二维码。
+    """
+    if not isinstance(ctrl, _Win32HelperControl):
+        if _点击匹配控件(ctrl, ['1599622041', '武陵禅寺客堂']):
+            return True
+    if _点击微信支付商户行OCR(ctrl):
+        return True
+    return _点击窗口比例位置(ctrl, 0.28, 0.345, label='选择武陵禅寺客堂商户行')
+
+
+def _点击微信支付确认区域(ctrl):
+    return _点击窗口比例位置(ctrl, 0.5, 0.79, label='确认登录区域')
+
+
+def _等待微信支付商户选择生效():
+    raw_seconds = os.getenv('KQ_WECHAT_PAY_MERCHANT_SELECT_SETTLE_SECONDS', '2.5')
+    try:
+        seconds = min(8.0, max(1.0, float(raw_seconds)))
+    except (TypeError, ValueError):
+        seconds = 2.5
+    logger.info(f'微信支付扫码登录：商户行已点击，等待页面切换 seconds={seconds}')
+    time.sleep(seconds)
+
+
 def _启动微信二维码诊断看门狗(stage, *, timeout=90):
     def capture():
         try:
@@ -637,14 +935,14 @@ def _等待微信支付商家助手窗口(*, timeout=45, raise_on_timeout=True):
     deadline = time.time() + timeout
     last_error = None
     while time.time() < deadline:
-        try:
-            ctrl = uia.PaneControl(Name='微信支付商家助手', searchDepth=1)
-            node = UiCtrlNode(ctrl, build_depth=5)
+        helper = _微信支付商家助手Win32窗口()
+        if helper is not None:
+            node = _Win32HelperControl(helper)
+            _关闭微信图片预览Win32(timeout_ms=500)
             node.activate()
+            logger.info(f'微信支付扫码登录：Win32命中商家助手窗口 rect={helper.get("rect")}')
             return node
-        except Exception as exc:
-            last_error = exc
-            time.sleep(1)
+        time.sleep(0.2)
 
     if not raise_on_timeout:
         logger.info(f'微信支付商家助手窗口未出现，跳过小程序内点击：last_error={last_error!r}')
@@ -740,12 +1038,13 @@ def _规范化微信支付商家助手窗口(ctrl):
             or rect.right > screen_width
             or rect.bottom > screen_height
         ):
+            _激活微信支付商家助手窗口(ctrl, reason='窗口已在屏幕内')
             return ctrl
         logger.info(
             '微信支付扫码登录：商家助手窗口超出桌面，先激活并最大化 '
             f'window={[rect.left, rect.top, rect.right, rect.bottom]} screen={[screen_width, screen_height]}'
         )
-        UiCtrlNode(ctrl, build_depth=1).activate()
+        _激活微信支付商家助手窗口(ctrl, reason='窗口超出屏幕')
         pyautogui.hotkey('win', 'up')
         time.sleep(2)
         return _等待微信支付商家助手窗口(timeout=5, raise_on_timeout=True)
@@ -1078,14 +1377,14 @@ class KqWechat:
                 _点击微信图片识别二维码(image)
 
             # 2 会弹出一个新的小程序窗口
-            def calculate_relative_point(ltrb, dst_val):
-                # 位置是根据已有经验推断的相对坐标，失败时诊断截图会保留现场。
-                left, top, right, bottom = ltrb
-                x_center = (left + right) / 2
-                y_offset_ratio = (dst_val - 42) / (814 - 42)
-                new_height = bottom - top
-                y_position = top + y_offset_ratio * new_height
-                return (x_center, y_position)
+            def current_helper_control(default_ctrl=None, *, timeout=2):
+                ctrl = _等待微信支付商家助手窗口(timeout=timeout, raise_on_timeout=False)
+                if ctrl is None:
+                    return default_ctrl if _存在微信支付商家助手Win32() else None
+                return _规范化微信支付商家助手窗口(ctrl)
+
+            def helper_ltrb(ctrl):
+                return _控件矩形(ctrl)
 
             logger.info('微信支付扫码登录：等待微信支付商家助手窗口')
             if ct1 is None:
@@ -1098,32 +1397,58 @@ class KqWechat:
             rect = ct1.BoundingRectangle
             ltrb = [rect.left, rect.top, rect.right, rect.bottom]
             logger.info(f'微信支付扫码登录：微信支付商家助手窗口位置={ltrb}')
-            clicked_semantic = False
+            merchant_selected = False
             raw_helper_ready_timeout = os.getenv('KQ_WECHAT_PAY_HELPER_READY_TIMEOUT_SECONDS', '8')
             try:
                 helper_ready_timeout = min(15, max(3, int(float(raw_helper_ready_timeout))))
             except (TypeError, ValueError):
                 helper_ready_timeout = 8
-            helper_ready_deadline = time.time() + helper_ready_timeout
-            while time.time() < helper_ready_deadline:
-                assistant_text = _控件树文本(ct1, max_nodes=500)
-                if any(key in assistant_text for key in ('系统繁忙', '网络繁忙', '稍后再试', '服务异常')):
-                    raise RuntimeError(f'微信支付商家助手异常页面：{assistant_text[:300]!r}')
-                clicked_semantic = _点击匹配控件(ct1, ['1599622041', '武陵禅寺客堂'])
-                if clicked_semantic:
+            if isinstance(ct1, _Win32HelperControl):
+                logger.info('微信支付扫码登录：商家助手使用Win32代理，直接点击商户选择页客堂商户行')
+                merchant_selected = _点击微信支付商户行(ct1)
+            else:
+                helper_ready_deadline = time.time() + helper_ready_timeout
+                while time.time() < helper_ready_deadline:
+                    assistant_text = _控件树文本(ct1, max_nodes=500)
+                    if any(key in assistant_text for key in ('系统繁忙', '网络繁忙', '稍后再试', '服务异常')):
+                        raise RuntimeError(f'微信支付商家助手异常页面：{assistant_text[:300]!r}')
+                    merchant_selected = _点击匹配控件(ct1, ['1599622041', '武陵禅寺客堂'])
+                    if merchant_selected:
+                        break
+                    refreshed = _点击匹配控件(ct1, ['刷新', '重新获取', '重新加载'], control_types={'ButtonControl'})
+                    if refreshed:
+                        time.sleep(3)
+                        continue
+                    time.sleep(1)
+            if not merchant_selected:
+                _采集微信二维码诊断('微信支付商家助手未命中语义商户行')
+                logger.info('微信支付扫码登录：未命中语义商户行，按商户选择页比例点击客堂商户行')
+                merchant_selected = _点击微信支付商户行(ct1)
+
+            if merchant_selected:
+                _等待微信支付商户选择生效()
+                # 选择商户后，微信小程序经常会切换为居中的确认窗口。
+                # 确认阶段必须重新读取窗口位置，不能沿用商户列表阶段坐标。
+                confirm_deadline = time.time() + 12
+                while time.time() < confirm_deadline:
+                    ct2 = current_helper_control(ct1, timeout=1)
+                    if ct2 is None:
+                        logger.info('微信支付扫码登录：商家助手窗口已关闭，确认阶段结束')
+                        break
+                    assistant_text = _控件树文本(ct2, max_nodes=500)
+                    if any(key in assistant_text for key in ('系统繁忙', '网络繁忙', '稍后再试', '服务异常')):
+                        raise RuntimeError(f'微信支付商家助手异常页面：{assistant_text[:300]!r}')
+                    if _点击匹配控件(ct2, ['确认登录', '允许登录', '同意登录', '登录', '允许'], control_types={'ButtonControl'}):
+                        time.sleep(3)
+                        break
+                    if _点击匹配控件(ct2, ['1599622041', '武陵禅寺客堂']):
+                        time.sleep(2)
+                        continue
+                    ltrb2 = helper_ltrb(ct2)
+                    logger.info(f'微信支付扫码登录：确认阶段未命中语义控件，点击当前窗口确认区域={ltrb2}')
+                    _点击微信支付确认区域(ct2)
                     time.sleep(3)
                     break
-                clicked_semantic = _点击匹配控件(ct1, ['刷新', '重新获取', '重新加载'], control_types={'ButtonControl'})
-                if clicked_semantic:
-                    time.sleep(3)
-                    continue
-                time.sleep(1)
-            if not clicked_semantic:
-                _采集微信二维码诊断('微信支付商家助手未命中语义控件')
-                logger.info('微信支付扫码登录：未命中语义控件，回退到经验坐标点击')
-                pyautogui.click(*calculate_relative_point(ltrb, 300))
-                time.sleep(5)
-                pyautogui.click(*calculate_relative_point(ltrb, 650))
         except Exception as exc:
             _采集微信二维码诊断('扫码登录微信支付失败', exc)
             try:
@@ -1275,6 +1600,9 @@ class KqWechat:
             raise ValueError(f'check_interval必须大于0：{check_interval!r}')
         if timeout is not None and timeout < 0:
             raise ValueError(f'timeout不能为负数：{timeout!r}')
+        if timeout is not None:
+            # 实际短信链路经常超过 5 分钟，时间窗过短会把已到达的验证码当成过期消息漏掉。
+            time_window = max(time_window, int((timeout + 59) // 60) + 1)
 
         def extract_verification_code(text):
             """从文本中提取6位验证码"""
@@ -1349,8 +1677,16 @@ class KqWechat:
         wx = KqWechat.创建微信实例()
         chat_opened = False
         last_error = None
+        last_progress_log_at = None
+        latest_candidate_time = None
+        latest_candidate_text = ''
+        matched_candidate_count = 0
 
         deadline = None if timeout is None else time.monotonic() + timeout
+        logger.info(
+            '微信支付短信验证码等待开始：'
+            f'service={service_name} timeout={timeout}s time_window={time_window}min check_interval={check_interval}s'
+        )
         while True:
             # 新短信提醒来电号码：验证码【644651】95017(微信支付)来电时间：2025-04-02 09:21:27
             if not chat_opened:
@@ -1362,6 +1698,11 @@ class KqWechat:
                     logger.warning(f'打开微信短信转发会话失败：{exc!r}')
             if chat_opened:
                 for content in collect_current_chat_texts(wx):
+                    if time_str := extract_call_time(content):
+                        latest_candidate_time = time_str
+                        latest_candidate_text = content[-120:]
+                    if extract_verification_code(content):
+                        matched_candidate_count += 1
                     if valid_code := validate_message(content, time_window):
                         logger.info('微信支付短信验证码已从微信目标会话消息获取')
                         return valid_code
@@ -1369,14 +1710,40 @@ class KqWechat:
             # 若目标会话读取失败，重置后下一轮重新打开，避免长期停在错误聊天。
             if not chat_opened:
                 for content in collect_current_chat_texts(wx):
+                    if time_str := extract_call_time(content):
+                        latest_candidate_time = time_str
+                        latest_candidate_text = content[-120:]
+                    if extract_verification_code(content):
+                        matched_candidate_count += 1
                     if valid_code := validate_message(content, time_window):
                         logger.info('微信支付短信验证码已从当前微信会话消息获取')
                         return valid_code
 
             now = time.monotonic()
+            elapsed = None if deadline is None else max(0, timeout - max(0, deadline - now))
+            if last_progress_log_at is None or now - last_progress_log_at >= 60:
+                remaining = None if deadline is None else max(0, int(round(deadline - now)))
+                logger.info(
+                    '微信支付短信验证码等待中：'
+                    f'elapsed={0 if elapsed is None else int(round(elapsed))}s '
+                    f'remaining={remaining if remaining is not None else "unbounded"} '
+                    f'chat_opened={chat_opened} matched_candidates={matched_candidate_count} '
+                    f'latest_candidate_time={latest_candidate_time!r} latest_candidate_tail={latest_candidate_text!r}'
+                )
+                last_progress_log_at = now
             if deadline is not None and now >= deadline:
                 detail = f'，last_error={last_error!r}' if last_error else ''
-                raise TimeoutError(f'等待懒人信息转发服务短信验证码超时：timeout={timeout}s，time_window={time_window}min{detail}')
+                latest_detail = ''
+                if latest_candidate_time or latest_candidate_text:
+                    latest_detail = (
+                        f'，latest_candidate_time={latest_candidate_time!r}'
+                        f'，latest_candidate_tail={latest_candidate_text!r}'
+                        f'，matched_candidates={matched_candidate_count}'
+                    )
+                raise TimeoutError(
+                    f'等待懒人信息转发服务短信验证码超时：timeout={timeout}s，time_window={time_window}min'
+                    f'{detail}{latest_detail}'
+                )
 
             if deadline is None:
                 time.sleep(check_interval)

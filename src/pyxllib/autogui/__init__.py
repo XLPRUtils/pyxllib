@@ -34,7 +34,6 @@ from .model import (
     index_images,
     normalize_frame_layer,
     normalize_match_role,
-    normalize_scene_identity_scope,
 )
 from .navigation import SceneNavigator
 from .runtime import Runtime
@@ -67,5 +66,4 @@ __all__ = [
     "index_images",
     "normalize_frame_layer",
     "normalize_match_role",
-    "normalize_scene_identity_scope",
 ]

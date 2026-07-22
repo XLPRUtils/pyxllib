@@ -39,6 +39,21 @@ def _append_weipay_login_trace(event, **data):
         logger.warning(f'微信支付登录追踪日志写入失败：event={event!r} path={trace_path!s} error={exc!r}')
 
 
+def _env_truthy(value):
+    return str(value or '').strip().lower() in {'1', 'true', 'yes', 'y', 'on'}
+
+
+def _weipay_login_max_attempts():
+    """微信支付扫码默认只尝试 1 次，避免账号因自动重扫过快触发风控。"""
+    if not _env_truthy(os.getenv('KQ_WEIPAY_LOGIN_ALLOW_RETRY')):
+        return 1
+    raw_attempts = os.getenv('KQ_WEIPAY_LOGIN_MAX_ATTEMPTS', '1')
+    try:
+        return max(1, int(float(raw_attempts)))
+    except (TypeError, ValueError):
+        return 1
+
+
 def _weipay_login_probe_root(probe_dir=None):
     root = (
         probe_dir
@@ -58,6 +73,7 @@ class Weipay(DpWebBase):
     base_url = 'https://pay.weixin.qq.com'
 
     def __init__(self, users=None):
+        self.login_users = list(users) if users else None
         self.browser = self._create_chromium()
         self.browser.set.download_path(tempfile.gettempdir())
         self.base_url = type(self).base_url
@@ -257,13 +273,17 @@ class Weipay(DpWebBase):
 
     def login(self, users=None):
         tab = self.tab
+        home_url = 'https://pay.weixin.qq.com/index.php/core/info'
         login_started_at = time.perf_counter()
         _append_weipay_login_trace(
             'login_enter',
             users=users,
             initial_url=getattr(tab, 'url', None),
         )
-        if tab.url != 'https://pay.weixin.qq.com/index.php/core/info':
+        username_ele = tab('tag:a@@class=username', timeout=3) if tab.url == home_url else None
+        if not username_ele:
+            if tab.url == home_url:
+                logger.warning('微信支付商户首页缺少用户名元素，按登录态失效重新扫码登录')
             raw_qr_timeout = os.getenv(
                 'KQ_WEIPAY_QRCODE_LIFETIME_SECONDS',
                 os.getenv('KQ_WECHAT_QRCODE_TIMEOUT_SECONDS', '55'),
@@ -277,11 +297,9 @@ class Weipay(DpWebBase):
                 login_timeout = min(90, max(qr_timeout, int(float(raw_timeout))))
             except (TypeError, ValueError):
                 login_timeout = qr_timeout + 20
-            raw_attempts = os.getenv('KQ_WEIPAY_LOGIN_MAX_ATTEMPTS', '5')
-            try:
-                max_attempts = max(1, int(float(raw_attempts)))
-            except (TypeError, ValueError):
-                max_attempts = 5
+            max_attempts = _weipay_login_max_attempts()
+            if max_attempts == 1:
+                logger.warning('微信支付登录扫码重试已关闭：本次最多发送 1 个二维码')
 
             last_error = None
             for attempt in range(1, max_attempts + 1):
@@ -310,7 +328,7 @@ class Weipay(DpWebBase):
                 tab.get('https://pay.weixin.qq.com')
                 _append_weipay_login_trace('pay_page_opened', attempt=attempt, url=getattr(tab, 'url', None))
                 message_sent = False
-                while tab.url != 'https://pay.weixin.qq.com/index.php/core/info':
+                while tab.url != home_url:
                     remaining = login_deadline - time.time()
                     if remaining <= 0:
                         last_error = TimeoutError(
@@ -361,7 +379,7 @@ class Weipay(DpWebBase):
                             try:
                                 with get_autogui_lock(timeout=20, force_break_timeout=10):
                                     _append_weipay_login_trace('wechat_scan_start', attempt=attempt, user=users[0])
-                                    KqWechat.扫码登录微信支付(users[0], assume_current_chat=True)
+                                    KqWechat.扫码登录微信支付(users[0], assume_current_chat=False)
                                     _append_weipay_login_trace('wechat_scan_done', attempt=attempt, user=users[0])
                             finally:
                                 if old_qrcode_timeout is None:
@@ -370,9 +388,9 @@ class Weipay(DpWebBase):
                                     os.environ['KQ_WECHAT_QRCODE_TIMEOUT_SECONDS'] = old_qrcode_timeout
 
                             post_login_deadline = time.time() + min(10, max(3, login_deadline - time.time()))
-                            while tab.url != 'https://pay.weixin.qq.com/index.php/core/info' and time.time() < post_login_deadline:
+                            while tab.url != home_url and time.time() < post_login_deadline:
                                 time.sleep(1)
-                            if tab.url != 'https://pay.weixin.qq.com/index.php/core/info':
+                            if tab.url != home_url:
                                 _append_weipay_login_trace(
                                     'post_scan_homepage_timeout',
                                     attempt=attempt,
@@ -400,7 +418,7 @@ class Weipay(DpWebBase):
                         )
                         break
 
-                if tab.url == 'https://pay.weixin.qq.com/index.php/core/info':
+                if tab.url == home_url:
                     try:
                         reset_result = self._reset_wechat_qrcode_windows_for_login(close_seconds=3, timeout=15)
                         logger.info(f'微信支付登录成功后已清理微信二维码窗口状态：{reset_result}')
@@ -450,7 +468,10 @@ class Weipay(DpWebBase):
                         '仍未进入商户首页'
                     ) from last_error
                 time.sleep(3)
-        self.user = tab('tag:a@@class=username').text.split('@')[0]
+        username_ele = username_ele or tab('tag:a@@class=username', timeout=10)
+        if not username_ele:
+            raise RuntimeError(f'微信支付已进入商户首页但未找到用户名元素：url={tab.url}')
+        self.user = username_ele.text.split('@')[0]
         _append_weipay_login_trace(
             'login_finish',
             user=self.user,
@@ -1700,6 +1721,32 @@ return {ok: lens.slice(0, values.length).every((item, i) => item.len === String(
         if send_btn is None:
             logger.warning('微信支付确认弹窗未找到明显的发送短信按钮')
             return False
+
+        def snapshot_button_state():
+            js = r"""
+const normalize = (value) => String(value || '').replace(/\s+/g, ' ').trim();
+const node = this;
+const dialog = node.closest('[role="dialog"], .dialog, .modal, .weui-dialog, .wx_dialog') || node.parentElement;
+const style = getComputedStyle(node);
+const rect = node.getBoundingClientRect();
+return {
+  text: normalize(node.innerText || node.textContent || node.value),
+  disabled: Boolean(node.disabled)
+    || node.getAttribute('disabled') !== null
+    || node.getAttribute('aria-disabled') === 'true'
+    || /(^|\s)(disabled|is-disabled)(\s|$)/.test(String(node.className || '')),
+  visible: rect.width > 0 && rect.height > 0
+    && style.display !== 'none' && style.visibility !== 'hidden' && style.opacity !== '0',
+  dialogText: normalize(dialog && dialog.innerText),
+};
+"""
+            try:
+                state = send_btn.run_js(js)
+            except Exception:
+                return {}
+            return state if isinstance(state, dict) else {}
+
+        before = snapshot_button_state()
         clicked = False
         try:
             send_btn.click()
@@ -1718,13 +1765,33 @@ return {ok: lens.slice(0, values.length).every((item, i) => item.len === String(
 
         deadline = time.time() + timeout
         while time.time() < deadline:
-            try:
-                body_text = self._normalize_page_text(tab('tag:body').text)
-            except Exception:
-                body_text = ''
-            if any(x in body_text for x in ['重新发送', '获取验证码', '验证码已发送']):
+            current = snapshot_button_state()
+            current_text = self._normalize_page_text(current.get('text', ''))
+            dialog_text = self._normalize_page_text(current.get('dialogText', ''))
+            before_dialog_text = self._normalize_page_text(before.get('dialogText', ''))
+            countdown_visible = '秒' in current_text and any(ch.isdigit() for ch in current_text)
+            state_changed = bool(current) and (
+                current.get('disabled') and not before.get('disabled')
+                or current_text != self._normalize_page_text(before.get('text', ''))
+                or current.get('visible') is False
+            )
+            dialog_confirmed = (
+                dialog_text != before_dialog_text
+                and any(x in dialog_text for x in ['验证码已发送', '重新发送'])
+            )
+            if state_changed and (
+                current.get('disabled')
+                or countdown_visible
+                or any(x in current_text for x in ['重新发送', '验证码已发送'])
+            ):
+                return True
+            if dialog_confirmed:
                 return True
             time.sleep(0.5)
+        logger.warning(
+            '微信支付短信发送动作未确认状态变化：'
+            f'before={before!r} after={snapshot_button_state()!r}'
+        )
         return False
 
     def _find_visible_confirm_action(self, tab, *, timeout=10):
@@ -1982,7 +2049,9 @@ return (() => {{
 
         return False
 
-    def 填写密码与验证码(self, tab, submit_file=None, sms_timeout=300):
+    def 填写密码与验证码(self, tab, submit_file=None, sms_timeout=None):
+        if sms_timeout is None:
+            sms_timeout = int(os.getenv('KQ5034_WEIPAY_SMS_TIMEOUT_SECONDS') or '900')
         self._clear_page_selection(tab)
         inputs = self._find_visible_dialog_inputs(tab)
         try:
@@ -2079,7 +2148,10 @@ return (() => {{
         if sms_input is not None:
             self._clear_page_selection(tab)
             if not self._click_weipay_risk_send_sms(tab):
-                logger.warning(f'微信支付确认弹窗未找到明显的发送短信按钮，继续等待验证码：submit_file={submit_file!s}')
+                raise RuntimeError(
+                    '微信支付短信验证码发送未确认，返款未提交'
+                    f'：submit_file={submit_file!s}'
+                )
             time.sleep(10)
             try:
                 with get_autogui_lock():
@@ -2670,6 +2742,24 @@ return [...document.querySelectorAll('table')].filter(isVisible).map((table, tab
         tab = self.tab
         tab.get('https://pay.weixin.qq.com/index.php/xphp/cbatchrefund/batch_refund#/pages/index/index')
         upload_button = self._find_visible_upload_action(tab, timeout=30)
+        if upload_button is None:
+            try:
+                body_text = self._normalize_page_text(tab('tag:body').text)
+            except Exception:
+                body_text = ''
+            try:
+                self._raise_if_weipay_auth_invalid(body_text)
+            except RuntimeError as auth_exc:
+                if self.login_users:
+                    logger.warning(
+                        f'微信支付批量退款页检测到登录态/权限问题，先尝试即时重新登录再继续：'
+                        f'error={auth_exc!r} url={tab.url} title={tab.title}'
+                    )
+                    self.login(self.login_users)
+                    tab.get('https://pay.weixin.qq.com/index.php/xphp/cbatchrefund/batch_refund#/pages/index/index')
+                    upload_button = self._find_visible_upload_action(tab, timeout=30)
+                else:
+                    raise
         if upload_button is None:
             visible_actions = self._snapshot_visible_action_texts(tab)
             raise RuntimeError(

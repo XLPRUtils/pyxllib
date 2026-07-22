@@ -4,7 +4,7 @@ from kq5034.xiaoetong import XiaoetongWeb
 
 
 class _FakeButton:
-    def click(self):
+    def click(self, *_args, **_kwargs):
         return None
 
     def input(self, *_args, **_kwargs):
@@ -102,3 +102,132 @@ def test_export_lesson_data_uses_longer_download_wait_for_large_exports(monkeypa
             'download_wait_seconds': XiaoetongWeb._lesson_export_download_wait_seconds,
         },
     )]
+
+
+def test_export_clockin_data_prefers_page_name_and_falls_back_to_new_task(monkeypatch):
+    web = XiaoetongWeb.__new__(XiaoetongWeb)
+
+    class _ClockinElement:
+        states = type('States', (), {'is_clickable': True})()
+        scroll = type('Scroll', (), {'to_see': lambda self: None})()
+
+        class _Wait:
+            def __init__(self, element):
+                self.element = element
+
+            def clickable(self):
+                return self.element
+
+        def __init__(self):
+            self.wait = self._Wait(self)
+
+        def __call__(self, *_args, **_kwargs):
+            return self
+
+        def click(self, *_args, **_kwargs):
+            return None
+
+    class _ClockinTab:
+        url = 'https://admin.xiaoe-tech.com/t/community_admin/miniCommunity#/micro_wrapper?component_name=clock_task_data'
+        action_type = staticmethod(lambda *_args, **_kwargs: None)
+
+        def __call__(self, *_args, **_kwargs):
+            return _ClockinElement()
+
+        def get2(self, *_args, **_kwargs):
+            return self
+
+        def run_js(self, *_args, **_kwargs):
+            return '13期一阶忏悔门打卡\n任务数据'
+
+        def wait(self, *_args, **_kwargs):
+            return None
+
+    web.tab = _ClockinTab()
+    monkeypatch.setattr(web, '_make_runtime_cache_key', lambda *args, **kwargs: 'clockin-cache-key')
+    monkeypatch.setattr(web, '_restore_runtime_cached_file', lambda *args, **kwargs: XiaoetongWeb._CACHE_MISS)
+    monkeypatch.setattr(web, '_store_runtime_cached_file', lambda _key, file: file)
+    monkeypatch.setattr(web, '_查找本地下载文件', lambda *args, **kwargs: None)
+    monkeypatch.setattr(web, '_等待禅宗打卡导出按钮', lambda *args, **kwargs: (_ClockinElement(), _ClockinElement()))
+    monkeypatch.setattr(web, '_提取已生成下载文件名', lambda *_args, **_kwargs: '')
+    monkeypatch.setattr(web, '_列出下载中心任务名', lambda keywords=None: ['旧任务'])
+
+    calls = []
+
+    def fake_download_last_file(match_keywords=None, exclude_task_names=None, **kwargs):
+        calls.append((match_keywords, list(exclude_task_names or []), kwargs.get('max_wait_seconds')))
+        return Path('C:/tmp/13期一阶忏悔门打卡.csv')
+
+    monkeypatch.setattr(web, 'download_last_file', fake_download_last_file)
+
+    result = web.export_clockin_data(
+        web.tab.url,
+        expected_download_name='d260712禅宗13期一阶-共修打卡-忏悔门',
+        start_date='2026-07-11',
+        end_date='2026-09-11',
+        exclude_existing_download_tasks=False,
+    )
+
+    assert result == Path('C:/tmp/13期一阶忏悔门打卡.csv')
+    assert calls == [(None, ['旧任务'], 10 * 60)]
+
+
+def test_export_diary_clockin_ignores_local_empty_text_when_export_button_exists(monkeypatch):
+    web = XiaoetongWeb.__new__(XiaoetongWeb)
+
+    class _RecordingButton:
+        def __init__(self):
+            self.clicked = False
+
+        def click(self, *_args, **_kwargs):
+            self.clicked = True
+            return None
+
+    class _Dialog:
+        def __call__(self, *_args, **_kwargs):
+            return _FakeButton()
+
+    export_button = _RecordingButton()
+
+    class _DiaryTab:
+        url = 'https://admin.xiaoe-tech.com/t/clock_admin/index#/punchDetail/diaryList?activity_id=ac_center'
+
+        def __call__(self, locator, *_args, **_kwargs):
+            if locator == 'tag:button@@text():导出动态':
+                return export_button
+            if locator == 'tag:div@@role=dialog@@aria-label=导出数据':
+                return _Dialog()
+            return _FakeButton()
+
+        def get2(self, *_args, **_kwargs):
+            return self
+
+        def run_js(self, *_args, **_kwargs):
+            return '第48届觉观技术公益网课【中心教室】\n#【打卡】中心教室-21\n暂无内容'
+
+        def wait(self, *_args, **_kwargs):
+            return None
+
+    web.tab = _DiaryTab()
+    monkeypatch.setattr(web, '_make_runtime_cache_key', lambda *args, **kwargs: 'diary-clockin-cache-key')
+    monkeypatch.setattr(web, '_restore_runtime_cached_file', lambda *args, **kwargs: XiaoetongWeb._CACHE_MISS)
+    monkeypatch.setattr(web, '_store_runtime_cached_file', lambda _key, file: file)
+    monkeypatch.setattr(web, '_查找本地下载文件', lambda *args, **kwargs: None)
+    monkeypatch.setattr(web, '_列出下载中心任务名', lambda keywords=None: ['旧导出'] if keywords else ['旧任务'])
+
+    calls = []
+
+    def fake_download_last_file(match_keywords=None, exclude_task_names=None, **kwargs):
+        calls.append((match_keywords, list(exclude_task_names or []), kwargs.get('max_wait_seconds')))
+        return Path('C:/tmp/第48届觉观-打卡数.csv')
+
+    monkeypatch.setattr(web, 'download_last_file', fake_download_last_file)
+
+    result = web.export_clockin_data(
+        web.tab.url,
+        expected_download_name='第48届觉观-打卡数',
+    )
+
+    assert export_button.clicked
+    assert result == Path('C:/tmp/第48届觉观-打卡数.csv')
+    assert calls == [(None, ['旧任务'], 10 * 60)]

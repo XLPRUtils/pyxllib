@@ -20,6 +20,7 @@ def _image(title: str, filename: str, shapes: list[dict] | None = None) -> dict:
         "type": "image",
         "title": title,
         "filename": filename,
+        "layer": 1,
         "width": 900,
         "height": 1600,
         "shapes": shapes or [],
@@ -232,9 +233,17 @@ def test_behavior_tree_find_view_empty_group_ignores_nested_identity_shapes():
     assert runtime.find_view("任意分组") is view
 
 
+def test_shape_load_direction_prefers_canonical_field_and_reads_legacy_fields():
+    assert Shape({"loadDirection": "down", "contentDirection": "up"}).load_direction == "down"
+    assert Shape({"load_direction": "left"}).load_direction == "left"
+    assert Shape({"窗口加载方向": "右"}).load_direction == "right"
+    assert Shape({"contentDirection": "up"}).load_direction == "up"
+    assert Shape({"内容方向": "下"}).content_direction == "down"
+
+
 def test_behavior_tree_shape_load_delegates_scroll_window_to_runtime(monkeypatch):
     image = _image("邮件", "0121.png", [
-        {"id": "list", "title": "邮件清单2", "x": 0.1, "y": 0.2, "w": 0.4, "h": 0.5, "contentDirection": "down"}
+        {"id": "list", "title": "邮件清单2", "x": 0.1, "y": 0.2, "w": 0.4, "h": 0.5, "loadDirection": "down"}
     ])
     shape = View(image).get_shape("邮件清单2")
     calls = []
@@ -276,7 +285,7 @@ def test_behavior_tree_shape_load_delegates_scroll_window_to_runtime(monkeypatch
     assert runtime.attrs["load_new"] is True
 
 
-def test_behavior_tree_shape_load_without_content_direction_does_not_drag():
+def test_behavior_tree_shape_load_without_load_direction_does_not_drag():
     shape = Shape({"title": "按钮"})
 
     class FakeRuntime(Runtime):
@@ -383,7 +392,12 @@ def test_behavior_tree_action_planner_drag_shape_content_points_follow_direction
 
 
 def test_behavior_tree_scene_recognizer_is_runtime_agnostic():
-    ctx = {"images": {1: {"title": "#1"}, 2: {"title": "#2"}}}
+    ctx = {
+        "images": {
+            1: {"title": "#1", "layer": 1},
+            2: {"title": "#2", "shapes": [{"id": "identity", "isSceneIdentity": True}]},
+        },
+    }
     recognizer = SceneRecognizer(
         score_image=lambda _ctx, image, _frame: 90 if image["title"] == "#2" else 70,
         threshold_for_scene_id=lambda _scene_id: 80,
@@ -393,7 +407,7 @@ def test_behavior_tree_scene_recognizer_is_runtime_agnostic():
 
 
 def test_behavior_tree_scene_recognizer_prefers_order_on_preferred_tie():
-    ctx = {"images": {34: {"title": "#34"}, 35: {"title": "#35"}}}
+    ctx = {"images": {34: {"title": "#34", "layer": 1}, 35: {"title": "#35", "layer": 2}}}
     recognizer = SceneRecognizer(
         score_image=lambda *_args: 100.0,
         threshold_for_scene_id=lambda _scene_id: 80,
@@ -401,6 +415,56 @@ def test_behavior_tree_scene_recognizer_prefers_order_on_preferred_tie():
 
     assert recognizer.identify_scene_number(ctx, "frame", preferred_scene_ids=[35, 34]) == (35, 100.0)
     assert recognizer.identify_scene_number(ctx, "frame") == (34, 100.0)
+
+
+def test_behavior_tree_scene_recognizer_excludes_layer3_by_default_but_accepts_layer0():
+    ctx = {
+        "images": {
+            34: {"title": "#34", "layer": 1},
+            201: {"title": "#201", "isSceneIdentity": False},
+            300: {"title": "#300", "layer": 3},
+        },
+    }
+    recognizer = SceneRecognizer(
+        score_image=lambda _ctx, image, _frame: 100.0 if image["title"] in {"#201", "#300"} else 0.0,
+        threshold_for_scene_id=lambda _scene_id: 80,
+    )
+
+    assert recognizer.identify_scene_number(ctx, "frame") == (None, 0.0)
+    assert recognizer.identify_scene_number(ctx, "frame", preferred_scene_ids=[201, 300]) == (201, 100.0)
+
+
+def test_behavior_tree_scene_tree_layer0_does_not_fall_back_to_default_candidates():
+    world = _image("世界", "0034.png", [{"id": "world", "isSceneIdentity": True}])
+    prompt = _image("仙缘挑战提示", "0201.png", [{"id": "prompt", "isSceneIdentity": True}])
+    prompt.pop("layer")
+    material = {**_image("素材", "0300.png"), "layer": 3, "shapes": []}
+    ctx = {
+        "asset_tree": [world, prompt, material],
+        "images": {34: world, 201: prompt, 300: material},
+    }
+    recognizer = SceneRecognizer(
+        score_image=lambda _ctx, image, _frame: 100.0 if image["title"] in {"世界", "素材"} else 0.0,
+        threshold_for_scene_id=lambda _scene_id: 80,
+    )
+
+    assert recognizer.identify_scene_tree_number(ctx, "frame") == (34, 100.0)
+    assert recognizer.identify_scene_tree_number(ctx, "frame", preferred_scene_ids=[201]) == (None, 0.0)
+    assert recognizer.identify_scene_tree_number(ctx, "frame", preferred_scene_ids=[300]) == (300, 100.0)
+
+
+def test_behavior_tree_scene_tree_layer0_is_exact_even_for_nested_assets():
+    parent = _image("父场景", "0265.png", [{"id": "parent", "isSceneIdentity": True}])
+    child = _image("子场景", "0266.png", [{"id": "child", "isSceneIdentity": True}])
+    parent["children"] = [child]
+    ctx = {"asset_tree": [parent], "images": {265: parent, 266: child}}
+    recognizer = SceneRecognizer(
+        score_image=lambda _ctx, image, _frame: 100.0 if image["title"] == "父场景" else 0.0,
+        threshold_for_scene_id=lambda _scene_id: 80,
+    )
+
+    assert recognizer.identify_scene_tree_number(ctx, "frame", preferred_scene_ids=[266]) == (None, 0.0)
+    assert recognizer.identify_scene_tree_number(ctx, "frame", preferred_scene_ids=[]) == (None, 0.0)
 
 
 def test_behavior_tree_scene_scorer_combines_scene_identity_roles():
@@ -414,7 +478,7 @@ def test_behavior_tree_scene_scorer_combines_scene_identity_roles():
         threshold=80,
     )
 
-    assert scorer.scene_score({}, image, "frame") == 95
+    assert scorer.scene_score({}, image, "frame") == 0
 
 
 def test_behavior_tree_scene_scorer_enforces_required_ocr_role():

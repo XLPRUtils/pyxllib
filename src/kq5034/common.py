@@ -9,6 +9,7 @@
 
 import contextlib
 import io
+import importlib
 import json
 import base64
 from collections import Counter
@@ -135,10 +136,29 @@ def _patch_drissionpage_download_move():
 
 _patch_drissionpage_download_move()
 
-try:
-    import xlproject.loadenv  # noqa: F401
-except Exception:
-    pass
+
+def _ensure_xlproject_loadenv():
+    """Load xlproject/.env for standalone KQ5034 scripts as well as behavior-tree runs."""
+    current_file = Path(__file__).resolve()
+    for parent in current_file.parents:
+        candidate = parent / "xlproject" / "src"
+        if not (candidate / "xlproject" / "loadenv.py").is_file():
+            continue
+        source = str(candidate)
+        if source not in sys.path:
+            sys.path.insert(0, source)
+        break
+
+    try:
+        loadenv = importlib.import_module("xlproject.loadenv")
+        importlib.reload(loadenv)
+        return True
+    except Exception as exc:
+        logger.warning(f'KQ5034加载xlproject.loadenv失败，环境变量可能不完整：{exc!r}')
+        return False
+
+
+_ensure_xlproject_loadenv()
 
 import pyautogui
 

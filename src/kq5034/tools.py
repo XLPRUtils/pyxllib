@@ -164,13 +164,36 @@ class KqTools:
     def update_weipay_data(self, today=None):
         return self.kqdb.update_weipay_data(today)
 
+    @staticmethod
+    def _是禅宗修道班课次(row):
+        lesson_name = str(row.get('lesson_name') or '')
+        return '禅宗' in lesson_name or '修道班' in lesson_name
+
     @classmethod
-    def _计算课次下一次需要更新的时间点(cls, row):
+    def _对齐禅宗课次更新时间(cls, row):
+        """把 B 类课次的 next_update 向后对齐到开课日的整周锚点。"""
+        from datetime import timedelta
+        import math
+
+        if not cls._是禅宗修道班课次(row) or not row.get('start_date'):
+            return row.get('next_update')
+
+        start_date = row['start_date']
+        next_update = row.get('next_update')
+        if not next_update or next_update <= start_date:
+            return start_date + timedelta(days=7)
+
+        elapsed_seconds = (next_update - start_date).total_seconds()
+        week_count = max(1, math.ceil(elapsed_seconds / timedelta(days=7).total_seconds()))
+        return start_date + timedelta(weeks=week_count)
+
+    @classmethod
+    def _计算课次下一次需要更新的时间点(cls, row, now=None):
         """ 输入数据库课程配置的一个条目，计算下一次应该更新的时间 """
         from datetime import datetime, timedelta
 
         # 获取当前时间
-        now = datetime.now()
+        now = now or datetime.now()
 
         # 计算视频结束时间
         if '闯关' in row['lesson_name']:  # 闯关类课程，不用计算视频时长的偏差
@@ -179,7 +202,8 @@ class KqTools:
             video_end_time = row['start_date'] + timedelta(seconds=row['video_duration'] or 0)
 
         # 确定更新间隔（这里可以对各种新的课程逻辑配置规则，目前禅宗间隔7天，普通课程间隔1天）
-        update_interval = timedelta(days=7 if '禅宗' in row['lesson_name'] else 1)
+        is_zen_stage_course = cls._是禅宗修道班课次(row)
+        update_interval = timedelta(days=7 if is_zen_stage_course else 1)
 
         # 如果当前时间在视频结束时间之前，下次更新就是视频结束时间
         if now < video_end_time:
@@ -196,9 +220,9 @@ class KqTools:
 
         # 从视频结束时间开始，计算下一个更新时间点
         # if 'd250317禅宗4阶' in row['lesson_name']:
-        if '禅宗' in row['lesson_name']:
-            # 禅宗比较特别，直接用next_update
-            next_time = row['next_update']
+        if is_zen_stage_course:
+            # B 类按开课日的整周锚点更新；脏配置只允许向后校正，不能提前下载。
+            next_time = cls._对齐禅宗课次更新时间(row)
         else:
             next_time = video_end_time
 
@@ -253,6 +277,24 @@ class KqTools:
             try:
                 for i, row in enumerate(lessons, start=1):
                     logger.info(f'shop={shop_id} {i}/{num}：' + row['lesson_name'])
+
+                    # SQL 只按原始 next_update 选课；B 类脏配置可能落在周六。
+                    # 导出前再按开课日周锚点做一次门禁，并顺手修正数据库。
+                    aligned_next_update = self._对齐禅宗课次更新时间(row)
+                    if self._是禅宗修道班课次(row) and aligned_next_update != row.get('next_update'):
+                        self.kqdb.update_row(
+                            'lesson_table',
+                            {'next_update': aligned_next_update},
+                            {'lesson_id': row['lesson_id']},
+                            commit=True,
+                        )
+                        row['next_update'] = aligned_next_update
+                    if aligned_next_update and aligned_next_update > datetime.datetime.now():
+                        logger.info(
+                            f'B类课次尚未到周更新点，跳过提前下载：{row["lesson_name"]} '
+                            f'next_update={aligned_next_update:%Y-%m-%d %H:%M:%S}'
+                        )
+                        continue
 
                     try:
                         file = self.xe2.export_lesson_data(row)

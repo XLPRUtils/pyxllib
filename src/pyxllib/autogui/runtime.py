@@ -99,7 +99,7 @@ class Runtime:
     def load_shape(self, shape: Shape, *, ratio: float = 0.5, duration: float = 1.5):
         attrs = self._attrs()
         attrs["load_new"] = False
-        if not shape.content_direction:
+        if not shape.load_direction:
             return
         before = self.shape_load_signature(shape)
         self.drag_shape_content(shape, ratio=ratio, duration=duration)

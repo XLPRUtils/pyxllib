@@ -875,6 +875,7 @@ return true;
         cache_key = None
         expected_download_name = expected_download_name or ''
         existing_exports = None
+        existing_download_tasks = []
         if 'community_admin' in url:  # 禅宗打卡
             if start_date is None:  # 开始时间可以设置为一年前
                 start_date = (datetime.datetime.now() - datetime.timedelta(days=365)).strftime('%Y-%m-%d')
@@ -906,16 +907,18 @@ return true;
         if 'community_admin' in url:  # 禅宗打卡
             tab.wait(3)
             pane, _ = self._等待禅宗打卡导出按钮(tab)
-            page_text = ''
-            with contextlib.suppress(Exception):
-                page_text = tab.run_js('return document.querySelector("#sub_app_container")?.innerText || ""') or ''
-            if '暂无数据' in page_text or '无数据' in page_text:
-                logger.info(f'禅宗打卡页暂无可导出数据：url={tab.url}')
-                if cache_key is not None:
-                    self._store_runtime_cached_file(cache_key, None)
-                return None
-            if not expected_download_name:
-                expected_download_name = self._提取禅宗打卡导出名(tab)
+            # 能找到导出按钮说明打卡任务页已正常加载。页面其他区域（例如空筛选结果、
+            # 说明卡片）也可能包含“暂无数据”，不能据此把整个任务误判为空。
+            page_download_name = self._提取禅宗打卡导出名(tab)
+            if page_download_name and not page_download_name.isdigit():
+                if expected_download_name and self._标准化下载名(expected_download_name) != self._标准化下载名(page_download_name):
+                    logger.info(
+                        '禅宗打卡配置名与页面任务名不同，改用页面任务名匹配下载：'
+                        f'configured={expected_download_name} page={page_download_name}'
+                    )
+                expected_download_name = page_download_name
+            if download:
+                existing_download_tasks = self._列出下载中心任务名()
             if download and expected_download_name:
                 existing_exports = (
                     self._列出下载中心任务名([expected_download_name])
@@ -969,15 +972,20 @@ return true;
                     self._列出下载中心任务名([expected_download_name])
                     if exclude_existing_download_tasks else []
                 )
+            export_btn = tab('tag:button@@text():导出动态', timeout=10)
             try:
                 page_text = tab.run_js('return document.body.innerText') or ''
             except Exception:
                 page_text = ''
-            if '暂无内容' in page_text or '无数据' in page_text:
+            # 日历打卡的动态列表、点评弹窗等局部区域可能出现“暂无内容”，
+            # 只要导出按钮存在，就说明打卡页可导出，不能把整页误判为空。
+            if not export_btn and ('暂无内容' in page_text or '无数据' in page_text):
                 if cache_key is not None:
                     self._store_runtime_cached_file(cache_key, None)
                 return None
-            tab('tag:button@@text():导出动态').click(by_js=True)
+            if not export_btn:
+                raise RuntimeError(f'日历打卡页导出按钮未找到：url={tab.url}')
+            export_btn.click(by_js=True)
             while True:
                 ele = tab('tag:div@@role=dialog@@aria-label=导出数据')
                 try:
@@ -1012,16 +1020,37 @@ return true;
             # tab.close()
             strict_name_check = bool(expected_download_name)
             try:
-                file = self.download_last_file(
-                    [expected_download_name] if expected_download_name else None,
-                    exclude_task_names=existing_exports,
-                    max_wait_seconds=20 * 60 if existing_exports is not None else None,
-                )
+                if 'community_admin' in url:
+                    # 禅宗页配置名、页面短标题与下载中心任务名经常不一致；这里按点击导出后
+                    # 新增的任务识别，避免“0”等短标题误命中旧的无关下载任务。
+                    strict_name_check = False
+                    file = self.download_last_file(
+                        exclude_task_names=existing_download_tasks,
+                        max_wait_seconds=10 * 60,
+                    )
+                elif 'diaryList' in url:
+                    # 日历打卡下载中心任务名会被平台改写成活动标题或“打卡日记数据”，
+                    # 不能要求它包含本地配置名；按点击后新增任务识别更稳定。
+                    strict_name_check = False
+                    file = self.download_last_file(
+                        exclude_task_names=existing_download_tasks,
+                        max_wait_seconds=10 * 60,
+                    )
+                else:
+                    file = self.download_last_file(
+                        [expected_download_name] if expected_download_name else None,
+                        exclude_task_names=existing_exports,
+                        max_wait_seconds=20 * 60 if existing_exports is not None else None,
+                    )
             except RuntimeError as exc:
-                if 'diaryList' not in url or '未找到匹配任务' not in str(exc):
+                can_fallback_by_new_task = (
+                    ('community_admin' in url or 'diaryList' in url)
+                    and '未找到匹配任务' in str(exc)
+                )
+                if not can_fallback_by_new_task:
                     raise
                 logger.warning(
-                    '日历打卡导出任务名未命中配置名，回退到按新增下载任务识别：'
+                    '打卡导出任务名未命中，回退到按新增下载任务识别：'
                     f'expected={expected_download_name} err={exc}'
                 )
                 strict_name_check = False
