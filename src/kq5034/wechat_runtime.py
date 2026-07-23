@@ -1244,11 +1244,14 @@ class KqWechat:
         if os.getenv('KQ_WECHAT_QRCODE_CHILD') == '1':
             return KqWechat._扫码登录微信支付本进程(user, assume_current_chat=assume_current_chat)
 
-        raw_timeout = os.getenv('KQ_WECHAT_QRCODE_TIMEOUT_SECONDS', '55')
+        raw_timeout = os.getenv(
+            'KQ_WECHAT_QRCODE_CHILD_TIMEOUT_SECONDS',
+            os.getenv('KQ_WEIPAY_LOGIN_TIMEOUT_SECONDS', '75'),
+        )
         try:
-            timeout = min(60, max(20, int(float(raw_timeout))))
+            timeout = min(120, max(30, int(float(raw_timeout))))
         except (TypeError, ValueError):
-            timeout = 55
+            timeout = 75
 
         cmd = [
             sys.executable,
@@ -1438,6 +1441,9 @@ class KqWechat:
                     assistant_text = _控件树文本(ct2, max_nodes=500)
                     if any(key in assistant_text for key in ('系统繁忙', '网络繁忙', '稍后再试', '服务异常')):
                         raise RuntimeError(f'微信支付商家助手异常页面：{assistant_text[:300]!r}')
+                    if '登录成功' in assistant_text:
+                        logger.info('微信支付扫码登录：商家助手已显示登录成功，结束确认阶段等待浏览器跳转')
+                        break
                     if _点击匹配控件(ct2, ['确认登录', '允许登录', '同意登录', '登录', '允许'], control_types={'ButtonControl'}):
                         time.sleep(3)
                         break
