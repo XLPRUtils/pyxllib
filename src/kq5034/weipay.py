@@ -1442,8 +1442,11 @@ return (() => {
         while time.time() < deadline:
             candidates = []
             for order, locator in enumerate(locators):
+                remaining = deadline - time.time()
+                if remaining <= 0:
+                    break
                 try:
-                    for ele in tab.eles(locator):
+                    for ele in tab.eles(locator, timeout=min(0.5, remaining)):
                         state = self._get_element_render_state(ele)
                         if state['hidden_ancestor'] or state['width'] <= 0 or state['height'] <= 0:
                             continue
