@@ -8,6 +8,7 @@ from ctypes import wintypes
 
 from .common import *  # noqa: F403
 from pyxllib.prog import process_runtime
+from wxautox.utils import RollIntoView
 
 
 _微信主窗口类名 = {'WeChatMainWndForPC', 'WeChatLoginWndForPC'}
@@ -588,6 +589,24 @@ def _控件可用(ctrl):
             return False
 
 
+def _激活控件窗口(ctrl):
+    try:
+        ctrl.SetActive(0.2)
+        return True
+    except Exception:
+        pass
+    try:
+        hwnd = getattr(ctrl, 'NativeWindowHandle', None)
+        if hwnd:
+            user32 = ctypes.windll.user32
+            user32.ShowWindow(wintypes.HWND(hwnd), 9)
+            user32.SetForegroundWindow(wintypes.HWND(hwnd))
+            return True
+    except Exception:
+        pass
+    return False
+
+
 def _点击控件(ctrl):
     try:
         ctrl.Click(move=False, simulateMove=False, return_pos=False)
@@ -647,6 +666,63 @@ def _点击匹配控件(root, keywords, *, control_types=None):
         except Exception as exc:
             logger.warning(f'微信支付扫码登录：点击匹配控件失败 name={name!r} type={ctrl_type!r} err={exc!r}')
     return False
+
+
+def _点击微信二维码消息(msg):
+    """尽量点击消息里的图片本体，避免 wxautox 的头像偏移点击落空。"""
+    control = getattr(msg, 'control', None)
+    content = str(getattr(msg, 'content', '') or '')
+    if control is None:
+        msg.click()
+        return 'message.click:no-control'
+
+    try:
+        RollIntoView(getattr(msg, 'chatbox').ListControl(), control, equal=True)
+    except Exception:
+        pass
+    try:
+        _激活控件窗口(control.GetTopLevelControl())
+    except Exception:
+        _激活控件窗口(control)
+
+    candidates = []
+    try:
+        for ctrl in _遍历控件树(control, max_nodes=80):
+            try:
+                name = getattr(ctrl, 'Name', '') or ''
+                ctrl_type = getattr(ctrl, 'ControlTypeName', '') or ''
+                rect = ctrl.BoundingRectangle
+                width = rect.right - rect.left
+                height = rect.bottom - rect.top
+            except Exception:
+                continue
+            if width < 40 or height < 40:
+                continue
+            if ctrl_type in {'ImageControl', 'ButtonControl'}:
+                candidates.append((width * height, ctrl_type, name, ctrl))
+    except Exception:
+        pass
+
+    for _, ctrl_type, name, ctrl in sorted(candidates, key=lambda x: x[0], reverse=True):
+        try:
+            logger.info(f'微信支付扫码登录：点击消息内图片候选 type={ctrl_type!r} name={name!r} summary={_控件摘要(ctrl)}')
+            _点击控件(ctrl)
+            return f'inner:{ctrl_type}:{name}'
+        except Exception as exc:
+            logger.warning(f'微信支付扫码登录：点击消息内图片候选失败 type={ctrl_type!r} name={name!r} err={exc!r}')
+
+    try:
+        rect = control.BoundingRectangle
+        x = rect.left + int((rect.right - rect.left) * 0.72)
+        y = rect.top + int((rect.bottom - rect.top) * 0.5)
+        logger.info(f'微信支付扫码登录：使用消息区域坐标兜底打开二维码图片 x={x} y={y} content={content!r}')
+        pyautogui.click(x, y)
+        return 'coordinate:message-region'
+    except Exception as exc:
+        logger.warning(f'微信支付扫码登录：消息区域坐标兜底失败 err={exc!r}')
+
+    msg.click()
+    return 'message.click:fallback'
 
 
 def _控件树文本(root, *, max_nodes=300):
@@ -772,6 +848,36 @@ def _微信支付商户行OCR匹配(rows):
     return sorted(matches, key=lambda item: (-item['score'], item['box'][1], item['box'][0]))[0]
 
 
+def _微信支付商家助手OCR文本框(ctrl, *, request_timeout=5):
+    _激活微信支付商家助手窗口(ctrl, reason='OCR识别微信支付商家助手')
+    left, top, right, bottom = _控件矩形(ctrl)
+    width = max(1, int(right - left))
+    height = max(1, int(bottom - top))
+    if width < 200 or height < 200:
+        return []
+    screenshot = _微信支付商家助手截图(left, top, width, height)
+    try:
+        from pyxllib.autogui.anlib import get_xlapi
+
+        rows = _微信支付OCR文本框列表(
+            get_xlapi().common_ocr(screenshot, request_timeout=request_timeout, request_retries=0)
+        )
+    except Exception as exc:
+        logger.warning(f'微信支付扫码登录：common_ocr识别商家助手失败，尝试本地PaddleOCR：{exc!r}')
+        try:
+            from pyxllib.ai.ocr import ocr_text
+
+            rows = _微信支付OCR文本框列表(ocr_text(screenshot, model='basic'))
+        except Exception as local_exc:
+            logger.warning(f'微信支付扫码登录：商家助手本地PaddleOCR失败：{local_exc!r}')
+            return []
+    for row in rows:
+        row['window'] = [left, top, right, bottom]
+        row['width'] = width
+        row['height'] = height
+    return rows
+
+
 def _微信支付商户行OCR文本框(ctrl):
     _激活微信支付商家助手窗口(ctrl, reason='OCR识别微信支付商户行')
     left, top, right, bottom = _控件矩形(ctrl)
@@ -868,6 +974,23 @@ def _点击微信支付商户行(ctrl):
 
 def _点击微信支付确认区域(ctrl):
     return _点击窗口比例位置(ctrl, 0.5, 0.79, label='确认登录区域')
+
+
+def _点击微信支付确认OCR(ctrl):
+    rows = _微信支付商家助手OCR文本框(ctrl, request_timeout=3)
+    texts = [str(row.get('text') or '') for row in rows if row.get('text')]
+    for row in rows:
+        text = str(row.get('text') or '').replace(' ', '')
+        if not any(key in text for key in ('确认登录', '允许登录', '同意登录', '登录', '允许')):
+            continue
+        x1, y1, x2, y2 = row['box']
+        left, top, _right, _bottom = row['window']
+        click_x = left + (x1 + x2) / 2
+        click_y = top + (y1 + y2) / 2
+        logger.info(f'微信支付扫码登录：OCR命中确认按钮 text={text!r} x={click_x:.1f} y={click_y:.1f}')
+        pyautogui.click(click_x, click_y)
+        return True, texts
+    return False, texts
 
 
 def _等待微信支付商户选择生效():
@@ -995,20 +1118,41 @@ def _等待微信图片预览或商家助手(*, timeout=8, stable_seconds=0.8, r
     raise RuntimeError(f'微信二维码图片预览未稳定，诊断目录：{diag_dir}') from last_error
 
 
-def _打开最近微信二维码图片(wx, *, max_messages=8, open_timeout=4, stable_seconds=0.6):
+def _打开最近微信二维码图片(wx, *, max_messages=8, open_timeout=4, stable_seconds=0.6, after_text=None):
     messages = wx.GetAllMessage()
     if not messages:
         diag_dir = _采集微信二维码诊断('微信会话无消息')
         raise RuntimeError(f'微信会话没有可点击消息，诊断目录：{diag_dir}')
+
+    marker_index = None
+    if after_text:
+        needle = str(after_text)
+        for index in range(len(messages) - 1, -1, -1):
+            content = str(getattr(messages[index], 'content', '') or '')
+            if needle in content:
+                marker_index = index
+                break
+        if marker_index is None:
+            diag_dir = _采集微信二维码诊断('未找到本轮二维码消息标记', include_uia=False)
+            raise RuntimeError(f'微信会话未找到本轮二维码消息标记：{needle!r}，诊断目录：{diag_dir}')
+        messages = messages[marker_index + 1:]
+        if not messages:
+            diag_dir = _采集微信二维码诊断('本轮二维码标记后无图片消息', include_uia=False)
+            raise RuntimeError(f'本轮二维码消息标记后没有可点击消息：{needle!r}，诊断目录：{diag_dir}')
 
     last_error = None
     tried = 0
     for offset, msg in enumerate(reversed(messages[-max(1, int(max_messages)):]), start=1):
         tried += 1
         try:
-            msg.click()
+            click_method = _点击微信二维码消息(msg)
+            logger.info(
+                '微信支付扫码登录：已尝试打开最近消息 '
+                f'offset_from_end={offset} method={click_method!r} content={str(getattr(msg, "content", ""))[:80]!r}'
+            )
         except Exception as exc:
             last_error = exc
+            logger.warning(f'微信支付扫码登录：点击最近消息失败 offset_from_end={offset} err={exc!r}')
             continue
 
         image, ct1 = _等待微信图片预览或商家助手(
@@ -1020,6 +1164,8 @@ def _打开最近微信二维码图片(wx, *, max_messages=8, open_timeout=4, st
             return image, ct1, {
                 'message_offset_from_end': offset,
                 'tried_messages': tried,
+                'after_text': after_text,
+                'marker_index': marker_index,
             }
         _快速重置微信二维码窗口状态(close_seconds=1)
 
@@ -1240,9 +1386,9 @@ class KqWechat:
         return result
 
     @staticmethod
-    def 扫码登录微信支付(user, *, assume_current_chat=False):
+    def 扫码登录微信支付(user, *, assume_current_chat=False, after_text=None):
         if os.getenv('KQ_WECHAT_QRCODE_CHILD') == '1':
-            return KqWechat._扫码登录微信支付本进程(user, assume_current_chat=assume_current_chat)
+            return KqWechat._扫码登录微信支付本进程(user, assume_current_chat=assume_current_chat, after_text=after_text)
 
         raw_timeout = os.getenv(
             'KQ_WECHAT_QRCODE_CHILD_TIMEOUT_SECONDS',
@@ -1265,6 +1411,7 @@ class KqWechat:
             json.dumps({
                 'user': str(user),
                 'assume_current_chat': assume_current_chat,
+                'after_text': after_text,
             }, ensure_ascii=False),
         ]
         env = os.environ.copy()
@@ -1321,7 +1468,7 @@ class KqWechat:
             logger.info(f'微信支付扫码登录子进程 stderr：{stderr[-4000:]}')
 
     @staticmethod
-    def _扫码登录微信支付本进程(user, *, assume_current_chat=False):
+    def _扫码登录微信支付本进程(user, *, assume_current_chat=False, after_text=None):
         """
         :param user: 微信群名/图片二维码存放的群位置
         """
@@ -1332,7 +1479,10 @@ class KqWechat:
             watchdog_timeout = 45
         watchdog = _启动微信二维码诊断看门狗('扫码登录微信支付卡住', timeout=watchdog_timeout)
         # 0 打开图片
-        logger.info(f'微信支付扫码登录：准备打开二维码图片 user={user!r} assume_current_chat={assume_current_chat}')
+        logger.info(
+            '微信支付扫码登录：准备打开二维码图片 '
+            f'user={user!r} assume_current_chat={assume_current_chat} after_text={after_text!r}'
+        )
         try:
             image = None
             _快速重置微信二维码窗口状态(close_seconds=2)
@@ -1350,17 +1500,6 @@ class KqWechat:
             else:
                 logger.info(f'微信支付扫码登录：打开会话 user={user!r}')
                 wx.ChatWith(user)
-            messages = wx.GetAllMessage()
-            if not messages:
-                diag_dir = _采集微信二维码诊断('微信会话无消息')
-                raise RuntimeError(f'微信会话没有可点击消息：user={user!r}，诊断目录：{diag_dir}')
-            msg = messages[-1]
-            logger.info('微信支付扫码登录：打开最新二维码图片')
-            msg.click()  # wxautox才有click方法，wxauto基础版没有
-
-            # 新版微信可能在打开图片后自动识别二维码并直接拉起商家助手，
-            # 此时 ImagePreviewWnd 已关闭。先认最终状态，避免把成功误判成
-            # “找不到识别图中二维码按钮”。
             raw_preview_timeout = os.getenv('KQ_WECHAT_IMAGE_PREVIEW_READY_TIMEOUT_SECONDS', '8')
             raw_preview_stable = os.getenv('KQ_WECHAT_IMAGE_PREVIEW_STABLE_SECONDS', '0.8')
             try:
@@ -1371,10 +1510,19 @@ class KqWechat:
                 preview_stable = min(3, max(0.3, float(raw_preview_stable)))
             except (TypeError, ValueError):
                 preview_stable = 0.8
-            image, ct1 = _等待微信图片预览或商家助手(
-                timeout=preview_timeout,
+
+            logger.info('微信支付扫码登录：打开最近二维码图片')
+            # 新版微信可能在打开图片后自动识别二维码并直接拉起商家助手，
+            # 此时 ImagePreviewWnd 已关闭。先认最终状态，避免把成功误判成
+            # “找不到识别图中二维码按钮”。
+            image, ct1, open_info = _打开最近微信二维码图片(
+                wx,
+                max_messages=int(os.getenv('KQ_WECHAT_QRCODE_OPEN_MAX_MESSAGES', '8')),
+                open_timeout=preview_timeout,
                 stable_seconds=preview_stable,
+                after_text=after_text,
             )
+            logger.info(f'微信支付扫码登录：二维码图片打开结果 {open_info}')
             if ct1 is None:
                 logger.info('微信支付扫码登录：点击微信图片“识别图中二维码”')
                 _点击微信图片识别二维码(image)
@@ -1433,20 +1581,33 @@ class KqWechat:
                 # 选择商户后，微信小程序经常会切换为居中的确认窗口。
                 # 确认阶段必须重新读取窗口位置，不能沿用商户列表阶段坐标。
                 confirm_deadline = time.time() + 12
+                confirm_done = False
                 while time.time() < confirm_deadline:
                     ct2 = current_helper_control(ct1, timeout=1)
                     if ct2 is None:
                         logger.info('微信支付扫码登录：商家助手窗口已关闭，确认阶段结束')
+                        confirm_done = True
                         break
                     assistant_text = _控件树文本(ct2, max_nodes=500)
                     if any(key in assistant_text for key in ('系统繁忙', '网络繁忙', '稍后再试', '服务异常')):
                         raise RuntimeError(f'微信支付商家助手异常页面：{assistant_text[:300]!r}')
                     if '登录成功' in assistant_text:
                         logger.info('微信支付扫码登录：商家助手已显示登录成功，结束确认阶段等待浏览器跳转')
+                        confirm_done = True
                         break
                     if _点击匹配控件(ct2, ['确认登录', '允许登录', '同意登录', '登录', '允许'], control_types={'ButtonControl'}):
                         time.sleep(3)
+                        confirm_done = True
                         break
+                    if isinstance(ct2, _Win32HelperControl):
+                        clicked_confirm, ocr_texts = _点击微信支付确认OCR(ct2)
+                        if clicked_confirm:
+                            time.sleep(3)
+                            confirm_done = True
+                            break
+                        logger.info(f'微信支付扫码登录：确认阶段等待OCR确认按钮，当前文本={ocr_texts[:12]!r}')
+                        time.sleep(1)
+                        continue
                     if _点击匹配控件(ct2, ['1599622041', '武陵禅寺客堂']):
                         time.sleep(2)
                         continue
@@ -1454,7 +1615,11 @@ class KqWechat:
                     logger.info(f'微信支付扫码登录：确认阶段未命中语义控件，点击当前窗口确认区域={ltrb2}')
                     _点击微信支付确认区域(ct2)
                     time.sleep(3)
+                    confirm_done = True
                     break
+                if not confirm_done:
+                    diag_dir = _采集微信二维码诊断('微信支付商家助手确认未完成')
+                    raise RuntimeError(f'微信支付商家助手确认未完成，诊断目录：{diag_dir}')
         except Exception as exc:
             _采集微信二维码诊断('扫码登录微信支付失败', exc)
             try:

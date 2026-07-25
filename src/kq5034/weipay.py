@@ -370,17 +370,43 @@ class Weipay(DpWebBase):
                             remaining_seconds=round(remaining, 3),
                         )
                         if users:
+                            qrcode_marker = (
+                                f'KQ_WECHAT_PAY_QR attempt={attempt} '
+                                f'ts={_datetime.now().strftime("%Y%m%d%H%M%S")} '
+                                f'pid={os.getpid()}'
+                            )
+                            qrcode_message = f'考勤工作需要，快帮我扫码登录微信支付\n{qrcode_marker}'
                             for user in users:
-                                wechat_lock_send(user, '考勤工作需要，快帮我扫码登录微信支付', files=[file])
-                            _append_weipay_login_trace('qrcode_sent_to_wechat', attempt=attempt, users=users, file=str(file))
+                                wechat_lock_send(user, qrcode_message, files=[file])
+                            _append_weipay_login_trace(
+                                'qrcode_sent_to_wechat',
+                                attempt=attempt,
+                                users=users,
+                                file=str(file),
+                                marker=qrcode_marker,
+                            )
                             time.sleep(max(0.5, min(3, remaining)))
                             old_qrcode_timeout = os.environ.get('KQ_WECHAT_QRCODE_TIMEOUT_SECONDS')
                             os.environ['KQ_WECHAT_QRCODE_TIMEOUT_SECONDS'] = str(qr_timeout)
                             try:
                                 with get_autogui_lock(timeout=20, force_break_timeout=10):
-                                    _append_weipay_login_trace('wechat_scan_start', attempt=attempt, user=users[0])
-                                    KqWechat.扫码登录微信支付(users[0], assume_current_chat=False)
-                                    _append_weipay_login_trace('wechat_scan_done', attempt=attempt, user=users[0])
+                                    _append_weipay_login_trace(
+                                        'wechat_scan_start',
+                                        attempt=attempt,
+                                        user=users[0],
+                                        marker=qrcode_marker,
+                                    )
+                                    KqWechat.扫码登录微信支付(
+                                        users[0],
+                                        assume_current_chat=False,
+                                        after_text=qrcode_marker,
+                                    )
+                                    _append_weipay_login_trace(
+                                        'wechat_scan_done',
+                                        attempt=attempt,
+                                        user=users[0],
+                                        marker=qrcode_marker,
+                                    )
                             finally:
                                 if old_qrcode_timeout is None:
                                     os.environ.pop('KQ_WECHAT_QRCODE_TIMEOUT_SECONDS', None)
