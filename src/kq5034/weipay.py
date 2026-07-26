@@ -2522,7 +2522,13 @@ return 'OK';
 
         refund_amount_input = tab.ele('tag:input@@name=refund_amount', timeout=15)
         if not refund_amount_input:
-            raise RuntimeError('未找到退款金额输入框')
+            try:
+                body_text = tab('tag:body').text
+            except Exception:
+                body_text = ''
+            if '当前订单过期不能申请退款' in body_text:
+                raise RuntimeError('当前订单过期不能申请退款')
+            raise RuntimeError(f'未找到退款金额输入框，url={tab.url}，title={tab.title}')
         refund_amount_input.input(refund_amount, clear=True)
 
         reason_input = tab.ele('#textInput', timeout=5) or tab.ele('tag:textarea', timeout=5)

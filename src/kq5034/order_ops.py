@@ -333,7 +333,8 @@ def _apply_single_refund(row: dict[str, Any], *, weipay) -> tuple[dict[str, Any]
         row["执行退款"] = "已退还全部促学金"
         return row, False
 
-    voucher_id = _normalize_order_id(row.get("商户订单号")) or _normalize_order_id(row.get("微信支付订单号"))
+    # 申请退款页对部分商户单号会直接跳回首页；微信支付订单号进入金额表单更稳定。
+    voucher_id = _normalize_order_id(row.get("微信支付订单号")) or _normalize_order_id(row.get("商户订单号"))
     if not voucher_id:
         raise OrderAutomationError("缺少可用于执行退款的订单号")
 
