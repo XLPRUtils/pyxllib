@@ -836,13 +836,52 @@ return 'OK';
     def download_monthly_records(self, month, save_dir=True):
         tab = self.tab
         logger.info(f'开始下载微信支付账单：month={month} save_dir={save_dir}')
-        tab.get('https://pay.weixin.qq.com/index.php/xphp/cfund_bill_nc/funds_bill_nc#/')
+        monthly_records_url = 'https://pay.weixin.qq.com/index.php/xphp/cfund_bill_nc/funds_bill_nc#/'
 
         start_day = month + '-01'
         end_day = month + f'-{str(pd.Period(month).end_time.day)}'
 
-        tab.wait(3)
-        self._fill_visible_inputs(tab, [start_day, end_day], minimum_count=2)
+        auth_retry_used = False
+        while True:
+            tab.get(monthly_records_url)
+            tab.wait(3)
+            try:
+                body_text = self._normalize_page_text(tab('tag:body').text)
+            except Exception:
+                body_text = ''
+            try:
+                self._raise_if_weipay_auth_invalid(body_text)
+            except RuntimeError as auth_exc:
+                if auth_retry_used or not self.login_users:
+                    raise
+                logger.warning(
+                    f'微信支付账单页检测到登录态/权限问题，先尝试即时重新登录再继续：'
+                    f'month={month} error={auth_exc!r} url={tab.url} title={tab.title}'
+                )
+                self.login(self.login_users)
+                auth_retry_used = True
+                continue
+            try:
+                self._fill_visible_inputs(tab, [start_day, end_day], minimum_count=2)
+                break
+            except RuntimeError:
+                try:
+                    body_text = self._normalize_page_text(tab('tag:body').text)
+                except Exception:
+                    body_text = ''
+                try:
+                    self._raise_if_weipay_auth_invalid(body_text)
+                except RuntimeError as auth_exc:
+                    if auth_retry_used or not self.login_users:
+                        raise auth_exc
+                    logger.warning(
+                        f'微信支付账单页填写日期前检测到登录态/权限问题，先尝试即时重新登录再继续：'
+                        f'month={month} error={auth_exc!r} url={tab.url} title={tab.title}'
+                    )
+                    self.login(self.login_users)
+                    auth_retry_used = True
+                    continue
+                raise
 
         # 账单页左侧有“已结算查询”入口，这里只点主查询按钮。
         query_btn = None
