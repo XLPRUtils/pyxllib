@@ -69,6 +69,11 @@ def _write_json(path, data):
     path.write_text(json.dumps(data, ensure_ascii=False, indent=2, default=str), encoding='utf-8')
 
 
+def _weipay_auth_probe_root():
+    root = os.getenv('KQ_WEIPAY_AUTH_PROBE_DIR') or Path(tempfile.gettempdir()) / 'codeyun' / 'kq5034' / 'weipay_auth_probe'
+    return Path(root)
+
+
 class Weipay(DpWebBase):
     base_url = 'https://pay.weixin.qq.com'
 
@@ -106,6 +111,16 @@ class Weipay(DpWebBase):
             logger.warning(f'微信支付查找可复用标签页失败，改为新建标签页：{exc!r}')
         logger.info('微信支付未找到可复用标签页，创建新标签页')
         return self.browser.new_tab(self.base_url)
+
+    def _重建微信支付工作标签页(self, reason=''):
+        try:
+            if getattr(self, 'tab', None):
+                self.tab.close()
+        except Exception:
+            pass
+        logger.warning(f'微信支付工作标签页将重建：reason={reason!r}')
+        self.tab = self.browser.new_tab(self.base_url)
+        return self.tab
 
     @staticmethod
     def 清理重复微信支付标签页(browser=None, *, keep_tab_id=None, min_tabs_to_keep=1, reason=''):
@@ -271,6 +286,54 @@ class Weipay(DpWebBase):
                 'stderr_tail': result.stderr[-2000:],
             }
 
+    def _微信支付首页已登录(self, tab, *, home_url='https://pay.weixin.qq.com/index.php/core/info', timeout=8):
+        """探测当前浏览器是否已经处于微信支付商户平台登录态。"""
+        deadline = time.time() + max(1, timeout)
+        last_url = getattr(tab, 'url', '')
+        last_title = getattr(tab, 'title', '')
+        while time.time() < deadline:
+            last_url = getattr(tab, 'url', '')
+            last_title = getattr(tab, 'title', '')
+            if any(x in str(last_url or '') for x in ['/core/home/session_expired', '/index.php/core/account/login']):
+                return None
+            try:
+                username_ele = tab('tag:a@@class=username', timeout=1)
+                if username_ele:
+                    user = (username_ele.text or '').split('@')[0].strip()
+                    if user:
+                        return user
+            except Exception:
+                pass
+            try:
+                text = self._normalize_page_text(tab('tag:body', timeout=1).text)
+            except Exception:
+                text = ''
+            url = str(last_url or '')
+            title = str(last_title or '')
+            has_login_text = any(x in text for x in ['请使用微信扫码登录', '微信扫一扫登录', '请扫码登录'])
+            is_weipay_page = 'pay.weixin.qq.com' in url
+            logged_page_url = any(x in url for x in [
+                '/index.php/core/info',
+                '/index.php/core/refundquery',
+                '/xphp/cfund_bill_nc/funds_bill_nc',
+            ])
+            logged_title = any(x in title for x in ['微信商户平台', '退款查询', '资金流水账单', '账户概况'])
+            logged_text = any(x in text for x in [
+                '账户概况',
+                '商户平台',
+                '交易中心',
+                '资金管理',
+                '退款查询',
+                '资金流水账单',
+                '下载多日账单',
+                '业务明细账单',
+            ])
+            if is_weipay_page and not has_login_text and (logged_page_url or logged_title or logged_text):
+                return ''
+            time.sleep(0.5)
+        logger.info(f'微信支付网页登录态探测未命中：url={last_url!r} title={last_title!r}')
+        return None
+
     def login(self, users=None):
         tab = self.tab
         home_url = 'https://pay.weixin.qq.com/index.php/core/info'
@@ -280,10 +343,26 @@ class Weipay(DpWebBase):
             users=users,
             initial_url=getattr(tab, 'url', None),
         )
-        username_ele = tab('tag:a@@class=username', timeout=3) if tab.url == home_url else None
-        if not username_ele:
-            if tab.url == home_url:
-                logger.warning('微信支付商户首页缺少用户名元素，按登录态失效重新扫码登录')
+        if tab.url != home_url:
+            try:
+                tab.get(home_url)
+                tab.wait(3)
+            except Exception as exc:
+                logger.warning(f'微信支付进入商户首页探测失败，继续扫码登录流程：url={getattr(tab, "url", "")} error={exc!r}')
+        logged_user = self._微信支付首页已登录(tab, home_url=home_url, timeout=8)
+        if logged_user is not None:
+            self.user = logged_user or '已登录'
+            logger.info(f'微信支付已是网页登录态，跳过二维码扫码：url={getattr(tab, "url", "")} user={self.user!r}')
+            _append_weipay_login_trace(
+                'login_reuse_existing_web_state',
+                user=self.user,
+                final_url=getattr(tab, 'url', None),
+                elapsed_seconds=round(time.perf_counter() - login_started_at, 3),
+            )
+            return
+        if logged_user is None:
+            if str(getattr(tab, 'url', '') or '').startswith(home_url):
+                logger.warning('微信支付商户首页未确认登录态，准备进入二维码登录流程')
             raw_qr_timeout = os.getenv(
                 'KQ_WEIPAY_QRCODE_LIFETIME_SECONDS',
                 os.getenv('KQ_WECHAT_QRCODE_TIMEOUT_SECONDS', '55'),
@@ -305,18 +384,6 @@ class Weipay(DpWebBase):
             for attempt in range(1, max_attempts + 1):
                 attempt_started_at = time.perf_counter()
                 login_deadline = time.time() + login_timeout
-                logger.info(
-                    f'微信支付登录扫码尝试开始：attempt={attempt}/{max_attempts} '
-                    f'qrcode_timeout={qr_timeout}s timeout={login_timeout}s'
-                )
-                _append_weipay_login_trace(
-                    'attempt_start',
-                    attempt=attempt,
-                    max_attempts=max_attempts,
-                    qrcode_timeout=qr_timeout,
-                    login_timeout=login_timeout,
-                    current_url=getattr(tab, 'url', None),
-                )
                 try:
                     reset_result = self._reset_wechat_qrcode_windows_for_login(close_seconds=3, timeout=15)
                     logger.info(f'微信支付登录扫码前已重置微信二维码窗口状态：{reset_result}')
@@ -327,13 +394,24 @@ class Weipay(DpWebBase):
 
                 tab.get('https://pay.weixin.qq.com')
                 _append_weipay_login_trace('pay_page_opened', attempt=attempt, url=getattr(tab, 'url', None))
+                logged_user = self._微信支付首页已登录(tab, home_url=home_url, timeout=5)
+                if logged_user is not None:
+                    self.user = logged_user or '已登录'
+                    logger.info(f'微信支付打开入口后确认已有网页登录态，跳过二维码扫码：url={getattr(tab, "url", "")} user={self.user!r}')
+                    _append_weipay_login_trace(
+                        'attempt_reuse_existing_web_state',
+                        attempt=attempt,
+                        user=self.user,
+                        final_url=getattr(tab, 'url', None),
+                    )
+                    break
                 message_sent = False
-                while tab.url != home_url:
+                while self._微信支付首页已登录(tab, home_url=home_url, timeout=1) is None:
                     remaining = login_deadline - time.time()
                     if remaining <= 0:
                         last_error = TimeoutError(
                             f'微信支付登录超时：attempt={attempt}/{max_attempts} '
-                            f'等待 {login_timeout} 秒后仍未进入商户首页'
+                            f'等待 {login_timeout} 秒后仍未进入商户平台登录态'
                         )
                         break
 
@@ -361,6 +439,16 @@ class Weipay(DpWebBase):
                         continue
 
                     try:
+                        logged_user = self._微信支付首页已登录(tab, home_url=home_url, timeout=1)
+                        if logged_user is not None:
+                            self.user = logged_user or '已登录'
+                            _append_weipay_login_trace(
+                                'qrcode_step_reuse_existing_web_state',
+                                attempt=attempt,
+                                user=self.user,
+                                final_url=getattr(tab, 'url', None),
+                            )
+                            break
                         div = tab('tag:div@@id=IDQrcodeImg', timeout=max(1, min(5, remaining)))
                         file = div('tag:img').save(XlPath.tempdir(), 'qrcode')
                         _append_weipay_login_trace(
@@ -374,6 +462,19 @@ class Weipay(DpWebBase):
                                 f'KQ_WECHAT_PAY_QR attempt={attempt} '
                                 f'ts={_datetime.now().strftime("%Y%m%d%H%M%S")} '
                                 f'pid={os.getpid()}'
+                            )
+                            logger.info(
+                                f'微信支付登录扫码尝试开始：attempt={attempt}/{max_attempts} '
+                                f'qrcode_timeout={qr_timeout}s timeout={login_timeout}s marker={qrcode_marker}'
+                            )
+                            _append_weipay_login_trace(
+                                'attempt_start',
+                                attempt=attempt,
+                                max_attempts=max_attempts,
+                                qrcode_timeout=qr_timeout,
+                                login_timeout=login_timeout,
+                                current_url=getattr(tab, 'url', None),
+                                marker=qrcode_marker,
                             )
                             qrcode_message = f'考勤工作需要，快帮我扫码登录微信支付\n{qrcode_marker}'
                             for user in users:
@@ -414,11 +515,11 @@ class Weipay(DpWebBase):
                                     os.environ['KQ_WECHAT_QRCODE_TIMEOUT_SECONDS'] = old_qrcode_timeout
 
                             post_login_deadline = time.time() + min(10, max(3, login_deadline - time.time()))
-                            while tab.url != home_url and time.time() < post_login_deadline:
+                            while self._微信支付首页已登录(tab, home_url=home_url, timeout=1) is None and time.time() < post_login_deadline:
                                 time.sleep(1)
-                            if tab.url != home_url:
+                            if self._微信支付首页已登录(tab, home_url=home_url, timeout=1) is None:
                                 _append_weipay_login_trace(
-                                    'post_scan_homepage_timeout',
+                                    'post_scan_logged_state_timeout',
                                     attempt=attempt,
                                     url=getattr(tab, 'url', None),
                                 )
@@ -444,7 +545,7 @@ class Weipay(DpWebBase):
                         )
                         break
 
-                if tab.url == home_url:
+                if self._微信支付首页已登录(tab, home_url=home_url, timeout=1) is not None:
                     try:
                         reset_result = self._reset_wechat_qrcode_windows_for_login(close_seconds=3, timeout=15)
                         logger.info(f'微信支付登录成功后已清理微信二维码窗口状态：{reset_result}')
@@ -494,10 +595,10 @@ class Weipay(DpWebBase):
                         '仍未进入商户首页'
                     ) from last_error
                 time.sleep(3)
-        username_ele = username_ele or tab('tag:a@@class=username', timeout=10)
-        if not username_ele:
+        logged_user = self._微信支付首页已登录(tab, home_url=home_url, timeout=10)
+        if logged_user is None:
             raise RuntimeError(f'微信支付已进入商户首页但未找到用户名元素：url={tab.url}')
-        self.user = username_ele.text.split('@')[0]
+        self.user = logged_user or getattr(self, 'user', None) or '已登录'
         _append_weipay_login_trace(
             'login_finish',
             user=self.user,
@@ -850,7 +951,7 @@ return 'OK';
             except Exception:
                 body_text = ''
             try:
-                self._raise_if_weipay_auth_invalid(body_text)
+                self._raise_if_weipay_bill_auth_invalid(body_text)
             except RuntimeError as auth_exc:
                 if auth_retry_used or not self.login_users:
                     raise
@@ -870,7 +971,7 @@ return 'OK';
                 except Exception:
                     body_text = ''
                 try:
-                    self._raise_if_weipay_auth_invalid(body_text)
+                    self._raise_if_weipay_bill_auth_invalid(body_text)
                 except RuntimeError as auth_exc:
                     if auth_retry_used or not self.login_users:
                         raise auth_exc
@@ -897,6 +998,11 @@ return 'OK';
             if query_btn:
                 break
         if not query_btn:
+            try:
+                body_text = self._normalize_page_text(tab('tag:body').text)
+            except Exception:
+                body_text = ''
+            self._write_weipay_auth_probe('bill_query_button_missing', body_text)
             raise RuntimeError('未找到微信支付账单查询按钮')
         query_btn.click(by_js=True)
         tab.wait(5)
@@ -919,6 +1025,11 @@ return 'OK';
             if download_btn:
                 break
         if not download_btn:
+            try:
+                body_text = self._normalize_page_text(tab('tag:body').text)
+            except Exception:
+                body_text = ''
+            self._write_weipay_auth_probe('bill_download_button_missing', body_text)
             raise RuntimeError('未找到微信支付账单下载入口')
         download_btn.click(by_js=True)
 
@@ -965,6 +1076,16 @@ return 'OK';
                 except DrissionPage.errors.NoRectError as exc:
                     last_error = exc
                     logger.warning(f'月份账单下载遇到 NoRectError，准备重试：month={month} attempt={i + 1}/4 error={exc}')
+                    time.sleep(1)
+                except (
+                        DrissionPage.errors.PageDisconnectedError,
+                        DrissionPage.errors.ContextLostError,
+                ) as exc:
+                    last_error = exc
+                    logger.warning(f'月份账单下载页面断连，重建标签页后重试：month={month} attempt={i + 1}/4 error={exc}')
+                    self._重建微信支付工作标签页(reason=f'daily_update_retry:{type(exc).__name__}')
+                    if self.login_users:
+                        self.login(self.login_users)
                     time.sleep(1)
             if dst_file is not None:
                 dst_files.append(dst_file)
@@ -2057,6 +2178,56 @@ return (() => {{
             raise RuntimeError('微信支付当前流程被安全验证拦截，请先在本机完成安全验证后再执行批量退款')
         if '当前商户号还未开通资金账户' in text and '无法查看资金账单' in text:
             raise RuntimeError('微信支付当前商户号未开通资金账户，无法下载资金账单')
+
+    def _write_weipay_auth_probe(self, stage, body_text='', extra=None):
+        tab = getattr(self, 'tab', None)
+        payload = {
+            'ts': _datetime.now().isoformat(timespec='seconds'),
+            'stage': stage,
+            'user': getattr(self, 'user', ''),
+            'url': getattr(tab, 'url', '') if tab else '',
+            'title': getattr(tab, 'title', '') if tab else '',
+            'body_head': self._normalize_page_text(body_text)[:1200],
+        }
+        if extra:
+            payload.update(extra)
+        path = _weipay_auth_probe_root() / f"{_datetime.now().strftime('%Y%m%d-%H%M%S')}-{stage}.json"
+        try:
+            _write_json(path, payload)
+            logger.warning(f'微信支付页面状态诊断已保存：stage={stage} path={path}')
+        except Exception as exc:
+            logger.warning(f'微信支付页面状态诊断保存失败：stage={stage} error={exc!r}')
+        return path
+
+    def _raise_if_weipay_bill_auth_invalid(self, body_text):
+        text = self._normalize_page_text(body_text)
+        if any(x in text for x in ['请使用微信扫码登录', '二维码失效', '微信扫一扫登录', '请扫码登录', '登录超时，请重新登录']):
+            raise RuntimeError('微信支付登录态已失效，请重新扫码登录后再下载资金账单')
+        bill_page_ready_signals = [
+            '账户类型 基本账户',
+            '下载多日账单',
+            '业务明细账单',
+            '日期 期初余额(元)',
+            '日终余额(元)',
+        ]
+        if any(x in text for x in bill_page_ready_signals) and '查询' in text:
+            return
+        if '安全验证' in text and '进入账户概况' in text:
+            raise RuntimeError('微信支付资金账单页被安全验证拦截，请先在本机完成安全验证后再下载账单')
+        if '当前商户号还未开通资金账户' in text and '无法查看资金账单' in text:
+            self._write_weipay_auth_probe('bill_account_unavailable', text)
+            raise RuntimeError('微信支付当前商户号未开通资金账户，无法下载资金账单')
+        bill_permission_signals = [
+            '你没有操作此功能的权限',
+            '你没有此页面的查看操作权限',
+            '所需权限',
+            '请联系本商户员工管理员修改权限',
+            '暂时无该功能权限',
+            '请联系本商户员工管理员',
+        ]
+        if any(x in text for x in bill_permission_signals):
+            self._write_weipay_auth_probe('bill_auth_invalid', text)
+            raise RuntimeError('微信支付当前登录态无法访问资金账单页，请确认已选中“武陵禅寺客堂 / 1599622041”商户且账号具备资金账单查看权限')
 
     @staticmethod
     def _batch_refund_submit_marker_path(file):

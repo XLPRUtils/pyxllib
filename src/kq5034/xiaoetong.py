@@ -1166,6 +1166,69 @@ return true;
         empty_markers = ('暂无内容', '暂无数据', '无数据')
         return '导出列表' in summary and any(x in summary for x in empty_markers)
 
+    def _有新增下载中心任务(self, existing_task_names, match_keywords=None):
+        existing_counts = Counter(self._标准化下载名(x) for x in (existing_task_names or []) if x)
+        current_names = self._列出下载中心任务名(match_keywords)
+        current_counts = Counter(self._标准化下载名(x) for x in current_names if x)
+        return any(current_counts[name] > existing_counts.get(name, 0) for name in current_counts)
+
+    def _点击闯关课导出确认(self, tab, row, *, existing_exports=None, download=True):
+        lesson = row.get('lesson_name', row.get('lesson_id2', ''))
+        for locator in ('t:button@@text():导 出', 't:button@@text():导出'):
+            btn = tab(locator, timeout=1)
+            if btn:
+                btn.click(by_js=True)
+                break
+        else:
+            body = self._直播课用户页摘要(tab, max_chars=500)
+            raise RuntimeError(f'闯关课导出入口未找到：lesson={lesson} url={tab.url} body={body!r}')
+
+        tab.wait(2)
+        for attempt in range(1, 11):
+            clicked_text = ''
+            with contextlib.suppress(Exception):
+                clicked_text = tab.run_js(r'''
+const buttons = Array.from(document.querySelectorAll(
+  '.ant-modal-content button, .ant-modal button, .ss-modal button, [role="dialog"] button'
+));
+const btn = buttons.find(btn => {
+  const text = (btn.innerText || btn.textContent || '').replace(/\s+/g, '');
+  return !btn.disabled && (/^导出$/.test(text) || text === '确定');
+});
+if (btn) {
+  btn.click();
+  return (btn.innerText || btn.textContent || '').trim();
+}
+return '';
+''') or ''
+            if clicked_text:
+                logger.info(f'闯关课导出确认按钮已点击：lesson={lesson} button={clicked_text!r}')
+                return
+
+            for locator in (
+                't:div@@class=ant-modal-content',
+                't:div@@class=ant-modal',
+                't:div@@role=dialog',
+            ):
+                modal = tab(locator, timeout=0.5)
+                if not modal:
+                    continue
+                for btn_locator in ('t:button@@text():导 出', 't:button@@text():导出', 't:button@@text():确定'):
+                    btn = modal(btn_locator, timeout=0.5)
+                    if btn:
+                        btn.click(by_js=True)
+                        logger.info(f'闯关课导出确认按钮已点击：lesson={lesson} locator={btn_locator}')
+                        return
+
+            if download and attempt >= 2 and self._有新增下载中心任务(existing_exports):
+                logger.info(f'闯关课导出未出现确认弹窗，但下载中心已有新增任务：lesson={lesson}')
+                return
+
+            tab.wait(3)
+
+        body = self._直播课用户页摘要(tab, max_chars=800)
+        raise RuntimeError(f'闯关课导出确认失败：lesson={lesson} url={tab.url} body={body!r}')
+
     def _等待直播课用户导出按钮(self, tab, row, work_url):
         """小鹅通直播用户页经常慢加载；必须等到导出入口出现，不能把空壳 DOM 当作空数据。"""
         lesson = row.get('lesson_name', row.get('lesson_id2', ''))
@@ -1377,6 +1440,9 @@ return fetch('/xe.data-user-behavior.live.user_list_filter/1.0.0', {
                 for ele in tab.eles('t:i@@class=sense-icon-close'):
                     ele.click(by_js=True)
 
+                if download:
+                    existing_exports = self._列出下载中心任务名()
+
                 # 该课完成标记，例如：'(未开始9人；进行中3人；已完成 9人)'
                 status_ele = tab('t:div@@class=num-box-item@@text():未开始', timeout=3)
                 status = status_ele.text if status_ele else ''
@@ -1390,9 +1456,7 @@ return fetch('/xe.data-user-behavior.live.user_list_filter/1.0.0', {
                     logger.warning(f'闯关课状态文本解析失败，继续尝试导出：lesson={row.get("lesson_name", row["lesson_id2"])} '
                                    f'status={status!r} url={tab.url}')
 
-                tab('t:button@@text():导 出').click()
-                tab.wait(5)
-                tab('t:div@@class=ant-modal-content')('t:button@@text():导 出').click()
+                self._点击闯关课导出确认(tab, row, existing_exports=existing_exports, download=download)
             else:
                 if download:
                     existing_exports = self._列出下载中心任务名()
