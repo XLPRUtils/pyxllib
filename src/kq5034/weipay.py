@@ -294,7 +294,11 @@ class Weipay(DpWebBase):
         while time.time() < deadline:
             last_url = getattr(tab, 'url', '')
             last_title = getattr(tab, 'title', '')
-            if any(x in str(last_url or '') for x in ['/core/home/session_expired', '/index.php/core/account/login']):
+            if any(x in str(last_url or '') for x in [
+                '/core/home/session_expired',
+                '/index.php/core/account/login',
+                '/index.php/core/home/login',
+            ]):
                 return None
             try:
                 username_ele = tab('tag:a@@class=username', timeout=1)
@@ -312,6 +316,8 @@ class Weipay(DpWebBase):
             title = str(last_title or '')
             has_login_text = any(x in text for x in ['请使用微信扫码登录', '微信扫一扫登录', '请扫码登录'])
             is_weipay_page = 'pay.weixin.qq.com' in url
+            is_public_landing_url = url.rstrip('/') == 'https://pay.weixin.qq.com'
+            is_authenticated_area_url = '/index.php/' in url and '/index.php/core/home/login' not in url
             logged_page_url = any(x in url for x in [
                 '/index.php/core/info',
                 '/index.php/core/refundquery',
@@ -328,15 +334,41 @@ class Weipay(DpWebBase):
                 '下载多日账单',
                 '业务明细账单',
             ])
-            if is_weipay_page and not has_login_text and (logged_page_url or logged_title or logged_text):
+            if (
+                is_weipay_page
+                and not has_login_text
+                and not is_public_landing_url
+                and (logged_page_url or (is_authenticated_area_url and (logged_title or logged_text)))
+            ):
                 return ''
             time.sleep(0.5)
         logger.info(f'微信支付网页登录态探测未命中：url={last_url!r} title={last_title!r}')
         return None
 
+    def _确保微信支付落到商户首页(self, tab, *, home_url='https://pay.weixin.qq.com/index.php/core/info', timeout=10):
+        """确认当前登录态最终落到商户首页，而不是停留在带 return_url 的登录页。"""
+        last_url = str(getattr(tab, 'url', '') or '')
+        if last_url == home_url:
+            return True
+        try:
+            tab.get(home_url)
+        except Exception as exc:
+            logger.warning(f'微信支付登录态首页跳转失败：from={last_url!r} to={home_url!r} error={exc!r}')
+            return False
+
+        deadline = time.time() + max(1, timeout)
+        while time.time() < deadline:
+            last_url = str(getattr(tab, 'url', '') or '')
+            if last_url == home_url:
+                return True
+            time.sleep(0.5)
+        logger.warning(f'微信支付登录态未落到商户首页：url={last_url!r} expected={home_url!r}')
+        return False
+
     def login(self, users=None):
         tab = self.tab
         home_url = 'https://pay.weixin.qq.com/index.php/core/info'
+        landed_home = False
         login_started_at = time.perf_counter()
         _append_weipay_login_trace(
             'login_enter',
@@ -352,15 +384,33 @@ class Weipay(DpWebBase):
         logged_user = self._微信支付首页已登录(tab, home_url=home_url, timeout=8)
         if logged_user is not None:
             self.user = logged_user or '已登录'
-            logger.info(f'微信支付已是网页登录态，跳过二维码扫码：url={getattr(tab, "url", "")} user={self.user!r}')
+            landed_home = self._确保微信支付落到商户首页(tab, home_url=home_url, timeout=10)
+            if not landed_home:
+                logger.warning('微信支付检测到网页登录态，但未能进入商户首页；为避免已登录状态重复发二维码，本次跳过扫码')
+                _append_weipay_login_trace(
+                    'login_reuse_existing_web_state_home_unconfirmed_skip_qr',
+                    user=self.user,
+                    final_url=getattr(tab, 'url', None),
+                    elapsed_seconds=round(time.perf_counter() - login_started_at, 3),
+                )
+                return
+            else:
+                logger.info(f'微信支付已是网页登录态，跳过二维码扫码：url={getattr(tab, "url", "")} user={self.user!r}')
+                _append_weipay_login_trace(
+                    'login_reuse_existing_web_state',
+                    user=self.user,
+                    final_url=getattr(tab, 'url', None),
+                    elapsed_seconds=round(time.perf_counter() - login_started_at, 3),
+                )
+                return
+        if logged_user is not None:
             _append_weipay_login_trace(
-                'login_reuse_existing_web_state',
+                'login_reuse_existing_web_state_requires_scan',
                 user=self.user,
                 final_url=getattr(tab, 'url', None),
                 elapsed_seconds=round(time.perf_counter() - login_started_at, 3),
             )
-            return
-        if logged_user is None:
+        if logged_user is None or not landed_home:
             if str(getattr(tab, 'url', '') or '').startswith(home_url):
                 logger.warning('微信支付商户首页未确认登录态，准备进入二维码登录流程')
             raw_qr_timeout = os.getenv(
@@ -371,11 +421,11 @@ class Weipay(DpWebBase):
                 qr_timeout = min(60, max(20, int(float(raw_qr_timeout))))
             except (TypeError, ValueError):
                 qr_timeout = 55
-            raw_timeout = os.getenv('KQ_WEIPAY_LOGIN_TIMEOUT_SECONDS', str(qr_timeout + 20))
+            raw_timeout = os.getenv('KQ_WEIPAY_LOGIN_TIMEOUT_SECONDS', str(qr_timeout + 70))
             try:
-                login_timeout = min(90, max(qr_timeout, int(float(raw_timeout))))
+                login_timeout = min(150, max(qr_timeout + 60, int(float(raw_timeout))))
             except (TypeError, ValueError):
-                login_timeout = qr_timeout + 20
+                login_timeout = qr_timeout + 70
             max_attempts = _weipay_login_max_attempts()
             if max_attempts == 1:
                 logger.warning('微信支付登录扫码重试已关闭：本次最多发送 1 个二维码')
@@ -397,9 +447,18 @@ class Weipay(DpWebBase):
                 logged_user = self._微信支付首页已登录(tab, home_url=home_url, timeout=5)
                 if logged_user is not None:
                     self.user = logged_user or '已登录'
-                    logger.info(f'微信支付打开入口后确认已有网页登录态，跳过二维码扫码：url={getattr(tab, "url", "")} user={self.user!r}')
+                    if self._确保微信支付落到商户首页(tab, home_url=home_url, timeout=10):
+                        logger.info(f'微信支付打开入口后确认已有网页登录态，跳过二维码扫码：url={getattr(tab, "url", "")} user={self.user!r}')
+                        _append_weipay_login_trace(
+                            'attempt_reuse_existing_web_state',
+                            attempt=attempt,
+                            user=self.user,
+                            final_url=getattr(tab, 'url', None),
+                        )
+                        break
+                    logger.warning('微信支付打开入口后识别为已登录，但未进入商户首页；为避免重复发二维码，本轮直接结束')
                     _append_weipay_login_trace(
-                        'attempt_reuse_existing_web_state',
+                        'attempt_reuse_existing_web_state_home_unconfirmed_skip_qr',
                         attempt=attempt,
                         user=self.user,
                         final_url=getattr(tab, 'url', None),
@@ -449,6 +508,26 @@ class Weipay(DpWebBase):
                                 final_url=getattr(tab, 'url', None),
                             )
                             break
+                        raw_pre_qr_lock_timeout = os.getenv('KQ_WEIPAY_PRE_QR_LOCK_TIMEOUT_SECONDS', '8')
+                        raw_pre_qr_lock_force_break = os.getenv('KQ_WEIPAY_PRE_QR_LOCK_FORCE_BREAK_SECONDS', '5')
+                        try:
+                            pre_qr_lock_timeout = min(30, max(3, int(float(raw_pre_qr_lock_timeout))))
+                        except (TypeError, ValueError):
+                            pre_qr_lock_timeout = 8
+                        try:
+                            pre_qr_lock_force_break = min(30, max(3, int(float(raw_pre_qr_lock_force_break))))
+                        except (TypeError, ValueError):
+                            pre_qr_lock_force_break = 5
+                        with get_autogui_lock(
+                            timeout=pre_qr_lock_timeout,
+                            force_break_timeout=pre_qr_lock_force_break,
+                        ):
+                            _append_weipay_login_trace(
+                                'pre_qr_autogui_lock_ready',
+                                attempt=attempt,
+                                timeout=pre_qr_lock_timeout,
+                                force_break_timeout=pre_qr_lock_force_break,
+                            )
                         div = tab('tag:div@@id=IDQrcodeImg', timeout=max(1, min(5, remaining)))
                         file = div('tag:img').save(XlPath.tempdir(), 'qrcode')
                         _append_weipay_login_trace(
@@ -488,7 +567,9 @@ class Weipay(DpWebBase):
                             )
                             time.sleep(max(0.5, min(3, remaining)))
                             old_qrcode_timeout = os.environ.get('KQ_WECHAT_QRCODE_TIMEOUT_SECONDS')
+                            old_child_timeout = os.environ.get('KQ_WECHAT_QRCODE_CHILD_TIMEOUT_SECONDS')
                             os.environ['KQ_WECHAT_QRCODE_TIMEOUT_SECONDS'] = str(qr_timeout)
+                            os.environ['KQ_WECHAT_QRCODE_CHILD_TIMEOUT_SECONDS'] = str(login_timeout)
                             try:
                                 with get_autogui_lock(timeout=20, force_break_timeout=10):
                                     _append_weipay_login_trace(
@@ -513,8 +594,17 @@ class Weipay(DpWebBase):
                                     os.environ.pop('KQ_WECHAT_QRCODE_TIMEOUT_SECONDS', None)
                                 else:
                                     os.environ['KQ_WECHAT_QRCODE_TIMEOUT_SECONDS'] = old_qrcode_timeout
+                                if old_child_timeout is None:
+                                    os.environ.pop('KQ_WECHAT_QRCODE_CHILD_TIMEOUT_SECONDS', None)
+                                else:
+                                    os.environ['KQ_WECHAT_QRCODE_CHILD_TIMEOUT_SECONDS'] = old_child_timeout
 
-                            post_login_deadline = time.time() + min(10, max(3, login_deadline - time.time()))
+                            raw_post_scan_timeout = os.getenv('KQ_WEIPAY_POST_SCAN_CONFIRM_SECONDS', '30')
+                            try:
+                                post_scan_timeout = min(90, max(30, int(float(raw_post_scan_timeout))))
+                            except (TypeError, ValueError):
+                                post_scan_timeout = 30
+                            post_login_deadline = time.time() + min(post_scan_timeout, max(3, login_deadline - time.time()))
                             while self._微信支付首页已登录(tab, home_url=home_url, timeout=1) is None and time.time() < post_login_deadline:
                                 time.sleep(1)
                             if self._微信支付首页已登录(tab, home_url=home_url, timeout=1) is None:
@@ -648,20 +738,35 @@ class Weipay(DpWebBase):
             result['reset_before_seconds'] = round(time.perf_counter() - t0, 3)
 
             weipay = Weipay(users)
-            result['status'] = 'ok'
-            result['success'] = True
             result['user'] = weipay.user
             result['tab_url'] = getattr(weipay.tab, 'url', None)
             try:
                 result['tab_title'] = getattr(weipay.tab, 'title', None)
             except Exception as exc:
                 result['tab_title_error'] = repr(exc)
-            _append_weipay_login_trace(
-                'probe_success',
-                run_id=run_id,
-                user=result.get('user'),
-                tab_url=result.get('tab_url'),
-            )
+            if result.get('tab_url') == 'https://pay.weixin.qq.com/index.php/core/info':
+                result['status'] = 'ok'
+                result['success'] = True
+                _append_weipay_login_trace(
+                    'probe_success',
+                    run_id=run_id,
+                    user=result.get('user'),
+                    tab_url=result.get('tab_url'),
+                )
+            else:
+                result['status'] = 'failed'
+                result['success'] = False
+                result['error_type'] = 'UnexpectedLandingPage'
+                result['error'] = (
+                    'Expected merchant home after login probe, '
+                    f'got {result.get("tab_url")!r}'
+                )
+                _append_weipay_login_trace(
+                    'probe_unexpected_landing_page',
+                    run_id=run_id,
+                    user=result.get('user'),
+                    tab_url=result.get('tab_url'),
+                )
         except Exception as exc:
             captured_exc = exc
             result['status'] = 'failed'

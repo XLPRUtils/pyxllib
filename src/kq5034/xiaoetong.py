@@ -1753,7 +1753,7 @@ return fetch('/xe.data-user-behavior.live.user_list_filter/1.0.0', {
         from .db import KqDb
         昵称, 手机号 = KqDb.标准化昵称手机号参数(昵称, 手机号)
 
-        # 2 先按手机号检查
+        # 2 先按手机号检查，再按昵称/姓名补充。姓名类筛选是模糊匹配，不能把“刘潇”误判成“刘潇楚”。
         def 采集数据(模式, 内容):
             # 1 打开筛选器
             筛选器 = tab('t:form@@class=el-form user_list-search-form')
@@ -1821,10 +1821,25 @@ return fetch('/xe.data-user-behavior.live.user_list_filter/1.0.0', {
 
             return df
 
-        # 暂时只做标准手机号检查，且候选项只有一条的时候才填写
+        def 唯一精确用户ID(df, 字段, 内容):
+            if len(df) != 1:
+                return None
+            if str(df.iloc[0].get(字段, '')).strip() != str(内容).strip():
+                return None
+            return df.iloc[0].get('用户ID')
+
+        # 手机号命中是强匹配：候选项只有一条即可返回。
         if 手机号:
             df = 采集数据('手机号', 手机号[0])
             if len(df) == 1:
                 return df['用户ID'][0]
+        for value in 昵称:
+            df = 采集数据('昵称', value)
+            if user_id := 唯一精确用户ID(df, '用户', value):
+                return user_id
+        for value in 昵称:
+            df = 采集数据('姓名', value)
+            if user_id := 唯一精确用户ID(df, '姓名', value):
+                return user_id
 
         return
