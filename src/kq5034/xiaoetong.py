@@ -630,6 +630,12 @@ return true;
 
             return records
 
+    @staticmethod
+    def _下载中心任务已失败(status, action_text=''):
+        status = (status or '').strip()
+        action_text = (action_text or '').strip()
+        return '失败' in status or '失败' in action_text
+
     def _提取禅宗打卡导出名(self, tab):
         """ 从禅宗打卡页提取下载中心中应出现的任务名前缀。 """
         text = ''
@@ -730,16 +736,28 @@ return true;
             candidate_rows = []
             task_counts = Counter()
             for row in rows:
-                btn = row('tag:button@@text():下载', timeout=0.5)
-                if not btn:
-                    continue
-
                 file1 = self._提取下载中心任务名(row)
                 normalized_name = self._标准化下载名(file1)
                 if match_keywords and not any(x in normalized_name for x in match_keywords):
                     continue
 
+                tds = row.eles('tag:td')
+                status = (tds[-3].text or '').strip() if len(tds) >= 3 else ''
+                action_text = (tds[-1].text or '').strip() if len(tds) >= 1 else ''
+                btn = row('tag:button@@text():下载', timeout=0.5)
                 task_counts[normalized_name] += 1
+                is_new_task = (
+                    exclude_task_counts.get(normalized_name, 0) < task_counts[normalized_name]
+                    and file1 not in self.exist_files
+                )
+                if is_new_task and self._下载中心任务已失败(status, action_text):
+                    raise RuntimeError(
+                        f'下载中心任务处理失败：task={file1!r} status={status!r} '
+                        f'action={action_text!r} url={tab.url}'
+                    )
+                if not btn:
+                    continue
+
                 candidate_rows.append((row, btn, file1, normalized_name))
 
             skipped_existing = False
@@ -823,9 +841,10 @@ return true;
             tab('tag:input@@placeholder=请输入昵称/备注名搜索').input(str(search_name), clear=True)
             tab('tag:span@@text()=筛选').click()
 
-        existing_exports = self._列出下载中心任务名(export_keywords) if download else []
-        existing_download_tasks = self._列出下载中心任务名() if download else []
         task_records = self._列出下载中心任务记录(export_keywords) if download else []
+        existing_exports = [x['name'] for x in task_records] if download else []
+        existing_download_records = self._列出下载中心任务记录() if download else []
+        existing_download_tasks = [x['name'] for x in existing_download_records] if download else []
         processing_tasks = [x for x in task_records if ('处理中' in x['status'] or '任务撤回' in x['action_text']) and not x['can_download']]
         if processing_tasks:
             processing_tasks.sort(key=lambda x: x['apply_time'], reverse=True)
