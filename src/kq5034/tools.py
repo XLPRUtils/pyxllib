@@ -5,8 +5,8 @@ import hashlib
 import io
 
 from .common import *  # noqa: F403
-from .db import KqBook, KqDb, get_kqdb, get_用户列表
-from .order_ops import find_order_in_db, sync_kqbook_order_sheet
+from .db import KqDb, get_kqdb, get_用户列表
+from .order_ops import find_order_in_db
 from .weipay import Weipay
 from .xiaoetong import LiveLessonUserListEmpty, XiaoetongApi, XiaoetongWeb
 
@@ -19,7 +19,6 @@ class KqTools:
         self._xe2 = None
         self._weipay = None
         self._kqdb = None
-        self._kqbook = None
 
     def __0_附属工具(self):
         pass
@@ -53,13 +52,6 @@ class KqTools:
         if self._kqdb is None:
             self._kqdb = get_kqdb()
         return self._kqdb
-
-    @property
-    def kqbook(self) -> KqBook:
-        """ 考勤总表 """
-        if self._kqbook is None:
-            self._kqbook = KqBook()
-        return self._kqbook
 
     def __1_开课前配置工具(self):
         pass
@@ -106,9 +98,6 @@ class KqTools:
 
     def browser_users(self, user_id2s):
         return self.kqdb.browser_users(user_id2s)
-
-    def add_book_lessons_to_db(self, data_row=4):
-        return self.kqdb.add_book_lessons_to_db(data_row)
 
     def update_shop1_all_lesson_playback_settings(self, force_reset_lessons=None):
         """ 将没有next_update的店铺1的课程，全部补上开始、结束、更新节点等各数据 """
@@ -532,21 +521,6 @@ class KqTools:
 
     def 在数据库中查找订单(self, 订单号):
         return find_order_in_db(订单号, kqdb=self.kqdb)
-
-    def kqbook_检查已返款(self, 需要退款=False, *, file_id=None, script_id=None):
-        if file_id:
-            kqbook = KqBook(file_id=file_id, script_id=script_id)
-        else:
-            kqbook = self.kqbook
-
-        return sync_kqbook_order_sheet(
-            need_refund=需要退款,
-            kqbook=kqbook,
-            weipay=self.weipay,
-        )
-
-    def kqbook_执行退款(self, **kwargs):
-        self.kqbook_检查已返款(True, **kwargs)
 
     @classmethod
     def 过滤有效返款促学金(cls, lines):

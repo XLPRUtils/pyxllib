@@ -1,0 +1,44 @@
+{
+  "before": {
+    "enabled": true,
+    "description": "所有人可查看",
+    "scope": "all",
+    "permission": "view"
+  },
+  "result1": {
+    "before": {
+      "enabled": true,
+      "description": "所有人可查看",
+      "scope": "all",
+      "permission": "view"
+    },
+    "after": {
+      "enabled": true,
+      "description": "所有人可查看",
+      "scope": "all",
+      "permission": "view"
+    },
+    "changed": false
+  },
+  "result2": {
+    "before": {
+      "enabled": true,
+      "description": "所有人可查看",
+      "scope": "all",
+      "permission": "view"
+    },
+    "after": {
+      "enabled": true,
+      "description": "所有人可查看",
+      "scope": "all",
+      "permission": "view"
+    },
+    "changed": false
+  },
+  "after": {
+    "enabled": true,
+    "description": "所有人可查看",
+    "scope": "all",
+    "permission": "view"
+  }
+}

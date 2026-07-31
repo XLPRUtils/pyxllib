@@ -227,7 +227,7 @@ def sync_fanbei_attendance_step1(
 ) -> Dict[str, Any]:
     """Run Fanbei step1 through the shared KQ5034 automation layer.
 
-    Step1 is the old ``KqCourse.step1`` data-download part without any WPS
+    Step 1 is the table-independent data-download part of the attendance workflow
     workbook status mutation: switch Xiaoe shop, update due lesson playback
     data, then update matching clock-in data.  The caller decides scheduling
     and status persistence.

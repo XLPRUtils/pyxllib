@@ -35,14 +35,10 @@ from pyxllib.ext.drissionlib import get_dp_page, get_dp_tab
 # from pyxllib.ai.chat import Chat, CompressContent, DifyChat
 from pyxllib.file.xlsyncfile import SyncFileClient, XlSyncFileClient
 
-from pyxllib.text.jscode import get_airscript_head2
-
 if sys.platform == 'win32':
     import win32com.client as win32
 
 from pyxllib.ext.yuquelib import Yuque, LakeImage, XlLakeImage
-from pyxllib.ext.wpsapi import WpsOnlineBook
-
 from pyxllib.prog.scheduler import run_python_module, support_retry_process
 
 from pyxllib.prog.xlenv import *

@@ -361,7 +361,7 @@ def process_order_rows(
     kqdb=None,
     lookup_mode: Any = DEFAULT_ORDER_LOOKUP_MODE,
 ) -> dict[str, Any]:
-    """Process order rows without binding to WPS; suitable for codeyun or legacy wrappers."""
+    """Process order rows independently of any table implementation."""
 
     normalized_lookup_mode = _normalize_lookup_mode(lookup_mode, strict=True)
     normalized_rows = [_normalize_order_row(row) for row in rows]
@@ -474,42 +474,3 @@ def execute_order_action(
             lookup_mode=lookup_mode,
         )
     raise OrderAutomationError(f"不支持的订单动作：{action}")
-
-
-def sync_kqbook_order_sheet(
-    *,
-    need_refund: bool = False,
-    kqbook=None,
-    file_id: str | None = None,
-    script_id: str | None = None,
-    weipay=None,
-    weipay_login_users: Sequence[str] | None = None,
-    lookup_mode: Any = DEFAULT_ORDER_LOOKUP_MODE,
-) -> dict[str, Any]:
-    """Legacy WPS adapter: read from `订单操作`, process, then write back and release lock."""
-
-    if kqbook is None:
-        from .db import KqBook
-
-        if file_id:
-            kqbook = KqBook(file_id=file_id, script_id=script_id)
-        else:
-            kqbook = KqBook()
-
-    try:
-        df = kqbook.sql_select("订单操作", ORDER_SHEET_COLUMNS, 4)
-        result = execute_order_action(
-            action="refund" if need_refund else "inspect",
-            rows=df.to_dict(orient="records"),
-            weipay=weipay,
-            weipay_login_users=weipay_login_users,
-            lookup_mode=lookup_mode,
-        )
-        arr = [[row.get(col, "") for col in ORDER_SHEET_COLUMNS] for row in result["rows"]]
-        kqbook.write_arr(arr, "订单操作!A4", 50)
-        return result
-    finally:
-        try:
-            kqbook.run_func("releaseMutexLock", "订单操作", "程序状态：")
-        except Exception:
-            pass

@@ -1,0 +1,15 @@
+{
+  "before": {
+    "enabled": false,
+    "description": "所有人可编辑",
+    "scope": "all",
+    "permission": "edit"
+  },
+  "after": {
+    "enabled": true,
+    "description": "所有人可查看",
+    "scope": "all",
+    "permission": "view"
+  },
+  "changed": true
+}

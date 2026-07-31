@@ -1,0 +1,18 @@
+[
+  {
+    "method": "permission_button",
+    "opened": true,
+    "popover_after": false,
+    "panel_after": true
+  },
+  {
+    "method": "esc",
+    "error": "AttributeError(\"type object 'Keys' has no attribute 'ESC'\")"
+  },
+  {
+    "method": "share_button",
+    "opened": true,
+    "popover_after": false,
+    "panel_after": true
+  }
+]

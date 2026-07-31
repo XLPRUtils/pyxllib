@@ -1,0 +1,17 @@
+[
+  {
+    "method": "box_click",
+    "input_visible": false,
+    "input_value": null
+  },
+  {
+    "method": "filename_double_actions_click",
+    "input_visible": false,
+    "input_value": null
+  },
+  {
+    "method": "filename_js_sequence",
+    "input_visible": true,
+    "input_value": "20260308禅宗8其4.5阶"
+  }
+]

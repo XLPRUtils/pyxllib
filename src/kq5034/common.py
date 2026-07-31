@@ -47,7 +47,6 @@ from pyxllib.prog.xlenv import XlEnv, get_xl_homedir, get_xl_hostname, xlhome_di
 from pyxllib.prog.debug import format_exception
 from pyxllib.autogui.wxautolib import wechat_lock_send, WeChatSingletonLock, wechat_logger, WeChat
 from pyxllib.text.levenshtein import get_levenshtein_similar
-from pyxllib.ext.wpsapi import WpsOnlineBook
 from pyxllib.text.convert import chinese2digits
 from pyxllib.cv.slidercaptcha import SliderCaptchaLocator
 from pyxllib.prog.filelock import get_autogui_lock

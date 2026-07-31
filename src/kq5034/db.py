@@ -1,4 +1,4 @@
-"""数据库与 WPS 总表相关实现。"""
+"""考勤数据库实现。"""
 
 from .common import *  # noqa: F403
 
@@ -316,15 +316,12 @@ class KqDb(XlprDb):
         
         :param data_row: 在线表格数据起始行，默认4
         :param commit: 是否提交事务，默认为True。设为False可用于测试校验逻辑
-        :param df: 可选，直接传入 DataFrame 数据，用于测试
+        :param df: 待导入的 DataFrame；数据来源由调用方显式提供
         :param check_name_format: 是否校验课程名称格式，默认为True
         """
         # 1 获取待新建的课次数据
         if df is None:
-            wb = KqBook()
-            df = wb.sql_select('课次数据', ['shop_id', 'lesson_id2', 'lesson_name',
-                                            'start_date', 'next_update', 'video_duration', 'end_date'],
-                               data_row)
+            raise ValueError("add_book_lessons_to_db 需要显式传入 df，当前考勤不再从外部在线表读取课次配置")
 
         # 1.2 按日期排序
         if not df.empty and 'start_date' in df.columns:
@@ -1839,14 +1836,6 @@ ORDER BY ldt.lesson_id DESC;
                     item['lesson_id'] = new_lesson_id
                     self.insert_row('lesson_data_table', item)
                 self.commit()
-
-
-class KqBook(WpsOnlineBook):
-    """ 考勤总表：https://www.kdocs.cn/l/cguYugQWIRs1 """
-
-    def __init__(self, file_id='cguYugQWIRs1', script_id='V2-1ZdbCT3SwkZS2cYf9nunLl'):
-        # https://www.kdocs.cn/api/v3/ide/file/cguYugQWIRs1/script/V2-1ZdbCT3SwkZS2cYf9nunLl/sync_task
-        super().__init__(file_id, script_id)
 
 
 def __2_复合功能类():

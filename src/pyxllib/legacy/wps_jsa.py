@@ -3,9 +3,15 @@
 # @Author : 陈坤泽
 # @Date   : 2024/07/31
 
+"""历史 WPS/JSA 接口。
+
+仅供明确需要维护旧系统或研究历史实现时显式导入。新功能不得依赖本模块。
+"""
+
 import os
 import re
 import time
+from pathlib import Path
 
 from pyxllib.prog.lazyimport import lazy_import
 
@@ -23,6 +29,12 @@ try:
     from DrissionPage import Chromium
 except ModuleNotFoundError:
     Chromium = lazy_import('from DrissionPage import Chromium')
+
+
+def load_airscript_template() -> str:
+    """读取脱离业务系统保存的通用 AirScript 模板。"""
+
+    return (Path(__file__).parent / "templates" / "airscript.js").read_text(encoding="utf-8").strip()
 
 
 class WpsScriptSoftTimeoutError(TimeoutError):
@@ -183,7 +195,7 @@ class WpsOnlineBook:
 
     def __2_封装的更高级的接口(self):
         """ 这系列的功能需要配套这个框架范式使用：
-        https://github.com/XLPRUtils/pyxllib/blob/master/pyxllib/text/airscript.js
+        历史模板位于 ``pyxllib/legacy/templates/airscript.js``。
         """
         pass
 
@@ -343,5 +355,5 @@ class WpsOnlineBook:
 
 
 if __name__ == '__main__':
-    wb = WpsOnlineBook('chQzbASABLcN')
+    wb = WpsOnlineBook('<FILE_ID>')
     wb.browser_refresh()

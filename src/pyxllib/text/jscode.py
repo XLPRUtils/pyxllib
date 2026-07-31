@@ -463,7 +463,9 @@ def get_airscript_head2(definitions=False):
         True: 填充后，拆分成一个个函数定义的字典返回
     :return:
     """
-    s = (XlPath(__file__).parent / 'airscript.js').read_text().strip()
+    from pyxllib.legacy.wps_jsa import load_airscript_template
+
+    s = load_airscript_template()
     vars = {
         'JSA_POST_HOST_URL': os.getenv('JSA_POST_HOST_URL'),
         'JSA_POST_TOKEN': os.getenv('JSA_POST_TOKEN'),
