@@ -12,6 +12,13 @@ from .xiaoetong import LiveLessonUserListEmpty, XiaoetongApi, XiaoetongWeb
 
 
 class KqTools:
+    """KQ5034 共享工具。
+
+    运行态保留浏览器、用户匹配和订单能力。直接读写 PG 视频/打卡表的
+    方法属于历史接口；课程脚本应改用各自 CodeYun 工作簿的配置与数据
+    sheet。
+    """
+
     root = xlhome_dir('data/m2112kq5034')
 
     def __init__(self):

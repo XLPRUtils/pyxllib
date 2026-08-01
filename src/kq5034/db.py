@@ -3,7 +3,13 @@
 from .common import *  # noqa: F403
 
 class KqDb(XlprDb):
-    """ 考勤数据库类 """
+    """KQ5034 历史数据库接口。
+
+    当前考勤运行态只使用本类的 ``user_table`` / ``weipay_table`` 能力。
+    视频与打卡相关方法保留用于阅读旧实现，其四张 PG 表已于
+    2026-07-31 改名进入观察期；新代码不得调用这些历史方法。
+    退役与回滚说明见 ``museum/kq5034_pg_course_data/README.md``。
+    """
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
