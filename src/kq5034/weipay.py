@@ -974,23 +974,33 @@ return 'OK';
 
     @staticmethod
     def _iter_visible_tip_dialogs(tab):
-        try:
-            dialogs = tab.eles('t:div@@aria-label=温馨提示')
-        except Exception:
-            return []
-
         visible_dialogs = []
-        for dialog in dialogs:
+        seen = set()
+        for selector in (
+                't:div@@aria-label=温馨提示',
+                't:div@@role=dialog',
+                't:div@@class:el-dialog',
+        ):
             try:
-                if not dialog.states.has_rect:
-                    continue
+                dialogs = tab.eles(selector)
             except Exception:
                 continue
-            visible_dialogs.append(dialog)
+            for dialog in dialogs:
+                try:
+                    if not dialog.states.has_rect:
+                        continue
+                    html = dialog.html[:200]
+                except Exception:
+                    continue
+                if html in seen:
+                    continue
+                seen.add(html)
+                visible_dialogs.append(dialog)
         return visible_dialogs
 
     def _confirm_bill_download_dialog(self, tab, timeout=90):
         deadline = time.time() + timeout
+        recent_dialog_texts = []
         while time.time() < deadline:
             try:
                 body_text = self._normalize_page_text(tab('tag:body').text)
@@ -1010,14 +1020,25 @@ return 'OK';
                     text = self._normalize_page_text(dialog.text)
                 except Exception:
                     continue
+                if text:
+                    recent_dialog_texts.append(text[:200])
+                    recent_dialog_texts = recent_dialog_texts[-6:]
                 if '当前商户号还未开通资金账户' in text and '无法查看资金账单' in text:
                     raise RuntimeError('微信支付当前商户号未开通资金账户，无法下载资金账单')
-                if '账单打包完成' not in text and '请确认下载' not in text:
+                dialog_kind = None
+                if '错误提示' in text and '无相应数据' in text:
+                    dialog_kind = 'no_data'
+                elif any(x in text for x in ['账单打包完成', '请确认下载', '下载账单', '下载文件']):
+                    dialog_kind = 'confirm'
+                if not dialog_kind:
                     continue
 
                 btn = None
                 for selector in (
+                        't:button@@class:el-button--primary@@text()=确定',
                         't:button@@class:el-button--primary@@text():确 定',
+                        't:button@@class:el-button--primary@@text()=确认',
+                        't:button@@class:el-button--primary@@text()=下载',
                         't:button@@class:el-button--primary',
                 ):
                     try:
@@ -1034,9 +1055,16 @@ return 'OK';
                     dialog.wait.hidden()
                 except Exception:
                     pass
-                return True
+                if dialog_kind == 'no_data':
+                    return 'no_data'
+                return 'confirmed'
 
-            time.sleep(0.5)
+            time.sleep(0.8)
+        self._write_weipay_auth_probe(
+            'bill_download_dialog_missing',
+            body_text,
+            extra={'visible_dialog_texts': recent_dialog_texts},
+        )
         return False
 
     def download_monthly_records(self, month, save_dir=True):
@@ -1136,12 +1164,30 @@ return 'OK';
                 body_text = ''
             self._write_weipay_auth_probe('bill_download_button_missing', body_text)
             raise RuntimeError('未找到微信支付账单下载入口')
-        download_btn.click(by_js=True)
-
-        if not self._confirm_bill_download_dialog(tab, timeout=90):
+        dialog_confirmed = False
+        src_file = None
+        for click_attempt in range(1, 3):
+            download_btn.click(by_js=True)
+            dialog_state = self._confirm_bill_download_dialog(tab, timeout=45)
+            if dialog_state == 'no_data':
+                logger.info(f'微信支付账单下载返回无相应数据，按空结果处理：month={month}')
+                return None
+            if dialog_state == 'confirmed':
+                dialog_confirmed = True
+                break
+            try:
+                src_file = self._wait_for_new_download_file(before_files, timeout=8)
+            except RuntimeError:
+                src_file = None
+            if src_file is not None:
+                dialog_confirmed = True
+                break
+            logger.warning(f'微信支付账单下载确认弹窗未出现，准备重试点击下载：month={month} attempt={click_attempt}/2')
+        if not dialog_confirmed:
             raise RuntimeError('未找到微信支付账单下载确认弹窗')
 
-        src_file = self._wait_for_new_download_file(before_files, timeout=120)
+        if src_file is None:
+            src_file = self._wait_for_new_download_file(before_files, timeout=120)
         if save_dir is True:
             save_dir = xlhome_dir('data/m2112kq5034/数据表')
         else:
