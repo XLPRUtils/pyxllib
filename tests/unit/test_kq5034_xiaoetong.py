@@ -231,3 +231,64 @@ def test_export_diary_clockin_ignores_local_empty_text_when_export_button_exists
     assert export_button.clicked
     assert result == Path('C:/tmp/第48届觉观-打卡数.csv')
     assert calls == [(None, ['旧任务'], 10 * 60)]
+
+
+def test_search_lesson_links_closes_detail_tab_before_yield(monkeypatch):
+    web = XiaoetongWeb.__new__(XiaoetongWeb)
+
+    class _DetailTab:
+        url = 'https://admin.xiaoe-tech.com/t/live#/detail?id=lesson_123&tab=playbackSettings'
+
+        def __init__(self):
+            self.closed = False
+
+        def close(self):
+            self.closed = True
+
+    detail_tab = _DetailTab()
+
+    class _Click:
+        def for_new_tab(self, **_kwargs):
+            return detail_tab
+
+    class _Button:
+        click = _Click()
+
+    class _Title:
+        text = '8月梵呗初阶第1课'
+
+    class _Row:
+        def __call__(self, locator):
+            if locator == '.title title-hover ss-popover__reference':
+                return _Title()
+            if locator == 't:button@@text():管理':
+                return _Button()
+            raise AssertionError(f'意外定位器：{locator}')
+
+    class _Tbody:
+        def __call__(self, locator):
+            assert locator == '没有相应的数据'
+            return False
+
+        def eles(self, locator):
+            assert locator == 'tag:tr'
+            return [_Row()]
+
+    class _ListTab:
+        def get(self, _url):
+            return None
+
+        def __call__(self, locator):
+            assert locator == 'tag:tbody'
+            return _Tbody()
+
+    monkeypatch.setattr(web, 'switch_shop', lambda: _ListTab())
+
+    row = next(web.search_lesson_links('8月梵呗初阶', maxn=1))
+
+    assert detail_tab.closed is True
+    assert row == {
+        'lesson_name': '8月梵呗初阶第1课',
+        'lesson_id': 'lesson_123',
+        'lesson_id2': 'lesson_123',
+    }

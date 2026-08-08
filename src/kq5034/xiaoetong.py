@@ -1582,10 +1582,17 @@ return fetch('/xe.data-user-behavior.live.user_list_filter/1.0.0', {
                 break
 
             for tr in tbody.eles('tag:tr'):
-                tab2 = tr('t:button@@text():管理').click.for_new_tab(by_js=True)
-
                 title = tr('.title title-hover ss-popover__reference').text
-                course_id = re.search(r'id=(.+?)(?=$|&)', tab2.url).group(1)
+                tab2 = None
+                try:
+                    tab2 = tr('t:button@@text():管理').click.for_new_tab(by_js=True)
+                    course_id_match = re.search(r'id=(.+?)(?=$|&)', tab2.url)
+                    if not course_id_match:
+                        raise RuntimeError(f'课程管理页缺少课程 ID：title={title!r} url={tab2.url!r}')
+                    course_id = course_id_match.group(1)
+                finally:
+                    if tab2 is not None:
+                        tab2.close()
                 row = {
                     'lesson_name': title,
                     'lesson_id': course_id,
@@ -1593,7 +1600,6 @@ return fetch('/xe.data-user-behavior.live.user_list_filter/1.0.0', {
                 }
 
                 if required_title_keywords and not all(x in title for x in required_title_keywords):
-                    tab2.close()
                     continue
 
                 if should_collect:
@@ -1602,8 +1608,6 @@ return fetch('/xe.data-user-behavior.live.user_list_filter/1.0.0', {
                     # 使用 yield 返回结果
                     yield row
                 count += 1
-
-                tab2.close()
 
                 if maxn > 0 and count >= maxn and not should_collect:
                     # 已达到最大条目数
