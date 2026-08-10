@@ -38,8 +38,20 @@ def test_iter_export_user_list_falls_back_when_download_center_task_name_changes
     web = XiaoetongWeb.__new__(XiaoetongWeb)
     web.tab = _FakeTab()
 
-    monkeypatch.setattr(web, '_列出下载中心任务名', lambda keywords=None: ['旧导出A'] if keywords else ['旧导出A', '旧导出B'])
-    monkeypatch.setattr(web, '_列出下载中心任务记录', lambda keywords=None: [])
+    def fake_download_records(keywords=None):
+        names = ['旧导出A'] if keywords else ['旧导出A', '旧导出B']
+        return [
+            {
+                'name': name,
+                'status': '已完成',
+                'action_text': '下载',
+                'can_download': True,
+                'apply_time': '',
+            }
+            for name in names
+        ]
+
+    monkeypatch.setattr(web, '_列出下载中心任务记录', fake_download_records)
 
     calls = []
 

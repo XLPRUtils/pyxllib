@@ -177,9 +177,14 @@ def __1_单件功能类():
 
 
 def 尝试关闭重复页面(browser=None, timeout=3, reason='', keep_tab_ids=None):
-    """ 轻量尝试关闭重复页面，避开 get_tabs() 这条不稳定链路 """
+    """接入默认 DP 浏览器，关闭重复页并复查关闭结果。"""
     if browser is None:
-        return False
+        try:
+            browser = Chromium()
+        except Exception as e:
+            extra = f'，原因={reason}' if reason else ''
+            logger.warning(f'接入默认浏览器失败，已跳过本次清理{extra}: {e}')
+            return False
     keep_tab_ids = {x for x in (keep_tab_ids or []) if x}
 
     try:
@@ -248,6 +253,28 @@ def 尝试关闭重复页面(browser=None, timeout=3, reason='', keep_tab_ids=No
                 logger.warning(f'关闭标签页失败，已跳过 tab={info["tab_id"]}: {e}')
 
     if closed:
+        deadline = time.monotonic() + max(float(timeout or 0), 0)
+        remaining_close_ids = set(close_ids)
+        while remaining_close_ids and time.monotonic() <= deadline:
+            try:
+                current_infos = browser._run_cdp('Target.getTargets').get('targetInfos', [])
+                current_ids = {
+                    info.get('targetId')
+                    for info in current_infos
+                    if info.get('type') == 'page' and info.get('targetId')
+                }
+                remaining_close_ids.intersection_update(current_ids)
+            except Exception as e:
+                logger.warning(f'复查标签页关闭结果失败：{e}')
+                return False
+            if remaining_close_ids:
+                time.sleep(0.1)
+
         extra = f'，原因={reason}' if reason else ''
+        if remaining_close_ids:
+            logger.warning(
+                f'重复页面关闭未完全生效：remaining={sorted(remaining_close_ids)}{extra}'
+            )
+            return False
         logger.info(f'已关闭重复页面：{closed}个{extra}')
     return True

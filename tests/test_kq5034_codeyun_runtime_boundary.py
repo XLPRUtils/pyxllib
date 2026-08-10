@@ -28,6 +28,13 @@ def test_common_public_entrypoints_do_not_export_retired_table_stack():
         assert "get_airscript_head2" not in text
 
 
+def test_attendance_runtime_defaults_only_to_mf_windows_host():
+    text = (KQ_RUNTIME_ROOT / "attendance_api.py").read_text(encoding="utf-8")
+
+    assert '"codepc_mf"' in text
+    assert '"codepc_mi15"' not in text
+
+
 def test_historical_interface_is_explicit_and_template_is_available():
     from pyxllib.legacy.wps_jsa import WpsOnlineBook, load_airscript_template
 

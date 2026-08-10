@@ -25,7 +25,6 @@ XIAOETONG_SHOP_NAMES = {
 DEFAULT_XL_HOSTS = """[
 ["host",        "raw_name",     "homedir"],
 ["codepc_mf",   "",             "D:/home/chenkunze"],
-["codepc_mi15", "",             "C:/home/chenkunze"],
 ["xlpr0,titan1,titan2,tesla1,tesla2,xlpr4,xlpr8,xlpr10,xlpr6",
                 "",             "/home/chenkunze"]
 ]"""
@@ -70,7 +69,6 @@ def ensure_attendance_runtime() -> None:
         hostname = socket.gethostname().replace("-", "_").split(".")[0]
         homedir_by_host = {
             "codepc_mf": "D:/home/chenkunze",
-            "codepc_mi15": "C:/home/chenkunze",
         }
         homedir = homedir_by_host.get(hostname)
         if homedir:
