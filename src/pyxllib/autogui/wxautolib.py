@@ -34,11 +34,21 @@ class WeChatSingletonLock:
     def __init__(self, lock_timeout=-1, *, init=True):
         # 初始化全局锁
         self.lock = get_autogui_lock(timeout=lock_timeout)
-        self.wx = WeChat() if init else None
+        self.init = init
+        self.wx = None
 
     def __enter__(self):
         # 获取锁并激活微信窗口
         self.lock.acquire()
+        if self.init and self.wx is None:
+            try:
+                self.wx = WeChat()
+            except Exception as exc:
+                # 微信 4.x 已不再暴露旧版 WeChatMainWndForPC 控件树。
+                # 只替换底层文本传输，上层 Step 6、通知对象和文案保持原样。
+                from pyxllib.autogui.weixin4 import Weixin4TextClient
+
+                self.wx = Weixin4TextClient()
         if self.wx:
             self.wx._show()
             return self.wx
