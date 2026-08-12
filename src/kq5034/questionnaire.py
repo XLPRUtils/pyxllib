@@ -20,7 +20,7 @@ from loguru import logger
 问卷滞留提醒分组 = {
     '中台': ('中台', re.compile('念住|觉观|闯关')),
     '梵呗': ('梵呗', None),
-    '禅宗': ('禅宗', None),
+    '禅宗': ('禅宗', re.compile('修道班')),
     '未分组': (None, None),
 }
 问卷滞留提醒发送目标 = {

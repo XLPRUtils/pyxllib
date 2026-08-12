@@ -1,4 +1,5 @@
 from types import SimpleNamespace
+import sys
 
 import pytest
 from PIL import Image
@@ -10,6 +11,23 @@ def bare_client():
     client = object.__new__(Weixin4TextClient)
     client.hwnd = 1
     return client
+
+
+def test_find_main_window_falls_back_to_hidden_tray_window(monkeypatch):
+    windows = {
+        10: (False, "Qt51514QWindowIcon", "微信", (0, 0, 1200, 900)),
+        20: (False, "Qt51514QWindowIcon", "登录", (0, 0, 1200, 900)),
+    }
+    fake_win32gui = SimpleNamespace(
+        EnumWindows=lambda callback, arg: [callback(hwnd, arg) for hwnd in windows],
+        IsWindowVisible=lambda hwnd: windows[hwnd][0],
+        GetClassName=lambda hwnd: windows[hwnd][1],
+        GetWindowText=lambda hwnd: windows[hwnd][2],
+        GetWindowRect=lambda hwnd: windows[hwnd][3],
+    )
+    monkeypatch.setitem(sys.modules, "win32gui", fake_win32gui)
+
+    assert Weixin4TextClient._find_main_window() == 10
 
 
 def test_search_result_clicks_exact_conversation(monkeypatch):
@@ -37,9 +55,9 @@ def test_search_result_clicks_exact_conversation(monkeypatch):
     assert clicks == [(pytest.approx(0.225), pytest.approx(0.46), {"hwnd": 2})]
 
 
-def test_chatwith_uses_alias_and_never_presses_enter(monkeypatch):
+def test_chatwith_uses_exact_business_name_and_never_presses_enter(monkeypatch):
     client = bare_client()
-    chats = iter(["文件传输助手", "考勤后台(3)"])
+    chats = iter(["文件传输助手", "考勤中台(3)"])
     selected = []
     hotkeys = []
     fake_gui = SimpleNamespace(
@@ -60,7 +78,7 @@ def test_chatwith_uses_alias_and_never_presses_enter(monkeypatch):
     monkeypatch.setattr(client, "_select_search_result", selected.append)
 
     assert client.ChatWith("考勤中台") == "考勤中台"
-    assert selected == ["考勤后台"]
+    assert selected == ["考勤中台"]
     assert hotkeys == [("ctrl", "a"), ("ctrl", "v")]
     assert clipboard["value"] == "old"
 

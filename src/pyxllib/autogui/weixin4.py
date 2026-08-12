@@ -24,9 +24,8 @@ class Weixin4TextClient:
     """对微信 4.x 主窗口提供旧发送器需要的最小文本接口。"""
 
     window_class = "Qt51514QWindowIcon"
-    # Business code keeps the historical mi15 recipient name.  WeChat 4 on mf
-    # exposes the same operational conversation under this local name.
-    user_aliases = {"考勤中台": "考勤后台"}
+    # 业务群名必须精确匹配；“考勤中台”和“考勤后台”是两个不同会话。
+    user_aliases = {}
 
     def __init__(self, *, evidence_dir: str | Path | None = None):
         self.hwnd = self._find_main_window()
@@ -38,18 +37,23 @@ class Weixin4TextClient:
     def _find_main_window() -> int:
         import win32gui
 
-        matches: list[int] = []
+        visible_matches: list[int] = []
+        hidden_matches: list[int] = []
 
         def collect(hwnd, _):
-            if not win32gui.IsWindowVisible(hwnd):
-                return
             if win32gui.GetClassName(hwnd) != Weixin4TextClient.window_class:
+                return
+            if win32gui.GetWindowText(hwnd) != "微信":
                 return
             left, top, right, bottom = win32gui.GetWindowRect(hwnd)
             if right - left >= 900 and bottom - top >= 700:
+                matches = visible_matches if win32gui.IsWindowVisible(hwnd) else hidden_matches
                 matches.append(hwnd)
 
         win32gui.EnumWindows(collect, None)
+        # 微信关闭到托盘时，真实主窗口仍存在，只是 IsWindowVisible=False。
+        # 保留可见窗口优先级，只有没有可见主窗口时才恢复托盘窗口。
+        matches = visible_matches or hidden_matches
         if not matches:
             raise Weixin4Error("未找到已登录的微信 4.x 主窗口")
         return max(

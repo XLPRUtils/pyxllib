@@ -67,6 +67,22 @@ def test_分析问卷滞留记录格式化链接对象课程名():
     assert 'https://www.kdocs.cn' not in result['禅宗']['message']
 
 
+def test_分析问卷滞留记录将修道班归入线上修道班群():
+    df = pd.DataFrame(
+        {
+            '序号': [732],
+            '1、所属课程': ['修道班13期1阶'],
+            '处理状态': [''],
+        }
+    )
+
+    result = 分析问卷滞留记录(df)
+
+    assert result['禅宗']['items'] == ['修道班13期1阶：732']
+    assert result['未分组']['items'] == []
+    assert 问卷滞留提醒发送目标['禅宗'] == '线上修道班考勤管理'
+
+
 def test_读取CodeYun问卷提醒数据支持分页(monkeypatch):
     payloads = {
         1: {

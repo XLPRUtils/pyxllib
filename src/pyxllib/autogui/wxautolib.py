@@ -60,6 +60,19 @@ class WeChatSingletonLock:
 
 def wechat_lock_send(user, text=None, files=None, url=None, *, timeout=-1, **kwargs):
     """ 使用全局唯一单例锁，确保同一时间仅有一个微信自动化程序在操作 """
+    # mf 上的微信 4.x 纯文本优先走进程内发送：不激活窗口、不搜索会话，
+    # 上层 Step 6 / 日报 / 完成通知的收件人和文案保持原样。
+    if text and not files and not url and not kwargs.get('at'):
+        from pyxllib.autogui.weixin4_instrumentation import (
+            WeixinInstrumentationUnavailable,
+            send_text,
+        )
+
+        try:
+            send_text(user, str(text))
+            return
+        except WeixinInstrumentationUnavailable as exc:
+            logger.warning(f'微信动态发送不可用，降级 GUI：{exc}')
     with WeChatSingletonLock(timeout) as we:
         # 241223周一12:27，今天可被这个默认2秒坑惨了，往错误群一直发骚扰消息
         # 22:07，但我复测，感觉不可能找不到啊，为什么会找到禅宗考勤管理群呢，太离谱了
