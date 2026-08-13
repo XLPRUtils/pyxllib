@@ -206,7 +206,15 @@ class XiaoetongWeb(DpWebBase):
     _EMPTY_EXPORT = object()
     _runtime_export_cache = {}
     _runtime_export_cache_ttl = datetime.timedelta(hours=2)
-    _lesson_export_download_wait_seconds = 15 * 60
+    # 3600 秒是整门课程入口的最后兜底，不能下沉为单个课次/打卡的等待时间。
+    # 单个资源在页面加载、提交导出、下载中心生成和文件落地之间共享预算：
+    # 单课通常一分钟内完成，5 分钟即失败；打卡数据量波动更大，最多 10 分钟。
+    _lesson_resource_export_timeout_seconds = 5 * 60
+    _clockin_resource_export_timeout_seconds = 10 * 60
+    _resource_page_load_timeout_seconds = 90
+    _resource_script_timeout_seconds = 30
+    _resource_download_center_wait_seconds = 4 * 60
+    _resource_download_wait_seconds = 2 * 60
     _live_lesson_wait_seconds = 60
     _live_lesson_max_attempts = 3
     _live_user_list_page_size = 100
@@ -416,12 +424,22 @@ return true;
         return self.tab
 
     @contextlib.contextmanager
-    def 临时工作标签页(self, *, url=None, wait_seconds=0):
+    def 临时工作标签页(self, *, url=None, wait_seconds=0, page_load_timeout_seconds=None):
         """ 为一次性页面操作创建独立标签页，结束后自动关闭，避免堆积重复页面 """
         original_tab = self.tab
         tab = self.browser.new_tab()
         self.tab = tab
         try:
+            effective_page_load_timeout = (
+                page_load_timeout_seconds
+                if page_load_timeout_seconds is not None
+                else self._resource_page_load_timeout_seconds
+            )
+            with contextlib.suppress(Exception):
+                tab.set.timeouts(
+                    page_load=effective_page_load_timeout,
+                    script=self._resource_script_timeout_seconds,
+                )
             if url:
                 tab.get(url)
             if wait_seconds:
@@ -430,6 +448,15 @@ return true;
         finally:
             self._关闭标签页(tab, reason='临时工作标签页收尾')
             self.tab = original_tab
+
+    @classmethod
+    def _资源导出剩余秒数(cls, deadline, *, stage, timeout_seconds, maximum=None):
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise RuntimeError(f'单个资源导出超时：stage={stage} timeout={timeout_seconds}s')
+        if maximum is not None:
+            remaining = min(remaining, maximum)
+        return max(1, int(remaining))
 
     def _关闭标签页(self, tab, *, reason=''):
         """关闭单个工作标签页；失败时只记录日志，避免清理错误打断主流程。"""
@@ -443,6 +470,19 @@ return true;
             logger.warning(f'关闭标签页失败，尝试备用关闭：tab={tab_id} reason={reason} err={e}')
             with contextlib.suppress(Exception):
                 tab.close()
+
+    def _重建当前标签页(self, *, reason='资源导出失败'):
+        """丢弃可能失去响应的业务页，避免下一次资源重试复用坏现场。"""
+        old_tab = self.tab
+        new_tab = self.browser.new_tab()
+        with contextlib.suppress(Exception):
+            new_tab.set.timeouts(
+                page_load=self._resource_page_load_timeout_seconds,
+                script=self._resource_script_timeout_seconds,
+            )
+        self.tab = new_tab
+        self._关闭标签页(old_tab, reason=reason)
+        return new_tab
 
     @staticmethod
     def _标准化下载名(name):
@@ -891,6 +931,8 @@ return true;
     def export_clockin_data(self, url, download=True, start_date=None, end_date=None,
                             expected_download_name=None, exclude_existing_download_tasks=True):
         """ 导出指定的打卡数据文件 """
+        resource_timeout = self._clockin_resource_export_timeout_seconds
+        resource_deadline = time.monotonic() + resource_timeout
         cache_key = None
         expected_download_name = expected_download_name or ''
         existing_exports = None
@@ -921,7 +963,17 @@ return true;
                 return XlPath(recent_file)
 
         # tab = self.browser.new_tab()
+        with contextlib.suppress(Exception):
+            self.tab.set.timeouts(
+                page_load=self._resource_page_load_timeout_seconds,
+                script=self._resource_script_timeout_seconds,
+            )
         tab = self.tab.get2(url)
+        self._资源导出剩余秒数(
+            resource_deadline,
+            stage='打卡页面加载',
+            timeout_seconds=resource_timeout,
+        )
 
         if 'community_admin' in url:  # 禅宗打卡
             tab.wait(3)
@@ -1005,14 +1057,18 @@ return true;
             if not export_btn:
                 raise RuntimeError(f'日历打卡页导出按钮未找到：url={tab.url}')
             export_btn.click(by_js=True)
-            while True:
+            confirmed = False
+            for attempt in range(1, 4):
                 ele = tab('tag:div@@role=dialog@@aria-label=导出数据')
                 try:
                     ele('tag:button@@text():确认', timeout=5).click()
+                    confirmed = True
                     break
                 except Exception as e:
-                    logger.warning(format_exception(e, 3))
+                    logger.warning(f'日历打卡导出确认未就绪，重试 {attempt}/3：{format_exception(e, 3)}')
                     tab.wait(2)
+            if not confirmed:
+                raise RuntimeError(f'日历打卡导出确认等待超时：url={tab.url}')
             # 下载中心的任务列表有时不会立刻刷新出本次新建任务，等几秒再取文件能显著减少拿到旧导出的概率。
             tab.wait(10)
         # elif 'joinUser' in url:  # 作业打卡
@@ -1045,7 +1101,19 @@ return true;
                     strict_name_check = False
                     file = self.download_last_file(
                         exclude_task_names=existing_download_tasks,
-                        max_wait_seconds=10 * 60,
+                        poll_seconds=15,
+                        max_wait_seconds=self._资源导出剩余秒数(
+                            resource_deadline,
+                            stage='禅宗打卡下载中心',
+                            timeout_seconds=resource_timeout,
+                            maximum=self._resource_download_center_wait_seconds,
+                        ),
+                        download_wait_seconds=self._资源导出剩余秒数(
+                            resource_deadline,
+                            stage='禅宗打卡文件落地',
+                            timeout_seconds=resource_timeout,
+                            maximum=self._resource_download_wait_seconds,
+                        ),
                     )
                 elif 'diaryList' in url:
                     # 日历打卡下载中心任务名会被平台改写成活动标题或“打卡日记数据”，
@@ -1053,7 +1121,19 @@ return true;
                     strict_name_check = False
                     file = self.download_last_file(
                         exclude_task_names=existing_download_tasks,
-                        max_wait_seconds=10 * 60,
+                        poll_seconds=15,
+                        max_wait_seconds=self._资源导出剩余秒数(
+                            resource_deadline,
+                            stage='日历打卡下载中心',
+                            timeout_seconds=resource_timeout,
+                            maximum=self._resource_download_center_wait_seconds,
+                        ),
+                        download_wait_seconds=self._资源导出剩余秒数(
+                            resource_deadline,
+                            stage='日历打卡文件落地',
+                            timeout_seconds=resource_timeout,
+                            maximum=self._resource_download_wait_seconds,
+                        ),
                     )
                 else:
                     file = self.download_last_file(
@@ -1075,7 +1155,19 @@ return true;
                 strict_name_check = False
                 file = self.download_last_file(
                     exclude_task_names=existing_download_tasks,
-                    max_wait_seconds=10 * 60,
+                    poll_seconds=15,
+                    max_wait_seconds=self._资源导出剩余秒数(
+                        resource_deadline,
+                        stage='打卡下载中心回退',
+                        timeout_seconds=resource_timeout,
+                        maximum=self._resource_download_center_wait_seconds,
+                    ),
+                    download_wait_seconds=self._资源导出剩余秒数(
+                        resource_deadline,
+                        stage='打卡文件落地回退',
+                        timeout_seconds=resource_timeout,
+                        maximum=self._resource_download_wait_seconds,
+                    ),
                 )
             if file and expected_download_name and strict_name_check:
                 if self._标准化下载名(expected_download_name) not in self._标准化下载名(file.name):
@@ -1248,14 +1340,16 @@ return '';
         body = self._直播课用户页摘要(tab, max_chars=800)
         raise RuntimeError(f'闯关课导出确认失败：lesson={lesson} url={tab.url} body={body!r}')
 
-    def _等待直播课用户导出按钮(self, tab, row, work_url):
+    def _等待直播课用户导出按钮(self, tab, row, work_url, *, resource_deadline=None):
         """小鹅通直播用户页经常慢加载；必须等到导出入口出现，不能把空壳 DOM 当作空数据。"""
         lesson = row.get('lesson_name', row.get('lesson_id2', ''))
         last_summary = ''
         for attempt in range(1, self._live_lesson_max_attempts + 1):
-            deadline = time.time() + self._live_lesson_wait_seconds
+            deadline = time.monotonic() + self._live_lesson_wait_seconds
+            if resource_deadline is not None:
+                deadline = min(deadline, resource_deadline)
             check_index = 0
-            while time.time() < deadline:
+            while time.monotonic() < deadline:
                 check_index += 1
                 with contextlib.suppress(Exception):
                     tab.run_js('document.querySelector(".notify-wrap")?.remove()')
@@ -1279,6 +1373,13 @@ return '';
                 tab.get(work_url)
                 tab.wait(10)
 
+            if resource_deadline is not None:
+                self._资源导出剩余秒数(
+                    resource_deadline,
+                    stage='直播课用户页',
+                    timeout_seconds=self._lesson_resource_export_timeout_seconds,
+                )
+
         logger.warning(f'直播课用户列表导出按钮始终未出现，改用后台用户列表接口兜底：'
                        f'lesson={lesson} url={tab.url} body={last_summary!r}')
         return None
@@ -1292,7 +1393,7 @@ return '';
         except Exception:
             return 0
 
-    def _请求直播课用户列表页(self, tab, lesson_id2, page):
+    def _请求直播课用户列表页(self, tab, lesson_id2, page, *, resource_deadline=None):
         payload = {
             'resource_id': lesson_id2,
             'page': page,
@@ -1325,6 +1426,12 @@ return fetch('/xe.data-user-behavior.live.user_list_filter/1.0.0', {
 
         last_res = None
         for attempt in range(1, 6):
+            if resource_deadline is not None:
+                self._资源导出剩余秒数(
+                    resource_deadline,
+                    stage='直播课用户接口',
+                    timeout_seconds=self._lesson_resource_export_timeout_seconds,
+                )
             last_res = tab.run_js(js, payload)
             if isinstance(last_res, dict) and last_res.get('status') == 200:
                 data = last_res.get('data') or {}
@@ -1339,7 +1446,7 @@ return fetch('/xe.data-user-behavior.live.user_list_filter/1.0.0', {
 
         raise RuntimeError(f'直播课用户列表接口请求失败：lesson_id2={lesson_id2} page={page} last_res={last_res}')
 
-    def _导出直播课用户列表接口CSV(self, tab, row):
+    def _导出直播课用户列表接口CSV(self, tab, row, *, resource_deadline=None):
         """当小鹅通用户列表组件空白时，直接用同源后台接口生成兼容 CSV。"""
         lesson_id2 = str(row.get('lesson_id2') or '').strip()
         lesson = row.get('lesson_name', lesson_id2)
@@ -1347,7 +1454,12 @@ return fetch('/xe.data-user-behavior.live.user_list_filter/1.0.0', {
         page = 1
         total = None
         while True:
-            data = self._请求直播课用户列表页(tab, lesson_id2, page)
+            data = self._请求直播课用户列表页(
+                tab,
+                lesson_id2,
+                page,
+                resource_deadline=resource_deadline,
+            )
             payload = data.get('data') or {}
             rows = payload.get('list') or []
             total = int(payload.get('total') or 0)
@@ -1395,6 +1507,9 @@ return fetch('/xe.data-user-behavior.live.user_list_filter/1.0.0', {
         :param row: 一般是从数据库lesson_table获取的一条数据
             也可以只输入lesson_id2的值，即课次url，或者课次的小鹅通id
         """
+        resource_timeout = self._lesson_resource_export_timeout_seconds
+        resource_deadline = time.monotonic() + resource_timeout
+
         # 1 参数校验
         if isinstance(row, dict):
             pass
@@ -1427,7 +1542,16 @@ return fetch('/xe.data-user-behavior.live.user_list_filter/1.0.0', {
             wait_seconds = 5
 
         existing_exports = []
-        with self.临时工作标签页(url=work_url, wait_seconds=wait_seconds) as tab:
+        with self.临时工作标签页(
+            url=work_url,
+            wait_seconds=wait_seconds,
+            page_load_timeout_seconds=self._resource_page_load_timeout_seconds,
+        ) as tab:
+            self._资源导出剩余秒数(
+                resource_deadline,
+                stage='课次页面加载',
+                timeout_seconds=resource_timeout,
+            )
             if shop_id:
                 target_shop, _ = self._标准化店铺(shop_id)
                 for _ in range(2):
@@ -1480,9 +1604,18 @@ return fetch('/xe.data-user-behavior.live.user_list_filter/1.0.0', {
                 if download:
                     existing_exports = self._列出下载中心任务名()
 
-                btn = self._等待直播课用户导出按钮(tab, row, work_url)
+                btn = self._等待直播课用户导出按钮(
+                    tab,
+                    row,
+                    work_url,
+                    resource_deadline=resource_deadline,
+                )
                 if not btn:
-                    file = self._导出直播课用户列表接口CSV(tab, row)
+                    file = self._导出直播课用户列表接口CSV(
+                        tab,
+                        row,
+                        resource_deadline=resource_deadline,
+                    )
                     return self._store_runtime_cached_file(cache_key, file) if download else file
 
                 if self._直播课用户列表为空(tab):
@@ -1509,8 +1642,19 @@ return fetch('/xe.data-user-behavior.live.user_list_filter/1.0.0', {
                 tab.wait(5)
                 file = self.download_last_file(
                     exclude_task_names=existing_exports,
-                    max_wait_seconds=20 * 60,
-                    download_wait_seconds=self._lesson_export_download_wait_seconds,
+                    poll_seconds=15,
+                    max_wait_seconds=self._资源导出剩余秒数(
+                        resource_deadline,
+                        stage='课次下载中心',
+                        timeout_seconds=resource_timeout,
+                        maximum=self._resource_download_center_wait_seconds,
+                    ),
+                    download_wait_seconds=self._资源导出剩余秒数(
+                        resource_deadline,
+                        stage='课次文件落地',
+                        timeout_seconds=resource_timeout,
+                        maximum=self._resource_download_wait_seconds,
+                    ),
                 )
                 if not file:
                     raise RuntimeError(f'课次导出已提交但未下载到文件：lesson={row.get("lesson_name", "")} url={url}')

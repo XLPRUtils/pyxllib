@@ -79,7 +79,9 @@ net = [
 ]
 xlcv = [ # 图像处理相关
     "pillow",
-    "opencv-python",
+    # 与 PaddleOCR/PaddleX 共用唯一的 cv2 发行包，避免两个 OpenCV
+    # wheel 覆盖同一 site-packages/cv2 目录。
+    "opencv-contrib-python==4.10.0.84",
     "ImageHash",     # 图像hash值计算
 ]
 xlsx = [ # 表格相关工具

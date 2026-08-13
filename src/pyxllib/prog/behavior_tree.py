@@ -732,6 +732,7 @@ class Retry(Decorator):
 
         if status == Status.SUCCESS:
             self.state(ctx)["retry_at"] = None
+            ctx.runner.clear_handled_error(node=self)
         return self._record(status)
 
 
@@ -1434,6 +1435,18 @@ class BehaviorTreeRunner:
             except Exception:
                 if self.trace >= 1:
                     self.logger.exception("tree on_error callback failed")
+
+    def clear_handled_error(self, *, node: Optional[Node] = None) -> bool:
+        """Clear a recovered retry error without hiding unrelated failures."""
+
+        if not self.state.get("last_error_handled"):
+            return False
+        expected_path = node.path if node is not None else None
+        if expected_path is not None and self.state.get("last_error_node") != expected_path:
+            return False
+        for key in ("last_error_at", "last_error", "last_error_handled", "last_error_node"):
+            self.state.pop(key, None)
+        return True
 
     def _assign_paths(self) -> None:
         def visit(node: Node, parent_path: str = "") -> None:

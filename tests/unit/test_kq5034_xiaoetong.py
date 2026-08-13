@@ -1,5 +1,7 @@
 from pathlib import Path
 
+import pytest
+
 from kq5034.xiaoetong import XiaoetongWeb
 
 
@@ -76,7 +78,7 @@ def test_iter_export_user_list_falls_back_when_download_center_task_name_changes
     ]
 
 
-def test_export_lesson_data_uses_longer_download_wait_for_large_exports(monkeypatch):
+def test_export_lesson_data_caps_single_lesson_wait(monkeypatch):
     web = XiaoetongWeb.__new__(XiaoetongWeb)
     web.tab = _FakeTab()
     web.exist_files = set()
@@ -106,14 +108,13 @@ def test_export_lesson_data_uses_longer_download_wait_for_large_exports(monkeypa
     result = web.export_lesson_data({'lesson_id2': '28969108', 'lesson_name': '测试课次'})
 
     assert result == Path('C:/tmp/lesson-export.csv')
-    assert calls == [(
-        (),
-        {
-            'exclude_task_names': [],
-            'max_wait_seconds': 20 * 60,
-            'download_wait_seconds': XiaoetongWeb._lesson_export_download_wait_seconds,
-        },
-    )]
+    assert len(calls) == 1
+    args, kwargs = calls[0]
+    assert args == ()
+    assert kwargs['exclude_task_names'] == []
+    assert 1 <= kwargs['max_wait_seconds'] <= XiaoetongWeb._resource_download_center_wait_seconds
+    assert 1 <= kwargs['download_wait_seconds'] <= XiaoetongWeb._resource_download_wait_seconds
+    assert XiaoetongWeb._lesson_resource_export_timeout_seconds == 5 * 60
 
 
 def test_export_clockin_data_prefers_page_name_and_falls_back_to_new_task(monkeypatch):
@@ -181,7 +182,9 @@ def test_export_clockin_data_prefers_page_name_and_falls_back_to_new_task(monkey
     )
 
     assert result == Path('C:/tmp/13期一阶忏悔门打卡.csv')
-    assert calls == [(None, ['旧任务'], 10 * 60)]
+    assert len(calls) == 1
+    assert calls[0][:2] == (None, ['旧任务'])
+    assert 1 <= calls[0][2] <= XiaoetongWeb._resource_download_center_wait_seconds
 
 
 def test_export_diary_clockin_ignores_local_empty_text_when_export_button_exists(monkeypatch):
@@ -242,7 +245,46 @@ def test_export_diary_clockin_ignores_local_empty_text_when_export_button_exists
 
     assert export_button.clicked
     assert result == Path('C:/tmp/第48届觉观-打卡数.csv')
-    assert calls == [(None, ['旧任务'], 10 * 60)]
+    assert len(calls) == 1
+    assert calls[0][:2] == (None, ['旧任务'])
+    assert 1 <= calls[0][2] <= XiaoetongWeb._resource_download_center_wait_seconds
+    assert XiaoetongWeb._clockin_resource_export_timeout_seconds == 10 * 60
+
+
+def test_export_diary_clockin_confirmation_wait_is_bounded(monkeypatch):
+    web = XiaoetongWeb.__new__(XiaoetongWeb)
+
+    class _MissingConfirmDialog:
+        def __call__(self, *_args, **_kwargs):
+            raise RuntimeError('确认按钮未出现')
+
+    class _DiaryTab:
+        url = 'https://admin.xiaoe-tech.com/t/clock_admin/index#/punchDetail/diaryList?activity_id=timeout'
+
+        def __call__(self, locator, *_args, **_kwargs):
+            if locator == 'tag:button@@text():导出动态':
+                return _FakeButton()
+            if locator == 'tag:div@@role=dialog@@aria-label=导出数据':
+                return _MissingConfirmDialog()
+            return _FakeButton()
+
+        def get2(self, *_args, **_kwargs):
+            return self
+
+        def run_js(self, *_args, **_kwargs):
+            return '打卡动态'
+
+        def wait(self, *_args, **_kwargs):
+            return None
+
+    web.tab = _DiaryTab()
+    monkeypatch.setattr(web, '_make_runtime_cache_key', lambda *args, **kwargs: 'clockin-timeout-key')
+    monkeypatch.setattr(web, '_restore_runtime_cached_file', lambda *args, **kwargs: XiaoetongWeb._CACHE_MISS)
+    monkeypatch.setattr(web, '_查找本地下载文件', lambda *args, **kwargs: None)
+    monkeypatch.setattr(web, '_列出下载中心任务名', lambda *args, **kwargs: [])
+
+    with pytest.raises(RuntimeError, match='日历打卡导出确认等待超时'):
+        web.export_clockin_data(web.tab.url)
 
 
 def test_search_lesson_links_closes_detail_tab_before_yield(monkeypatch):

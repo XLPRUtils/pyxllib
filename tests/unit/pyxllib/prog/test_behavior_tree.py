@@ -567,6 +567,35 @@ def test_retry_notifies_and_marks_handled_error(tmp_path):
     assert runner.state["last_error_node"] == "Root/broken/Retry[10s]"
 
 
+def test_successful_retry_clears_recovered_runner_error(tmp_path):
+    clock = FakeClock("2026-04-26 00:00:00")
+    attempts = 0
+
+    def flaky():
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise RuntimeError("boom")
+
+    runner = BehaviorTreeRunner(
+        Root(Retry(Action(flaky), seconds=10)),
+        tmp_path / "state.json",
+        now_func=clock,
+    )
+
+    assert runner.run_once() == Status.SUCCESS
+    assert runner.state["last_error_handled"] is True
+    assert "RuntimeError: boom" in runner.state["last_error"]
+
+    clock.advance(seconds=10)
+    assert runner.run_once() == Status.SUCCESS
+    assert attempts == 2
+    assert "last_error" not in runner.state
+    assert "last_error_at" not in runner.state
+    assert "last_error_handled" not in runner.state
+    assert "last_error_node" not in runner.state
+
+
 def test_node_retry_fluent_api(tmp_path):
     clock = FakeClock("2026-04-26 00:00:00")
     events = []
