@@ -192,6 +192,13 @@ class XiaoetongApi:
 
 
 class XiaoetongWeb(DpWebBase):
+    店铺名称 = {
+        1: '5034山中薪',
+        2: '宗门学府',
+    }
+    _choose_shop_url = 'https://admin.xiaoe-tech.com/t/account/muti_index#/chooseShop'
+    _switch_shop_page_timeout_seconds = 30
+    _switch_shop_confirm_timeout_seconds = 15
     用户列表导出关键词 = (
         '用户列表导出',
         '用户导出列表',
@@ -305,11 +312,23 @@ class XiaoetongWeb(DpWebBase):
         if isinstance(shop, str) and shop.strip().isdigit():
             shop = int(shop.strip())
         if isinstance(shop, int):
-            shop = ['5034山中薪', '宗门学府'][shop - 1]
-        shop_id = 1 if shop == '5034山中薪' else 2 if shop == '宗门学府' else None
+            shop = XiaoetongWeb.店铺名称.get(shop)
+        shop_id = next((shop_id for shop_id, name in XiaoetongWeb.店铺名称.items() if name == shop), None)
         if shop_id is None:
             raise ValueError(f'未知店铺名：{shop}')
         return shop, shop_id
+
+    def assert_shop(self, shop, *, timeout=1.5):
+        """确认页面确实属于目标店铺；不能只相信进程内缓存的 ``cur_shop_id``。"""
+        shop, shop_id = self._标准化店铺(shop)
+        current_shop = self._当前店铺名(timeout=timeout)
+        if current_shop != shop:
+            raise RuntimeError(
+                f'当前店铺校验失败：target={shop} current_shop={current_shop or "未知"} '
+                f'url={self.tab.url}'
+            )
+        self.cur_shop_id = shop_id
+        return self.tab
 
     def _当前店铺名(self, timeout=0.8):
         tab = self.tab
@@ -356,12 +375,12 @@ return true;
         return False
 
     def switch_shop(self, shop='5034山中薪'):
-        """ 返回一个小鹅通指定店铺的新tab页面 """
+        """切到目标店铺，并以页面店铺名作为成功信号。"""
         tab = self._重连当前标签页()
         shop, shop_id = self._标准化店铺(shop)
 
         if self.cur_shop_id == shop_id and self._当前店铺名() == shop:
-            return tab
+            return self.assert_shop(shop)
 
         # 1 检查是否已在目标店铺
         max_attempts = 8
@@ -394,20 +413,35 @@ return true;
                 tab.wait(2)
                 continue
 
-            if tab.url != 'https://admin.xiaoe-tech.com/t/account/muti_index#/chooseShop':
+            if tab.url != self._choose_shop_url:
                 try:
-                    tab.get('https://admin.xiaoe-tech.com/t/account/muti_index#/chooseShop')
+                    loaded = tab.get(
+                        self._choose_shop_url,
+                        retry=1,
+                        interval=1,
+                        timeout=self._switch_shop_page_timeout_seconds,
+                    )
                 except DrissionPage.errors.PageDisconnectedError:
                     tab = self._重连当前标签页()
-                    tab.get('https://admin.xiaoe-tech.com/t/account/muti_index#/chooseShop')
-            tab.wait.doc_loaded()
-            if tab.url == 'https://admin.xiaoe-tech.com/t/account/muti_index#/chooseShop':  # 跳转到了店铺页
+                    loaded = tab.get(
+                        self._choose_shop_url,
+                        retry=1,
+                        interval=1,
+                        timeout=self._switch_shop_page_timeout_seconds,
+                    )
+                if loaded is False:
+                    raise RuntimeError(f'打开选店页失败：target={shop} url={tab.url}')
+            if tab.url == self._choose_shop_url:  # 跳转到了店铺页
                 if not self._在选店页点击店铺(shop):
                     raise RuntimeError(f'选店页未找到目标店铺：{shop}')
-                tab.wait(2)
-                current_shop = self._当前店铺名()
+                confirm_deadline = time.monotonic() + self._switch_shop_confirm_timeout_seconds
+                while time.monotonic() < confirm_deadline:
+                    current_shop = self._当前店铺名(timeout=0.5)
+                    if current_shop == shop:
+                        self.cur_shop_id = shop_id
+                        break
+                    tab.wait(0.25)
                 if current_shop == shop:
-                    self.cur_shop_id = shop_id
                     break
                 logger.warning(f'切换店铺重试 {attempt}/{max_attempts}: target={shop} url={tab.url} current_shop={current_shop or "未知"}')
         else:
@@ -419,9 +453,7 @@ return true;
         for t in tab.eles('t:i@@class=sense-icon-close'):
             t.click(by_js=True)
 
-        self.cur_shop_id = shop_id
-
-        return self.tab
+        return self.assert_shop(shop)
 
     @contextlib.contextmanager
     def 临时工作标签页(self, *, url=None, wait_seconds=0, page_load_timeout_seconds=None):

@@ -36,6 +36,58 @@ class _FakeTab:
         return None
 
 
+def test_assert_shop_rejects_wrong_visible_shop(monkeypatch):
+    web = XiaoetongWeb.__new__(XiaoetongWeb)
+    web.tab = _FakeTab()
+    web.cur_shop_id = 2
+    monkeypatch.setattr(web, '_当前店铺名', lambda timeout=0.8: '5034山中薪')
+
+    with pytest.raises(RuntimeError, match='target=宗门学府.*current_shop=5034山中薪'):
+        web.assert_shop(2)
+
+
+def test_switch_shop_navigates_with_timeout_and_confirms_visible_shop(monkeypatch):
+    class FakeSwitchTab(_FakeTab):
+        def __init__(self):
+            self.url = 'https://admin.xiaoe-tech.com/t/merchant/index'
+            self.get_calls = []
+
+        def get(self, url, **kwargs):
+            self.get_calls.append((url, kwargs))
+            self.url = url
+            return True
+
+        def eles(self, _locator):
+            return []
+
+    tab = FakeSwitchTab()
+    web = XiaoetongWeb.__new__(XiaoetongWeb)
+    web.tab = tab
+    web.cur_shop_id = 1
+    visible_shop = {'name': '5034山中薪'}
+    monkeypatch.setattr(web, '_重连当前标签页', lambda: tab)
+    monkeypatch.setattr(web, '_当前店铺名', lambda timeout=0.8: visible_shop['name'])
+
+    def click_shop(shop):
+        visible_shop['name'] = shop
+        return True
+
+    monkeypatch.setattr(web, '_在选店页点击店铺', click_shop)
+
+    result = web.switch_shop(2)
+
+    assert result is tab
+    assert web.cur_shop_id == 2
+    assert tab.get_calls == [(
+        XiaoetongWeb._choose_shop_url,
+        {
+            'retry': 1,
+            'interval': 1,
+            'timeout': XiaoetongWeb._switch_shop_page_timeout_seconds,
+        },
+    )]
+
+
 def test_iter_export_user_list_falls_back_when_download_center_task_name_changes(monkeypatch):
     web = XiaoetongWeb.__new__(XiaoetongWeb)
     web.tab = _FakeTab()

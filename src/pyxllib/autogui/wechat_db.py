@@ -24,6 +24,7 @@ import struct
 import subprocess
 import hmac
 import time
+import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -372,6 +373,7 @@ def _parse_appmsg(text: str) -> dict[str, Any] | None:
     file_ext = _extract_xml_tag(appmsg_text, "fileext")
     md5 = _extract_xml_tag(appmsg_text, "md5")
     thumb_url = _extract_xml_tag(appmsg_text, "thumburl") or _extract_xml_tag(appmsg_text, "cdnthumburl")
+    forwarded_items = _parse_forwarded_items(appmsg_text)
     refer = None
     if refer_block:
         refer = {
@@ -393,8 +395,51 @@ def _parse_appmsg(text: str) -> dict[str, Any] | None:
         "md5": md5,
         "thumb_url": thumb_url,
         "refer": refer,
+        "forwarded_items": forwarded_items,
     }
     return {key: value for key, value in item.items() if value not in ("", None)}
+
+
+def _parse_forwarded_items(text: str) -> list[dict[str, Any]]:
+    record_xml = html.unescape(_extract_xml_tag(text, "recorditem")).strip()
+    if not record_xml:
+        return []
+    try:
+        root = ET.fromstring(record_xml)
+    except ET.ParseError:
+        return []
+
+    items: list[dict[str, Any]] = []
+    for data_index, node in enumerate(root.findall(".//dataitem")):
+        datatype_text = str(node.get("datatype") or "").strip()
+        datatype = int(datatype_text) if datatype_text.isdigit() else None
+
+        def node_text(tag: str) -> str:
+            return str(node.findtext(tag) or "").strip()
+
+        def node_int(tag: str) -> int | None:
+            value = node_text(tag)
+            return int(value) if value.isdigit() and int(value) > 0 else None
+
+        item = {
+            "data_index": data_index,
+            "data_id": str(node.get("dataid") or "").strip(),
+            "datatype": datatype,
+            "speaker": node_text("sourcename"),
+            "source_time": node_text("sourcetime"),
+            "text": node_text("datadesc"),
+            "data_format": node_text("datafmt"),
+            "data_size": node_int("datasize"),
+            "full_md5": node_text("fullmd5"),
+            "thumb_size": node_int("thumbsize"),
+            "thumb_md5": node_text("thumbfullmd5"),
+            "cdn_data_url": node_text("cdndataurl"),
+            "cdn_data_key": node_text("cdndatakey"),
+            "cdn_thumb_url": node_text("cdnthumburl"),
+            "cdn_thumb_key": node_text("cdnthumbkey"),
+        }
+        items.append({key: value for key, value in item.items() if value not in ("", None)})
+    return items
 
 
 def _table_exists(conn: sqlite3.Connection, table: str) -> bool:
@@ -1170,6 +1215,53 @@ class WeChatDbStorage:
                     exported[item["md5"]] = item
                 exported[f"size:{item['size']}"] = item
                 exported[f"size:{item['size'] + 31}"] = item
+
+        # Merged-forward records are stored outside hardlink.db under
+        # msg/attach/<chat>/<month>/Rec/<record>/Img/<data_index>.  The
+        # message_resource rows point at them by data_index and encrypted
+        # size, so export these files as first-class image resources too.
+        attach_root = account_root / "msg" / "attach"
+        if attach_root.exists():
+            for source in attach_root.glob("*/*/Rec/*/Img/*"):
+                if not source.is_file():
+                    continue
+                try:
+                    source_size = source.stat().st_size
+                    relative = source.relative_to(account_root).as_posix()
+                except OSError:
+                    continue
+                digest = hashlib.sha256(relative.encode("utf-8")).hexdigest()[:16]
+                stem = f"forward_{digest}_{source.name}"
+                target = self._existing_exported_image(export_root / "image", "", stem)
+                if target is None and decode_missing:
+                    if image_xor_key is None:
+                        image_xor_key = self._wechat_v4_image_xor_key(account_root)
+                    if image_aes_key is None:
+                        image_aes_key = self._wechat_v4_image_dynamic_aes_key(account_root)
+                    target = _decode_wechat_v4_image_dat(
+                        source,
+                        export_root / "image",
+                        stem,
+                        image_xor_key or 0,
+                        image_aes_key,
+                    )
+                if target is None:
+                    continue
+                item = {
+                    "kind": "image",
+                    "file_name": target.name,
+                    "original_file_name": relative,
+                    "size": source_size,
+                    "source_path": os.fspath(source),
+                    "stored_path": os.fspath(target),
+                    "download_name": f"image/{target.name}",
+                    "md5": hashlib.md5(target.read_bytes()).hexdigest(),
+                    "decoded_from_dat": True,
+                    "forwarded_record": True,
+                }
+                exported[item["file_name"]] = item
+                exported[relative] = item
+                exported[f"size:{source_size}"] = item
         if decode_missing:
             self._exported_resource_files_cache = exported
             self._write_exported_resource_manifest(exported)
