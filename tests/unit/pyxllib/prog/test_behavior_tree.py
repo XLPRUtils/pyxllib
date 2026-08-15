@@ -22,6 +22,7 @@ from pyxllib.prog.behavior_tree import (
     Sequence,
     Status,
     Timeout,
+    Weekly,
     Window,
     WithServices,
 )
@@ -179,6 +180,39 @@ def test_monthly_start_next_waits_until_monthly_anchor(tmp_path):
     assert runner.run_once() == Status.SUCCESS
     assert events == ["run"]
     assert monthly_state["next_run_at"] == "2026-05-27 00:00:00"
+
+
+def test_weekly_start_next_waits_until_weekly_anchor(tmp_path):
+    clock = FakeClock("2026-08-14 10:00:00")  # Friday
+    events = []
+    state_path = tmp_path / "state.json"
+
+    runner = BehaviorTreeRunner(
+        Root(Action(lambda: events.append("run")).weekly(6, "22:00", start="next")),
+        state_path,
+        now_func=clock,
+    )
+
+    assert runner.run_once() == Status.SKIP
+    assert events == []
+    weekly_state = next(v for v in runner.state["nodes"].values() if "next_run_at" in v)
+    assert weekly_state["next_run_at"] == "2026-08-15 22:00:00"
+
+    clock.advance(days=1, hours=12)
+    assert runner.run_once() == Status.SUCCESS
+    assert events == ["run"]
+    assert weekly_state["next_run_at"] == "2026-08-22 22:00:00"
+
+
+def test_weekly_class_accepts_positional_child(tmp_path):
+    clock = FakeClock("2026-08-14 10:00:00")
+    runner = BehaviorTreeRunner(
+        Root(Weekly(6, "22:00", Action(lambda: None), start="next")),
+        tmp_path / "state.json",
+        now_func=clock,
+    )
+
+    assert runner.run_once() == Status.SKIP
 
 
 def test_monthly_skips_month_without_requested_day(tmp_path):

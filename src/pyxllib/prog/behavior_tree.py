@@ -61,6 +61,7 @@ __all__ = [
     "Status",
     "Timeout",
     "TreeContext",
+    "Weekly",
     "Window",
     "WithServices",
 ]
@@ -209,6 +210,32 @@ def _compute_next_monthly_time(
     raise RuntimeError(f"failed to compute next monthly time: day={day}, anchor={anchor!r}")
 
 
+def _compute_next_weekly_time(
+    weekday: int,
+    anchor: str = "00:00",
+    *,
+    base_time: Optional[datetime.datetime] = None,
+) -> datetime.datetime:
+    """计算下一个星期几的固定时间；星期一为 1，星期日为 7。"""
+
+    weekday = int(weekday)
+    if not 1 <= weekday <= 7:
+        raise ValueError(f"invalid weekly weekday: {weekday!r}")
+
+    current = (base_time or datetime.datetime.now()).replace(microsecond=0)
+    hour, minute, second = _parse_clock(anchor)
+    days_ahead = (weekday - current.isoweekday()) % 7
+    target = (current + datetime.timedelta(days=days_ahead)).replace(
+        hour=hour,
+        minute=minute,
+        second=second,
+        microsecond=0,
+    )
+    if target <= current:
+        target += datetime.timedelta(days=7)
+    return target
+
+
 def _compute_next_time(
     *anchors: str,
     base_time: Optional[datetime.datetime] = None,
@@ -353,6 +380,12 @@ class TreeContext:
         self.next_run_at = run_at
         return NextWake(run_at)
 
+    def next_weekly_time(self, weekday: int, anchor: str = "00:00", *, base_time=None) -> NextWake:
+        base = _parse_time(base_time) if base_time is not None else self.now()
+        run_at = _compute_next_weekly_time(weekday, anchor, base_time=base)
+        self.next_run_at = run_at
+        return NextWake(run_at)
+
     def node_state(self, node: "Node") -> Dict[str, Any]:
         return self.runner.node_state(node)
 
@@ -453,6 +486,30 @@ class Node:
     ) -> "Monthly":
         return Monthly(
             day,
+            anchor,
+            child=self,
+            label=label or self.default_label(),
+            persist=persist,
+            default_next_time=default_next_time,
+            start=start,
+            enabled=enabled,
+            on_schedule=on_schedule,
+        )
+
+    def weekly(
+        self,
+        weekday: int,
+        anchor: str = "00:00",
+        *,
+        label: Optional[str] = None,
+        persist: bool = True,
+        default_next_time=None,
+        start: str = "run",
+        enabled: bool = True,
+        on_schedule: Optional[Callable[[TreeContext, datetime.datetime], None]] = None,
+    ) -> "Weekly":
+        return Weekly(
+            weekday,
             anchor,
             child=self,
             label=label or self.default_label(),
@@ -991,6 +1048,74 @@ class Monthly(_TimeDecorator):
         status = self.child.tick(ctx)
         if status != Status.RUNNING:
             next_run_at = ctx.next_run_at or _compute_next_monthly_time(self.day, self.anchor, base_time=ctx.now())
+            self._set_next_run_at(ctx, next_run_at)
+        return self._record(status)
+
+
+class Weekly(_TimeDecorator):
+    """每周指定星期和时间触发的时间装饰器，星期一为 1。"""
+
+    def __init__(
+        self,
+        weekday: int,
+        anchor: Any = "00:00",
+        *args: Any,
+        child: Optional[Node] = None,
+        label: Optional[str] = None,
+        persist: bool = True,
+        default_next_time=None,
+        start: str = "run",
+        enabled: bool = True,
+        on_schedule: Optional[Callable[[TreeContext, datetime.datetime], None]] = None,
+    ):
+        if isinstance(anchor, Node):
+            if child is not None or args:
+                raise TypeError("Weekly accepts only one child node")
+            child = anchor
+            anchor = "00:00"
+        elif args:
+            if child is not None or len(args) != 1 or not isinstance(args[0], Node):
+                raise TypeError("Weekly requires a child node")
+            child = args[0]
+        if child is None:
+            raise TypeError("Weekly requires a child node")
+        self.weekday = int(weekday)
+        self.anchor = str(anchor)
+        _compute_next_weekly_time(self.weekday, self.anchor)
+        super().__init__(
+            child,
+            label=label,
+            persist=persist,
+            default_next_time=default_next_time,
+            start=start,
+            enabled=enabled,
+            on_schedule=on_schedule,
+        )
+
+    def default_label(self) -> str:
+        return self.label or f"Weekly[{self.weekday},{self.anchor}]"
+
+    def _default_initial_next_run_at(self, ctx: TreeContext) -> datetime.datetime:
+        if self.start.endswith("next"):
+            return _compute_next_weekly_time(self.weekday, self.anchor, base_time=ctx.now())
+        return ctx.now()
+
+    def tick(self, ctx: TreeContext) -> Status:
+        if not self.enabled:
+            return self._record(Status.SKIP)
+
+        next_run_at = self._ensure_next_run_at(ctx)
+        if next_run_at > ctx.now():
+            return self._record(Status.SKIP)
+
+        ctx.next_run_at = None
+        status = self.child.tick(ctx)
+        if status != Status.RUNNING:
+            next_run_at = ctx.next_run_at or _compute_next_weekly_time(
+                self.weekday,
+                self.anchor,
+                base_time=ctx.now(),
+            )
             self._set_next_run_at(ctx, next_run_at)
         return self._record(status)
 
