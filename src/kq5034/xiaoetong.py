@@ -983,16 +983,9 @@ return true;
             if cached_file is not self._CACHE_MISS:
                 return cached_file
 
-        if download and expected_download_name:
-            download_dir = Path.home() / 'Downloads' / '_xlproject_temp_downloads'
-            recent_file = self._查找本地下载文件(
-                expected_download_name,
-                download_dir,
-                newer_than_ts=time.time() - 2 * 60 * 60,
-            )
-            if recent_file is not None and self._文件已稳定(recent_file):
-                logger.info(f'复用近期本地打卡导出文件：expect={expected_download_name} file={recent_file}')
-                return XlPath(recent_file)
+        # 打卡名称（例如“共学打卡”）会被许多课程重复使用，不能仅凭文件名
+        # 复用下载目录里的近期文件，否则会把其它期次/圈子的导出写进当前课程。
+        # 上面的 runtime cache 已按完整 URL 与日期范围隔离，可安全承担复用。
 
         # tab = self.browser.new_tab()
         with contextlib.suppress(Exception):

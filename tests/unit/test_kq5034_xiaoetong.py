@@ -212,7 +212,13 @@ def test_export_clockin_data_prefers_page_name_and_falls_back_to_new_task(monkey
     monkeypatch.setattr(web, '_make_runtime_cache_key', lambda *args, **kwargs: 'clockin-cache-key')
     monkeypatch.setattr(web, '_restore_runtime_cached_file', lambda *args, **kwargs: XiaoetongWeb._CACHE_MISS)
     monkeypatch.setattr(web, '_store_runtime_cached_file', lambda _key, file: file)
-    monkeypatch.setattr(web, '_查找本地下载文件', lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        web,
+        '_查找本地下载文件',
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError('打卡导出不能按跨课程重复的文件名复用本地文件')
+        ),
+    )
     monkeypatch.setattr(web, '_等待禅宗打卡导出按钮', lambda *args, **kwargs: (_ClockinElement(), _ClockinElement()))
     monkeypatch.setattr(web, '_提取已生成下载文件名', lambda *_args, **_kwargs: '')
     monkeypatch.setattr(web, '_列出下载中心任务名', lambda keywords=None: ['旧任务'])
