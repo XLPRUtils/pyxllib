@@ -1,6 +1,7 @@
 """小鹅通相关实现。"""
 
 from .common import *  # noqa: F403
+from urllib.parse import parse_qs
 
 
 class LiveLessonUserListEmpty(RuntimeError):
@@ -372,7 +373,60 @@ return true;
             if clicked:
                 return True
             tab.wait(0.5)
-        return False
+
+        # 小鹅通的选店页偶尔会因前端静态资源加载失败，一直卡在全屏
+        # loading；此时店铺列表接口已正常返回，但 .shop-list-item 永远不会
+        # 挂载。复用页面自身的选店接口完成同一个业务动作，仍由后续
+        # _当前店铺名 / assert_shop 校验真实结果，不信任接口返回本身。
+        logger.warning(f'选店页未生成店铺卡片，尝试通过页面接口选店：target={shop} url={tab.url}')
+        result = tab.run_js("""
+const target = arguments[0];
+return fetch('/xe.merchant-service-admin.shop_list.get/2.0.0', {
+  credentials: 'include',
+}).then(async response => {
+  const payload = await response.json();
+  if (!response.ok || payload.code !== 0) {
+    return {ok: false, stage: 'shop_list', status: response.status, code: payload.code, msg: payload.msg || ''};
+  }
+  const groups = payload.data && Array.isArray(payload.data.shop_list) ? payload.data.shop_list : [];
+  const shops = groups.flatMap(group => Array.isArray(group.shop_list) ? group.shop_list : []);
+  const matches = shops.filter(item => item.shop_name === target);
+  if (matches.length !== 1) {
+    return {ok: false, stage: 'resolve', match_count: matches.length};
+  }
+  const item = matches[0];
+  if (item.shop_auth !== 1 || item.has_expired === 1 || item.is_wait_seal) {
+    return {
+      ok: false,
+      stage: 'eligibility',
+      shop_auth: item.shop_auth,
+      has_expired: item.has_expired,
+      is_wait_seal: item.is_wait_seal,
+    };
+  }
+  const endpoint = '/xe.merchant-serve.shop_list.shop.choose/1.0.0?app_id=' + encodeURIComponent(item.app_id);
+  const chooseResponse = await fetch(endpoint, {credentials: 'include'});
+  const choosePayload = await chooseResponse.json();
+  return {
+    ok: chooseResponse.ok && choosePayload.code === 0,
+    stage: 'choose',
+    status: chooseResponse.status,
+    code: choosePayload.code,
+    msg: choosePayload.msg || '',
+  };
+});
+""", shop, timeout=20)
+        if not isinstance(result, dict) or not result.get('ok'):
+            logger.warning(f'选店页接口选店失败：target={shop} result={result!r}')
+            return False
+
+        loaded = tab.get(
+            'https://admin.xiaoe-tech.com/t/merchant/index',
+            retry=1,
+            interval=1,
+            timeout=self._switch_shop_page_timeout_seconds,
+        )
+        return loaded is not False
 
     def switch_shop(self, shop='5034山中薪'):
         """切到目标店铺，并以页面店铺名作为成功信号。"""
@@ -1365,6 +1419,141 @@ return '';
         body = self._直播课用户页摘要(tab, max_chars=800)
         raise RuntimeError(f'闯关课导出确认失败：lesson={lesson} url={tab.url} body={body!r}')
 
+    @staticmethod
+    def _解析闯关课资源参数(lesson_url):
+        query = parse_qs(urlparse(str(lesson_url or '')).query)
+        course_id = str((query.get('course_id') or [''])[0]).strip()
+        resource_id = str((query.get('resource_id') or [''])[0]).strip()
+        if not course_id or not resource_id:
+            raise RuntimeError(f'闯关课链接缺少课程或资源参数：url={lesson_url}')
+        return course_id, resource_id
+
+    def _请求闯关课用户列表页(self, tab, lesson_url, page, *, resource_deadline=None):
+        course_id, resource_id = self._解析闯关课资源参数(lesson_url)
+        payload = {
+            'page': page,
+            'page_index': 10,
+            'course_id': course_id,
+            'resource_id': resource_id,
+            'resource_type': 3,
+            'status': 0,
+            'user_ids': [],
+        }
+        js = r'''
+const payload = arguments[0];
+return fetch('/xe.course.b_admin_r.camp_pro.student.section.list.get/1.0.0', {
+  method: 'POST',
+  credentials: 'include',
+  headers: {'content-type': 'application/json;charset=UTF-8'},
+  body: JSON.stringify(payload)
+}).then(async r => {
+  const text = await r.text();
+  let data = null;
+  try { data = JSON.parse(text); } catch (e) { data = {raw_text: text}; }
+  return {status: r.status, ok: r.ok, data};
+}).catch(e => ({error: String(e), stack: e.stack}));
+'''
+
+        last_res = None
+        for attempt in range(1, 6):
+            if resource_deadline is not None:
+                self._资源导出剩余秒数(
+                    resource_deadline,
+                    stage='闯关课用户接口',
+                    timeout_seconds=self._lesson_resource_export_timeout_seconds,
+                )
+            last_res = tab.run_js(js, payload)
+            if isinstance(last_res, dict) and last_res.get('status') == 200:
+                data = last_res.get('data') or {}
+                if data.get('code') == 0:
+                    return data
+                logger.warning(f'闯关课用户列表接口返回业务错误，重试：resource_id={resource_id} '
+                               f'page={page} attempt={attempt}/5 data={data}')
+            else:
+                logger.warning(f'闯关课用户列表接口请求失败，重试：resource_id={resource_id} '
+                               f'page={page} attempt={attempt}/5 res={last_res}')
+            tab.wait(10 * attempt)
+
+        raise RuntimeError(f'闯关课用户列表接口请求失败：resource_id={resource_id} '
+                           f'page={page} last_res={last_res}')
+
+    @staticmethod
+    def _闯关课时长文本(seconds):
+        seconds = max(0, int(seconds or 0))
+        if not seconds:
+            return '0秒'
+        parts = []
+        hours, seconds = divmod(seconds, 3600)
+        minutes, seconds = divmod(seconds, 60)
+        if hours:
+            parts.append(f'{hours}小时')
+        if minutes:
+            parts.append(f'{minutes}分钟')
+        if seconds:
+            parts.append(f'{seconds}秒')
+        return ''.join(parts)
+
+    def _导出闯关课用户列表接口CSV(self, tab, row, *, resource_deadline=None):
+        """页面路由失效或组件空白时，用页面同源只读接口生成兼容的学员播放记录。"""
+        lesson_url = str(row.get('lesson_id2') or '').strip()
+        lesson = row.get('lesson_name', lesson_url)
+        items = []
+        page = 1
+        total = None
+        while True:
+            data = self._请求闯关课用户列表页(
+                tab,
+                lesson_url,
+                page,
+                resource_deadline=resource_deadline,
+            )
+            payload = data.get('data') or {}
+            rows = payload.get('user_list') or []
+            total = int(payload.get('total') or 0)
+            items.extend(rows)
+            logger.info(f'闯关课用户列表接口分页：lesson={lesson} page={page} '
+                        f'got={len(rows)} accumulated={len(items)} total={total}')
+            if len(items) >= total or not rows:
+                break
+            page += 1
+
+        if not items and not total:
+            raise RuntimeError(f'闯关课用户列表接口返回0条：lesson={lesson} url={lesson_url}')
+        if len(items) != total:
+            raise RuntimeError(f'闯关课用户列表接口分页不完整：lesson={lesson} got={len(items)} total={total}')
+
+        safe_name = re.sub(r'[\\/:*?"<>|\r\n]+', '_', lesson or 'camp-pro')
+        download_dir = Path(tempfile.gettempdir()) / 'codeyun' / 'attendance-exports'
+        download_dir.mkdir(parents=True, exist_ok=True)
+        file = download_dir / f'{safe_name}-camp-pro-api-{datetime.datetime.now():%Y%m%d_%H%M%S}.csv'
+        state_names = {-1: '未参与', 0: '进行中', 1: '已完成'}
+        out_rows = []
+        for item in items:
+            seconds = int(item.get('stay_seconds') or 0)
+            progress = item.get('max_learn_progress')
+            try:
+                progress = int(float(str(progress).rstrip('%') or 0))
+            except (TypeError, ValueError):
+                progress = 0
+            out_rows.append({
+                '用户ID': item.get('user_id') or '',
+                '微信昵称': item.get('wx_nickname') or '',
+                '参与状态': state_names.get(item.get('finish_state'), ''),
+                '播放进度': f'{progress}%',
+                '累计播放时长': self._闯关课时长文本(seconds),
+                '累计播放时长（秒）': seconds,
+                '上次播放时间': item.get('last_learn_time') or '--',
+                '备注名': item.get('comment_name') or '',
+            })
+
+        pd.DataFrame(out_rows, columns=[
+            '用户ID', '微信昵称', '参与状态', '播放进度',
+            '累计播放时长', '累计播放时长（秒）', '上次播放时间', '备注名',
+        ]).to_csv(file, index=False, encoding='utf-8-sig')
+        logger.warning(f'已使用闯关课用户列表接口生成兜底CSV：lesson={lesson} '
+                       f'rows={len(out_rows)} total={total} file={file}')
+        return XlPath(file)
+
     def _等待直播课用户导出按钮(self, tab, row, work_url, *, resource_deadline=None):
         """小鹅通直播用户页经常慢加载；必须等到导出入口出现，不能把空壳 DOM 当作空数据。"""
         lesson = row.get('lesson_name', row.get('lesson_id2', ''))
@@ -1624,7 +1813,18 @@ return fetch('/xe.data-user-behavior.live.user_list_filter/1.0.0', {
                     logger.warning(f'闯关课状态文本解析失败，继续尝试导出：lesson={row.get("lesson_name", row["lesson_id2"])} '
                                    f'status={status!r} url={tab.url}')
 
-                self._点击闯关课导出确认(tab, row, existing_exports=existing_exports, download=download)
+                try:
+                    self._点击闯关课导出确认(tab, row, existing_exports=existing_exports, download=download)
+                except RuntimeError as exc:
+                    if not str(exc).startswith('闯关课导出入口未找到：'):
+                        raise
+                    logger.warning(f'闯关课页面导出入口不可用，改用后台用户列表接口兜底：{exc}')
+                    file = self._导出闯关课用户列表接口CSV(
+                        tab,
+                        row,
+                        resource_deadline=resource_deadline,
+                    )
+                    return self._store_runtime_cached_file(cache_key, file) if download else file
             else:
                 if download:
                     existing_exports = self._列出下载中心任务名()

@@ -1,5 +1,6 @@
 from pathlib import Path
 
+import pandas as pd
 import pytest
 
 from kq5034.xiaoetong import XiaoetongWeb
@@ -88,6 +89,63 @@ def test_switch_shop_navigates_with_timeout_and_confirms_visible_shop(monkeypatc
     )]
 
 
+def test_choose_shop_falls_back_to_page_api_when_shop_cards_do_not_render():
+    class FakeSwitchTab(_FakeTab):
+        def __init__(self):
+            self.url = XiaoetongWeb._choose_shop_url
+            self.get_calls = []
+            self.run_js_calls = []
+
+        def run_js(self, script, shop=None, **kwargs):
+            self.run_js_calls.append((script, shop, kwargs))
+            if shop is None:
+                return False
+            return {'ok': True, 'stage': 'choose', 'code': 0}
+
+        def get(self, url, **kwargs):
+            self.get_calls.append((url, kwargs))
+            self.url = url
+            return True
+
+    tab = FakeSwitchTab()
+    web = XiaoetongWeb.__new__(XiaoetongWeb)
+    web.tab = tab
+
+    assert web._在选店页点击店铺('5034山中薪') is True
+    assert len(tab.run_js_calls) == 11
+    fallback_script, shop, kwargs = tab.run_js_calls[-1]
+    assert 'shop_list.get/2.0.0' in fallback_script
+    assert 'shop.choose/1.0.0' in fallback_script
+    assert shop == '5034山中薪'
+    assert kwargs == {'timeout': 20}
+    assert tab.get_calls == [(
+        'https://admin.xiaoe-tech.com/t/merchant/index',
+        {
+            'retry': 1,
+            'interval': 1,
+            'timeout': XiaoetongWeb._switch_shop_page_timeout_seconds,
+        },
+    )]
+
+
+def test_choose_shop_api_fallback_rejects_ambiguous_or_failed_result():
+    class FakeSwitchTab(_FakeTab):
+        url = XiaoetongWeb._choose_shop_url
+
+        def run_js(self, _script, shop=None, **_kwargs):
+            if shop is None:
+                return False
+            return {'ok': False, 'stage': 'resolve', 'match_count': 0}
+
+        def get(self, *_args, **_kwargs):
+            raise AssertionError('接口未唯一命中可用店铺时不应进入管理台')
+
+    web = XiaoetongWeb.__new__(XiaoetongWeb)
+    web.tab = FakeSwitchTab()
+
+    assert web._在选店页点击店铺('5034山中薪') is False
+
+
 def test_iter_export_user_list_falls_back_when_download_center_task_name_changes(monkeypatch):
     web = XiaoetongWeb.__new__(XiaoetongWeb)
     web.tab = _FakeTab()
@@ -167,6 +225,65 @@ def test_export_lesson_data_caps_single_lesson_wait(monkeypatch):
     assert 1 <= kwargs['max_wait_seconds'] <= XiaoetongWeb._resource_download_center_wait_seconds
     assert 1 <= kwargs['download_wait_seconds'] <= XiaoetongWeb._resource_download_wait_seconds
     assert XiaoetongWeb._lesson_resource_export_timeout_seconds == 5 * 60
+
+
+def test_export_camp_pro_api_csv_paginates_and_matches_native_columns(monkeypatch, tmp_path):
+    web = XiaoetongWeb.__new__(XiaoetongWeb)
+    lesson_url = (
+        'https://admin.xiaoe-tech.com/t/course/camp_pro/course_detail_page'
+        '?course_id=course_1&resource_id=video_8&p_id=stale_chapter&type=3'
+    )
+    pages = {
+        1: {'data': {'total': 2, 'user_list': [{
+            'user_id': 'u1', 'wx_nickname': '甲', 'finish_state': 1,
+            'max_learn_progress': 100, 'stay_seconds': 3661,
+            'last_learn_time': '2026-08-18 00:01:02', 'comment_name': '',
+        }]}},
+        2: {'data': {'total': 2, 'user_list': [{
+            'user_id': 'u2', 'wx_nickname': '乙', 'finish_state': 0,
+            'max_learn_progress': 7, 'stay_seconds': 307,
+            'last_learn_time': '2026-08-18 00:02:03', 'comment_name': '备注',
+        }]}},
+    }
+    monkeypatch.setattr(web, '_请求闯关课用户列表页', lambda _tab, _url, page, **_kwargs: pages[page])
+    monkeypatch.setattr('kq5034.xiaoetong.tempfile.gettempdir', lambda: str(tmp_path))
+
+    file = web._导出闯关课用户列表接口CSV(
+        _FakeTab(),
+        {'lesson_id2': lesson_url, 'lesson_name': '第08课'},
+    )
+
+    df = pd.read_csv(file)
+    assert list(df.columns) == [
+        '用户ID', '微信昵称', '参与状态', '播放进度',
+        '累计播放时长', '累计播放时长（秒）', '上次播放时间', '备注名',
+    ]
+    assert df[['用户ID', '参与状态', '播放进度', '累计播放时长（秒）']].to_dict('records') == [
+        {'用户ID': 'u1', '参与状态': '已完成', '播放进度': '100%', '累计播放时长（秒）': 3661},
+        {'用户ID': 'u2', '参与状态': '进行中', '播放进度': '7%', '累计播放时长（秒）': 307},
+    ]
+    assert df['累计播放时长'].tolist() == ['1小时1分钟1秒', '5分钟7秒']
+
+
+def test_camp_pro_api_rejects_incomplete_pagination(monkeypatch):
+    web = XiaoetongWeb.__new__(XiaoetongWeb)
+    monkeypatch.setattr(
+        web,
+        '_请求闯关课用户列表页',
+        lambda *_args, **_kwargs: {'data': {'total': 2, 'user_list': []}},
+    )
+
+    with pytest.raises(RuntimeError, match='分页不完整'):
+        web._导出闯关课用户列表接口CSV(
+            _FakeTab(),
+            {
+                'lesson_id2': (
+                    'https://admin.xiaoe-tech.com/t/course/camp_pro/course_detail_page'
+                    '?course_id=course_1&resource_id=video_8&type=3'
+                ),
+                'lesson_name': '第08课',
+            },
+        )
 
 
 def test_export_clockin_data_prefers_page_name_and_falls_back_to_new_task(monkeypatch):
