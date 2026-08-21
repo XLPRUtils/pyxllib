@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import ctypes
+import json
 import os
 import time
 from pathlib import Path
@@ -146,12 +147,59 @@ class Weixin4TextClient:
 
     @staticmethod
     def _ocr_payload(image) -> dict:
-        # PaddleX 启动时的联网探测会拖慢本地已缓存模型的加载。
-        os.environ.setdefault("PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK", "True")
-        from pyxllib.ai.ocr import ocr_text
+        """识别微信截图，优先本地模型，不可用时复用已配置 OCR 服务。"""
 
-        result = ocr_text(image)
-        return result.json["res"] if hasattr(result, "json") else result
+        try:
+            # PaddleX 启动时的联网探测会拖慢本地已缓存模型的加载。
+            os.environ.setdefault("PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK", "True")
+            from pyxllib.ai.ocr import ocr_text
+
+            result = ocr_text(image)
+        except ModuleNotFoundError:
+            from pyxllib.autogui.anlib import get_xlapi
+
+            result = get_xlapi().common_ocr(
+                image,
+                request_timeout=15,
+                request_retries=1,
+            )
+        return Weixin4TextClient._normalize_ocr_payload(result)
+
+    @staticmethod
+    def _normalize_ocr_payload(result) -> dict:
+        """把本地 PaddleOCR 和远程 LabelMe 结果统一成文本框列表。"""
+
+        if hasattr(result, "json"):
+            result = result.json
+        payload = result.get("res") if isinstance(result, dict) else None
+        if not isinstance(payload, dict):
+            payload = result if isinstance(result, dict) else {}
+        if payload.get("rec_texts") is not None and payload.get("rec_boxes") is not None:
+            return payload
+
+        document = payload.get("document") if isinstance(payload.get("document"), dict) else payload
+        texts = []
+        boxes = []
+        for shape in document.get("shapes") or []:
+            if not isinstance(shape, dict):
+                continue
+            label = shape.get("label")
+            if isinstance(label, str) and label.startswith("{"):
+                try:
+                    label = json.loads(label)
+                except json.JSONDecodeError:
+                    pass
+            text = str(label.get("text") or label.get("label") or "") if isinstance(label, dict) else str(label or "")
+            try:
+                xs = [float(point[0]) for point in shape.get("points") or []]
+                ys = [float(point[1]) for point in shape.get("points") or []]
+            except (TypeError, ValueError, IndexError):
+                continue
+            if not text or not xs or not ys:
+                continue
+            texts.append(text)
+            boxes.append([min(xs), min(ys), max(xs), max(ys)])
+        return {"rec_texts": texts, "rec_boxes": boxes}
 
     @classmethod
     def _ocr_text(cls, image) -> str:

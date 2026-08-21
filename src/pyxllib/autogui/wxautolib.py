@@ -72,7 +72,9 @@ def wechat_lock_send(user, text=None, files=None, url=None, *, timeout=-1, **kwa
             send_text(user, str(text))
             return
         except WeixinInstrumentationUnavailable as exc:
-            logger.warning(f'微信动态发送不可用，降级 GUI：{exc}')
+            # 本函数也会作为 Loguru sink 执行；这里不能再次调用同一个
+            # logger，否则微信发送失败时会触发不可重入异常并放大故障。
+            print(f'微信动态发送不可用，降级 GUI：{exc}', file=sys.stderr)
     with WeChatSingletonLock(timeout) as we:
         # 241223周一12:27，今天可被这个默认2秒坑惨了，往错误群一直发骚扰消息
         # 22:07，但我复测，感觉不可能找不到啊，为什么会找到禅宗考勤管理群呢，太离谱了

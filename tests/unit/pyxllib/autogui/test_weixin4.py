@@ -30,6 +30,44 @@ def test_find_main_window_falls_back_to_hidden_tray_window(monkeypatch):
     assert Weixin4TextClient._find_main_window() == 10
 
 
+def test_normalize_remote_labelme_ocr_payload():
+    payload = {
+        "document": {
+            "shapes": [
+                {
+                    "label": '{"text": "考勤中台"}',
+                    "points": [[10, 20], [110, 20], [110, 50], [10, 50]],
+                }
+            ]
+        }
+    }
+
+    assert Weixin4TextClient._normalize_ocr_payload(payload) == {
+        "rec_texts": ["考勤中台"],
+        "rec_boxes": [[10.0, 20.0, 110.0, 50.0]],
+    }
+
+
+def test_ocr_payload_falls_back_to_configured_remote_service(monkeypatch):
+    image = Image.new("RGB", (20, 20), "white")
+    fake_ocr_module = SimpleNamespace(
+        ocr_text=lambda _: (_ for _ in ()).throw(ModuleNotFoundError("paddleocr"))
+    )
+    calls = []
+    fake_client = SimpleNamespace(
+        common_ocr=lambda value, **kwargs: calls.append((value, kwargs))
+        or {"rec_texts": ["考勤中台"], "rec_boxes": [[1, 2, 3, 4]]}
+    )
+    monkeypatch.setitem(sys.modules, "pyxllib.ai.ocr", fake_ocr_module)
+    monkeypatch.setattr("pyxllib.autogui.anlib.get_xlapi", lambda: fake_client)
+
+    assert Weixin4TextClient._ocr_payload(image) == {
+        "rec_texts": ["考勤中台"],
+        "rec_boxes": [[1, 2, 3, 4]],
+    }
+    assert calls == [(image, {"request_timeout": 15, "request_retries": 1})]
+
+
 def test_search_result_clicks_exact_conversation(monkeypatch):
     client = bare_client()
     image = Image.new("RGB", (400, 500), "white")
