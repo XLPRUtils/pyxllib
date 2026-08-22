@@ -59,39 +59,18 @@ class WeChatSingletonLock:
 
 
 def wechat_lock_send(user, text=None, files=None, url=None, *, timeout=-1, **kwargs):
-    """ 使用全局唯一单例锁，确保同一时间仅有一个微信自动化程序在操作 """
-    # mf 上的微信 4.x 纯文本优先走进程内发送：不激活窗口、不搜索会话，
-    # 上层 Step 6 / 日报 / 完成通知的收件人和文案保持原样。
-    if text and not files and not url and not kwargs.get('at'):
-        from pyxllib.autogui.weixin4_instrumentation import (
-            WeixinInstrumentationUnavailable,
-            send_text,
-        )
+    """通过进程内 API 发送微信消息，绝不激活或操作微信 GUI。
 
-        try:
-            send_text(user, str(text))
-            return
-        except WeixinInstrumentationUnavailable as exc:
-            # 本函数也会作为 Loguru sink 执行；这里不能再次调用同一个
-            # logger，否则微信发送失败时会触发不可重入异常并放大故障。
-            print(f'微信动态发送不可用，降级 GUI：{exc}', file=sys.stderr)
-    with WeChatSingletonLock(timeout) as we:
-        # 241223周一12:27，今天可被这个默认2秒坑惨了，往错误群一直发骚扰消息
-        # 22:07，但我复测，感觉不可能找不到啊，为什么会找到禅宗考勤管理群呢，太离谱了
-        status = we.ChatWith(user, timeout=5)
+    旧调用名为保持业务兼容而保留。API 尚未支持的消息类型必须失败关闭，
+    不能以软件升级、版本不匹配或能力缺失为由降级到桌面自动化。
+    """
+    del timeout
+    if files or url or kwargs.get('at') or not text:
+        raise NotImplementedError("微信 API 当前只支持不带 @ 的纯文本消息，禁止降级 GUI")
 
-        if status != user:
-            raise ValueError(f'无法找到用户：{user}')
+    from pyxllib.autogui.weixin4_instrumentation import send_text
 
-        if text:
-            if kwargs.get('at') == '所有人':
-                we.AtAll(text, user)
-            else:
-                we.SendMsg(text, user, **kwargs)
-        if files:
-            we.SendFiles(files, user, **kwargs)
-        if url:
-            we.SendUrlCard(url, user)
+    return send_text(user, str(text))
 
 
 def wechat_handler(message):
