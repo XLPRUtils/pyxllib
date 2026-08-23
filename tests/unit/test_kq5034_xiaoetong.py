@@ -37,6 +37,52 @@ class _FakeTab:
         return None
 
 
+def test_zen_catalog_detail_accepts_a_tab_that_arrives_after_click_timeout():
+    class FakeDetailTab:
+        def __init__(self):
+            self.url = 'https://admin.xiaoe-tech.com/detail?resource_id=v_delayed'
+            self.closed = False
+
+        def close(self):
+            self.closed = True
+
+    detail_tab = FakeDetailTab()
+
+    class FakeBrowser:
+        def __init__(self):
+            self.tabs = {'main': _FakeTab()}
+
+        @property
+        def tab_ids(self):
+            return list(self.tabs)
+
+        def get_tab(self, tab_id):
+            return self.tabs[tab_id]
+
+    browser = FakeBrowser()
+
+    class FakeWait:
+        def clickable(self, **_kwargs):
+            return True
+
+    class FakeClick:
+        def for_new_tab(self, **_kwargs):
+            browser.tabs['detail'] = detail_tab
+            raise RuntimeError('没有等到新标签页')
+
+    class FakeDataElement:
+        wait = FakeWait()
+        click = FakeClick()
+
+    web = XiaoetongWeb.__new__(XiaoetongWeb)
+    web.browser = browser
+
+    url = web._读取禅宗目录课次链接(_FakeTab(), FakeDataElement(), lesson_name='测试课')
+
+    assert url.endswith('resource_id=v_delayed')
+    assert detail_tab.closed is True
+
+
 def test_assert_shop_rejects_wrong_visible_shop(monkeypatch):
     web = XiaoetongWeb.__new__(XiaoetongWeb)
     web.tab = _FakeTab()
@@ -360,6 +406,72 @@ def test_export_clockin_data_prefers_page_name_and_falls_back_to_new_task(monkey
     assert len(calls) == 1
     assert calls[0][:2] == (None, ['旧任务'])
     assert 1 <= calls[0][2] <= XiaoetongWeb._resource_download_center_wait_seconds
+
+
+def test_export_clockin_data_reuses_exact_file_reported_by_current_export(monkeypatch):
+    web = XiaoetongWeb.__new__(XiaoetongWeb)
+
+    class _Element:
+        states = type('States', (), {'is_clickable': True})()
+        scroll = type('Scroll', (), {'to_see': lambda self: None})()
+
+        class _Wait:
+            def __init__(self, element):
+                self.element = element
+
+            def clickable(self):
+                return self.element
+
+        def __init__(self):
+            self.wait = self._Wait(self)
+
+        def __call__(self, *_args, **_kwargs):
+            return self
+
+        def click(self, *_args, **_kwargs):
+            return None
+
+    class _Tab:
+        url = 'https://admin.xiaoe-tech.com/t/community_admin/miniCommunity#/micro_wrapper?component_name=clock_task_data'
+        action_type = staticmethod(lambda *_args, **_kwargs: None)
+
+        def __call__(self, *_args, **_kwargs):
+            return _Element()
+
+        def get2(self, *_args, **_kwargs):
+            return self
+
+        def run_js(self, *_args, **_kwargs):
+            return '13期一阶共学打卡\n任务数据'
+
+        def wait(self, *_args, **_kwargs):
+            return None
+
+    web.tab = _Tab()
+    monkeypatch.setattr(web, '_make_runtime_cache_key', lambda *args, **kwargs: 'clockin-cache-key')
+    monkeypatch.setattr(web, '_restore_runtime_cached_file', lambda *args, **kwargs: XiaoetongWeb._CACHE_MISS)
+    monkeypatch.setattr(web, '_store_runtime_cached_file', lambda _key, file: file)
+    monkeypatch.setattr(web, '_等待禅宗打卡导出按钮', lambda *args, **kwargs: (_Element(), _Element()))
+    monkeypatch.setattr(web, '_提取已生成下载文件名', lambda *_args, **_kwargs: '13期一阶共学打卡-20260823.xlsx')
+    monkeypatch.setattr(web, '_列出下载中心任务名', lambda keywords=None: ['旧任务'])
+
+    calls = []
+
+    def fake_download_last_file(match_keywords=None, exclude_task_names=None, **kwargs):
+        calls.append((list(match_keywords or []), list(exclude_task_names or [])))
+        return Path('C:/tmp/13期一阶共学打卡-20260823.xlsx')
+
+    monkeypatch.setattr(web, 'download_last_file', fake_download_last_file)
+
+    result = web.export_clockin_data(
+        web.tab.url,
+        expected_download_name='d260712禅宗13期一阶-共学打卡',
+        start_date='2026-07-11',
+        end_date='2026-09-11',
+    )
+
+    assert result == Path('C:/tmp/13期一阶共学打卡-20260823.xlsx')
+    assert calls == [(['13期一阶共学打卡-20260823.xlsx'], [])]
 
 
 def test_export_diary_clockin_ignores_local_empty_text_when_export_button_exists(monkeypatch):

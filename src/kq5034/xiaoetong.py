@@ -1021,6 +1021,7 @@ return fetch('/xe.merchant-service-admin.shop_list.get/2.0.0', {
         resource_deadline = time.monotonic() + resource_timeout
         cache_key = None
         expected_download_name = expected_download_name or ''
+        generated_download_name = ''
         existing_exports = None
         existing_download_tasks = []
         if 'community_admin' in url:  # 禅宗打卡
@@ -1175,25 +1176,48 @@ return fetch('/xe.merchant-service-admin.shop_list.get/2.0.0', {
             strict_name_check = bool(expected_download_name)
             try:
                 if 'community_admin' in url:
-                    # 禅宗页配置名、页面短标题与下载中心任务名经常不一致；这里按点击导出后
-                    # 新增的任务识别，避免“0”等短标题误命中旧的无关下载任务。
-                    strict_name_check = False
-                    file = self.download_last_file(
-                        exclude_task_names=existing_download_tasks,
-                        poll_seconds=15,
-                        max_wait_seconds=self._资源导出剩余秒数(
-                            resource_deadline,
-                            stage='禅宗打卡下载中心',
-                            timeout_seconds=resource_timeout,
-                            maximum=self._resource_download_center_wait_seconds,
-                        ),
-                        download_wait_seconds=self._资源导出剩余秒数(
-                            resource_deadline,
-                            stage='禅宗打卡文件落地',
-                            timeout_seconds=resource_timeout,
-                            maximum=self._resource_download_wait_seconds,
-                        ),
-                    )
+                    if generated_download_name:
+                        # “已生成【...】”是本次导出弹窗返回的精确文件名。平台对短时间内的
+                        # 重复导出可能复用原任务、不新增下载中心行；此时按该精确名称取回
+                        # 任务，仍由下方文件名校验兜底，避免复用其它课程的“共学打卡”。
+                        strict_name_check = True
+                        file = self.download_last_file(
+                            [generated_download_name],
+                            exclude_task_names=[],
+                            poll_seconds=15,
+                            max_wait_seconds=self._资源导出剩余秒数(
+                                resource_deadline,
+                                stage='禅宗打卡精确文件下载中心',
+                                timeout_seconds=resource_timeout,
+                                maximum=self._resource_download_center_wait_seconds,
+                            ),
+                            download_wait_seconds=self._资源导出剩余秒数(
+                                resource_deadline,
+                                stage='禅宗打卡精确文件落地',
+                                timeout_seconds=resource_timeout,
+                                maximum=self._resource_download_wait_seconds,
+                            ),
+                        )
+                    else:
+                        # 禅宗页配置名、页面短标题与下载中心任务名经常不一致；未返回精确
+                        # 文件名时按点击导出后新增的任务识别。
+                        strict_name_check = False
+                        file = self.download_last_file(
+                            exclude_task_names=existing_download_tasks,
+                            poll_seconds=15,
+                            max_wait_seconds=self._资源导出剩余秒数(
+                                resource_deadline,
+                                stage='禅宗打卡下载中心',
+                                timeout_seconds=resource_timeout,
+                                maximum=self._resource_download_center_wait_seconds,
+                            ),
+                            download_wait_seconds=self._资源导出剩余秒数(
+                                resource_deadline,
+                                stage='禅宗打卡文件落地',
+                                timeout_seconds=resource_timeout,
+                                maximum=self._resource_download_wait_seconds,
+                            ),
+                        )
                 elif 'diaryList' in url:
                     # 日历打卡下载中心任务名会被平台改写成活动标题或“打卡日记数据”，
                     # 不能要求它包含本地配置名；按点击后新增任务识别更稳定。
@@ -2077,6 +2101,62 @@ return fetch('/xe.data-user-behavior.live.user_list_filter/1.0.0', {
 
         return row
 
+    def _读取禅宗目录课次链接(self, tab, data_ele, *, lesson_name=''):
+        """点击“数据”并回收本次创建的详情 Tab，容忍小鹅通偶发的延迟开页。"""
+        baseline_tab_ids = set(self.browser.tab_ids)
+        detail_tab = None
+        last_error = None
+        try:
+            for attempt in range(1, 4):
+                try:
+                    data_ele.wait.clickable(timeout=5)
+                    detail_tab = data_ele.click.for_new_tab(timeout=10)
+                except RuntimeError as exc:
+                    last_error = exc
+                    tab.wait(2)
+                    created_tabs = [
+                        self.browser.get_tab(tab_id)
+                        for tab_id in self.browser.tab_ids
+                        if tab_id not in baseline_tab_ids
+                    ]
+                    usable_tabs = [
+                        item for item in created_tabs
+                        if 'resource_id=' in str(getattr(item, 'url', '') or '')
+                    ]
+                    if usable_tabs:
+                        detail_tab = usable_tabs[0]
+                    else:
+                        logger.warning(
+                            f'禅宗目录课次详情未及时开页，重试 {attempt}/3：'
+                            f'lesson={lesson_name or "-"} error={exc}'
+                        )
+                        continue
+
+                deadline = time.monotonic() + 5
+                while time.monotonic() < deadline:
+                    url = str(getattr(detail_tab, 'url', '') or '')
+                    if 'resource_id=' in url:
+                        return url
+                    tab.wait(0.2)
+                last_error = RuntimeError(
+                    f'禅宗目录课次详情未进入资源页：lesson={lesson_name or "-"} '
+                    f'url={getattr(detail_tab, "url", "")}'
+                )
+                logger.warning(f'{last_error}，重试 {attempt}/3')
+
+            raise RuntimeError(
+                f'禅宗目录课次详情连续 3 次未打开：lesson={lesson_name or "-"}'
+            ) from last_error
+        finally:
+            # 谁打开谁关闭；也回收超时后迟到的详情 Tab，避免批量目录扫描泄漏。
+            for tab_id in list(self.browser.tab_ids):
+                if tab_id in baseline_tab_ids:
+                    continue
+                try:
+                    self.browser.get_tab(tab_id).close()
+                except Exception as exc:
+                    logger.warning(f'回收禅宗目录详情 Tab 失败：tab={tab_id} error={exc}')
+
     def 爬虫获得禅宗课程目录(self, 课程目录url, *, start_name=None, stop_name=None):
         """ 禅宗爬取课程目录
 
@@ -2124,9 +2204,7 @@ return fetch('/xe.data-user-behavior.live.user_list_filter/1.0.0', {
                 name = task('t:span@@class:ss-popover__reference').text
                 data_ele = task('t:span@@text()=数据')
                 data_ele.scroll.to_see()
-                tab2 = data_ele.click.for_new_tab(timeout=10)
-                url = tab2.url
-                tab2.close()
+                url = self._读取禅宗目录课次链接(tab, data_ele, lesson_name=name)
                 task_cfgs.append([name, url])
 
             courses[chapter_name] = task_cfgs
