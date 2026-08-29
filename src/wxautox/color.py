@@ -1,8 +1,38 @@
 import warnings
 import random
+import ctypes
 import os
+import sys
 
-os.system('')
+
+def _enable_windows_virtual_terminal_processing():
+    """Enable ANSI colors without spawning ``cmd.exe`` during module import."""
+
+    if os.name != 'nt':
+        return
+
+    try:
+        from ctypes import wintypes
+
+        kernel32 = ctypes.WinDLL('kernel32', use_last_error=True)
+        enable_virtual_terminal_processing = 0x0004
+        for stream, standard_handle in ((sys.stdout, -11), (sys.stderr, -12)):
+            if stream is None or not stream.isatty():
+                continue
+            handle = kernel32.GetStdHandle(standard_handle)
+            mode = wintypes.DWORD()
+            if kernel32.GetConsoleMode(handle, ctypes.byref(mode)):
+                kernel32.SetConsoleMode(
+                    handle,
+                    mode.value | enable_virtual_terminal_processing,
+                )
+    except (AttributeError, OSError, ValueError):
+        # Color support is optional. Importing wxautox must never create a shell
+        # or fail merely because the process has no attached console.
+        return
+
+
+_enable_windows_virtual_terminal_processing()
 
 color_dict = {
     'BLACK': '\x1b[30m',
