@@ -4,7 +4,7 @@ from pyxllib.autogui.behavior_tree import (
     CurView,
     DbView,
     MatchRole,
-    Runtime,
+    AutomationContext,
     SceneNavigator,
     SceneRecognizer,
     SceneScorer,
@@ -41,17 +41,17 @@ def test_behavior_tree_view_action_match_and_navigation_basics():
         "h": 96.0,
     }
     assert ActionPlanner().shape_center(tree[0], button) == (495.0, 1488.0)
-    assert ShapeMatchPlanner().runtime_match_payload_flags({"floating": True, "ocrMatchRole": "off"})["scan"] is True
+    assert ShapeMatchPlanner().shape_match_payload_flags({"floating": True, "ocrMatchRole": "off"})["scan"] is True
     assert ShapeMatchPlanner().match_conditions({"imageMatchRole": "定", "ocrMatchRole": "定", "ocrText": "邮"}) == ["image", "ocr"]
     assert [edge["shape"]["id"] for edge in SceneNavigator(tree).find_scene_route(1, 2)] == ["jump"]
 
 
-def test_behavior_tree_runtime_wait_click_is_generic_shape_action():
+def test_behavior_tree_context_wait_click_is_generic_shape_action():
     image = _image("菜单", "0035.png", [{"id": "mail", "kind": "rect", "title": "邮件"}])
     shape = View(image).get_shape("邮件")
     calls = []
 
-    class FakeRuntime(Runtime):
+    class FakeAutomationContext(AutomationContext):
         def __init__(self):
             self.count = 0
 
@@ -61,7 +61,7 @@ def test_behavior_tree_runtime_wait_click_is_generic_shape_action():
         def get_views(self, group: str = "", recursive: bool = False):
             return []
 
-        def goto_view(self, view):
+        def go_scene(self, view):
             raise NotImplementedError
 
         def match_shape(self, candidate):
@@ -72,7 +72,7 @@ def test_behavior_tree_runtime_wait_click_is_generic_shape_action():
             calls.append((view.title, candidate.title))
             return "clicked"
 
-    waiter = shape.wait_click(FakeRuntime())
+    waiter = shape.wait_click(FakeAutomationContext())
 
     assert next(waiter) == 1
     try:
@@ -108,12 +108,12 @@ def test_behavior_tree_view_close_delegates_action_to_runtime():
     ])
     calls = []
 
-    class FakeRuntime:
+    class FakeAutomationContext:
         def click_shape(self, view, shape):
             calls.append((view.id, shape.title))
             return "clicked"
 
-    assert View(image).close(FakeRuntime()) == "clicked"
+    assert View(image).close(FakeAutomationContext()) == "clicked"
     assert calls == [(47, "空白")]
 
 
@@ -125,7 +125,7 @@ def test_behavior_tree_dbview_and_curview_separate_static_and_runtime_state():
     curview = CurView(view=dbview, score=91.5, frame={"source": "live"})
     calls = []
 
-    class FakeRuntime:
+    class FakeAutomationContext:
         def click_shape(self, view, shape):
             calls.append((type(view), view.id, shape.title))
             return "closed"
@@ -135,22 +135,22 @@ def test_behavior_tree_dbview_and_curview_separate_static_and_runtime_state():
     assert curview.id == 47
     assert curview.title == "提示"
     assert curview.raw is image
-    assert curview.close(FakeRuntime()) == "closed"
+    assert curview.close(FakeAutomationContext()) == "closed"
     assert calls == [(DbView, 47, "空白")]
 
 
-def test_behavior_tree_runtime_resolves_curview_to_static_view():
+def test_behavior_tree_context_resolves_curview_to_static_view():
     image = _image("场景", "0121.png", [])
     dbview = DbView(image)
 
-    class FakeRuntime(Runtime):
+    class FakeAutomationContext(AutomationContext):
         def get_cur_view(self, update: bool = False):
             return CurView(dbview, score=88)
 
         def get_views(self, group: str = "", recursive: bool = False):
             return [dbview]
 
-        def goto_view(self, view):
+        def go_scene(self, view):
             raise NotImplementedError
 
         def match_shape(self, candidate):
@@ -159,19 +159,19 @@ def test_behavior_tree_runtime_resolves_curview_to_static_view():
         def click_shape(self, view, candidate):
             raise NotImplementedError
 
-    runtime = FakeRuntime()
+    context = FakeAutomationContext()
 
-    assert runtime.get_view(CurView(dbview, score=88)) is dbview
-    assert runtime.get_view(121) is dbview
+    assert context.get_view(CurView(dbview, score=88)) is dbview
+    assert context.get_view(121) is dbview
 
 
-def test_behavior_tree_runtime_centered_view_and_shape_matching():
+def test_behavior_tree_context_centered_view_and_shape_matching():
     required = {"id": "required", "title": "必须", "isSceneIdentity": True, "sceneIdentityRole": "required"}
     decisive = {"id": "decisive", "title": "任一", "sceneIdentityRole": "decisive"}
     view = View(_image("世界", "0034.png", [required, decisive]))
     calls = []
 
-    class FakeRuntime(Runtime):
+    class FakeAutomationContext(AutomationContext):
         def __init__(self, matched_ids):
             self.matched_ids = set(matched_ids)
 
@@ -188,14 +188,14 @@ def test_behavior_tree_runtime_centered_view_and_shape_matching():
         def click_shape(self, view, shape):
             return shape.title
 
-        def goto_view(self, view):
+        def go_scene(self, view):
             return view
 
-    assert view.get_shape("必须").is_match(FakeRuntime({"required"})) is True
-    assert view.is_match(FakeRuntime({"decisive"})) is True
-    assert view.is_match(FakeRuntime({"required"})) is True
-    assert view.is_match(FakeRuntime(set())) is False
-    assert FakeRuntime({"required"}).find_view("日常") is view
+    assert view.get_shape("必须").is_match(FakeAutomationContext({"required"})) is True
+    assert view.is_match(FakeAutomationContext({"decisive"})) is True
+    assert view.is_match(FakeAutomationContext({"required"})) is True
+    assert view.is_match(FakeAutomationContext(set())) is False
+    assert FakeAutomationContext({"required"}).find_view("日常") is view
     assert calls[-1] == ("日常", False)
 
 
@@ -209,7 +209,7 @@ def test_behavior_tree_find_view_empty_group_ignores_nested_identity_shapes():
     }
     view = View(_image("世界", "0034.png", [nested_identity]))
 
-    class FakeRuntime(Runtime):
+    class FakeAutomationContext(AutomationContext):
         def get_cur_view(self, update: bool = False):
             return None
 
@@ -222,15 +222,15 @@ def test_behavior_tree_find_view_empty_group_ignores_nested_identity_shapes():
         def click_shape(self, view, shape):
             return None
 
-        def goto_view(self, view):
+        def go_scene(self, view):
             return None
 
-    runtime = FakeRuntime()
+    context = FakeAutomationContext()
 
-    assert view.is_match(runtime) is True
-    assert view.is_match(runtime, include_descendants=False) is False
-    assert runtime.find_view("") is None
-    assert runtime.find_view("任意分组") is view
+    assert view.is_match(context) is True
+    assert view.is_match(context, include_descendants=False) is False
+    assert context.find_view("") is None
+    assert context.find_view("任意分组") is view
 
 
 def test_shape_load_direction_prefers_canonical_field_and_reads_legacy_fields():
@@ -248,9 +248,9 @@ def test_behavior_tree_shape_load_delegates_scroll_window_to_runtime(monkeypatch
     shape = View(image).get_shape("邮件清单2")
     calls = []
     sleeps = []
-    monkeypatch.setattr("pyxllib.autogui.runtime.time.sleep", lambda seconds: sleeps.append(seconds))
+    monkeypatch.setattr("pyxllib.autogui.automation_context.time.sleep", lambda seconds: sleeps.append(seconds))
 
-    class FakeRuntime(Runtime):
+    class FakeAutomationContext(AutomationContext):
         def __init__(self):
             self.attrs = {}
             self.signatures = iter(["before", "after"])
@@ -261,7 +261,7 @@ def test_behavior_tree_shape_load_delegates_scroll_window_to_runtime(monkeypatch
         def get_views(self, group: str = "", recursive: bool = False):
             return []
 
-        def goto_view(self, view):
+        def go_scene(self, view):
             return None
 
         def match_shape(self, shape):
@@ -276,19 +276,19 @@ def test_behavior_tree_shape_load_delegates_scroll_window_to_runtime(monkeypatch
         def shape_load_signature(self, shape):
             return next(self.signatures)
 
-    runtime = FakeRuntime()
+    context = FakeAutomationContext()
 
     assert shape is not None
-    assert list(shape.load(runtime, ratio=0.6, duration=2.0)) == [1]
+    assert list(shape.load(context, ratio=0.6, duration=2.0)) == [1]
     assert calls == [("邮件清单2", 0.6, 2.0)]
     assert sleeps == [2.0]
-    assert runtime.attrs["load_new"] is True
+    assert context.attrs["load_new"] is True
 
 
 def test_behavior_tree_shape_load_without_load_direction_does_not_drag():
     shape = Shape({"title": "按钮"})
 
-    class FakeRuntime(Runtime):
+    class FakeAutomationContext(AutomationContext):
         def __init__(self):
             self.attrs = {}
 
@@ -298,7 +298,7 @@ def test_behavior_tree_shape_load_without_load_direction_does_not_drag():
         def get_views(self, group: str = "", recursive: bool = False):
             return []
 
-        def goto_view(self, view):
+        def go_scene(self, view):
             return None
 
         def match_shape(self, shape):
@@ -310,16 +310,16 @@ def test_behavior_tree_shape_load_without_load_direction_does_not_drag():
         def drag_shape_content(self, shape, *, ratio=0.5, duration=1.5):
             raise AssertionError("should not drag")
 
-    runtime = FakeRuntime()
+    context = FakeAutomationContext()
 
-    assert list(shape.load(runtime)) == []
-    assert runtime.attrs["load_new"] is False
+    assert list(shape.load(context)) == []
+    assert context.attrs["load_new"] is False
 
 
-def test_behavior_tree_runtime_wait_view_yields_until_match():
+def test_behavior_tree_context_wait_scene_yields_until_match():
     view = View(_image("目标", "0121.png", [{"id": "identity", "title": "目标", "isSceneIdentity": True}]))
 
-    class FakeRuntime(Runtime):
+    class FakeAutomationContext(AutomationContext):
         def __init__(self):
             self.attempts = 0
 
@@ -330,7 +330,7 @@ def test_behavior_tree_runtime_wait_view_yields_until_match():
         def get_views(self, group: str = "", recursive: bool = False):
             return [view]
 
-        def goto_view(self, view):
+        def go_scene(self, view):
             return None
 
         def match_shape(self, shape):
@@ -339,8 +339,8 @@ def test_behavior_tree_runtime_wait_view_yields_until_match():
         def click_shape(self, view, shape):
             return None
 
-    runtime = FakeRuntime()
-    waiter = runtime.wait_view(view)
+    context = FakeAutomationContext()
+    waiter = context.wait_scene(view)
 
     assert next(waiter) == 1
     try:
@@ -348,21 +348,21 @@ def test_behavior_tree_runtime_wait_view_yields_until_match():
     except StopIteration as exc:
         assert exc.value is view
     else:
-        raise AssertionError("wait_view should stop when the target view matches")
+        raise AssertionError("wait_scene should stop when the target view matches")
 
 
-def test_behavior_tree_runtime_wait_view_timeout(monkeypatch):
+def test_behavior_tree_context_wait_scene_timeout(monkeypatch):
     view = View(_image("目标", "0121.png", [{"id": "identity", "title": "目标", "isSceneIdentity": True}]))
     monotonic_values = iter([0.0, 0.5, 1.2])
 
-    class FakeRuntime(Runtime):
+    class FakeAutomationContext(AutomationContext):
         def get_cur_view(self, update: bool = False):
             return None
 
         def get_views(self, group: str = "", recursive: bool = False):
             return [view]
 
-        def goto_view(self, view):
+        def go_scene(self, view):
             return None
 
         def match_shape(self, shape):
@@ -371,16 +371,16 @@ def test_behavior_tree_runtime_wait_view_timeout(monkeypatch):
         def click_shape(self, view, shape):
             return None
 
-    monkeypatch.setattr("pyxllib.autogui.runtime.time.monotonic", lambda: next(monotonic_values))
-    waiter = FakeRuntime().wait_view(view, timeout=1.0)
+    monkeypatch.setattr("pyxllib.autogui.automation_context.time.monotonic", lambda: next(monotonic_values))
+    waiter = FakeAutomationContext().wait_scene(view, wait=1.0)
 
     assert next(waiter) == 1
     try:
         next(waiter)
     except TimeoutError as exc:
-        assert "等待 view 超时" in str(exc)
+        assert "等待场景超时" in str(exc)
     else:
-        raise AssertionError("wait_view should raise TimeoutError after timeout")
+        raise AssertionError("wait_scene should raise TimeoutError after timeout")
 
 
 def test_behavior_tree_action_planner_drag_shape_content_points_follow_direction():
@@ -528,7 +528,7 @@ def test_behavior_tree_public_exports_are_explicit():
         "CurView",
         "DbView",
         "MatchRole",
-        "Runtime",
+        "AutomationContext",
         "SceneNavigator",
         "SceneRecognizer",
         "SceneScorer",
@@ -552,13 +552,13 @@ def test_autogui_package_reexports_behavior_tree_foundation():
     from pyxllib.autogui import CurView as PackageCurView
     from pyxllib.autogui import DbView as PackageDbView
     from pyxllib.autogui import MatchRole as PackageMatchRole
-    from pyxllib.autogui import Runtime as PackageRuntime
+    from pyxllib.autogui import AutomationContext as PackageAutomationContext
     from pyxllib.autogui import SceneNavigator as PackageSceneNavigator
     from pyxllib.autogui import View as PackageView
 
     assert PackageCurView is CurView
     assert PackageDbView is DbView
     assert PackageMatchRole is MatchRole
-    assert PackageRuntime is Runtime
+    assert PackageAutomationContext is AutomationContext
     assert PackageSceneNavigator is SceneNavigator
     assert PackageView is View

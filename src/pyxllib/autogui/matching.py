@@ -568,7 +568,7 @@ class ShapeMatchPlanner:
             return False
         return self.ocr_role(shape) != "off"
 
-    def runtime_match_payload_flags(self, shape: dict[str, Any], *, condition: str = "auto") -> dict[str, Any]:
+    def shape_match_payload_flags(self, shape: dict[str, Any], *, condition: str = "auto") -> dict[str, Any]:
         ocr_text = str(shape.get("ocrText") or "").strip()
         image_role = self.image_role(shape)
         ocr_role = self.ocr_role(shape)

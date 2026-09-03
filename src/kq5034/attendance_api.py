@@ -22,9 +22,15 @@ XIAOETONG_SHOP_NAMES = {
 }
 
 
-DEFAULT_XL_HOSTS = """[
+_CURRENT_FILE = Path(__file__).resolve()
+DEFAULT_XL_HOMEDIR = (
+    _CURRENT_FILE.parents[4].as_posix()
+    if len(_CURRENT_FILE.parents) > 4
+    else "C:/home/chenkunze"
+)
+DEFAULT_XL_HOSTS = f"""[
 ["host",        "raw_name",     "homedir"],
-["codepc_mf",   "",             "D:/home/chenkunze"],
+["codepc_mf",   "",             "{DEFAULT_XL_HOMEDIR}"],
 ["xlpr0,titan1,titan2,tesla1,tesla2,xlpr4,xlpr8,xlpr10,xlpr6",
                 "",             "/home/chenkunze"]
 ]"""
@@ -33,7 +39,7 @@ DEFAULT_XL_HOSTS = """[
 def ensure_attendance_runtime() -> None:
     """Prepare the small amount of runtime environment KQ5034 expects."""
 
-    current_file = Path(__file__).resolve()
+    current_file = _CURRENT_FILE
     slns_dir = current_file.parents[3] if len(current_file.parents) > 3 else None
     xlproject_src = slns_dir / "xlproject" / "src" if slns_dir is not None else None
     if xlproject_src is not None and xlproject_src.exists():
@@ -67,9 +73,7 @@ def ensure_attendance_runtime() -> None:
 
     if not os.environ.get("XL_HOMEDIR"):
         hostname = socket.gethostname().replace("-", "_").split(".")[0]
-        homedir_by_host = {
-            "codepc_mf": "D:/home/chenkunze",
-        }
+        homedir_by_host = {"codepc_mf": DEFAULT_XL_HOMEDIR}
         homedir = homedir_by_host.get(hostname)
         if homedir:
             os.environ["XL_HOMEDIR"] = homedir

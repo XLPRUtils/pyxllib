@@ -6,11 +6,11 @@ from typing import Any
 from .model import CurView, Shape, View
 
 
-class Runtime:
+class AutomationContext:
     """行为树运行时上下文基类。
 
     子类负责实现截图、OCR、点击、数据读取等运行期能力；View/Shape 只借助
-    Runtime 完成匹配和动作。
+    AutomationContext 完成匹配和动作。
     """
 
     default_wait_click_timeout: float | None = None
@@ -27,8 +27,8 @@ class Runtime:
                 return view
         return None
 
-    def wait_view(self, *views: CurView | View | int, timeout: float | None = None, interval_action: int = 1):
-        """等待任一指定 view 匹配当前画面。
+    def wait_scene(self, *views: CurView | View | int, wait: float = 5.0, interval_action: int = 1):
+        """等待任一指定场景匹配当前画面。
 
         这是生成器动作：未命中时让出一次行动力，下一轮 tick 再刷新识别。
         """
@@ -41,16 +41,16 @@ class Runtime:
             for view in target_views:
                 if view.is_match(self):
                     return view
-            if timeout is not None and time.monotonic() - start >= float(timeout):
+            if time.monotonic() - start >= float(wait):
                 expected = ", ".join(str(view.id or view.title or view.filename) for view in target_views) or "<empty>"
-                raise TimeoutError(f"等待 view 超时：{expected}")
+                raise TimeoutError(f"等待场景超时：{expected}")
             yield interval_action
 
-    def goto_view(self, view: CurView | View | int) -> Any:
-        """场景移动到目标 view。
+    def go_scene(self, view: CurView | View | int) -> Any:
+        """移动到目标场景。
 
-        具体路径规划、点击后的落点学习和跳转频次维护由业务 Runtime 实现；实现中
-        应复用 wait_view 等待目标或中间落点，避免点击后立即判定造成不稳定。
+        具体路径规划、点击后的落点学习和跳转频次维护由业务 AutomationContext 实现；实现中
+        应复用 wait_scene 等待目标或中间落点，避免点击后立即判定造成不稳定。
         """
 
         raise NotImplementedError

@@ -1925,6 +1925,11 @@ return fetch('/xe.data-user-behavior.live.user_list_filter/1.0.0', {
         match = re.search(r'(?:堂|第)\s*0*(\d+)\s*(?:课)?', str(text or ''))
         return int(match.group(1)) if match else None
 
+    @staticmethod
+    def _直播课列表行已封禁(text):
+        """小鹅通仍会把封禁资源混在搜索结果中，不能作为考勤课次候选。"""
+        return '视频已封禁' in str(text or '')
+
     def search_lesson_links(self, name, live_status=None, maxn=-1, sort_by_lesson_number=False,
                             expected_count=None, required_title_keywords=None):
         """
@@ -1975,6 +1980,9 @@ return fetch('/xe.data-user-behavior.live.user_list_filter/1.0.0', {
                 break
 
             for tr in tbody.eles('tag:tr'):
+                if self._直播课列表行已封禁(getattr(tr, 'text', '')):
+                    logger.warning(f'跳过小鹅通已封禁直播资源：{getattr(tr, "text", "")}')
+                    continue
                 title = tr('.title title-hover ss-popover__reference').text
                 tab2 = None
                 try:

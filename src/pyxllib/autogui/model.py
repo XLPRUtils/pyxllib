@@ -177,50 +177,50 @@ class Shape:
             result.extend(child.descendants(include_self=True))
         return result
 
-    def is_match(self, runtime: Any) -> bool:
-        """判断当前 shape 是否匹配 runtime 的当前画面。"""
+    def is_match(self, context: Any) -> bool:
+        """判断当前 shape 是否匹配 context 的当前画面。"""
 
-        matcher = getattr(runtime, "match_shape", None)
+        matcher = getattr(context, "match_shape", None)
         if matcher is None:
-            raise RuntimeError("runtime 缺少 match_shape(shape) 能力")
+            raise RuntimeError("context 缺少 match_shape(shape) 能力")
         return bool(matcher(self))
 
-    def click(self, runtime: Any) -> Any:
+    def click(self, context: Any) -> Any:
         """点击当前 shape。
 
-        具体点击实现属于 Runtime；Shape 只携带静态标注和所属 View。
+        具体点击实现属于 AutomationContext；Shape 只携带静态标注和所属 View。
         """
 
         if not isinstance(self.parent_view, View):
             raise RuntimeError("shape 缺少 parent_view，无法点击")
-        clicker = getattr(runtime, "click_shape", None)
+        clicker = getattr(context, "click_shape", None)
         if clicker is None:
-            raise RuntimeError("runtime 缺少 click_shape(view, shape) 能力")
+            raise RuntimeError("context 缺少 click_shape(view, shape) 能力")
         return clicker(self.parent_view, self)
 
-    def wait_click(self, runtime: Any, *, timeout: float | None = None) -> Any:
+    def wait_click(self, context: Any, *, timeout: float | None = None) -> Any:
         """等待当前 shape 命中后点击。
 
-        这是生成器动作。Runtime 负责等待、定位结果复用和实际点击。
+        这是生成器动作。AutomationContext 负责等待、定位结果复用和实际点击。
         """
 
         if not isinstance(self.parent_view, View):
             raise RuntimeError("shape 缺少 parent_view，无法等待点击")
-        wait_clicker = getattr(runtime, "wait_click_shape", None)
+        wait_clicker = getattr(context, "wait_click_shape", None)
         if wait_clicker is None:
-            raise RuntimeError("runtime 缺少 wait_click_shape(view, shape) 能力")
+            raise RuntimeError("context 缺少 wait_click_shape(view, shape) 能力")
         return (yield from wait_clicker(self.parent_view, self, timeout=timeout))
 
-    def load(self, runtime: Any, ratio: float = 0.5, duration: float = 1.5):
+    def load(self, context: Any, ratio: float = 0.5, duration: float = 1.5):
         """滚动加载当前 shape 表示的内容窗口。
 
-        runtime.attrs["load_new"] 表示本次滚动后是否仍有新内容。底层如何截图、
-        拖拽、比较内容变化由 Runtime 决定。
+        context.attrs["load_new"] 表示本次滚动后是否仍有新内容。底层如何截图、
+        拖拽、比较内容变化由 AutomationContext 决定。
         """
 
-        loader = getattr(runtime, "load_shape", None)
+        loader = getattr(context, "load_shape", None)
         if loader is None:
-            raise RuntimeError("runtime 缺少 load_shape(shape, ratio, duration) 能力")
+            raise RuntimeError("context 缺少 load_shape(shape, ratio, duration) 能力")
         yield from loader(self, ratio=ratio, duration=duration)
 
     def box(self, image: View | dict[str, Any] | None = None) -> dict[str, float | str]:
@@ -241,7 +241,7 @@ class View:
     """一帧画面标注。
 
     View 保存数据库/帧树中的静态标注；当前画面、点击、截图、OCR 等运行期能力
-    由 Runtime 提供。
+    由 AutomationContext 提供。
     """
 
     raw: dict[str, Any] | None = None
@@ -311,8 +311,8 @@ class View:
             return 1
         return 2 if any(shape.is_scene_identity for shape in self.get_shapes(include_groups=False)) else 3
 
-    def is_match(self, runtime: Any, *, include_descendants: bool = True) -> bool:
-        """借助场景标识 shape 判断 runtime 当前画面是否匹配当前 view。"""
+    def is_match(self, context: Any, *, include_descendants: bool = True) -> bool:
+        """借助场景标识 shape 判断 context 当前画面是否匹配当前 view。"""
 
         shapes = [
             shape
@@ -323,23 +323,23 @@ class View:
             return False
 
         decisive_shapes = [shape for shape in shapes if shape.scene_identity_role is MatchRole.decisive]
-        if any(shape.is_match(runtime) for shape in decisive_shapes):
+        if any(shape.is_match(context) for shape in decisive_shapes):
             return True
 
         required_shapes = [shape for shape in shapes if shape.scene_identity_role is MatchRole.required]
-        return bool(required_shapes) and all(shape.is_match(runtime) for shape in required_shapes)
+        return bool(required_shapes) and all(shape.is_match(context) for shape in required_shapes)
 
-    def close(self, runtime: Any) -> Any:
+    def close(self, context: Any) -> Any:
         """尝试关闭当前帧。
 
-        语义上 close 动作发生在 runtime 上，View 只提供“该怎么关”的静态标注依据。
+        语义上 close 动作发生在 context 上，View 只提供“该怎么关”的静态标注依据。
         """
 
         from .actions import CloseActionPlanner
 
         shape = CloseActionPlanner().choose_close_shape([shape.raw for shape in self.get_shapes()])
         if shape is not None:
-            return runtime.click_shape(self, Shape(shape, parent_view=self))
+            return context.click_shape(self, Shape(shape, parent_view=self))
         raise RuntimeError(f"帧「{self.title or self.id}」缺少可关闭标注")
 
 
@@ -354,10 +354,10 @@ class DbView(View):
 
 @dataclass(frozen=True)
 class CurView:
-    """Runtime 识别到的当前帧。
+    """AutomationContext 识别到的当前帧。
 
     CurView 只描述一次运行期观测结果；静态标注仍由 ``view`` 指向的 DbView/View
-    承载，点击、截图、OCR 等能力仍由 Runtime 执行。
+    承载，点击、截图、OCR 等能力仍由 AutomationContext 执行。
     """
 
     view: View | None = None
@@ -383,12 +383,12 @@ class CurView:
     def raw(self) -> dict[str, Any] | None:
         return self.view.raw if isinstance(self.view, View) else None
 
-    def close(self, runtime: Any) -> Any:
+    def close(self, context: Any) -> Any:
         """按当前识别到的静态帧标注关闭画面。"""
 
         if not isinstance(self.view, View):
             raise RuntimeError("当前帧缺少对应的静态 View，无法关闭")
-        return self.view.close(runtime)
+        return self.view.close(context)
 
 
 def image_number(image: dict[str, Any] | None) -> int | None:

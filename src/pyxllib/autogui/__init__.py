@@ -36,7 +36,7 @@ from .model import (
     normalize_match_role,
 )
 from .navigation import SceneNavigator
-from .runtime import Runtime
+from .automation_context import AutomationContext
 
 __all__ = [
     "ActionPlanner",
@@ -49,7 +49,7 @@ __all__ = [
     "MatchRole",
     "CurView",
     "DbView",
-    "Runtime",
+    "AutomationContext",
     "SceneNavigator",
     "SceneRecognizer",
     "SceneScoreFunc",

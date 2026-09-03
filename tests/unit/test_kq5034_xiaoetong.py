@@ -633,3 +633,8 @@ def test_search_lesson_links_closes_detail_tab_before_yield(monkeypatch):
         'lesson_id': 'lesson_123',
         'lesson_id2': 'lesson_123',
     }
+
+
+def test_search_lesson_links_recognizes_banned_resource_rows():
+    assert XiaoetongWeb._直播课列表行已封禁('视频已封禁 第50届觉观技术公益网课-17') is True
+    assert XiaoetongWeb._直播课列表行已封禁('第50届觉观技术公益网课-17 已上架 未开始') is False

@@ -11,7 +11,7 @@ from pathlib import Path
 
 WEIXIN_DLL = Path(r"C:\Program Files\Tencent\Weixin\4.1.12.55\Weixin.dll")
 EXPECTED_SHA256 = "7AD9753D11C2BAF5C900AAC50DDF56A8170AA85C46129D661325FF88505BEFB1"
-DEFAULT_CONTACT_DB = Path(r"D:\home\chenkunze\data\d2605微信逆向\decrypted\db_storage\contact\contact.db")
+DEFAULT_CONTACT_DB = Path(r"C:\home\chenkunze\data\d2605微信逆向\decrypted\db_storage\contact\contact.db")
 RECIPIENT_ALIASES = {"文件传输助手": "filehelper"}
 NATIVE_SOURCE = Path(__file__).with_name("native") / "weixin_4_1_12_send.c"
 NATIVE_ADAPTER = NATIVE_SOURCE.with_suffix(".dll")

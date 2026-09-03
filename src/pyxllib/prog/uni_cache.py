@@ -295,7 +295,10 @@ class UniCacheWrapper:
     def _init_backend(self, maxsize, ttl):
         """根据配置选择最佳的存储容器"""
         if ttl and ttl > 0:
-            self._cache = TTLCache(maxsize=maxsize, ttl=ttl)
+            # cachebox 6 renamed ``ttl`` to ``global_ttl`` while retaining the
+            # same positional constructor contract.  Positional arguments keep
+            # this wrapper compatible with both the old and new releases.
+            self._cache = TTLCache(maxsize, ttl)
         else:
             self._cache = LRUCache(maxsize=maxsize)
 
