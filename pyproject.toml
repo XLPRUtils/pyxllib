@@ -94,15 +94,13 @@ xlsx = [ # 表格相关工具
 autogui = [
     "psutil",                                # 进程管理
     "mss",                                   # 获取屏幕窗口
-    "pillow",                                # wxautox 依赖的 PIL / ImageGrab
+    "pillow",                                # 截图与图像处理
     "pyperclip",                             # 剪切板复制粘贴，我的qt、utools、docxlib等有使用
     "klembord",                              # 富文本复制粘贴
     "keyboard",                              # 键盘操作
     "pynput",
     "pyautogui",                             # 包含pygetwindow，这个库主要也就用来比较简单获得当前激活窗口，全部窗口等信息。更综合的能力不如pywinauto
-    "tenacity",                              # wxautox 重试装饰器依赖
-    "typing-extensions",                     # wxautox 的 Literal 类型依赖
-    "comtypes; sys_platform == 'win32'",     # wxautox 的 UIAutomation 依赖
+    "wxauto4>=41.1.7; sys_platform == 'win32'", # 微信 4.x 免费版桌面自动化
     "uiautomation; sys_platform == 'win32'", # ui窗口自动化操作
     "pywin32; sys_platform == 'win32'",      # win32com、win32api等很多win32前缀的库
 ]
@@ -171,7 +169,7 @@ exclude = [".github", ".gitignore", ".gitattributes", "tests", "examples"]
 path = "src/pyxllib/__init__.py"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/pyxllib", "src/pyxlpr", "src/wxautox", "src/kq5034"]
+packages = ["src/pyxllib", "src/pyxlpr", "src/kq5034"]
 
 [tool.uv]
 index-url = "https://pypi.tuna.tsinghua.edu.cn/simple"

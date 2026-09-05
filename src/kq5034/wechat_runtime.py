@@ -8,7 +8,6 @@ from ctypes import wintypes
 
 from .common import *  # noqa: F403
 from pyxllib.prog import process_runtime
-from wxautox.utils import RollIntoView
 
 
 _微信主窗口类名 = {'WeChatMainWndForPC', 'WeChatLoginWndForPC'}
@@ -66,6 +65,36 @@ class _Win32HelperControl:
             user32.SetForegroundWindow(wintypes.HWND(hwnd))
         except Exception as exc:
             logger.warning(f'激活微信支付商家助手Win32窗口失败：hwnd={hwnd} err={exc!r}')
+
+
+class _WeChatImagePreview:
+    """Minimal image-preview adapter built directly on the public UIA package."""
+
+    def __init__(self):
+        self.api = uia.WindowControl(ClassName='ImagePreviewWnd', searchDepth=1)
+        self.UiaAPI = self.api
+
+    @property
+    def ToolsBox(self):
+        for control_type in ('ToolBarControl', 'PaneControl'):
+            try:
+                control = getattr(self.api, control_type)(searchDepth=4)
+                if control.Exists(0.2):
+                    return control
+            except Exception:
+                pass
+        return None
+
+    @property
+    def t_qrcode(self):
+        for pattern in ('二维码', 'QR', 'Code'):
+            try:
+                control = self.api.ButtonControl(RegexName=f'.*{pattern}.*', searchDepth=8)
+                if control.Exists(0.2):
+                    return control
+            except Exception:
+                pass
+        return None
 
 
 def _微信二维码诊断目录(stage):
@@ -516,7 +545,7 @@ def _子控件摘要(ctrl, *, limit=40):
 
 
 def _采集微信二维码诊断(stage, err=None, *, include_uia=True):
-    """采集微信二维码识别失败时的桌面证据，避免只留下 wxautox 栈。"""
+    """采集微信二维码识别失败时的桌面证据，避免只留下 UIA 调用栈。"""
     diag_dir = _微信二维码诊断目录(stage)
     try:
         screenshot = pyautogui.screenshot()
@@ -700,7 +729,7 @@ def _点击匹配控件(root, keywords, *, control_types=None):
 
 
 def _点击微信二维码消息(msg):
-    """尽量点击消息里的图片本体，避免 wxautox 的头像偏移点击落空。"""
+    """尽量点击消息里的图片本体，避免头像偏移点击落空。"""
     control = getattr(msg, 'control', None)
     content = str(getattr(msg, 'content', '') or '')
     if control is None:
@@ -708,7 +737,9 @@ def _点击微信二维码消息(msg):
         return 'message.click:no-control'
 
     try:
-        RollIntoView(getattr(msg, 'chatbox').ListControl(), control, equal=True)
+        roll_into_view = getattr(msg, 'roll_into_view', None)
+        if callable(roll_into_view):
+            roll_into_view()
     except Exception:
         pass
     try:
@@ -1158,7 +1189,7 @@ def _等待微信图片预览或商家助手(*, timeout=8, stable_seconds=0.8, r
                 if rect == last_rect:
                     if stable_since is not None and now - stable_since >= stable_seconds:
                         try:
-                            image = WeChatImage()
+                            image = _WeChatImagePreview()
                             logger.info(f'微信支付扫码登录：二维码图片预览已稳定 rect={rect}')
                             return image, None
                         except Exception as exc:
@@ -1260,7 +1291,7 @@ def _规范化微信支付商家助手窗口(ctrl):
 class KqWechat:
     @staticmethod
     def 创建微信实例():
-        """ wxautox 初始化时会直接 print，某些控制台环境下会触发 stdout flush 异常 """
+        """微信 UI 自动化初始化可能输出文本，某些控制台环境会触发 stdout flush 异常。"""
         with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
             return WeChat()
 
@@ -1836,7 +1867,7 @@ class KqWechat:
                 raise RuntimeError(f'微信会话没有可点击消息：user={user!r}，诊断目录：{diag_dir}')
             messages[-1].click()
 
-        image = WeChatImage()
+        image = _WeChatImagePreview()
         candidates = []
         for label, ctrl in _微信图片二维码按钮候选(image):
             candidates.append({
@@ -1913,7 +1944,7 @@ class KqWechat:
         service_name = '懒人信息转发服务'
 
         def message_text(message):
-            """兼容 wxautox 的 Message 对象；短信文本可能在 sender/info 中。"""
+            """兼容微信 UI 自动化的 Message 对象；短信文本可能在 sender/info 中。"""
             if message is None:
                 return ''
             if isinstance(message, str):

@@ -24,7 +24,7 @@ class WeChatArchiveError(RuntimeError):
 
 
 class WeChatChatNotFoundError(WeChatArchiveError):
-    """Raised when wxautox cannot enter the requested chat."""
+    """Raised when WeChat UI automation cannot enter the requested chat."""
 
 
 def _now_text():
@@ -190,7 +190,7 @@ def classify_message_type(msg_type, mtype, content):
 
 
 def normalize_wx_messages(messages, chat_name, collected_at=None, now=None):
-    """Normalize wxautox message objects into plain dictionaries."""
+    """Normalize WeChat UI message objects into plain dictionaries."""
     collected_at = collected_at or _now_text()
     current_time = None
     current_time_label = None
@@ -1294,41 +1294,29 @@ class WeChatArchive:
     def _create_wechat(self):
         from pyxllib.autogui.wxautolib import WeChat
 
-        try:
-            return WeChat()
-        except Exception as init_error:
-            try:
-                from wxautox.elements import WeChatBase
-                original = WeChatBase._get_now_msgid
-            except Exception:
-                raise init_error
-
-            def safe_get_now_msgid(*args, **kwargs):
-                try:
-                    return original(*args, **kwargs)
-                except Exception:
-                    return []
-
-            WeChatBase._get_now_msgid = safe_get_now_msgid
-            try:
-                return WeChat()
-            finally:
-                WeChatBase._get_now_msgid = original
+        return WeChat()
 
     def _configure_media_save_path(self):
         os.makedirs(self.media_dir, exist_ok=True)
         try:
             from pyxllib.autogui.wxautolib import WxParam
 
-            if hasattr(WxParam, "DEFALUT_SAVEPATH"):
-                WxParam.DEFALUT_SAVEPATH = self.media_dir
+            if hasattr(WxParam, "DEFAULT_SAVE_PATH"):
+                WxParam.DEFAULT_SAVE_PATH = self.media_dir
         except Exception:
             pass
 
     def _enter_chat(self, wx, chat_name, exact=True):
         if not hasattr(wx, "ChatWith"):
             return chat_name
-        matched_name = wx.ChatWith(chat_name, timeout=self.chat_timeout, exact=exact)
+        try:
+            matched_name = wx.ChatWith(chat_name, exact=exact)
+        except TypeError:
+            # Compatibility with the old 3.x client signature.
+            matched_name = wx.ChatWith(chat_name, timeout=self.chat_timeout, exact=exact)
+        if not matched_name and hasattr(wx, "ChatInfo"):
+            info = wx.ChatInfo() or {}
+            matched_name = info.get("chat_name")
         if exact:
             if not matched_name:
                 raise WeChatChatNotFoundError("Cannot find WeChat chat: {}".format(chat_name))
@@ -1341,7 +1329,9 @@ class WeChatArchive:
     def _get_chat_info(self, wx, fallback_name):
         info = {}
         try:
-            if hasattr(wx, "CurrentChat"):
+            if hasattr(wx, "ChatInfo"):
+                info = wx.ChatInfo() or {}
+            elif hasattr(wx, "CurrentChat"):
                 info = wx.CurrentChat(details=True) or {}
         except Exception:
             info = {}
@@ -1380,7 +1370,9 @@ class WeChatArchive:
             time.sleep(poll_interval)
 
     def _load_more_message(self, wx, interval=0.3, max_steps=20):
-        """Bounded variant of wxautox.LoadMoreMessage."""
+        """Bounded variant of the UI client's ``LoadMoreMessage`` method."""
+        if not hasattr(wx, "LoadMoreMessage"):
+            return False
         msg_list = _safe_getattr(wx, "C_MsgList", None)
         if msg_list is None or not hasattr(msg_list, "GetChildren") or max_steps is None:
             return wx.LoadMoreMessage(interval=interval)

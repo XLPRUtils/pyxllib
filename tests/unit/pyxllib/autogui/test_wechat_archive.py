@@ -510,49 +510,30 @@ def test_schema_migration_adds_incremental_tables(tmp_path):
         conn.close()
 
 
-def test_create_wechat_temporarily_patches_msgid_reader(monkeypatch, tmp_path):
+def test_create_wechat_uses_configured_client(monkeypatch, tmp_path):
     import pyxllib.autogui as autogui_pkg
 
     wxautolib = types.ModuleType("pyxllib.autogui.wxautolib")
-    wxautox = types.ModuleType("wxautox")
-    wxautox.__path__ = []
-    elements = types.ModuleType("wxautox.elements")
-    state = {"calls": 0, "fallback_result": None}
-
-    class WeChatBase:
-        def _get_now_msgid(self, *args, **kwargs):
-            raise RuntimeError("msgid unavailable")
-
-    original = WeChatBase._get_now_msgid
 
     class FakeWeChat:
         def __init__(self):
-            state["calls"] += 1
-            if state["calls"] == 1:
-                raise RuntimeError("wechat init failed")
-            state["fallback_result"] = WeChatBase()._get_now_msgid("extra", source="test")
+            self.ready = True
 
     wxautolib.WeChat = FakeWeChat
-    elements.WeChatBase = WeChatBase
-    wxautox.elements = elements
     monkeypatch.setattr(autogui_pkg, "wxautolib", wxautolib, raising=False)
     monkeypatch.setitem(sys.modules, "pyxllib.autogui.wxautolib", wxautolib)
-    monkeypatch.setitem(sys.modules, "wxautox", wxautox)
-    monkeypatch.setitem(sys.modules, "wxautox.elements", elements)
 
     archive = WeChatArchive(tmp_path / "wechat.sqlite", wx=FakeWx([[]]))
 
-    assert isinstance(archive._create_wechat(), FakeWeChat)
-    assert state == {"calls": 2, "fallback_result": []}
-    assert WeChatBase._get_now_msgid is original
+    client = archive._create_wechat()
+    assert isinstance(client, FakeWeChat)
+    assert client.ready is True
 
 
-def test_create_wechat_reraises_original_error_when_msgid_patch_unavailable(monkeypatch, tmp_path):
+def test_create_wechat_propagates_client_initialization_error(monkeypatch, tmp_path):
     import pyxllib.autogui as autogui_pkg
 
     wxautolib = types.ModuleType("pyxllib.autogui.wxautolib")
-    wxautox = types.ModuleType("wxautox")
-    wxautox.__path__ = []
 
     class FakeWeChat:
         def __init__(self):
@@ -561,8 +542,6 @@ def test_create_wechat_reraises_original_error_when_msgid_patch_unavailable(monk
     wxautolib.WeChat = FakeWeChat
     monkeypatch.setattr(autogui_pkg, "wxautolib", wxautolib, raising=False)
     monkeypatch.setitem(sys.modules, "pyxllib.autogui.wxautolib", wxautolib)
-    monkeypatch.setitem(sys.modules, "wxautox", wxautox)
-    monkeypatch.delitem(sys.modules, "wxautox.elements", raising=False)
 
     archive = WeChatArchive(tmp_path / "wechat.sqlite", wx=FakeWx([[]]))
 

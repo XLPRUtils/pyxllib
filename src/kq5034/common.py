@@ -160,13 +160,7 @@ def _ensure_xlproject_loadenv():
 _ensure_xlproject_loadenv()
 
 import pyautogui
-
-try:  # 旧版vip买的wxautox
-    from wxautox.elements import WeChatImage
-except ImportError:  # pypi的wxautox，这个跟前面的那个wxautox还是有区别的
-    from wxautox.ui.component import WeChatImage
-
-from wxautox import uia
+import uiautomation as uia
 from pyxllib.autogui.uiautolib import UiCtrlNode
 
 

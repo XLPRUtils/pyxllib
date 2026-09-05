@@ -14,16 +14,11 @@ except ModuleNotFoundError:
     logger = lazy_import('from loguru import logger')
 
 if sys.platform == 'win32':
-    try:  # 尝试加载VIP版
-        from wxautox import WeChat
-        from wxautox.elements import WxParam  # WxParam.DEFALUT_SAVEPATH 可以用来配置数据自动保存位置
-    except ModuleNotFoundError:  # 否则用贫民版
-        try:
-            from wxauto import WeChat
-        except ModuleNotFoundError:
-            WeChat = lazy_import('from wxauto import WeChat', 'wxauto')
-        # 这个只有wxautox才有
-        WxParam = lazy_import('from wxautox.elements import WxParam', 'wxautox')
+    try:
+        from wxauto4 import WeChat, WxParam
+    except ModuleNotFoundError:
+        WeChat = lazy_import('from wxauto4 import WeChat', 'wxauto4')
+        WxParam = lazy_import('from wxauto4 import WxParam', 'wxauto4')
 
 from pyxllib.prog.filelock import get_autogui_lock
 
