@@ -273,6 +273,50 @@ def test_export_lesson_data_caps_single_lesson_wait(monkeypatch):
     assert XiaoetongWeb._lesson_resource_export_timeout_seconds == 5 * 60
 
 
+def test_export_lesson_data_accepts_single_community_table(monkeypatch):
+    class FakeBody:
+        def eles(self, locator):
+            assert locator == 't:tr'
+            return [object()]
+
+    class FakeTable:
+        def __call__(self, locator):
+            assert locator == 't:tbody'
+            return FakeBody()
+
+    class FakeCommunityTab(_FakeTab):
+        url = 'https://admin.xiaoe-tech.com/t/community_admin/miniCommunity#/course_detail_page?id=1'
+
+        def eles(self, locator):
+            if locator == 't:table@@class=ant-table-fixed':
+                return [FakeTable()]
+            return super().eles(locator)
+
+    web = XiaoetongWeb.__new__(XiaoetongWeb)
+    web.tab = FakeCommunityTab()
+    web.exist_files = set()
+
+    class FakeTempTab:
+        def __enter__(self):
+            return web.tab
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+    monkeypatch.setattr(web, '_make_runtime_cache_key', lambda *args, **kwargs: 'community-cache-key')
+    monkeypatch.setattr(web, '_restore_runtime_cached_file', lambda *args, **kwargs: XiaoetongWeb._CACHE_MISS)
+    monkeypatch.setattr(web, '_store_runtime_cached_file', lambda _key, file: file)
+    monkeypatch.setattr(web, '临时工作标签页', lambda *args, **kwargs: FakeTempTab())
+    monkeypatch.setattr(web, 'download_last_file', lambda **kwargs: Path('C:/tmp/community-export.csv'))
+
+    result = web.export_lesson_data({
+        'lesson_id2': web.tab.url,
+        'lesson_name': '单表课次',
+    })
+
+    assert result == Path('C:/tmp/community-export.csv')
+
+
 def test_export_camp_pro_api_csv_paginates_and_matches_native_columns(monkeypatch, tmp_path):
     web = XiaoetongWeb.__new__(XiaoetongWeb)
     lesson_url = (

@@ -1807,7 +1807,14 @@ return fetch('/xe.data-user-behavior.live.user_list_filter/1.0.0', {
 
             if url.startswith('https://admin.xiaoe-tech.com/t/community_admin/miniCommunity#/course_detail_page'):
                 # 空表，不用处理
-                trs = tab.eles('t:table@@class=ant-table-fixed')[1]('t:tbody').eles('t:tr')
+                # 小鹅通旧页面会同时渲染固定列和主体两张表，新页面在部分
+                # 课次只渲染一张。主体表始终位于最后，不能假定索引 1 存在。
+                tables = tab.eles('t:table@@class=ant-table-fixed')
+                if not tables:
+                    raise RuntimeError(
+                        f'课次数据表未加载：lesson={row.get("lesson_name", row["lesson_id2"])} url={tab.url}'
+                    )
+                trs = tables[-1]('t:tbody').eles('t:tr')
                 if not trs:
                     self._store_runtime_cached_file(cache_key, None)
                     return
