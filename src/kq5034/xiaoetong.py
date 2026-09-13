@@ -1112,6 +1112,14 @@ return fetch('/xe.merchant-service-admin.shop_list.get/2.0.0', {
                 confirm_btn.click()  # 这是两个不同的"确认"按钮
             tab('tag:button@@class=el-button el-button--primary@@text():导出').click()
             tab.wait(3)
+            # 平台对所选日期内零条动态明确提示“无数据导出”，不会创建下载任务。
+            # 只接受本次提交后的完整反馈行；列表局部“暂无数据”不能证明导出为空。
+            export_feedback = tab.run_js('return document.body.innerText || ""') or ''
+            if '无数据导出' in {line.strip() for line in export_feedback.splitlines()}:
+                logger.info(f'禅宗打卡所选日期无数据：start={start_date} end={end_date} url={url}')
+                if download and cache_key is not None:
+                    self._store_runtime_cached_file(cache_key, None)
+                return None
             generated_download_name = self._提取已生成下载文件名(tab)
             if generated_download_name:
                 expected_download_name = generated_download_name

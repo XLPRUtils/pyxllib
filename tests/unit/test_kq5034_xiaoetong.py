@@ -376,7 +376,8 @@ def test_camp_pro_api_rejects_incomplete_pagination(monkeypatch):
         )
 
 
-def test_export_clockin_data_prefers_page_name_and_falls_back_to_new_task(monkeypatch):
+@pytest.mark.parametrize('export_feedback', ['', '暂无数据', '无数据导出'])
+def test_export_clockin_data_prefers_page_name_and_falls_back_to_new_task(monkeypatch, export_feedback):
     web = XiaoetongWeb.__new__(XiaoetongWeb)
 
     class _ClockinElement:
@@ -410,7 +411,7 @@ def test_export_clockin_data_prefers_page_name_and_falls_back_to_new_task(monkey
             return self
 
         def run_js(self, *_args, **_kwargs):
-            return '13期一阶忏悔门打卡\n任务数据'
+            return '13期一阶忏悔门打卡\n任务数据\n' + export_feedback
 
         def wait(self, *_args, **_kwargs):
             return None
@@ -418,7 +419,8 @@ def test_export_clockin_data_prefers_page_name_and_falls_back_to_new_task(monkey
     web.tab = _ClockinTab()
     monkeypatch.setattr(web, '_make_runtime_cache_key', lambda *args, **kwargs: 'clockin-cache-key')
     monkeypatch.setattr(web, '_restore_runtime_cached_file', lambda *args, **kwargs: XiaoetongWeb._CACHE_MISS)
-    monkeypatch.setattr(web, '_store_runtime_cached_file', lambda _key, file: file)
+    cached = []
+    monkeypatch.setattr(web, '_store_runtime_cached_file', lambda key, file: (cached.append((key, file)), file)[1])
     monkeypatch.setattr(
         web,
         '_查找本地下载文件',
@@ -446,6 +448,11 @@ def test_export_clockin_data_prefers_page_name_and_falls_back_to_new_task(monkey
         exclude_existing_download_tasks=False,
     )
 
+    if export_feedback == '无数据导出':
+        assert result is None
+        assert calls == []
+        assert cached == [('clockin-cache-key', None)]
+        return
     assert result == Path('C:/tmp/13期一阶忏悔门打卡.csv')
     assert len(calls) == 1
     assert calls[0][:2] == (None, ['旧任务'])
