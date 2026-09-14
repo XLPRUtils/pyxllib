@@ -93,6 +93,33 @@ def test_assert_shop_rejects_wrong_visible_shop(monkeypatch):
         web.assert_shop(2)
 
 
+def test_assert_shop_refreshes_stale_header_after_other_tab_switches_shop():
+    class StaleTab:
+        url = 'https://admin.xiaoe-tech.com/t/merchant/index'
+        refreshed = False
+
+        def eles(self, locator, **kwargs):
+            return [] if self.refreshed else [type('Notice', (), {
+                'states': type('States', (), {'is_displayed': True})(),
+            })()]
+
+        def refresh(self):
+            self.refreshed = True
+
+        def __call__(self, locator, **kwargs):
+            shop = '宗门学府' if self.refreshed else '5034山中薪'
+            return locator.endswith('=' + shop)
+
+    web = XiaoetongWeb.__new__(XiaoetongWeb)
+    web.tab = StaleTab()
+    web.cur_shop_id = 1
+    with pytest.raises(RuntimeError, match='current_shop=宗门学府'):
+        web.assert_shop(1)
+    assert web.tab.refreshed
+    assert web.cur_shop_id is None
+    assert web.assert_shop(2) is web.tab
+
+
 def test_switch_shop_navigates_with_timeout_and_confirms_visible_shop(monkeypatch):
     class FakeSwitchTab(_FakeTab):
         def __init__(self):

@@ -333,6 +333,12 @@ class XiaoetongWeb(DpWebBase):
 
     def _当前店铺名(self, timeout=0.8):
         tab = self.tab
+        # 店铺身份由共享登录态决定。其它页签切店后，本页页眉仍会保留
+        # 旧店名；平台的切店通知意味着必须刷新后才能校验真实身份。
+        stale_notice = tab.eles('text:您已切换到其他店铺，当前页面需要刷新后才能继续操作', timeout=0)
+        if any(notice.states.is_displayed for notice in stale_notice):
+            self.cur_shop_id = None
+            tab.refresh()
         for name in ('5034山中薪', '宗门学府'):
             if tab(f'tag:span@@class:global-shop-name@@text()={name}', timeout=timeout):
                 return name
