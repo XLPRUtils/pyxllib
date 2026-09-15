@@ -2,10 +2,35 @@
 #include <stdint.h>
 #include <string.h>
 
+/*
+ * 版本无关的进程内微信文本发送适配器。
+ *
+ * 函数地址与消息结构偏移全部由调用方（weixin4_offsets 解析结果）通过
+ * SendParams 传入，因此微信更新后不需要重新编译本适配器；只需重新解析布局。
+ */
+
 typedef void (*fn_one)(void *out);
 typedef void (*fn_two)(uint64_t value, void *out);
 typedef intptr_t (*fn_ctor)(void *object);
 typedef intptr_t (*fn_send)(uint64_t context, void *scratch, void *vector, int flag);
+
+typedef struct {
+    uintptr_t get_coro;
+    uintptr_t get_service;
+    uintptr_t get_context;
+    uintptr_t message_ctor;
+    uintptr_t do_send;
+    uint32_t object_size;
+    uint32_t content_off;
+    uint32_t wxid_off;
+    uint32_t len_off;
+    uint32_t flag_off;
+    uint32_t kind_off;
+    uint32_t subtype_off;
+    uint32_t flag_value;
+    uint32_t kind_value;
+    uint32_t subtype_value;
+} SendParams;
 
 static void noop(void *value) { (void)value; }
 static void *fake_vtable[2] = {(void *)&noop, (void *)&noop};
@@ -43,17 +68,18 @@ static void release_shared(uint64_t control_value) {
 }
 
 __declspec(dllexport) int SendTextNow(
-    uintptr_t base_value, const char *wxid, const char *content,
+    const SendParams *params, const char *wxid, const char *content,
     uintptr_t *diagnostics
 ) {
-    unsigned char *base = (unsigned char *)base_value;
-    fn_one get_coro = (fn_one)(base + 0x42010);
-    fn_two get_service = (fn_two)(base + 0x339480);
-    fn_two get_context = (fn_two)(base + 0x6cea20);
-    fn_ctor message_ctor = (fn_ctor)(base + 0x738e90);
-    fn_send do_send = (fn_send)(base + 0x1734330);
+    if (!params) return 1;
 
-    const size_t object_size = 0x1000;
+    fn_one get_coro = (fn_one)params->get_coro;
+    fn_two get_service = (fn_two)params->get_service;
+    fn_two get_context = (fn_two)params->get_context;
+    fn_ctor message_ctor = (fn_ctor)params->message_ctor;
+    fn_send do_send = (fn_send)params->do_send;
+
+    const size_t object_size = params->object_size;
     unsigned char *full = (unsigned char *)HeapAlloc(
         GetProcessHeap(), HEAP_ZERO_MEMORY, 0x10 + object_size + 64);
     if (!full) return 0;
@@ -68,12 +94,12 @@ __declspec(dllexport) int SendTextNow(
     message_ctor(object);
     *(void **)(object + 8) = object;
     *(void **)(object + 16) = control;
-    *(uint32_t *)(object + 0x9c) = 1;
-    *(uint64_t *)(object + 0x118) = 1;
-    *(uint64_t *)(object + 0x180) = 0x77;
-    *(uint64_t *)(object + 0x1c8) = (uint64_t)strlen(content);
-    assign_string(object + 0xb0, wxid);
-    assign_string(object + 0x758, content);
+    *(uint32_t *)(object + params->kind_off) = params->kind_value;
+    *(uint32_t *)(object + params->flag_off) = params->flag_value;
+    *(uint64_t *)(object + params->subtype_off) = params->subtype_value;
+    *(uint64_t *)(object + params->len_off) = (uint64_t)strlen(content);
+    assign_string(object + params->wxid_off, wxid);
+    assign_string(object + params->content_off, content);
 
     *(void **)element = object;
     *(void **)(element + 8) = control;
