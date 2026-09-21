@@ -644,6 +644,7 @@ class WeChatDbStorage:
         exists = {name: path.exists() for name, path in dbs.items()}
         return {
             "db_storage_path": os.fspath(self.root),
+            "live_account_root": self._load_sync_state().get("live_account_root"),
             "exists": self.root.exists(),
             "databases": exists,
             "ready": exists["session"] and exists["message"],
@@ -742,6 +743,8 @@ class WeChatDbStorage:
         cached_account_root = self._valid_wechat_account_root(Path(str(state.get("live_account_root")))) if state.get("live_account_root") else None
         if cached_account_root:
             return cached_account_root
+        if state.get("live_account_root"):
+            raise WeChatDbError("已绑定的微信账号目录不可用，拒绝自动切换账号")
         if self.root.name == "db_storage":
             candidates.append(self.root.parent)
         env_path = (os.environ.get("CODEYUN_WECHAT_ACCOUNT_ROOT") or "").strip()
@@ -769,11 +772,17 @@ class WeChatDbStorage:
                             candidates.extend(Path(match.group(0)).glob("wxid_*"))
             finally:
                 conn.close()
+        valid_candidates = {}
         for candidate in candidates:
             valid = self._valid_wechat_account_root(candidate)
             if valid:
-                self._update_sync_state(live_account_root=os.fspath(valid))
-                return valid
+                valid_candidates[os.path.normcase(os.fspath(valid.resolve()))] = valid
+        if len(valid_candidates) > 1:
+            raise WeChatDbError("发现多个微信账号目录，请显式绑定独立的账号存储")
+        if valid_candidates:
+            valid = next(iter(valid_candidates.values()))
+            self._update_sync_state(live_account_root=os.fspath(valid))
+            return valid
         return None
 
     def _raw_snapshot_db_storage(self, live_account_root: Path) -> Path:
@@ -932,6 +941,29 @@ class WeChatDbStorage:
             "errors": errors[:20],
             "error_count": len(errors),
         }
+
+    def initialize_from_live(self, sender: dict, *, export_media: bool = False) -> dict[str, Any]:
+        """将空归档绑定到指定在线账号，校验密钥后同步；已有归档不可换账号。"""
+        from pyxllib.autogui.weixin4_instrumentation import resolve_sender
+        from pyxllib.autogui.wechat_key_scan import scan_account_keys
+
+        if resolve_sender(sender["account_id"]) != sender:
+            raise WeChatDbError("账号进程已变化")
+        live_root = Path(sender["account_root"])
+        state = self._load_sync_state()
+        if state.get("live_account_root") and Path(state["live_account_root"]).resolve() != live_root.resolve():
+            raise WeChatDbError("归档已属于另一账号，拒绝覆盖")
+        matches = scan_account_keys(sender["pid"], live_root / "db_storage")
+        required = {"contact/contact.db", "session/session.db", "message/message_0.db"}
+        if not required.issubset(matches):
+            raise WeChatDbError(f"账号核心数据库密钥不完整：{sorted(required - matches.keys())}")
+        if resolve_sender(sender["account_id"]) != sender:
+            raise WeChatDbError("密钥校验期间账号进程变化")
+        secret = self.root.parent.parent / "secrets" / "wechat_v4_db_keys.json"
+        secret.parent.mkdir(parents=True, exist_ok=True)
+        secret.write_text(json.dumps({"matches": matches}), encoding="utf-8")
+        self._update_sync_state(live_account_root=str(live_root))
+        return self.sync_from_live(export_media=export_media)
 
     def sync_from_live(self, *, export_media: bool = True) -> dict[str, Any]:
         started_at = time.time()

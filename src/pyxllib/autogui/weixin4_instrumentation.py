@@ -15,15 +15,20 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import shutil
 import sqlite3
 import subprocess
 from pathlib import Path
 
+import psutil
+
 from pyxllib.autogui.weixin4_offsets import RebindError, WeixinLayout, resolve
 
 WEIXIN_DLL = Path(r"C:\Program Files\Tencent\Weixin\4.1.13.65\Weixin.dll")
 DEFAULT_CONTACT_DB = Path(r"C:\home\chenkunze\data\d2605微信逆向\decrypted\db_storage\contact\contact.db")
+# 已通过联系人公开字段核验：Code4101 / 代号4101。不要按进程次序选默认号。
+DEFAULT_SENDER_ACCOUNT_ID = "wxid_m1cd4f5aahut22"
 RECIPIENT_ALIASES = {"文件传输助手": "filehelper"}
 NATIVE_SOURCE = Path(__file__).with_name("native") / "weixin_send.c"
 NATIVE_ADAPTER = NATIVE_SOURCE.with_suffix(".dll")
@@ -37,6 +42,50 @@ class WeixinInstrumentationError(RuntimeError):
 
 class WeixinInstrumentationUnavailable(WeixinInstrumentationError):
     """API 不可用；调用方必须失败关闭，禁止降级 GUI。"""
+
+
+def account_id_from_root(root: str | Path) -> str:
+    """微信本地账号目录带四位设备后缀；公开账号 ID 不含该后缀。"""
+    return re.sub(r"_[0-9a-fA-F]{4}$", "", Path(root).name)
+
+
+def list_live_accounts() -> list[dict]:
+    """按进程实际打开的数据库路径识别账号，不读取数据库内容、不注入进程。"""
+    accounts = []
+    for process in psutil.process_iter():
+        try:
+            if process.name().lower() != "weixin.exe":
+                continue
+            roots = set()
+            for item in process.open_files():
+                parts = Path(item.path).parts
+                if "xwechat_files" in parts and "db_storage" in parts:
+                    roots.add(str(Path(*parts[:parts.index("db_storage")])))
+            for root in sorted(roots):
+                accounts.append({"account_id": account_id_from_root(root), "account_root": root,
+                                 "pid": process.pid, "create_time": process.create_time()})
+        except (psutil.Error, OSError):
+            continue
+    return accounts
+
+
+def resolve_sender(account_id: str) -> dict:
+    """指定账号必须唯一在线；主号离线时绝不改用其他账号。"""
+    accounts = list_live_accounts()
+    matches = [item for item in accounts if item["account_id"] == account_id]
+    if len(matches) != 1 or sum(item["pid"] == matches[0]["pid"] for item in accounts) != 1:
+        raise WeixinInstrumentationUnavailable(f"发信账号 {account_id!r} 必须唯一在线，实际 {len(matches)} 个")
+    return matches[0]
+
+
+def contact_account_id(contact_db: str | Path = DEFAULT_CONTACT_DB) -> str:
+    """联系人快照归属来自同步元数据；缺失时拒绝猜测。"""
+    from pyxllib.autogui.wechat_db import WeChatDbStorage
+
+    root = WeChatDbStorage(Path(contact_db).parent.parent).status().get("live_account_root")
+    if not root:
+        raise WeixinInstrumentationUnavailable("联系人快照缺少账号归属，请先绑定账号并同步")
+    return account_id_from_root(root)
 
 
 def _repair_legacy_text(value: str) -> str:
@@ -250,9 +299,20 @@ def send_text(
     recipient: str,
     text: str,
     *,
-    contact_db: str | Path = DEFAULT_CONTACT_DB,
+    contact_db: str | Path | None = None,
+    sender_account_id: str = DEFAULT_SENDER_ACCOUNT_ID,
 ) -> dict:
-    """通过进程内 API 向唯一解析的微信会话发送纯文本。"""
+    """默认由 Code4101 发信；其他账号须显式指定，并使用其自己的联系人快照。"""
+    sender = resolve_sender(sender_account_id)
+    is_filehelper = RECIPIENT_ALIASES.get(str(recipient).strip(), str(recipient).strip()) == "filehelper"
+    if contact_db is None and not is_filehelper:
+        from pyxllib.autogui.wechat_accounts import get_account_storage
+
+        contact_db = get_account_storage(sender_account_id).root / "contact" / "contact.db"
+    contact_db = contact_db or DEFAULT_CONTACT_DB
+    if not is_filehelper:
+        if contact_account_id(contact_db) != sender_account_id:
+            raise WeixinInstrumentationUnavailable("联系人快照与发信账号不一致，拒绝跨账号解析收件人")
     layout = load_layout()
     adapter = _ensure_native_adapter()
     recipient_id = resolve_recipient_id(recipient, contact_db)
@@ -263,7 +323,7 @@ def send_text(
     matches = []
     diagnostics = []
     for process in frida.get_local_device().enumerate_processes():
-        if process.name.lower() != "weixin.exe":
+        if process.name.lower() != "weixin.exe" or process.pid != sender["pid"]:
             continue
         session = None
         script = None
@@ -297,6 +357,8 @@ def send_text(
         )
     session, script, probe = matches[0]
     try:
+        if resolve_sender(sender_account_id) != sender:
+            raise WeixinInstrumentationUnavailable("发信账号进程已变化，请重新调用")
         result = script.exports_sync.sendtext(recipient_id, str(text))
     except Exception as exc:
         raise WeixinInstrumentationError(f"微信进程内 API 发送失败：{exc}") from exc
@@ -304,4 +366,4 @@ def send_text(
         session.detach()
     if not isinstance(result, dict) or result.get("result") != 1:
         raise WeixinInstrumentationError(f"微信进程内 API 返回异常：{result!r}")
-    return {"recipient_id": recipient_id, "probe": probe, "result": result}
+    return {"sender": sender, "recipient_id": recipient_id, "probe": probe, "result": result}

@@ -65,14 +65,16 @@ def wechat_lock_send(user, text=None, files=None, url=None, *, timeout=-1, **kwa
 
     from pyxllib.autogui.weixin4_instrumentation import send_text
 
-    return send_text(user, str(text))
+    sender = kwargs.get('sender_account_id')
+    return send_text(user, str(text), **({'sender_account_id': sender} if sender else {}))
 
 
 def wechat_handler(message):
     # 获取群名，如果没有指定，不使用此微信发送功能
     user = message.record["extra"].get("wechat_user")
     if user:
-        wechat_lock_send(user, message)
+        sender = message.record["extra"].get("wechat_sender_account_id")
+        wechat_lock_send(user, message, **({'sender_account_id': sender} if sender else {}))
 
 
 if sys.platform == 'win32':

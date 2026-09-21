@@ -45,7 +45,8 @@ from pyxllib.algo.stat import custom_fillna, xlpivot
 from pyxllib.prog.uni_cache import uni_cache
 from pyxllib.prog.xlenv import XlEnv, get_xl_homedir, get_xl_hostname, xlhome_dir, xlhome_wkdir
 from pyxllib.prog.debug import format_exception
-from pyxllib.autogui.wxautolib import wechat_lock_send, WeChatSingletonLock, wechat_logger, WeChat
+from pyxllib.autogui.wxautolib import WeChatSingletonLock, WeChat
+from kq5034.wechat import wechat_lock_send, wechat_logger
 from pyxllib.text.levenshtein import get_levenshtein_similar
 from pyxllib.text.convert import chinese2digits
 from pyxllib.cv.slidercaptcha import SliderCaptchaLocator
