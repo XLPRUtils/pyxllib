@@ -13,4 +13,4 @@
 文档：https://www.yuque.com/xlpr/pyxllib/home/edit
 """
 
-__version__ = '4.91'
+__version__ = '4.92'

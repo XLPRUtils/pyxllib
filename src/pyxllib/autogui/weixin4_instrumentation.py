@@ -50,14 +50,22 @@ def account_id_from_root(root: str | Path) -> str:
 
 
 def list_live_accounts() -> list[dict]:
-    """按进程实际打开的数据库路径识别账号，不读取数据库内容、不注入进程。"""
+    """按进程打开或映射的数据库路径识别账号，不读取数据库内容、不注入进程。
+
+    Windows 的已删除文件句柄可能使 psutil.open_files 在 stat($Extend/$Deleted)
+    时抛出 AccessDenied；此时只读进程映射路径取得相同的账号归属证据。
+    """
     accounts = []
     for process in psutil.process_iter():
         try:
             if process.name().lower() != "weixin.exe":
                 continue
             roots = set()
-            for item in process.open_files():
+            try:
+                paths = process.open_files()
+            except (psutil.AccessDenied, OSError):
+                paths = process.memory_maps()
+            for item in paths:
                 parts = Path(item.path).parts
                 if "xwechat_files" in parts and "db_storage" in parts:
                     roots.add(str(Path(*parts[:parts.index("db_storage")])))

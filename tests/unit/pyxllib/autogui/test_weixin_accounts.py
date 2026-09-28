@@ -69,3 +69,22 @@ def test_enumerate_accounts_by_open_paths(monkeypatch, tmp_path):
                                                   SimpleNamespace(path=str(root / "db_storage" / "session" / "session.db"))])
     monkeypatch.setattr(api.psutil, "process_iter", lambda: [process])
     assert api.list_live_accounts() == [{"account_id": "wxid_main", "account_root": str(root), "pid": 10, "create_time": 1}]
+
+
+def test_enumerate_accounts_when_deleted_handle_stat_is_denied(monkeypatch, tmp_path):
+    root = tmp_path / "xwechat_files" / "wxid_second_ab12"
+
+    def denied():
+        raise api.psutil.AccessDenied(pid=20)
+
+    process = SimpleNamespace(
+        pid=20, name=lambda: "Weixin.exe", create_time=lambda: 2,
+        open_files=denied,
+        memory_maps=lambda: [SimpleNamespace(path=str(root / "db_storage" / "contact" / "contact.db-shm"))],
+    )
+    monkeypatch.setattr(api.psutil, "process_iter", lambda: [process])
+    assert api.list_live_accounts() == [
+        {"account_id": "wxid_second", "account_root": str(root), "pid": 20, "create_time": 2}
+    ]
+    process.memory_maps = denied
+    assert api.list_live_accounts() == []
