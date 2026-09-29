@@ -118,6 +118,7 @@ class _PeImage:
             raise RebindError("PE 节表解析失败") from exc
         try:
             self._fn_bounds = self._parse_pdata()
+            self._fn_starts = [begin for begin, _end in self._fn_bounds]
         except struct.error as exc:
             raise RebindError("pdata 解析失败") from exc
 
@@ -154,8 +155,7 @@ class _PeImage:
         return self.data[start:start + size]
 
     def containing(self, rva: int) -> tuple[int, int] | None:
-        starts = [begin for begin, _end in self._fn_bounds]
-        index = bisect.bisect_right(starts, rva) - 1
+        index = bisect.bisect_right(self._fn_starts, rva) - 1
         if index < 0:
             return None
         begin, end = self._fn_bounds[index]
@@ -279,7 +279,7 @@ def _ctor_string_pair_at(text: bytes, index: int) -> int | None:
     组合指纹：``lea rax,[rip+disp]; mov [rsi],rax; xorps xmm0,xmm0;`` 后再接两组
     ``movups [rsi+d],xmm0; mov qword [rsi+d+0x10],0; mov qword [rsi+d+0x18],0xf``。
     """
-    if index < 13 or text[index - 3:index] != b"\x0f\x57\xc0":
+    if index < 13 or index + 69 > len(text) or text[index - 3:index] != b"\x0f\x57\xc0":
         return None
     if text[index - 6:index - 3] != b"\x48\x89\x06":
         return None
@@ -288,7 +288,7 @@ def _ctor_string_pair_at(text: bytes, index: int) -> int | None:
     if text[index:index + 2] != b"\x0f\x11":
         return None
     modrm = text[index + 2]
-    if not 0x80 <= modrm <= 0x8F or (modrm & 7) == 4:  # mod=10 / reg=xmm0 / 非 SIB
+    if modrm != 0x86:  # 与上方 vtable 写入相同的 rsi 对象 / xmm0
         return None
     rm = modrm & 7
     disp = struct.unpack_from("<i", text, index + 3)[0]
@@ -304,6 +304,19 @@ def _ctor_string_pair_at(text: bytes, index: int) -> int | None:
     if text[cursor:cursor + 2] != b"\x0f\x11" or text[cursor + 2] != (0x80 | rm):
         return None
     if struct.unpack_from("<i", text, cursor + 3)[0] != disp + 0x20:
+        return None
+    cursor += 7
+    for expected_delta, expected_value in ((0x30, 0), (0x38, 0xF)):
+        if text[cursor:cursor + 3] != b"\x48\xc7\x86":
+            return None
+        if struct.unpack_from("<i", text, cursor + 3)[0] != disp + expected_delta:
+            return None
+        if struct.unpack_from("<I", text, cursor + 7)[0] != expected_value:
+            return None
+        cursor += 11
+    # 文本消息恰好初始化两个字段后返回。4.1.15.50 的另一派生消息有相同
+    # 前缀，但继续初始化额外字段；只匹配前缀会误将它当作文本构造器。
+    if text[cursor:cursor + 11] != bytes.fromhex("4889f04883c4505f5e5dc3"):
         return None
     return disp
 

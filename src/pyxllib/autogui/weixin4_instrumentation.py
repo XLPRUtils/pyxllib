@@ -7,7 +7,7 @@
 - L4 失败关闭：解析歧义或签名不符时抛出 :class:`WeixinInstrumentationUnavailable`，
   调用方必须失败关闭，禁止降级 GUI。
 
-原生适配器 :file:`native/weixin_4_1_13_send.c` 不再硬编码偏移，函数地址与结构偏移
+原生适配器 :file:`native/weixin_send.c` 不再硬编码偏移，函数地址与结构偏移
 全部由解析结果在运行时传入，因此微信更新通常不需要重新编译适配器。
 """
 
@@ -25,7 +25,6 @@ import psutil
 
 from pyxllib.autogui.weixin4_offsets import RebindError, WeixinLayout, resolve
 
-WEIXIN_DLL = Path(r"C:\Program Files\Tencent\Weixin\4.1.13.65\Weixin.dll")
 DEFAULT_CONTACT_DB = Path(r"C:\home\chenkunze\data\d2605微信逆向\decrypted\db_storage\contact\contact.db")
 # 已通过联系人公开字段核验：Code4101 / 代号4101。不要按进程次序选默认号。
 DEFAULT_SENDER_ACCOUNT_ID = "wxid_m1cd4f5aahut22"
@@ -135,9 +134,22 @@ def resolve_recipient_id(name: str, contact_db: str | Path = DEFAULT_CONTACT_DB)
     return matches.pop()
 
 
-def load_layout(path: str | Path = WEIXIN_DLL, *, refresh: bool = False) -> WeixinLayout:
+def running_weixin_dll(sender_account_id: str = DEFAULT_SENDER_ACCOUNT_ID) -> Path:
+    """使用指定在线账号实际映射的 DLL；安装目录中的其他版本不能代表运行版本。"""
+    sender = resolve_sender(sender_account_id)
+    try:
+        paths = {Path(item.path) for item in psutil.Process(sender["pid"]).memory_maps()
+                 if Path(item.path).name.lower() == "weixin.dll"}
+    except (psutil.Error, OSError) as exc:
+        raise WeixinInstrumentationUnavailable(f"无法读取发信进程 DLL：{exc}") from exc
+    if len(paths) != 1 or resolve_sender(sender_account_id) != sender:
+        raise WeixinInstrumentationUnavailable("发信进程 DLL 不唯一或进程已变化")
+    return paths.pop()
+
+
+def load_layout(path: str | Path | None = None, *, refresh: bool = False) -> WeixinLayout:
     """按 ``(路径, mtime, 大小)`` 缓存布局解析结果；DLL 变化即重新解析。"""
-    dll = Path(path)
+    dll = Path(path) if path is not None else running_weixin_dll()
     if not dll.exists():
         raise WeixinInstrumentationUnavailable(f"未找到微信 DLL：{dll}")
     stat = dll.stat()
@@ -155,9 +167,10 @@ def load_layout(path: str | Path = WEIXIN_DLL, *, refresh: bool = False) -> Weix
     return layout
 
 
-def preflight(path: str | Path = WEIXIN_DLL) -> dict:
+def preflight(path: str | Path | None = None) -> dict:
     """启动自检：解析当前微信布局，返回可诊断结果而不发送任何消息。"""
     try:
+        path = Path(path) if path is not None else running_weixin_dll()
         layout = load_layout(path)
     except WeixinInstrumentationError as exc:
         return {"ok": False, "error": str(exc), "dll": str(path)}
@@ -321,7 +334,8 @@ def send_text(
     if not is_filehelper:
         if contact_account_id(contact_db) != sender_account_id:
             raise WeixinInstrumentationUnavailable("联系人快照与发信账号不一致，拒绝跨账号解析收件人")
-    layout = load_layout()
+    dll = running_weixin_dll(sender_account_id)
+    layout = load_layout(dll)
     adapter = _ensure_native_adapter()
     recipient_id = resolve_recipient_id(recipient, contact_db)
     try:
@@ -346,6 +360,8 @@ def send_text(
             script.load()
             probe = script.exports_sync.probe()
             if probe:
+                if Path(probe["path"]).resolve() != dll.resolve():
+                    raise WeixinInstrumentationUnavailable("发信进程 DLL 与解析版本不一致")
                 matches.append((session, script, probe))
                 session = None
         except Exception as exc:

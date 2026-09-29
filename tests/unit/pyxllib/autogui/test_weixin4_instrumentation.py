@@ -1,4 +1,6 @@
 import sqlite3
+import struct
+from types import SimpleNamespace
 from pathlib import Path
 
 import pytest
@@ -124,7 +126,7 @@ def test_native_script_loads_version_pinned_adapter(tmp_path):
 
 @requires_weixin
 def test_preflight_reports_pinned_layout():
-    result = weixin4_instrumentation.preflight()
+    result = weixin4_instrumentation.preflight(WEIXIN_DLL)
 
     assert result["ok"] is True
     assert result["source"] == "pinned"
@@ -170,3 +172,48 @@ def test_native_adapter_reuses_current_build(monkeypatch, tmp_path):
     monkeypatch.setattr(weixin4_instrumentation, "NATIVE_ADAPTER", adapter)
 
     assert weixin4_instrumentation._ensure_native_adapter() == adapter
+
+
+def test_running_dll_uses_requested_account_mapping(monkeypatch):
+    sender = {"pid": 42}
+    accounts = []
+    def resolve(account):
+        accounts.append(account)
+        return sender
+    monkeypatch.setattr(weixin4_instrumentation, "resolve_sender", resolve)
+    monkeypatch.setattr(weixin4_instrumentation.psutil, "Process", lambda pid: SimpleNamespace(
+        memory_maps=lambda: [SimpleNamespace(path="C:/Weixin/4.1.15.50/Weixin.dll"),
+                             SimpleNamespace(path="C:/Windows/kernel32.dll")]))
+    assert weixin4_instrumentation.running_weixin_dll("second-account") == Path("C:/Weixin/4.1.15.50/Weixin.dll")
+    assert accounts == ["second-account", "second-account"]
+
+
+def test_running_dll_rejects_ambiguous_mapping(monkeypatch):
+    monkeypatch.setattr(weixin4_instrumentation, "resolve_sender", lambda account: {"pid": 42})
+    monkeypatch.setattr(weixin4_instrumentation.psutil, "Process", lambda pid: SimpleNamespace(
+        memory_maps=lambda: [SimpleNamespace(path="C:/old/Weixin.dll"), SimpleNamespace(path="C:/new/Weixin.dll")]))
+    with pytest.raises(weixin4_instrumentation.WeixinInstrumentationUnavailable, match="不唯一"):
+        weixin4_instrumentation.running_weixin_dll()
+
+
+def test_text_ctor_rejects_derived_type_with_same_prefix():
+    prefix = bytes.fromhex("488d05000000004889060f57c0")
+    def string_field(offset):
+        return (b"\x0f\x11\x86" + struct.pack("<i", offset)
+                + b"\x48\xc7\x86" + struct.pack("<iI", offset + 16, 0)
+                + b"\x48\xc7\x86" + struct.pack("<iI", offset + 24, 15))
+    fields = string_field(0x758) + string_field(0x778)
+    epilogue = bytes.fromhex("4889f04883c4505f5e5dc3")
+    assert weixin4_offsets._ctor_string_pair_at(prefix + fields + epilogue, len(prefix)) == 0x758
+    assert weixin4_offsets._ctor_string_pair_at(prefix + fields + string_field(0x798) + epilogue, len(prefix)) is None
+    assert weixin4_offsets._ctor_string_pair_at(prefix + fields[:-1], len(prefix)) is None
+
+
+@pytest.mark.skipif(not Path(r"C:\Program Files\Tencent\Weixin\4.1.15.50\Weixin.dll").exists(),
+                    reason="缺少 4.1.15.50 Weixin.dll")
+def test_rebind_4_1_15_50_distinguishes_text_constructor():
+    result = weixin4_instrumentation.preflight(r"C:\Program Files\Tencent\Weixin\4.1.15.50\Weixin.dll")
+    assert result["ok"] is True
+    assert result["offsets"]["message_ctor"] == "0x778d10"
+    assert result["offsets"]["send_entry"] == "0x19e3b60"
+    assert result["content_offset"] == "0x758"
