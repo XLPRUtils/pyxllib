@@ -242,6 +242,12 @@ class XiaoetongWeb(DpWebBase):
 
         self.cur_shop_id = None
 
+    @staticmethod
+    def _create_chromium():
+        """只接管考勤 DP profile；调试端口迁移不改变浏览器身份。"""
+        from .browser import connect_attendance_browser
+        return connect_attendance_browser()
+
     @classmethod
     def clear_runtime_export_cache(cls):
         cls._runtime_export_cache.clear()
@@ -2060,75 +2066,9 @@ return fetch('/xe.data-user-behavior.live.user_list_filter/1.0.0', {
                 yield row
 
     def get_leeson_playback_settings(self, lesson_id2):
-        """ 设置课次的回放配置情况
-        通过浏览网页，查看课程的回放等相关配置，确定每个课所需的更新时间节点
-
-        241217周二21:13，删除了对update_times的配置
-            其实无论任何情况，如果有需要，保底每天监控就行了，都能兼容的
-            并不是非要用update_times的机制
-            或者特殊的课程名，下游任务自己写next_update的更新逻辑
-        """
-        row = {}
-
-        # 1 访问课次网址
-
-        # 这里有个比较高效的方法，是判断是否有现成的这个链接的tab可以直接服用
-        #   不过这样其实也有危险，真的是其他并行在跑的任务，去抢占别人资源就冲突了~
-        #   所以现在这样如果配合"search_lesson_links"使用，虽然会出现一个课程出现两个tab，但影响并不大
-        tab = self.browser.new_tab()
-        tab.get(f'https://admin.xiaoe-tech.com/t/live#/detail?id={lesson_id2}&tab=playbackSettings')
-
-        tab('tag:div@@class=config-title@@text()=回放有效期：')  # 开始监听，出现这个元素在执行下述操作
-
-        tab.listen.start('tag:div@@class=time')
-        # tab.listen.start('tag:input@@placeholder=请选择日期和时间')  # 这个可能不存在
-        tab.wait(5)
-
-        # 课程标题
-        row['lesson_name'] = tab('t:div@@class=title-text').text
-
-        # 2 计算开始时间
-        text = tab('直播时间').text
-        dts = re.findall(r'\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}', text)
-        # 这里会获得两个时间：dts[0]直播开始时间，dts[1]直播结束时间
-        assert len(dts) == 2
-        row['start_date'] = dts[0]
-        d0 = datetime.datetime.strptime(dts[1], '%Y-%m-%d %H:%M:%S')
-        update_times = [d0]
-
-        # 3 计算课程结束时间
-        ele = tab('t:input@@placeholder=请选择日期和时间', timeout=1)  # todo："请选择截止日期"   变成：请选择日期和时间
-        if ele:  # 有回放设置
-            while True:
-                if ele.value:
-                    break
-                time.sleep(1)
-            # row['end_date'] = ele.value + ' 23:59:59'
-            row['end_date'] = ele.value if len(ele.value) == 19 else (
-                ele.value + ' 23:59:59' if len(ele.value) == 10 else ValueError("ele.value 格式不正确。"))
-            # 在间隔范围内，每天监控一次
-            # d1 = datetime.datetime.strptime(row['end_date'], '%Y-%m-%d %H:%M:%S')
-            # while True:  # 理论上在课程回放结束前，应该每天在课程结束24小时后更新一次
-            #     d0 += datetime.timedelta(days=1)
-            #     if d0 > d1:
-            #         break
-            #     update_times.append(d0)
-        else:  # 找不到选项，则表示很可能设置了"永久"而不是限时
-            # row['end_date'] = dts[1]
-            row['end_date'] = ''  # 永久情况，这个参数可以置空不写
-
-        tab.close()
-
-        # 4 每个要更新的时间节点
-        # row['update_times'] = [x.strftime('%Y-%m-%d %H:%M:%S') for x in update_times]
-        # row['next_update'] = update_times[0]  # 更新时间的初始配置
-        row['next_update'] = dts[1]  # 更新时间的初始配置
-
-        d1 = datetime.datetime.strptime(row['start_date'], '%Y-%m-%d %H:%M:%S')
-        d2 = update_times[0]
-        row['video_duration'] = (d2 - d1).seconds
-
-        return row
+        """Read current Xiaoe playback settings with bounded waits and owned-tab cleanup."""
+        from .live_settings import read_live_playback_settings
+        return read_live_playback_settings(self.browser, lesson_id2)
 
     def _读取禅宗目录课次链接(self, tab, data_ele, *, lesson_name=''):
         """点击“数据”并回收本次创建的详情 Tab，容忍小鹅通偶发的延迟开页。"""
