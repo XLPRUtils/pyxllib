@@ -158,22 +158,26 @@ def _get_item_value(item: Any, key: str, default: Any = None) -> Any:
 
 
 def _close_kqtools_browser(kqtools: Any) -> None:
+    """Release this adapter's tab while keeping the shared browser alive.
+
+    ``close_browser`` is retained for API compatibility. Attendance adapters
+    own the tab created by DpWebBase, never the browser or other jobs' tabs.
+    Keep the last tab as an anchor so later scheduled jobs can reconnect.
+    """
     xe2 = getattr(kqtools, "_xe2", None)
     if xe2 is None:
         return
     browser = getattr(xe2, "browser", None)
-    for close_target in (
-        getattr(xe2, "quit", None),
-        getattr(browser, "quit", None),
-        getattr(browser, "close", None),
-    ):
-        if not callable(close_target):
-            continue
-        try:
-            close_target()
-            return
-        except Exception:
-            continue
+    tab = getattr(xe2, "tab", None)
+    if browser is None or tab is None:
+        return
+    try:
+        tabs = browser.get_tabs()
+        if len(tabs) > 1 and any(t.tab_id == tab.tab_id for t in tabs):
+            tab.close()
+    except Exception:
+        # A disconnected tab must never trigger termination of the browser.
+        pass
 
 
 def lookup_registration_users_browser(
@@ -208,7 +212,11 @@ def lookup_registration_users_browser(
             names = _as_text_list(_get_item_value(item, "names", []))
             phones = _as_text_list(_get_item_value(item, "phones", []))
             try:
+                # 多个作业共用登录态，批次开始时切店不足以保证后续查询归属。
+                # 查询前后都验证页面店名；切店竞争时丢弃结果，不回填跨店 ID。
+                kqtools.xe2.assert_shop(shop_name)
                 user_id = kqtools.xe2.查找用户(names, phones, course_name, course_product_name)
+                kqtools.xe2.assert_shop(shop_name)
                 results.append({"key": key, "user_id": str(user_id or "")})
             except Exception as exc:
                 results.append({"key": key, "user_id": "", "error": str(exc)})
