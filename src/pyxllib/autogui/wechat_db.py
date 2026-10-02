@@ -528,6 +528,10 @@ def decrypt_wechat_v4_db(in_path: Path, out_path: Path, key_hex: str, mode: str)
             f_out.write(page[WX_DB_PAGE_SIZE - reserve :])
             page_count += 1
     if page_count:
+        # A live database can keep its newest committed pages entirely in WAL.
+        # Publish one atomic snapshot containing only authenticated, committed frames.
+        from pyxllib.autogui.wechat_updates import apply_committed_wal
+        apply_committed_wal(in_path, tmp_path, key_hex, mode)
         tmp_path.replace(out_path)
         return True
     tmp_path.unlink(missing_ok=True)
@@ -807,6 +811,10 @@ class WeChatDbStorage:
         unchanged = 0
         removed = 0
         errors: list[str] = []
+        # Treat DB and its WAL as one source generation. A checkpoint during
+        # copying must not publish a mixture of two generations.
+        before = {p.relative_to(source_root).as_posix(): self._file_fingerprint(p)
+                  for p in source_root.rglob("*") if p.is_file()}
         for source in source_root.rglob("*"):
             if not source.is_file():
                 continue
@@ -830,6 +838,9 @@ class WeChatDbStorage:
                 tmp = target.with_suffix(target.suffix + ".copying")
                 tmp.unlink(missing_ok=True)
                 shutil.copy2(source, tmp)
+                if not self._same_fingerprint(source_fingerprint, self._file_fingerprint(source)):
+                    tmp.unlink(missing_ok=True)
+                    raise WeChatDbError(f"同步期间文件变化，下一轮重试：{rel}")
                 tmp.replace(target)
                 live_db_files[rel_key] = {
                     **source_fingerprint,
@@ -839,6 +850,10 @@ class WeChatDbStorage:
                 copied += 1
             except Exception as exc:
                 errors.append(f"{rel}: {type(exc).__name__}: {exc}")
+        after = {p.relative_to(source_root).as_posix(): self._file_fingerprint(p)
+                 for p in source_root.rglob("*") if p.is_file()}
+        if before != after:
+            errors.append("Source generation changed while copying; retry before publishing")
         if target_root.exists():
             source_rels = {path.relative_to(source_root).as_posix() for path in source_root.rglob("*") if path.is_file()}
             for rel_key in list(live_db_files):
@@ -866,6 +881,7 @@ class WeChatDbStorage:
         state = self._load_sync_state()
         decrypted_dbs = dict(state.get("decrypted_dbs") or {})
         decrypted = 0
+        wal_only_updates = []
         unchanged = 0
         skipped = 0
         failed: list[str] = []
@@ -879,6 +895,8 @@ class WeChatDbStorage:
             target = self.root / rel
             try:
                 source_fingerprint = self._file_fingerprint(source)
+                wal_path = Path(str(source) + "-wal")
+                wal_fingerprint = self._file_fingerprint(wal_path) if wal_path.exists() else None
                 mode = key_info.get("mode") or "raw-derived-key"
                 previous = decrypted_dbs.get(rel_key)
                 if (
@@ -887,15 +905,19 @@ class WeChatDbStorage:
                     and self._same_fingerprint(source_fingerprint, previous.get("source_fingerprint"))
                     and previous.get("key_hex") == key_info["key_hex"]
                     and previous.get("mode") == mode
+                    and previous.get("wal_fingerprint") == wal_fingerprint
                 ):
                     unchanged += 1
                     continue
                 ok = decrypt_wechat_v4_db(source, target, key_info["key_hex"], mode)
                 if ok:
+                    if previous and self._same_fingerprint(source_fingerprint, previous.get("source_fingerprint")) and previous.get("wal_fingerprint") != wal_fingerprint:
+                        wal_only_updates.append(rel_key)
                     decrypted_dbs[rel_key] = {
                         "source": os.fspath(source),
                         "target": os.fspath(target),
                         "source_fingerprint": source_fingerprint,
+                        "wal_fingerprint": wal_fingerprint,
                         "target_fingerprint": self._file_fingerprint(target),
                         "key_hex": key_info["key_hex"],
                         "mode": mode,
@@ -912,6 +934,7 @@ class WeChatDbStorage:
             "source": os.fspath(source_root),
             "target": os.fspath(self.root),
             "decrypted": decrypted,
+            "wal_only_updates": wal_only_updates,
             "unchanged": unchanged,
             "skipped": skipped,
             "failed": failed[:20],
@@ -966,11 +989,52 @@ class WeChatDbStorage:
         return self.sync_from_live(export_media=export_media)
 
     def sync_from_live(self, *, export_media: bool = True) -> dict[str, Any]:
+        """Serialize account snapshot publication; media export is opt-in for monitors."""
+        from filelock import FileLock
+        self.root.parent.mkdir(parents=True, exist_ok=True)
+        with FileLock(str(self.root.parent / "live-sync.lock"), timeout=120):
+            return self._sync_from_live(export_media=export_media)
+
+    def poll_updates(self, cursor: dict | None = None, *, limit: int = 1000) -> dict:
+        """Refresh all account chats and return new messages plus an opaque cursor.
+
+        None establishes a baseline without replaying history. Persist returned
+        cursor atomically with accepted events; retrying the old cursor is safe.
+        Resources are fetched separately through list_messages when required.
+        """
+        from pyxllib.autogui.wechat_updates import poll_storage_updates
+        return poll_storage_updates(self, cursor, limit=limit)
+
+    def message_resources(self, chat_id: str, local_id: int) -> dict:
+        """Export readable assets on demand for one message; no GUI fallback.
+
+        Returned items contain export.stored_path when decoding succeeds.
+        An empty result does not prove the original message had no attachment.
+        """
+        username = self._resolve_chat_username(chat_id)
+        result = self._resource_summary(username, export=True, decode_missing=True).get(int(local_id), {})
+        for item in result.get("items", []):
+            exported = item.get("export")
+            if not exported:
+                continue
+            path = Path(exported["stored_path"])
+            readable = path.is_file()
+            if readable and exported.get("kind") == "image":
+                with path.open("rb") as stream:
+                    readable = bool(_image_type_from_header(stream.read(64)))
+            exported["readable"] = readable
+            if not readable:
+                exported["read_error"] = "资源尚未成功解码；不能把原始加密文件当作可读图片"
+        return result
+
+    def _sync_from_live(self, *, export_media: bool = True) -> dict[str, Any]:
         started_at = time.time()
         live_account_root = self._wechat_account_root()
         if not live_account_root:
             raise WeChatDbError("未找到本机微信账号目录")
         copy_result = self._copy_live_db_storage(live_account_root)
+        if copy_result.get("error_count"):
+            raise WeChatDbError("微信源快照不完整，尚未发布：" + "; ".join(copy_result["errors"][:3]))
         decrypt_result = self._decrypt_snapshot_dbs(live_account_root)
         self._exported_resource_files_cache = None
         _WECHAT_EXPORTED_RESOURCE_CACHE.pop(os.fspath(self.root.resolve()), None)
