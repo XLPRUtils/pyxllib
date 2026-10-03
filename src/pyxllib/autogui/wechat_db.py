@@ -24,6 +24,7 @@ import struct
 import subprocess
 import hmac
 import time
+import uuid
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 from pathlib import Path
@@ -43,11 +44,10 @@ WX_DB_AES_BLOCK_SIZE = 16
 WX_DB_ROUND_COUNT = 256000
 WX_IMAGE_V4_AES_KEYS = {
     b"\x07\x08V1\x08\x07": b"cfcd208495d565ef",
-    b"\x07\x08V2\x08\x07": b"43e7d25eb1b9bb64",
+    b"\x07\x08V2\x08\x07": None,  # V2 is account-specific, never a universal fixed key.
 }
-WX_IMAGE_V4_XOR_TAIL_SIZE = 0x100000
 _WECHAT_IMAGE_AES_KEY_CACHE: dict[str, bytes | None] = {}
-_WECHAT_IMAGE_XOR_KEY_CACHE: dict[str, int] = {}
+_WECHAT_IMAGE_KEY_RETRY_AT: dict[str, float] = {}
 _WECHAT_EXPORTED_RESOURCE_CACHE: dict[str, tuple[float, dict[str, dict[str, Any]]]] = {}
 _WECHAT_EXPORTED_RESOURCE_CACHE_TTL = 300.0
 
@@ -104,13 +104,14 @@ def _decode_text_value(value: Any) -> str:
 
 
 def _image_type_from_header(data: bytes) -> str:
-    if data.startswith(b"\xff\xd8\xff"):
+    if data.startswith(b"\xff\xd8\xff") and len(data) >= 4 and data[3] in (*range(0xE0, 0xF0), 0xDB, 0xC0, 0xC2, 0xC4, 0xFE):
         return "jpg"
     if data.startswith(b"\x89PNG\r\n\x1a\n"):
         return "png"
     if data.startswith((b"GIF87a", b"GIF89a")):
         return "gif"
-    if data.startswith(b"BM"):
+    if (len(data) >= 14 and data.startswith(b"BM") and data[6:10] == b"\0" * 4
+            and 26 <= int.from_bytes(data[10:14], "little") <= int.from_bytes(data[2:6], "little")):
         return "bmp"
     if data.startswith(b"RIFF") and data[8:12] == b"WEBP":
         return "webp"
@@ -122,7 +123,58 @@ def _wechat_v4_image_aes_key(header: bytes) -> bytes | None:
 
 
 def _detect_image_format(data: bytes) -> str:
-    return _image_type_from_header(data) or "bin"
+    return _image_type_from_header(data) or ("wxgf" if data.startswith(b"wxgf") else "bin")
+
+
+def _readable_image(path: Path) -> bool:
+    """A signature alone can match a wrong AES key; validate the entire image."""
+    try:
+        from PIL import Image
+        with Image.open(path) as image:
+            image.verify()
+        with Image.open(path) as image:
+            image.load()
+        return True
+    except (OSError, ValueError, SyntaxError):
+        return False
+
+
+def _convert_wxgf(data: bytes) -> bytes | None:
+    """Extract length-prefixed Annex B HEVC and render a still as PNG.
+
+    WXGF's header length is byte 4; each stream begins after a big-endian
+    32-bit length. Prefer the largest stream (the colour image). Keep unknown
+    containers unreadable instead of passing encrypted bytes to a viewer.
+    Format reference: sjzar/chatlog a16b689/pkg/util/dat2img/wxgf.go.
+    """
+    if len(data) < 15 or data[:4] != b"wxgf" or not 5 <= data[4] < len(data):
+        return None
+    streams = []
+    for marker in (b"\0\0\0\1", b"\0\0\1"):
+        offset = data[4]
+        while offset < len(data):
+            start = data.find(marker, offset)
+            if start < 0:
+                break
+            size = int.from_bytes(data[start - 4:start], "big") if start >= 4 else 0
+            if size > 0 and start + size <= len(data):
+                streams.append(data[start:start + size])
+                offset = start + size
+            else:
+                offset = start + 1
+        if streams:
+            break
+    if not streams:
+        return None
+    executable = os.environ.get("FFMPEG_PATH") or shutil.which("ffmpeg")
+    if not executable:
+        return None
+    result = subprocess.run([executable, "-hide_banner", "-loglevel", "error", "-xerror",
+                             "-f", "hevc", "-i", "pipe:0", "-frames:v", "1",
+                             "-f", "image2pipe", "-c:v", "png", "pipe:1"],
+                            input=max(streams, key=len), capture_output=True, timeout=30,
+                            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0)
+    return result.stdout if result.returncode == 0 and result.stdout.startswith(b"\x89PNG") else None
 
 
 def _verify_wechat_v4_image_aes_key(aes_key: bytes, templates: list[bytes]) -> bool:
@@ -149,7 +201,8 @@ def _find_wechat_v4_image_templates(attach_dir: Path, max_templates: int = 3, ma
             if examined > max_files and templates:
                 return templates
             try:
-                data = source.read_bytes()[:0x1F]
+                with source.open("rb") as stream:
+                    data = stream.read(0x1F)
             except OSError:
                 continue
             if len(data) >= 0x1F and data.startswith(b"\x07\x08V2\x08\x07"):
@@ -164,11 +217,11 @@ def _find_wechat_v4_image_templates(attach_dir: Path, max_templates: int = 3, ma
     return templates
 
 
-def _scan_windows_weixin_image_aes_key(templates: list[bytes]) -> bytes | None:
+def _scan_windows_weixin_image_aes_key(templates: list[bytes], *, pid: int | None = None) -> bytes | None:
     if os.name != "nt" or not templates:
         return None
-    cache_key = "|".join(template.hex() for template in templates)
-    if cache_key in _WECHAT_IMAGE_AES_KEY_CACHE:
+    cache_key = str(pid) + "|" + "|".join(template.hex() for template in templates)
+    if _WECHAT_IMAGE_AES_KEY_CACHE.get(cache_key):
         return _WECHAT_IMAGE_AES_KEY_CACHE[cache_key]
     env_key = (os.environ.get("CODEYUN_WECHAT_IMAGE_AES_KEY") or "").strip()
     if env_key:
@@ -182,20 +235,19 @@ def _scan_windows_weixin_image_aes_key(templates: list[bytes]) -> bytes | None:
                 _WECHAT_IMAGE_AES_KEY_CACHE[cache_key] = candidate[:16]
                 return candidate[:16]
 
-    try:
-        output = subprocess.check_output(
-            [
-                "powershell",
-                "-NoProfile",
-                "-Command",
-                "Get-CimInstance Win32_Process -Filter \"Name='Weixin.exe'\" | Select-Object -ExpandProperty ProcessId",
-            ],
-            text=True,
-            stderr=subprocess.DEVNULL,
-        )
-    except Exception:
-        return None
-    pids = [int(part) for part in output.split() if part.isdigit()]
+    if pid is not None:
+        pids = [pid]
+    else:
+        try:
+            output = subprocess.check_output(
+                ["powershell", "-NoProfile", "-Command",
+                 "Get-CimInstance Win32_Process -Filter \"Name='Weixin.exe'\" | Select-Object -ExpandProperty ProcessId"],
+                text=True, stderr=subprocess.DEVNULL,
+                creationflags=subprocess.CREATE_NO_WINDOW,
+            )
+        except Exception:
+            return None
+        pids = [int(part) for part in output.split() if part.isdigit()]
     if not pids:
         return None
 
@@ -226,6 +278,8 @@ def _scan_windows_weixin_image_aes_key(templates: list[bytes]) -> bytes | None:
     open_process.argtypes = [ctypes.c_ulong, ctypes.c_int, ctypes.c_ulong]
     open_process.restype = ctypes.c_void_p
     close_handle = kernel32.CloseHandle
+    close_handle.argtypes = [ctypes.c_void_p]
+    close_handle.restype = ctypes.c_int
     virtual_query_ex = kernel32.VirtualQueryEx
     virtual_query_ex.argtypes = [
         ctypes.c_void_p,
@@ -303,34 +357,74 @@ def _decode_wechat_v4_image_dat(source: Path, target_dir: Path, stem: str, xor_k
     try:
         with source.open("rb") as f:
             header = f.read(0xF)
+            if header[:6] not in WX_IMAGE_V4_AES_KEYS:
+                data = header + f.read()
+                candidates = [data]
+                # Legacy .dat uses one XOR byte for the entire file. Infer it
+                # from a recognized signature, then validate the whole image.
+                for key in range(256):
+                    if _image_type_from_header(bytes(value ^ key for value in data[:16])):
+                        candidates.append(bytes(value ^ key for value in data))
+                from io import BytesIO
+                from PIL import Image
+                for plain in candidates:
+                    kind = _image_type_from_header(plain[:16])
+                    if not kind:
+                        continue
+                    try:
+                        with Image.open(BytesIO(plain)) as image:
+                            image.verify()
+                        with Image.open(BytesIO(plain)) as image:
+                            image.load()
+                    except (OSError, ValueError, SyntaxError):
+                        continue
+                    target_dir.mkdir(parents=True, exist_ok=True)
+                    target = target_dir / f"{stem}.{kind}"
+                    temporary = target.with_suffix(f".{uuid.uuid4().hex}.tmp")
+                    temporary.write_bytes(plain)
+                    temporary.replace(target)
+                    return target
+                return None
             aes_key = aes_key or _wechat_v4_image_aes_key(header)
             if not aes_key:
                 return None
-            encrypt_length = struct.unpack_from("<H", header, 6)[0]
+            encrypt_length, xor_length = struct.unpack_from("<II", header, 6)
             encrypt_length0 = encrypt_length // 16 * 16 + 16
             encrypted_data = f.read(encrypt_length0)
             rest_data = f.read()
         if not encrypted_data:
             return None
-        if len(encrypted_data) % 16:
-            encrypted_data += b"\x00" * (16 - len(encrypted_data) % 16)
+        if len(encrypted_data) != encrypt_length0 or xor_length > len(rest_data):
+            return None
         from Crypto.Cipher import AES
 
         decrypted_data = AES.new(aes_key, AES.MODE_ECB).decrypt(encrypted_data)
-        image_type = _image_type_from_header(decrypted_data[:12])
-        if not image_type:
+        image_type = _detect_image_format(decrypted_data[:16])
+        if image_type == "bin":
             return None
         pad_length = decrypted_data[-1]
-        if 1 <= pad_length <= 16:
-            decrypted_data = decrypted_data[:-pad_length]
-        plain_tail = bytes(byte ^ xor_key for byte in rest_data[-WX_IMAGE_V4_XOR_TAIL_SIZE:])
-        plain_data = decrypted_data + rest_data[:-WX_IMAGE_V4_XOR_TAIL_SIZE] + plain_tail
-        if _image_type_from_header(plain_data[:12]) != image_type:
+        if not (1 <= pad_length <= 16 and decrypted_data[-pad_length:] == bytes([pad_length]) * pad_length):
             return None
+        decrypted_data = decrypted_data[:-pad_length]
+        plain_data = decrypted_data + (rest_data[:-xor_length] + bytes(byte ^ xor_key for byte in rest_data[-xor_length:]) if xor_length else rest_data)
+        if _detect_image_format(plain_data[:16]) != image_type:
+            return None
+        if image_type == "wxgf":
+            converted = _convert_wxgf(plain_data)
+            if converted:
+                plain_data, image_type = converted, "png"
+        if image_type != "wxgf":
+            from PIL import Image
+            from io import BytesIO
+            with Image.open(BytesIO(plain_data)) as image:
+                image.verify()
+            with Image.open(BytesIO(plain_data)) as image:
+                image.load()
         target_dir.mkdir(parents=True, exist_ok=True)
         target = target_dir / f"{stem}.{image_type}"
-        if not target.exists() or target.stat().st_size != len(plain_data):
-            target.write_bytes(plain_data)
+        temporary = target.with_suffix(f".{uuid.uuid4().hex}.tmp")
+        temporary.write_bytes(plain_data)
+        temporary.replace(target)
         return target
     except Exception:
         return None
@@ -578,7 +672,6 @@ class WeChatDbStorage:
         self.paths = WeChatDbPaths.from_root(root)
         self._image_xor_key_cache: int | None = None
         self._image_aes_key_cache: bytes | None = None
-        self._image_aes_key_scanned = False
         self._exported_resource_files_cache: dict[str, dict[str, Any]] | None = None
 
     @property
@@ -602,7 +695,7 @@ class WeChatDbStorage:
         state["updated_at"] = int(time.time())
         path = self._sync_state_path()
         path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = path.with_suffix(path.suffix + ".tmp")
+        tmp = path.with_suffix(path.suffix + f".{uuid.uuid4().hex}.tmp")
         tmp.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
         tmp.replace(path)
 
@@ -1011,8 +1104,15 @@ class WeChatDbStorage:
         Returned items contain export.stored_path when decoding succeeds.
         An empty result does not prove the original message had no attachment.
         """
+        from filelock import FileLock
+        # Sync and media export both update account state. Share ownership so
+        # key recovery cannot overwrite a concurrently published DB generation.
+        with FileLock(str(self.root.parent / "live-sync.lock"), timeout=120):
+            return self._message_resources(chat_id, local_id)
+
+    def _message_resources(self, chat_id: str, local_id: int) -> dict:
         username = self._resolve_chat_username(chat_id)
-        result = self._resource_summary(username, export=True, decode_missing=True).get(int(local_id), {})
+        result = self._resource_summary(username, export=True, decode_missing=True, local_id=int(local_id)).get(int(local_id), {})
         for item in result.get("items", []):
             exported = item.get("export")
             if not exported:
@@ -1021,8 +1121,15 @@ class WeChatDbStorage:
             readable = path.is_file()
             if readable and exported.get("kind") == "image":
                 with path.open("rb") as stream:
-                    readable = bool(_image_type_from_header(stream.read(64)))
+                    readable = bool(_image_type_from_header(stream.read(64))) and _readable_image(path)
             exported["readable"] = readable
+            if readable and exported.get("kind") == "image":
+                from PIL import Image
+                with Image.open(path) as image:
+                    exported["width"], exported["height"] = image.size
+                original = str(exported.get("original_file_name") or "")
+                exported["variant"] = "high" if original.endswith("_h.dat") else "thumbnail" if original.endswith("_t.dat") else "standard"
+                exported.pop("read_error", None)
             if not readable:
                 exported["read_error"] = "资源尚未成功解码；不能把原始加密文件当作可读图片"
         return result
@@ -1037,7 +1144,8 @@ class WeChatDbStorage:
             raise WeChatDbError("微信源快照不完整，尚未发布：" + "; ".join(copy_result["errors"][:3]))
         decrypt_result = self._decrypt_snapshot_dbs(live_account_root)
         self._exported_resource_files_cache = None
-        _WECHAT_EXPORTED_RESOURCE_CACHE.pop(os.fspath(self.root.resolve()), None)
+        for decode in (0, 1):
+            _WECHAT_EXPORTED_RESOURCE_CACHE.pop(f"{self.root.resolve()}|decode={decode}", None)
         media_result = self.export_all_resources() if export_media else None
         return {
             "live_account_root": os.fspath(live_account_root),
@@ -1113,7 +1221,8 @@ class WeChatDbStorage:
             if download_name:
                 unique[str(download_name)] = item
         manifest.parent.mkdir(parents=True, exist_ok=True)
-        manifest.write_text(
+        temporary = manifest.with_suffix(f".{uuid.uuid4().hex}.tmp")
+        temporary.write_text(
             json.dumps(
                 {
                     "generated_at": int(time.time()),
@@ -1124,59 +1233,58 @@ class WeChatDbStorage:
             ),
             encoding="utf-8",
         )
+        temporary.replace(manifest)
 
     def _wechat_v4_image_xor_key(self, account_root: Path) -> int:
+        """Infer the account XOR byte by thumbnail JPEG-end votes.
+
+        One coincidental tail must not poison all images. A failed discovery
+        is retried on the next request; only positive evidence is cached.
+        """
         if self._image_xor_key_cache is not None:
             return self._image_xor_key_cache
-        state = self._load_sync_state()
-        image_state = state.get("image_decode") or {}
-        if isinstance(image_state.get("xor_key"), int):
-            self._image_xor_key_cache = int(image_state["xor_key"])
-            return self._image_xor_key_cache
-        cache_key = os.fspath(account_root.resolve())
-        if cache_key in _WECHAT_IMAGE_XOR_KEY_CACHE:
-            self._image_xor_key_cache = _WECHAT_IMAGE_XOR_KEY_CACHE[cache_key]
-            return self._image_xor_key_cache
-        for dirname in ("cache", "temp", "msg"):
+        from collections import Counter
+        votes = Counter()
+        for dirname in ("msg", "cache", "temp"):
             base = account_root / dirname
             if not base.exists():
                 continue
-            checked = 0
-            for source in base.rglob("*_t.dat"):
-                checked += 1
-                if checked > 2000:
+            for index, source in enumerate(base.rglob("*_t.dat")):
+                if index >= 2000:
                     break
                 try:
-                    with source.open("rb") as f:
-                        header = f.read(6)
-                        if _wechat_v4_image_aes_key(header) is None:
+                    with source.open("rb") as stream:
+                        if stream.read(6) not in WX_IMAGE_V4_AES_KEYS or source.stat().st_size < 31:
                             continue
-                        if source.stat().st_size < 2:
-                            continue
-                        f.seek(-2, os.SEEK_END)
-                        tail = f.read(2)
-                    key1 = tail[0] ^ 0xFF
-                    key2 = tail[1] ^ 0xD9
-                    if key1 == key2:
-                        self._image_xor_key_cache = key1
-                        _WECHAT_IMAGE_XOR_KEY_CACHE[cache_key] = key1
-                        state = self._load_sync_state()
-                        image_state = dict(state.get("image_decode") or {})
-                        image_state["xor_key"] = key1
-                        state["image_decode"] = image_state
-                        self._save_sync_state(state)
-                        return key1
+                        stream.seek(-2, os.SEEK_END)
+                        tail = stream.read(2)
+                    key = tail[0] ^ 0xFF
+                    if key == tail[1] ^ 0xD9:
+                        votes[key] += 1
                 except OSError:
                     continue
-        self._image_xor_key_cache = 0
-        _WECHAT_IMAGE_XOR_KEY_CACHE[cache_key] = 0
-        return 0
+        if not votes:
+            return 0
+        key, count = votes.most_common(1)[0]
+        if len(votes) > 1 and count <= votes.most_common(2)[1][1]:
+            return 0
+        self._image_xor_key_cache = key
+        state = self._load_sync_state()
+        state["image_decode"] = {**state.get("image_decode", {}), "xor_key": key}
+        self._save_sync_state(state)
+        return key
 
-    def _wechat_v4_image_dynamic_aes_key(self, account_root: Path) -> bytes | None:
-        if self._image_aes_key_scanned:
-            return self._image_aes_key_cache
+    def _wechat_v4_image_dynamic_aes_key(self, account_root: Path, source: Path | None = None) -> bytes | None:
         attach_dir = account_root / "msg" / "attach"
-        templates = _find_wechat_v4_image_templates(attach_dir)
+        if source is not None:
+            with source.open("rb") as stream:
+                stream.seek(15)
+                templates = [stream.read(16)]
+        else:
+            templates = _find_wechat_v4_image_templates(attach_dir)
+        if self._image_aes_key_cache and _verify_wechat_v4_image_aes_key(self._image_aes_key_cache, templates):
+            return self._image_aes_key_cache
+        retry_key = str(account_root.resolve()) + "|" + "|".join(block.hex() for block in templates)
         state = self._load_sync_state()
         image_state = dict(state.get("image_decode") or {})
         cached_hex = str(image_state.get("aes_key_hex") or "")
@@ -1185,17 +1293,61 @@ class WeChatDbStorage:
                 cached_key = bytes.fromhex(cached_hex)
                 if len(cached_key) == 16 and _verify_wechat_v4_image_aes_key(cached_key, templates):
                     self._image_aes_key_cache = cached_key
-                    self._image_aes_key_scanned = True
                     return cached_key
             except ValueError:
                 pass
-        self._image_aes_key_cache = _scan_windows_weixin_image_aes_key(templates)
-        self._image_aes_key_scanned = True
+        if _WECHAT_IMAGE_KEY_RETRY_AT.get(retry_key, 0) > time.monotonic():
+            return None
+        from pyxllib.autogui.weixin4_instrumentation import account_id_from_root, resolve_sender
+        # Account UIN is also present in some Windows login-config versions.
+        # Never trust a guessed field offset: prove every derived key against
+        # this message's actual ciphertext before persisting it.
+        account_id = account_id_from_root(account_root)
+        for name in ("login_config", "login_configv2"):
+            config_path = account_root / "config" / name
+            if not config_path.is_file():
+                continue
+            data = config_path.read_bytes()[:65536]
+            candidates = {str(int.from_bytes(data[i:i + 4], order)) for order in ("little", "big")
+                          for i in range(max(0, len(data) - 3))}
+            candidates.update(part.decode() for part in re.findall(rb"\d{5,10}", data))
+            for uin in candidates:
+                candidate = hashlib.md5((uin + account_id).encode()).hexdigest()[:16].encode()
+                if _verify_wechat_v4_image_aes_key(candidate, templates):
+                    self._image_aes_key_cache = candidate
+                    image_state["aes_key_hex"] = candidate.hex()
+                    image_state["aes_key_verified_at"] = int(time.time())
+                    state["image_decode"] = image_state
+                    self._save_sync_state(state)
+                    return candidate
+        suffix = account_root.name.rsplit("_", 1)[-1].lower()
+        if re.fullmatch(r"[0-9a-f]{4}", suffix):
+            # WeChat's account suffix and image XOR byte constrain the 32-bit
+            # UIN to 2^24 candidates. This recovers keys even when image AES
+            # material has not yet been loaded into the running process.
+            xor = self._wechat_v4_image_xor_key(account_root)
+            for uin in range(xor, 1 << 32, 256):
+                number = str(uin)
+                if hashlib.md5(number.encode()).hexdigest()[:4] != suffix:
+                    continue
+                for identity in (account_id, account_root.name):
+                    candidate = hashlib.md5((number + identity).encode()).hexdigest()[:16].encode()
+                    if _verify_wechat_v4_image_aes_key(candidate, templates):
+                        self._image_aes_key_cache = candidate
+                        image_state["aes_key_hex"] = candidate.hex()
+                        image_state["aes_key_verified_at"] = int(time.time())
+                        state["image_decode"] = image_state
+                        self._save_sync_state(state)
+                        return candidate
+        sender = resolve_sender(account_id_from_root(account_root))
+        self._image_aes_key_cache = _scan_windows_weixin_image_aes_key(templates, pid=sender["pid"])
         if self._image_aes_key_cache:
             image_state["aes_key_hex"] = self._image_aes_key_cache.hex()
             image_state["aes_key_verified_at"] = int(time.time())
             state["image_decode"] = image_state
             self._save_sync_state(state)
+        else:
+            _WECHAT_IMAGE_KEY_RETRY_AT[retry_key] = time.monotonic() + 30
         return self._image_aes_key_cache
 
     def _relative_media_path(self, row: dict[str, Any], dirs: dict[int, str], media_kind: str) -> Path | None:
@@ -1215,16 +1367,17 @@ class WeChatDbStorage:
     def _existing_exported_image(self, export_dir: Path, prefix: str, stem: str) -> Path | None:
         for ext in ("jpg", "png", "gif", "webp", "bmp"):
             candidate = export_dir / f"{prefix}{stem}.{ext}"
-            if candidate.exists():
+            if candidate.exists() and _readable_image(candidate):
                 return candidate
         return None
 
-    def _export_resource_files(self, *, decode_missing: bool = True) -> dict[str, dict[str, Any]]:
-        if decode_missing and self._exported_resource_files_cache is not None:
+    def _export_resource_files(self, *, decode_missing: bool = True, resource_hints: list[dict] | None = None,
+                               chat_username: str | None = None, image_md5: str = "") -> dict[str, dict[str, Any]]:
+        if resource_hints is None and decode_missing and self._exported_resource_files_cache is not None:
             return self._exported_resource_files_cache
         cache_key = f"{self.root.resolve()}|decode={int(decode_missing)}"
         cached = _WECHAT_EXPORTED_RESOURCE_CACHE.get(cache_key)
-        if cached and time.time() - cached[0] < _WECHAT_EXPORTED_RESOURCE_CACHE_TTL:
+        if resource_hints is None and cached and time.time() - cached[0] < _WECHAT_EXPORTED_RESOURCE_CACHE_TTL:
             if decode_missing:
                 self._exported_resource_files_cache = cached[1]
             return cached[1]
@@ -1232,7 +1385,8 @@ class WeChatDbStorage:
             exported = self._load_exported_resource_manifest()
             _WECHAT_EXPORTED_RESOURCE_CACHE[cache_key] = (time.time(), exported)
             return exported
-        exported = self._load_exported_resource_manifest()
+        manifest_items = self._load_exported_resource_manifest()
+        exported = manifest_items if resource_hints is None else {}
         account_root = self._wechat_account_root()
         if not account_root:
             return exported
@@ -1245,7 +1399,35 @@ class WeChatDbStorage:
             ("video_hardlink_info_v4", "video"),
             ("file_hardlink_info_v4", "file"),
         ]:
-            for row in self._hardlink_rows(table):
+            rows = self._hardlink_rows(table)
+            if media_kind == "image" and resource_hints is not None:
+                chat_hash = hashlib.md5((chat_username or "").encode()).hexdigest()
+                rows = [row for row in rows if dirs.get(int(row.get("dir1") or 0)) == chat_hash]
+                if image_md5:
+                    families = {re.sub(r"_[ht]$", "", Path(str(row.get("file_name") or "")).stem)
+                                for row in rows if str(row.get("md5") or "") == image_md5}
+                    if families:
+                        rows = [row for row in rows if re.sub(r"_[ht]$", "", Path(str(row.get("file_name") or "")).stem) in families]
+                        # Thumbnail files can be present without a hardlink row.
+                        for row in list(rows):
+                            if str(row.get("file_name") or "").endswith("_h.dat"):
+                                thumb = {**row, "file_name": str(row["file_name"]).replace("_h.dat", "_t.dat"), "md5": ""}
+                                path = account_root / self._relative_media_path(thumb, dirs, "image")
+                                if path.is_file() and not any(x["file_name"] == thumb["file_name"] for x in rows):
+                                    thumb["file_size"] = path.stat().st_size - 31
+                                    rows.append(thumb)
+                    else:
+                        # A different image with the same byte length is not
+                        # evidence that this message's missing asset is local.
+                        rows = []
+            for row in rows:
+                if resource_hints is not None:
+                    tokens = [str(row.get("md5") or ""), str(row.get("file_name") or "")]
+                    size = int(row.get("file_size") or 0)
+                    if not any(any(token and token in hint["packed_text"] for token in tokens)
+                               or (size and int(hint["size"] or 0) in (size, size + 31))
+                               for hint in resource_hints):
+                        continue
                 relative_path = self._relative_media_path(row, dirs, media_kind)
                 if not relative_path:
                     continue
@@ -1256,9 +1438,10 @@ class WeChatDbStorage:
                 prefix = f"{md5_text[:8]}_" if md5_text else ""
                 original_file_name = str(row.get("file_name") or relative_path.name)
                 target_name = f"{prefix}{relative_path.name}"
-                cached_item = exported.get(md5_text) or exported.get(original_file_name) or exported.get(target_name)
+                cached_item = manifest_items.get(md5_text) or manifest_items.get(original_file_name) or manifest_items.get(target_name)
                 cached_stored_path = str(cached_item.get("stored_path") or "") if cached_item else ""
-                if cached_item and cached_stored_path and Path(cached_stored_path).exists():
+                if (cached_item and cached_stored_path and Path(cached_stored_path).exists()
+                        and (media_kind != "image" or _readable_image(Path(cached_stored_path)))):
                     exported[str(cached_item["file_name"])] = cached_item
                     exported[original_file_name] = cached_item
                     if md5_text:
@@ -1275,8 +1458,12 @@ class WeChatDbStorage:
                     if not decoded and decode_missing:
                         if image_xor_key is None:
                             image_xor_key = self._wechat_v4_image_xor_key(account_root)
-                        if image_aes_key is None:
-                            image_aes_key = self._wechat_v4_image_dynamic_aes_key(account_root)
+                        with source.open("rb") as stream:
+                            signature = stream.read(6)
+                        if signature == b"\x07\x08V2\x08\x07":
+                            image_aes_key = self._wechat_v4_image_dynamic_aes_key(account_root, source)
+                        else:
+                            image_aes_key = None
                         decoded = _decode_wechat_v4_image_dat(
                             source,
                             export_root / media_kind,
@@ -1317,14 +1504,20 @@ class WeChatDbStorage:
         # message_resource rows point at them by data_index and encrypted
         # size, so export these files as first-class image resources too.
         attach_root = account_root / "msg" / "attach"
+        if resource_hints is not None:
+            attach_root = attach_root / hashlib.md5((chat_username or "").encode()).hexdigest()
         if attach_root.exists():
-            for source in attach_root.glob("*/*/Rec/*/Img/*"):
+            forward_pattern = "*/*/Rec/*/Img/*" if resource_hints is None else "*/Rec/*/Img/*"
+            for source in attach_root.glob(forward_pattern):
                 if not source.is_file():
                     continue
                 try:
                     source_size = source.stat().st_size
                     relative = source.relative_to(account_root).as_posix()
                 except OSError:
+                    continue
+                if resource_hints is not None and not any(source_size == int(hint["size"] or 0)
+                        or source.name in hint["packed_text"] for hint in resource_hints):
                     continue
                 digest = hashlib.sha256(relative.encode("utf-8")).hexdigest()[:16]
                 stem = f"forward_{digest}_{source.name}"
@@ -1333,7 +1526,7 @@ class WeChatDbStorage:
                     if image_xor_key is None:
                         image_xor_key = self._wechat_v4_image_xor_key(account_root)
                     if image_aes_key is None:
-                        image_aes_key = self._wechat_v4_image_dynamic_aes_key(account_root)
+                        image_aes_key = self._wechat_v4_image_dynamic_aes_key(account_root, source)
                     target = _decode_wechat_v4_image_dat(
                         source,
                         export_root / "image",
@@ -1359,9 +1552,11 @@ class WeChatDbStorage:
                 exported[relative] = item
                 exported[f"size:{source_size}"] = item
         if decode_missing:
-            self._exported_resource_files_cache = exported
-            self._write_exported_resource_manifest(exported)
-        _WECHAT_EXPORTED_RESOURCE_CACHE[cache_key] = (time.time(), exported)
+            if resource_hints is None:
+                self._exported_resource_files_cache = exported
+            self._write_exported_resource_manifest({**manifest_items, **exported})
+        if resource_hints is None:
+            _WECHAT_EXPORTED_RESOURCE_CACHE[cache_key] = (time.time(), exported)
         return exported
 
     def list_chats(
@@ -1618,10 +1813,10 @@ class WeChatDbStorage:
         *,
         export: bool = False,
         decode_missing: bool = True,
+        local_id: int | None = None,
     ) -> dict[int, dict[str, Any]]:
         if not self.paths.resource.exists() or chat_username.startswith("Msg_"):
             return {}
-        exported_files = self._export_resource_files(decode_missing=decode_missing) if export else {}
         conn = _connect_readonly(self.paths.resource)
         try:
             if not (_table_exists(conn, "ChatName2Id") and _table_exists(conn, "MessageResourceInfo")):
@@ -1640,10 +1835,26 @@ class WeChatDbStorage:
                     detail.packed_info
                 FROM MessageResourceInfo info
                 LEFT JOIN MessageResourceDetail detail ON detail.message_id = info.message_id
-                WHERE info.chat_id = ?
+                WHERE info.chat_id = ? AND (? IS NULL OR info.message_local_id = ?)
                 """,
-                (chat_row["rowid"],),
+                (chat_row["rowid"], local_id, local_id),
             ).fetchall()
+            hints = [{"packed_text": _decode_text_value(row["packed_info"]), "size": row["size"]} for row in rows]
+            image_md5 = ""
+            if local_id is not None:
+                message_conn = self._message_conn("message")
+                try:
+                    table = message_table_name(chat_username)
+                    if _table_exists(message_conn, table):
+                        message = message_conn.execute(f'SELECT message_content FROM "{table}" WHERE local_id=?', (local_id,)).fetchone()
+                        if message:
+                            match = re.search(r'<img\b[^>]*\bmd5="([a-fA-F0-9]{32})"', _decode_text_value(message[0]))
+                            image_md5 = match.group(1).lower() if match else ""
+                finally:
+                    message_conn.close()
+            exported_files = (self._export_resource_files(decode_missing=decode_missing,
+                                resource_hints=hints if local_id is not None else None,
+                                chat_username=chat_username, image_md5=image_md5) if export else {})
             grouped: dict[int, dict[str, Any]] = {}
             for row in rows:
                 local_id = int(row["message_local_id"] or 0)
