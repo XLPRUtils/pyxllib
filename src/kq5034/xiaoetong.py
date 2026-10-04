@@ -1909,7 +1909,8 @@ return fetch('/xe.data-user-behavior.live.user_list_filter/1.0.0', {
                         tab('tag:button@@text():导出 ').click(by_js=True)
                         break
                     except Exception as e:
-                        wechat_logger.warning(format_exception(e, 3))
+                        # 页面重试只是采集诊断；通知由外层业务显式决定。
+                        logger.warning(format_exception(e, 3))
                         if i == 9:
                             raise e
                         tab.wait(2)
