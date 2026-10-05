@@ -1110,6 +1110,17 @@ class WeChatDbStorage:
         with FileLock(str(self.root.parent / "live-sync.lock"), timeout=120):
             return self._message_resources(chat_id, local_id)
 
+    def voice_message(self, chat_id: str, local_id: int) -> dict:
+        """Read one exact voice message and export locally decoded WAV if available.
+
+        This account-scoped provider owns database identity and decoding. It
+        returns no guessed transcription, and never invokes GUI or cloud ASR.
+        """
+        from filelock import FileLock
+        from pyxllib.autogui.wechat_voice import read_voice_message
+        with FileLock(str(self.root.parent / 'live-sync.lock'), timeout=120):
+            return read_voice_message(self, chat_id, local_id)
+
     def _message_resources(self, chat_id: str, local_id: int) -> dict:
         username = self._resolve_chat_username(chat_id)
         result = self._resource_summary(username, export=True, decode_missing=True, local_id=int(local_id)).get(int(local_id), {})
@@ -1132,6 +1143,16 @@ class WeChatDbStorage:
                 exported.pop("read_error", None)
             if not readable:
                 exported["read_error"] = "资源尚未成功解码；不能把原始加密文件当作可读图片"
+        if not result.get('items'):
+            from pyxllib.autogui.wechat_voice import read_voice_message
+            try:
+                voice = read_voice_message(self, chat_id, local_id)
+            except ValueError:
+                return result  # An ordinary text or absent message has no voice asset.
+            audio = voice.get('audio') or {}
+            if audio:
+                result = {'resource_count': 1, 'total_size': audio['size'], 'resource_types': [34],
+                          'items': [{'kind': 'voice', 'type': 34, 'export': audio}], 'voice': voice}
         return result
 
     def _sync_from_live(self, *, export_media: bool = True) -> dict[str, Any]:
