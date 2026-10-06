@@ -103,6 +103,19 @@ def _decode_text_value(value: Any) -> str:
     return ""
 
 
+def _resource_reference_text(value: Any) -> str:
+    """Keep embedded ASCII media identities in binary resource metadata.
+
+    packed_info is a protobuf-like blob, not a UTF-8 string. Its binary
+    framing can defeat text decoding even when a filename is embedded.
+    """
+    text = _decode_text_value(value)
+    if isinstance(value, bytes):
+        tokens = re.findall(rb"(?<![a-fA-F0-9])(?:[a-fA-F0-9]{32}|[a-fA-F0-9]{16})(?:_[ht])?(?:\.dat)?(?![a-fA-F0-9])", value)
+        return " ".join([text, *(token.decode("ascii") for token in tokens)]).strip()
+    return text
+
+
 def _image_type_from_header(data: bytes) -> str:
     if data.startswith(b"\xff\xd8\xff") and len(data) >= 4 and data[3] in (*range(0xE0, 0xF0), 0xDB, 0xC0, 0xC2, 0xC4, 0xFE):
         return "jpg"
@@ -453,6 +466,18 @@ def _strip_xml_sender_prefix(text: str) -> str:
     return stripped
 
 
+def parse_message_appmsg(text: str) -> dict[str, Any] | None:
+    """Parse message app content, including inline merged-forward records.
+
+    Forwarded speakers are display names, not verified account identities.
+    Attachment entries contain metadata only; read real bytes through
+    message_resources(chat_id, local_id), checking export.readable first.
+    None means there is no parseable app message. An empty forwarded_items
+    list does not prove a forwarded record contains no messages.
+    """
+    return _parse_appmsg(text)
+
+
 def _parse_appmsg(text: str) -> dict[str, Any] | None:
     xml_text = _strip_xml_sender_prefix(text)
     if "<appmsg" not in xml_text.lower():
@@ -521,6 +546,8 @@ def _parse_forwarded_items(text: str) -> list[dict[str, Any]]:
             "datatype": datatype,
             "speaker": node_text("sourcename"),
             "source_time": node_text("sourcetime"),
+            "source_timestamp": node_int("srcMsgCreateTime"),
+            "source_message_id": node_text("fromnewmsgid"),
             "text": node_text("datadesc"),
             "data_format": node_text("datafmt"),
             "data_size": node_int("datasize"),
@@ -1102,6 +1129,10 @@ class WeChatDbStorage:
         """Export readable assets on demand for one message; no GUI fallback.
 
         Returned items contain export.stored_path when decoding succeeds.
+        Merged forwards are bound by the message's cache record ID and entry
+        index, never by file size alone. Opening the desktop record/attachment
+        can trigger WeChat's download; this API exports already cached bytes.
+        Forwarded videos must match the embedded expected size and checksum.
         An empty result does not prove the original message had no attachment.
         """
         from filelock import FileLock
@@ -1134,12 +1165,15 @@ class WeChatDbStorage:
                 with path.open("rb") as stream:
                     readable = bool(_image_type_from_header(stream.read(64))) and _readable_image(path)
             exported["readable"] = readable
+            if readable:
+                exported["decoded_size"] = path.stat().st_size
             if readable and exported.get("kind") == "image":
                 from PIL import Image
                 with Image.open(path) as image:
                     exported["width"], exported["height"] = image.size
                 original = str(exported.get("original_file_name") or "")
-                exported["variant"] = "high" if original.endswith("_h.dat") else "thumbnail" if original.endswith("_t.dat") else "standard"
+                if not exported.get("forwarded_record"):
+                    exported["variant"] = "high" if original.endswith("_h.dat") else "thumbnail" if original.endswith("_t.dat") else "standard"
                 exported.pop("read_error", None)
             if not readable:
                 exported["read_error"] = "资源尚未成功解码；不能把原始加密文件当作可读图片"
@@ -1223,12 +1257,14 @@ class WeChatDbStorage:
             stored_path = item.get("stored_path")
             if stored_path and not Path(str(stored_path)).exists():
                 continue
+            if item.get("forward_record_id") and item.get("forward_data_index") is not None:
+                exported[f"record:{item['forward_record_id']}:{item['forward_data_index']}:{item['kind']}:{item.get('variant', 'standard')}"] = item
             for key in [
                 item.get("file_name"),
                 item.get("original_file_name"),
                 item.get("md5"),
-                f"size:{item.get('size')}" if item.get("size") is not None else "",
-                f"size:{int(item.get('size')) + 31}" if item.get("size") is not None else "",
+                f"size:{item.get('size')}" if item.get("size") is not None and not item.get("forwarded_record") else "",
+                f"size:{int(item.get('size')) + 31}" if item.get("size") is not None and not item.get("forwarded_record") else "",
             ]:
                 if key:
                     exported[str(key)] = item
@@ -1424,9 +1460,35 @@ class WeChatDbStorage:
             if media_kind == "image" and resource_hints is not None:
                 chat_hash = hashlib.md5((chat_username or "").encode()).hexdigest()
                 rows = [row for row in rows if dirs.get(int(row.get("dir1") or 0)) == chat_hash]
+                # Received thumbnails may have no hardlink row. The message's
+                # packed_info_data owns their exact filename family; XML md5
+                # identifies image content and is a different identity.
+                references = {token.lower() for hint in resource_hints
+                              for token in re.findall(r"[a-fA-F0-9]{32}", hint["packed_text"])}
+                chat_dir = account_root / "msg" / "attach" / chat_hash
+                for reference in references:
+                    for suffix in (".dat", "_h.dat", "_t.dat"):
+                        for path in chat_dir.glob(f"*/Img/{reference}{suffix}"):
+                            if not path.is_file():
+                                continue
+                            month = path.parent.parent.name
+                            if any(str(row.get("file_name")) == path.name
+                                   and dirs.get(int(row.get("dir2") or 0)) == month for row in rows):
+                                continue
+                            chat_key = next((key for key, value in dirs.items() if value == chat_hash), None)
+                            if chat_key is None:
+                                chat_key = max(dirs, default=0) + 1
+                                dirs[chat_key] = chat_hash
+                            month_key = next((key for key, value in dirs.items() if value == month), None)
+                            if month_key is None:
+                                month_key = max(dirs, default=0) + 1
+                                dirs[month_key] = month
+                            rows.append({"dir1": chat_key, "dir2": month_key, "file_name": path.name,
+                                         "md5": "", "file_size": path.stat().st_size - 31})
                 if image_md5:
                     families = {re.sub(r"_[ht]$", "", Path(str(row.get("file_name") or "")).stem)
-                                for row in rows if str(row.get("md5") or "") == image_md5}
+                                for row in rows if str(row.get("md5") or "") == image_md5
+                                or re.sub(r"_[ht]$", "", Path(str(row.get("file_name") or "")).stem) in references}
                     if families:
                         rows = [row for row in rows if re.sub(r"_[ht]$", "", Path(str(row.get("file_name") or "")).stem) in families]
                         # Thumbnail files can be present without a hardlink row.
@@ -1445,7 +1507,8 @@ class WeChatDbStorage:
                 if resource_hints is not None:
                     tokens = [str(row.get("md5") or ""), str(row.get("file_name") or "")]
                     size = int(row.get("file_size") or 0)
-                    if not any(any(token and token in hint["packed_text"] for token in tokens)
+                    family = re.sub(r"_[ht]$", "", Path(str(row.get("file_name") or "")).stem)
+                    if not any(any(token and token in hint["packed_text"] for token in [*tokens, family])
                                or (size and int(hint["size"] or 0) in (size, size + 31))
                                for hint in resource_hints):
                         continue
@@ -1520,58 +1583,81 @@ class WeChatDbStorage:
                 exported[f"size:{item['size']}"] = item
                 exported[f"size:{item['size'] + 31}"] = item
 
-        # Merged-forward records are stored outside hardlink.db under
-        # msg/attach/<chat>/<month>/Rec/<record>/Img/<data_index>.  The
-        # message_resource rows point at them by data_index and encrypted
-        # size, so export these files as first-class image resources too.
+        # Merged forwards own a cache directory by the message's record ID.
+        # Never associate by size alone: different forwards can share sizes.
         attach_root = account_root / "msg" / "attach"
         if resource_hints is not None:
             attach_root = attach_root / hashlib.md5((chat_username or "").encode()).hexdigest()
+        record_ids = {hint.get("forward_record_id") for hint in resource_hints or []
+                      if hint.get("forward_record_id")}
         if attach_root.exists():
-            forward_pattern = "*/*/Rec/*/Img/*" if resource_hints is None else "*/Rec/*/Img/*"
+            forward_pattern = "*/*/Rec/*/*/*" if resource_hints is None else "*/Rec/*/*/*"
             for source in attach_root.glob(forward_pattern):
                 if not source.is_file():
                     continue
-                try:
-                    source_size = source.stat().st_size
-                    relative = source.relative_to(account_root).as_posix()
-                except OSError:
+                record_id = source.parent.parent.name
+                if resource_hints is not None and record_id not in record_ids:
                     continue
-                if resource_hints is not None and not any(source_size == int(hint["size"] or 0)
-                        or source.name in hint["packed_text"] for hint in resource_hints):
+                folder = source.parent.name
+                media_kind = {"Img": "image", "V": "video"}.get(folder)
+                if media_kind is None:
                     continue
+                data_index = re.sub(r"_[ht]$", "", source.stem)
+                if not data_index.isdigit():
+                    continue
+                if resource_hints is not None and not any(
+                        hint.get("forward_record_id") == record_id
+                        and str(hint.get("data_index")) == data_index for hint in resource_hints):
+                    continue
+                source_size = source.stat().st_size
+                relative = source.relative_to(account_root).as_posix()
                 digest = hashlib.sha256(relative.encode("utf-8")).hexdigest()[:16]
-                stem = f"forward_{digest}_{source.name}"
-                target = self._existing_exported_image(export_root / "image", "", stem)
-                if target is None and decode_missing:
-                    if image_xor_key is None:
-                        image_xor_key = self._wechat_v4_image_xor_key(account_root)
-                    if image_aes_key is None:
-                        image_aes_key = self._wechat_v4_image_dynamic_aes_key(account_root, source)
-                    target = _decode_wechat_v4_image_dat(
-                        source,
-                        export_root / "image",
-                        stem,
-                        image_xor_key or 0,
-                        image_aes_key,
-                    )
-                if target is None:
-                    continue
+                stem = f"forward_{digest}_{source.stem}"
+                variant = "thumbnail" if source.stem.endswith("_t") else "high" if source.stem.endswith("_h") else "standard"
+                if media_kind == "image":
+                    target = self._existing_exported_image(export_root / "image", "", stem)
+                    if target is None and decode_missing:
+                        if image_xor_key is None:
+                            image_xor_key = self._wechat_v4_image_xor_key(account_root)
+                        with source.open("rb") as stream:
+                            signature = stream.read(6)
+                        image_aes_key = (self._wechat_v4_image_dynamic_aes_key(account_root, source)
+                                         if signature == b"\x07\x08V2\x08\x07" else None)
+                        target = _decode_wechat_v4_image_dat(source, export_root / "image", stem,
+                                                           image_xor_key or 0, image_aes_key)
+                    if target is None:
+                        continue
+                else:
+                    target = export_root / media_kind / (stem + source.suffix)
+                    if media_kind == "video":
+                        with source.open("rb") as stream:
+                            header = stream.read(64)
+                        if b"ftyp" not in header:
+                            continue
+                    with source.open("rb") as stream:
+                        source_digest = hashlib.file_digest(stream, "md5").hexdigest()
+                    cached_digest = ""
+                    if target.exists() and target.stat().st_size == source_size:
+                        with target.open("rb") as stream:
+                            cached_digest = hashlib.file_digest(stream, "md5").hexdigest()
+                    if cached_digest != source_digest:
+                        if not decode_missing:
+                            continue
+                        target.parent.mkdir(parents=True, exist_ok=True)
+                        temporary = target.with_name(target.name + f".{uuid.uuid4().hex}.tmp")
+                        shutil.copy2(source, temporary)
+                        os.replace(temporary, target)
                 item = {
-                    "kind": "image",
-                    "file_name": target.name,
-                    "original_file_name": relative,
-                    "size": source_size,
-                    "source_path": os.fspath(source),
-                    "stored_path": os.fspath(target),
-                    "download_name": f"image/{target.name}",
+                    "kind": media_kind, "file_name": target.name, "original_file_name": relative,
+                    "size": source_size, "source_path": os.fspath(source), "stored_path": os.fspath(target),
+                    "download_name": f"{media_kind}/{target.name}",
                     "md5": hashlib.md5(target.read_bytes()).hexdigest(),
-                    "decoded_from_dat": True,
-                    "forwarded_record": True,
+                    "decoded_from_dat": media_kind == "image", "forwarded_record": True,
+                    "forward_record_id": record_id, "forward_data_index": data_index, "variant": variant,
                 }
                 exported[item["file_name"]] = item
                 exported[relative] = item
-                exported[f"size:{source_size}"] = item
+                exported[f"record:{record_id}:{data_index}:{media_kind}:{variant}"] = item
         if decode_missing:
             if resource_hints is None:
                 self._exported_resource_files_cache = exported
@@ -1701,6 +1787,7 @@ class WeChatDbStorage:
         offset: int = 0,
         order: str = "desc",
         include_resources: bool = True,
+        local_id: int | None = None,
     ) -> dict[str, Any]:
         limit = min(max(1, int(limit)), MAX_PAGE_SIZE)
         offset = max(0, int(offset))
@@ -1717,6 +1804,9 @@ class WeChatDbStorage:
                 return {"total": 0, "items": [], "table_name": table}
             clauses = []
             params: list[Any] = []
+            if local_id is not None:
+                clauses.append("msg.local_id = ?")
+                params.append(int(local_id))
             if q:
                 clauses.append("(msg.message_content LIKE ? OR sender.user_name LIKE ? OR msg.source LIKE ?)")
                 needle = f"%{_safe_like(q.strip())}%"
@@ -1860,19 +1950,38 @@ class WeChatDbStorage:
                 """,
                 (chat_row["rowid"], local_id, local_id),
             ).fetchall()
-            hints = [{"packed_text": _decode_text_value(row["packed_info"]), "size": row["size"]} for row in rows]
-            image_md5 = ""
-            if local_id is not None:
-                message_conn = self._message_conn("message")
-                try:
-                    table = message_table_name(chat_username)
-                    if _table_exists(message_conn, table):
-                        message = message_conn.execute(f'SELECT message_content FROM "{table}" WHERE local_id=?', (local_id,)).fetchone()
-                        if message:
-                            match = re.search(r'<img\b[^>]*\bmd5="([a-fA-F0-9]{32})"', _decode_text_value(message[0]))
-                            image_md5 = match.group(1).lower() if match else ""
-                finally:
-                    message_conn.close()
+            metadata: dict[int, dict[str, Any]] = {}
+            ids = sorted({int(row["message_local_id"]) for row in rows})
+            message_conn = self._message_conn("message")
+            try:
+                table = message_table_name(chat_username)
+                if _table_exists(message_conn, table):
+                    for offset in range(0, len(ids), 500):
+                        batch = ids[offset:offset + 500]
+                        placeholders = ",".join("?" for _ in batch)
+                        messages = message_conn.execute(
+                            f'SELECT local_id, message_content, packed_info_data FROM "{table}" WHERE local_id IN ({placeholders})', batch
+                        ).fetchall()
+                        for message in messages:
+                            body = _decode_text_value(message["message_content"])
+                            refs = _resource_reference_text(message["packed_info_data"])
+                            parsed = parse_message_appmsg(body) or {}
+                            record_ids = set(re.findall(r"(?<![a-f0-9])[a-f0-9]{16}(?![a-f0-9])", refs.lower()))
+                            match = re.search(r'<img\b[^>]*\bmd5="([a-fA-F0-9]{32})"', body)
+                            metadata[int(message["local_id"])] = {
+                                "refs": refs, "image_md5": match.group(1).lower() if match else "",
+                                "forwarded": parsed.get("app_type") == 19,
+                                "record_id": next(iter(record_ids)) if parsed.get("app_type") == 19 and len(record_ids) == 1 else "",
+                                "items": {str(entry["data_index"]): entry for entry in parsed.get("forwarded_items", [])},
+                            }
+            finally:
+                message_conn.close()
+            hints = [{"packed_text": _resource_reference_text(row["packed_info"]) + " "
+                      + metadata.get(int(row["message_local_id"]), {}).get("refs", ""),
+                      "size": row["size"], "data_index": str(row["data_index"]),
+                      "forward_record_id": metadata.get(int(row["message_local_id"]), {}).get("record_id", "")}
+                     for row in rows]
+            image_md5 = metadata.get(local_id, {}).get("image_md5", "")
             exported_files = (self._export_resource_files(decode_missing=decode_missing,
                                 resource_hints=hints if local_id is not None else None,
                                 chat_username=chat_username, image_md5=image_md5) if export else {})
@@ -1895,14 +2004,29 @@ class WeChatDbStorage:
                     item["resource_types"].add(str(row["type"]))
                 if row["data_index"] is not None:
                     item["data_indexes"].add(str(row["data_index"]))
-                packed_text = _decode_text_value(row["packed_info"])
+                packed_text = _resource_reference_text(row["packed_info"])
                 exported = None
-                for key, value in exported_files.items():
-                    if key and key in packed_text:
-                        exported = value
-                        break
-                if not exported:
-                    exported = exported_files.get(f"size:{int(row['size'] or 0)}")
+                meta = metadata.get(local_id, {})
+                if meta.get("forwarded"):
+                    record_id = meta.get("record_id")
+                    resource_type = int(row["type"] or 0)
+                    media_kind = "video" if resource_type == 131074 else "image"
+                    variant = "thumbnail" if resource_type in {262145, 196610} else "standard"
+                    exported = exported_files.get(f"record:{record_id}:{row['data_index']}:{media_kind}:{variant}")
+                    entry = meta.get("items", {}).get(str(row["data_index"]), {})
+                    if exported and media_kind != "image":
+                        expected_md5 = entry.get("full_md5")
+                        expected_size = entry.get("data_size")
+                        if ((expected_md5 and exported.get("md5") != expected_md5)
+                                or (expected_size and exported.get("size") != expected_size)):
+                            exported = None
+                else:
+                    for key, value in exported_files.items():
+                        if key and key in packed_text:
+                            exported = value
+                            break
+                    if not exported:
+                        exported = exported_files.get(f"size:{int(row['size'] or 0)}")
                 resource_item = {
                     "resource_id": row["resource_id"],
                     "type": row["type"],
@@ -1912,7 +2036,27 @@ class WeChatDbStorage:
                 }
                 if exported:
                     resource_item["export"] = exported
+                elif meta.get("forwarded"):
+                    resource_item["export_status"] = "unavailable"
+                    resource_item["read_error"] = "附件尚未缓存、未解码或完整性校验未通过；打开转发记录并触发附件下载后重试"
                 item["items"].append(resource_item)
+            # Expose every locally available version of the exact message
+            # family, even when resource.db only contains the thumbnail row.
+            for group_id, group in grouped.items():
+                meta = metadata.get(group_id, {})
+                references = set(re.findall(r"[a-fA-F0-9]{32}", meta.get("refs", "").lower()))
+                paths = {entry.get("export", {}).get("stored_path") for entry in group["items"]}
+                for asset in exported_files.values():
+                    family = re.sub(r"_[ht]$", "", Path(asset.get("original_file_name", "")).stem)
+                    same_record = bool(meta.get("forwarded") and meta.get("record_id")
+                                       and asset.get("forward_record_id") == meta["record_id"]
+                                       and asset.get("forward_data_index") in meta.get("items", {}))
+                    if (asset.get("kind") != "image" or not (family in references or same_record)
+                            or asset["stored_path"] in paths):
+                        continue
+                    paths.add(asset["stored_path"])
+                    group["items"].append({"resource_id": None, "type": None, "size": asset["size"],
+                                           "data_index": asset.get("forward_data_index", "0"), "packed_text": "", "export": asset})
             return {
                 local_id: {
                     **item,
