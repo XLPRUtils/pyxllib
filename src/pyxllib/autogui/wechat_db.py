@@ -2098,6 +2098,68 @@ class WeChatDbStorage:
         finally:
             conn.close()
 
+    def group_members(self, chat_id: str) -> list[dict[str, str]]:
+        """Read exact group member IDs and group nicknames from the account snapshot.
+
+        Decode ChatRoomMemberData, keeping empty nicknames distinct from a
+        missing member. Unknown protobuf fields are skipped; corrupt data fails
+        visibly. No live mutation, GUI or cross-account fallback.
+        """
+        if not re.fullmatch(r"[0-9]+@chatroom", chat_id):
+            raise ValueError("必须使用精确的微信群 ID")
+        conn = _connect_readonly(self.paths.contact)
+        try:
+            row = conn.execute("SELECT ext_buffer FROM chat_room WHERE username = ?", (chat_id,)).fetchone()
+        finally:
+            conn.close()
+        if row is None:
+            raise WeChatDbError(f"当前账号归档中没有群 {chat_id}")
+
+        def fields(data):
+            offset = 0
+            def varint():
+                nonlocal offset
+                value = 0
+                for shift in range(0, 70, 7):
+                    if offset >= len(data):
+                        raise WeChatDbError("群成员 protobuf 被截断")
+                    byte = data[offset]
+                    offset += 1
+                    value |= (byte & 127) << shift
+                    if byte < 128:
+                        return value
+                raise WeChatDbError("群成员 protobuf varint 无效")
+            while offset < len(data):
+                key = varint()
+                number, wire = key >> 3, key & 7
+                if not number:
+                    raise WeChatDbError("群成员 protobuf 字段无效")
+                if wire == 0:
+                    varint()
+                    continue
+                size = varint() if wire == 2 else {1: 8, 5: 4}.get(wire)
+                if size is None or offset + size > len(data):
+                    raise WeChatDbError("群成员 protobuf 格式无效")
+                value = data[offset:offset + size]
+                offset += size
+                if wire == 2:
+                    yield number, value
+
+        members = []
+        try:
+            for number, raw in fields(row[0] or b""):
+                if number != 1:
+                    continue
+                member = {"username": "", "display_name": ""}
+                for field, value in fields(raw):
+                    if field in (1, 2):
+                        member["username" if field == 1 else "display_name"] = value.decode("utf-8")
+                if member["username"]:
+                    members.append(member)
+        except UnicodeDecodeError as exc:
+            raise WeChatDbError("群成员昵称不是 UTF-8") from exc
+        return members
+
     def list_tables(self, database: str) -> list[dict[str, Any]]:
         path = self._database_path(database)
         conn = _connect_readonly(path)
