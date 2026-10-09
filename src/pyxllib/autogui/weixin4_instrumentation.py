@@ -62,8 +62,14 @@ def list_live_accounts() -> list[dict]:
             roots = set()
             try:
                 paths = process.open_files()
-            except (psutil.AccessDenied, OSError):
-                paths = process.memory_maps()
+            except (psutil.AccessDenied, OSError, RuntimeError):
+                # Windows may fail while sizing SystemExtendedHandleInformation
+                # with RuntimeError; mapped paths provide the same account
+                # ownership evidence without enumerating open handles.
+                try:
+                    paths = process.memory_maps()
+                except (psutil.Error, OSError, RuntimeError):
+                    paths = []
             for item in paths:
                 parts = Path(item.path).parts
                 if "xwechat_files" in parts and "db_storage" in parts:
