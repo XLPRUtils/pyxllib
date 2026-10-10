@@ -716,3 +716,33 @@ def test_search_lesson_links_closes_detail_tab_before_yield(monkeypatch):
 def test_search_lesson_links_recognizes_banned_resource_rows():
     assert XiaoetongWeb._直播课列表行已封禁('视频已封禁 第50届觉观技术公益网课-17') is True
     assert XiaoetongWeb._直播课列表行已封禁('第50届觉观技术公益网课-17 已上架 未开始') is False
+
+
+def test_search_lesson_links_preserves_banned_evidence_without_opening_detail(monkeypatch):
+    from types import SimpleNamespace
+    web = XiaoetongWeb.__new__(XiaoetongWeb)
+    class Row:
+        text = '视频已封禁 第52届觉观技术公益网课-17\n2026-11-17 05:20:00'
+        def __call__(self, locator):
+            assert locator == '.title title-hover ss-popover__reference'
+            return SimpleNamespace(text='第52届觉观技术公益网课-17')
+    class Body:
+        def __call__(self, locator):
+            return False
+        def eles(self, locator):
+            return [Row()]
+    class Tab:
+        def get(self, url):
+            pass
+        def __call__(self, locator):
+            if locator == 'tag:tbody':
+                return Body()
+            return SimpleNamespace(eles=lambda locator: [None, SimpleNamespace(
+                attr=lambda key: 'ss-pagination-item__disabled'), None])
+    monkeypatch.setattr(web, 'switch_shop', lambda: Tab())
+    assert list(web.search_lesson_links('第52届')) == []
+    rows = list(web.search_lesson_links('第52届', include_unavailable=True))
+    assert len(rows) == 1
+    assert rows[0]['availability'] == 'banned'
+    assert rows[0]['start_date'] == '2026-11-17 05:20:00'
+    assert 'lesson_id2' not in rows[0]

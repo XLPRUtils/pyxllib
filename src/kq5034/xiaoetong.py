@@ -1959,7 +1959,7 @@ return fetch('/xe.data-user-behavior.live.user_list_filter/1.0.0', {
         return '视频已封禁' in str(text or '')
 
     def search_lesson_links(self, name, live_status=None, maxn=-1, sort_by_lesson_number=False,
-                            expected_count=None, required_title_keywords=None):
+                            expected_count=None, required_title_keywords=None, include_unavailable=False):
         """
         :param name: 课程名称
         :param str live_status: 直播状态：全部状态，未开始，直播中，已结束
@@ -1967,13 +1967,14 @@ return fetch('/xe.data-user-behavior.live.user_list_filter/1.0.0', {
         :param bool sort_by_lesson_number: 是否按标题中的课号升序返回；小鹅通列表默认常是倒序。
         :param expected_count: 期望课次数；用于防止关键词命中相似课程后误写入配置表。
         :param required_title_keywords: 标题必须包含的关键词，可以是字符串或字符串列表。
+        :param include_unavailable: 资源准备时保留封禁行及列表日期证据；封禁行不提供可采集链接。
         :return: 使用 yield 逐条返回查询结果
         """
         tab = self.switch_shop()
         if isinstance(required_title_keywords, str):
             required_title_keywords = [required_title_keywords]
         required_title_keywords = [str(x) for x in (required_title_keywords or []) if str(x)]
-        should_collect = sort_by_lesson_number or expected_count is not None or required_title_keywords
+        should_collect = sort_by_lesson_number or expected_count is not None or required_title_keywords or include_unavailable
 
         # 1 配置要访问的 url
         # 小鹅通直播列表页是 hash 路由，查询参数必须放在 '#/list' 后面。
@@ -2008,10 +2009,22 @@ return fetch('/xe.data-user-behavior.live.user_list_filter/1.0.0', {
                 break
 
             for tr in tbody.eles('tag:tr'):
-                if self._直播课列表行已封禁(getattr(tr, 'text', '')):
+                row_text = getattr(tr, 'text', '')
+                banned = self._直播课列表行已封禁(row_text)
+                if banned and not include_unavailable:
                     logger.warning(f'跳过小鹅通已封禁直播资源：{getattr(tr, "text", "")}')
                     continue
                 title = tr('.title title-hover ss-popover__reference').text
+                if required_title_keywords and not all(x in title for x in required_title_keywords):
+                    continue
+                if banned:
+                    dates = re.findall(r'\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}', row_text)
+                    rows.append({'lesson_name': title, 'availability': 'banned',
+                                 'start_date': dates[0] if len(dates) == 1 else '',
+                                 'source_row': '\n'.join(line.strip() for line in row_text.splitlines()
+                                     if any(x in line for x in ('视频已封禁', '引用违规素材', '已上架', '未开始'))
+                                     or re.fullmatch(r'\s*\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\s*', line))})
+                    continue
                 tab2 = None
                 try:
                     tab2 = tr('t:button@@text():管理').click.for_new_tab(by_js=True)
@@ -2027,6 +2040,9 @@ return fetch('/xe.data-user-behavior.live.user_list_filter/1.0.0', {
                     'lesson_id': course_id,
                     'lesson_id2': course_id,
                 }
+                if include_unavailable:
+                    dates = re.findall(r'\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}', row_text)
+                    row.update(availability='available', start_date=dates[0] if len(dates) == 1 else '')
 
                 if required_title_keywords and not all(x in title for x in required_title_keywords):
                     continue
