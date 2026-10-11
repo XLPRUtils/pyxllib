@@ -579,6 +579,16 @@ def _safe_like(value: str) -> str:
     return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
 
 
+def _literal_like_clause(column: str) -> str:
+    """Pair _safe_like's literal escaping with SQLite's explicit escape char.
+
+    Column expressions are provider-owned identifiers, never user query text.
+    Without ESCAPE SQLite treats the added backslash as a literal, so queries
+    containing underscores/percent/backslashes incorrectly lose actual rows.
+    """
+    return f"{column} LIKE ? ESCAPE '\\'"
+
+
 def normalize_message_type(value: int | None) -> int:
     raw = int(value or 0)
     if raw > 0xFFFFFFFF and (raw & 0xFFFFFFFF) < 100000:
@@ -1808,7 +1818,8 @@ class WeChatDbStorage:
                 clauses.append("msg.local_id = ?")
                 params.append(int(local_id))
             if q:
-                clauses.append("(msg.message_content LIKE ? OR sender.user_name LIKE ? OR msg.source LIKE ?)")
+                clauses.append("(" + " OR ".join(_literal_like_clause(column) for column in
+                               ("msg.message_content", "sender.user_name", "msg.source")) + ")")
                 needle = f"%{_safe_like(q.strip())}%"
                 params.extend([needle, needle, needle])
             if message_type:
@@ -1897,7 +1908,8 @@ class WeChatDbStorage:
             clauses = []
             params: list[Any] = []
             if q:
-                clauses.append("(msg.message_content LIKE ? OR sender.user_name LIKE ? OR msg.source LIKE ?)")
+                clauses.append("(" + " OR ".join(_literal_like_clause(column) for column in
+                               ("msg.message_content", "sender.user_name", "msg.source")) + ")")
                 needle = f"%{_safe_like(q.strip())}%"
                 params.extend([needle, needle, needle])
             if message_type:
@@ -2204,7 +2216,7 @@ class WeChatDbStorage:
                     if "TEXT" in (col["type"] or "").upper()
                 ]
                 if text_cols:
-                    clauses.append("(" + " OR ".join(f'"{col}" LIKE ?' for col in text_cols) + ")")
+                    clauses.append("(" + " OR ".join(_literal_like_clause(f'"{col}"') for col in text_cols) + ")")
                     params.extend([f"%{_safe_like(q.strip())}%"] * len(text_cols))
             where_sql = " WHERE " + " AND ".join(clauses) if clauses else ""
             total = conn.execute(f'SELECT COUNT(*) FROM "{table}" {where_sql}', params).fetchone()[0]

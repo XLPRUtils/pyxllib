@@ -1,6 +1,25 @@
 from pyxllib.autogui.wechat_db import _parse_appmsg
 
 
+def test_literal_like_escape_matches_reserved_and_multiline_text(tmp_path):
+    import sqlite3
+    from pyxllib.autogui.wechat_db import _safe_like, _literal_like_clause
+    values = ['inactive_observed', '100% complete', r'C:\archive\message',
+              'title\nwriter inactive_observed 100%', 'plain text']
+    with sqlite3.connect(tmp_path / 'literal-search.sqlite') as conn:
+        conn.execute('CREATE TABLE archive(text TEXT)')
+        conn.executemany('INSERT INTO archive VALUES(?)', [(v,) for v in values])
+        conn.execute('INSERT INTO archive VALUES(?)', ('inactiveXobserved',))
+        conn.execute('INSERT INTO archive VALUES(?)', ('100X complete',))
+        for value in values:
+            found = [r[0] for r in conn.execute('SELECT text FROM archive WHERE '+
+                        _literal_like_clause('text'), ('%'+_safe_like(value)+'%',))]
+            assert value in found
+            assert all(value in text for text in found)
+        assert [r[0] for r in conn.execute('SELECT text FROM archive WHERE '+
+                    _literal_like_clause('text'), ('%'+_safe_like('inactive_observed')+'%',))] == [values[0], values[3]]
+
+
 def test_parse_appmsg_expands_forwarded_text_and_image_items():
     record = (
         "&lt;recordinfo&gt;&lt;datalist count=\"2\"&gt;"
