@@ -37,6 +37,32 @@ def test_resolve_business_groups_exactly(tmp_path):
     assert resolve_recipient_id("文件传输助手", path) == "filehelper"
 
 
+def test_native_sends_to_different_groups_share_process_lock(monkeypatch, tmp_path):
+    import threading
+    import time
+    from concurrent.futures import ThreadPoolExecutor
+    monkeypatch.setattr(weixin4_instrumentation.tempfile, 'gettempdir', lambda: str(tmp_path))
+    monkeypatch.setattr(weixin4_instrumentation, 'resolve_sender', lambda _: {'pid': 42})
+    active = 0
+    peak = 0
+    mutex = threading.Lock()
+    def fake_send(recipient, text, **kwargs):
+        nonlocal active, peak
+        with mutex:
+            active += 1
+            peak = max(peak, active)
+        time.sleep(0.05)
+        with mutex:
+            active -= 1
+        return {'recipient': recipient}
+    monkeypatch.setattr(weixin4_instrumentation, '_send_text_locked', fake_send)
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        results = list(pool.map(lambda recipient: weixin4_instrumentation.send_text(recipient, 'test'),
+                                ['group-a', 'group-b']))
+    assert peak == 1
+    assert [r['recipient'] for r in results] == ['group-a', 'group-b']
+
+
 def test_resolve_repairs_legacy_gbk_text(tmp_path):
     mojibake = "考勤后台".encode("gbk").decode("latin1")
     path = make_db(tmp_path, [("room@chatroom", "", "", mojibake)])

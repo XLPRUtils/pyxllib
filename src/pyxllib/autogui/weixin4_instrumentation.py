@@ -19,6 +19,8 @@ import re
 import shutil
 import sqlite3
 import subprocess
+import tempfile
+from contextlib import contextmanager
 from pathlib import Path
 
 import psutil
@@ -322,7 +324,58 @@ def _script_source(adapter: Path, layout: WeixinLayout | None = None) -> str:
     )
 
 
+@contextmanager
+def _sender_runtime_lock(sender_account_id: str):
+    """One native hook owner per Weixin process, across recipients/processes."""
+    from filelock import FileLock
+    sender = resolve_sender(sender_account_id)
+    directory = Path(tempfile.gettempdir()) / 'pyxllib' / 'weixin-native-send'
+    directory.mkdir(parents=True, exist_ok=True)
+    with FileLock(str(directory / f"pid-{sender['pid']}.lock"), timeout=60):
+        if resolve_sender(sender_account_id) != sender:
+            raise WeixinInstrumentationUnavailable('发信进程在等待期间变化，未执行发送')
+        yield sender
+
+
+def preflight_sender(sender_account_id: str) -> dict:
+    """Validate live native signatures under the sender lock; never send or hook."""
+    import frida
+    with _sender_runtime_lock(sender_account_id) as sender:
+        dll = running_weixin_dll(sender_account_id)
+        layout = load_layout(dll)
+        # Reuse the exact sender validation before adapter loading or interception.
+        source = _script_source(Path('unused'), layout).split('const adapter = Module.load', 1)[0]
+        source += "\nrpc.exports = {probe() { return {pid: Process.id, path: module.path}; }};"
+        session = frida.attach(sender['pid'])
+        try:
+            script = session.create_script(source)
+            script.load()
+            probe = script.exports_sync.probe()
+            if Path(probe['path']).resolve() != dll.resolve():
+                raise WeixinInstrumentationUnavailable('发信进程 DLL 与解析版本不一致')
+            return {'ok': True, 'pid': probe['pid'], 'version': layout.version, 'source': layout.source}
+        finally:
+            session.detach()
+
+
 def send_text(
+    recipient: str,
+    text: str,
+    *,
+    contact_db: str | Path | None = None,
+    sender_account_id: str = DEFAULT_SENDER_ACCOUNT_ID,
+) -> dict:
+    """Serialize native validation, hook, send and detach for the whole account.
+
+    Concurrent sends to different groups otherwise see each other's Frida
+    detour instead of the original get_coro prologue and fail validation.
+    """
+    with _sender_runtime_lock(sender_account_id):
+        return _send_text_locked(recipient, text, contact_db=contact_db,
+                                 sender_account_id=sender_account_id)
+
+
+def _send_text_locked(
     recipient: str,
     text: str,
     *,
