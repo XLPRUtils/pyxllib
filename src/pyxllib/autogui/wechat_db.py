@@ -662,7 +662,9 @@ def decrypt_wechat_v4_db(in_path: Path, out_path: Path, key_hex: str, mode: str)
         # A live database can keep its newest committed pages entirely in WAL.
         # Publish one atomic snapshot containing only authenticated, committed frames.
         from pyxllib.autogui.wechat_updates import apply_committed_wal
-        apply_committed_wal(in_path, tmp_path, key_hex, mode)
+        from pyxllib.autogui.wechat_diagnostics import sync_stage
+        with sync_stage("decrypt.wal_apply"):
+            apply_committed_wal(in_path, tmp_path, key_hex, mode)
         tmp_path.replace(out_path)
         return True
     tmp_path.unlink(missing_ok=True)
@@ -1039,7 +1041,10 @@ class WeChatDbStorage:
                 ):
                     unchanged += 1
                     continue
-                ok = decrypt_wechat_v4_db(source, target, key_info["key_hex"], mode)
+                from pyxllib.autogui.wechat_diagnostics import sync_stage
+                with sync_stage("decrypt.db") as units:
+                    ok = decrypt_wechat_v4_db(source, target, key_info["key_hex"], mode)
+                    units["value"] = int(source.stat().st_size // WX_DB_PAGE_SIZE)
                 if ok:
                     if previous and self._same_fingerprint(source_fingerprint, previous.get("source_fingerprint")) and previous.get("wal_fingerprint") != wal_fingerprint:
                         wal_only_updates.append(rel_key)
@@ -1204,10 +1209,15 @@ class WeChatDbStorage:
         live_account_root = self._wechat_account_root()
         if not live_account_root:
             raise WeChatDbError("未找到本机微信账号目录")
-        copy_result = self._copy_live_db_storage(live_account_root)
+        from pyxllib.autogui.wechat_diagnostics import sync_stage
+        with sync_stage("sync.copy") as units:
+            copy_result = self._copy_live_db_storage(live_account_root)
+            units["value"] = int(copy_result.get("copied") or 0)
         if copy_result.get("error_count"):
             raise WeChatDbError("微信源快照不完整，尚未发布：" + "; ".join(copy_result["errors"][:3]))
-        decrypt_result = self._decrypt_snapshot_dbs(live_account_root)
+        with sync_stage("sync.decrypt") as units:
+            decrypt_result = self._decrypt_snapshot_dbs(live_account_root)
+            units["value"] = int(decrypt_result.get("decrypted") or 0)
         self._exported_resource_files_cache = None
         for decode in (0, 1):
             _WECHAT_EXPORTED_RESOURCE_CACHE.pop(f"{self.root.resolve()}|decode={decode}", None)

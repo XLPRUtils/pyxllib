@@ -99,6 +99,7 @@ def mention_ids(source: str) -> list[str]:
 
 def poll_storage_updates(storage, cursor: dict | None, *, limit: int = 1000) -> dict:
     from filelock import FileLock
+    from pyxllib.autogui.wechat_diagnostics import sync_stage
     from pyxllib.autogui.wechat_db import _connect_readonly, _decode_text_value, _table_exists, message_table_name, normalize_message_type
     import re
 
@@ -126,7 +127,8 @@ def poll_storage_updates(storage, cursor: dict | None, *, limit: int = 1000) -> 
             except psutil.Error:
                 pass
         if not valid or time.monotonic() - checked_at >= 30:
-            sender = resolve_sender(account_id_from_root(owner))
+            with sync_stage("updates.resolve_sender"):
+                sender = resolve_sender(account_id_from_root(owner))
             storage._updates_live_sender = (time.monotonic(), sender)
         if Path(sender["account_root"]).resolve() != Path(owner).resolve():
             raise RuntimeError("Live account root changed; prepare the account through its public API")
@@ -142,6 +144,8 @@ def poll_storage_updates(storage, cursor: dict | None, *, limit: int = 1000) -> 
         contacts = None
         events, has_more = [], False
         connections = []
+        query_stage = sync_stage("updates.query")
+        query_units = query_stage.__enter__()
         try:
             names = []
             # Normal chat history is sharded; local IDs are scoped to a shard.
@@ -182,7 +186,8 @@ def poll_storage_updates(storage, cursor: dict | None, *, limit: int = 1000) -> 
                     if newly_discovered and int(row["create_time"] or 0) < started_at:
                         continue
                     if contacts is None:
-                        contacts = storage._contact_map(include_avatar=False)
+                        with sync_stage("updates.contacts"):
+                            contacts = storage._contact_map(include_avatar=False)
                     sender = row["sender_username"] or ""
                     contact = contacts.get(sender) or {}
                     source = _decode_text_value(row["source"])
@@ -199,3 +204,5 @@ def poll_storage_updates(storage, cursor: dict | None, *, limit: int = 1000) -> 
         finally:
             for conn in connections:
                 conn.close()
+            query_units["value"] = len(events)
+            query_stage.__exit__(None, None, None)
