@@ -65,8 +65,22 @@ def test_missing_bound_archive_never_rebinds(monkeypatch, tmp_path):
 def test_enumerate_accounts_by_open_paths(monkeypatch, tmp_path):
     root = tmp_path / "xwechat_files" / "wxid_main_ab12"
     process = SimpleNamespace(pid=10, name=lambda: "Weixin.exe", create_time=lambda: 1,
+                              memory_maps=lambda: [SimpleNamespace(path=r"C:\Windows\System32\ntdll.dll")],
                               open_files=lambda: [SimpleNamespace(path=str(root / "db_storage" / "contact" / "contact.db")),
                                                   SimpleNamespace(path=str(root / "db_storage" / "session" / "session.db"))])
+    monkeypatch.setattr(api.psutil, "process_iter", lambda: [process])
+    assert api.list_live_accounts() == [{"account_id": "wxid_main", "account_root": str(root), "pid": 10, "create_time": 1}]
+
+
+def test_mapped_db_paths_avoid_system_handle_enumeration(monkeypatch, tmp_path):
+    root = tmp_path / "xwechat_files" / "wxid_main_ab12"
+
+    def must_not_enumerate_handles():
+        raise AssertionError("open_files must not run when mapped db paths already prove the account")
+
+    process = SimpleNamespace(pid=10, name=lambda: "Weixin.exe", create_time=lambda: 1,
+                              memory_maps=lambda: [SimpleNamespace(path=str(root / "db_storage" / "message" / "message_0.db"))],
+                              open_files=must_not_enumerate_handles)
     monkeypatch.setattr(api.psutil, "process_iter", lambda: [process])
     assert api.list_live_accounts() == [{"account_id": "wxid_main", "account_root": str(root), "pid": 10, "create_time": 1}]
 

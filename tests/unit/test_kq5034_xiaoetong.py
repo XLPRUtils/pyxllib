@@ -223,7 +223,9 @@ def test_iter_export_user_list_falls_back_when_download_center_task_name_changes
     web = XiaoetongWeb.__new__(XiaoetongWeb)
     web.tab = _FakeTab()
 
-    def fake_download_records(keywords=None):
+    def fake_download_records(keywords=None, exclude_keywords=None):
+        if keywords:
+            assert exclude_keywords == list(XiaoetongWeb.用户列表导出排除关键词)
         names = ['旧导出A'] if keywords else ['旧导出A', '旧导出B']
         return [
             {
@@ -259,6 +261,41 @@ def test_iter_export_user_list_falls_back_when_download_center_task_name_changes
         (list(XiaoetongWeb.用户列表导出关键词), ['旧导出A'], 20 * 60),
         (None, ['旧导出A', '旧导出B'], 10 * 60),
     ]
+
+
+def test_user_list_download_records_exclude_live_lesson_user_lists(monkeypatch):
+    """2026-10-16：'用户列表' 子串命中课次直播用户列表，被当作店铺用户入库。"""
+    from types import SimpleNamespace
+
+    web = XiaoetongWeb.__new__(XiaoetongWeb)
+
+    class Row:
+        def __init__(self, name):
+            self.name = name
+
+        def eles(self, locator):
+            return [SimpleNamespace(text=x) for x in ('2026-10-16', '已完成', '', '下载')]
+
+        def __call__(self, *_args, **_kwargs):
+            return True
+
+    class Tab:
+        def eles(self, locator):
+            return [SimpleNamespace(eles=lambda _locator: [
+                Row('《第51届觉观技术公益网课-11》-直播用户列表'), Row('用户列表导出')])]
+
+    class TempTab:
+        def __enter__(self):
+            return Tab()
+
+        def __exit__(self, *_exc):
+            return False
+
+    monkeypatch.setattr(web, '临时工作标签页', lambda **_kwargs: TempTab())
+    monkeypatch.setattr(XiaoetongWeb, '_提取下载中心任务名', staticmethod(lambda row: row.name))
+    names = [x['name'] for x in web._列出下载中心任务记录(
+        list(XiaoetongWeb.用户列表导出关键词), list(XiaoetongWeb.用户列表导出排除关键词))]
+    assert names == ['用户列表导出']
 
 
 def test_export_lesson_data_caps_single_lesson_wait(monkeypatch):

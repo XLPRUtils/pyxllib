@@ -223,14 +223,40 @@ def wait_page_not_change(page, interval=3):
 class DpWebBase:
     """ 基于dp开发的爬虫工具的一个基础类 """
 
+    # DrissionPage 4.1 的 new_tab 在丢失 targetCreated 挂载时会无限等待；
+    # 子类设置秒数后改为限时失败，None 保持原行为。
+    new_tab_timeout = None
+
     def __init__(self, url=None, *, base_url=None):
         self.browser = self._create_chromium()
         self.browser.set.download_path(tempfile.gettempdir())
 
         parsed_url = urlparse(url)
         root_url = f"{parsed_url.scheme}://{parsed_url.netloc}"  # 构建基础 URL
-        self.tab: XlTab = self.browser.new_tab(url)
+        self.tab: XlTab = self._new_tab(url)
         self.base_url = base_url or root_url  # 使用基础 URL 作为 base_url，后续同域名网站去重用
+
+    def _new_tab(self, url=None):
+        if not self.new_tab_timeout:
+            return self.browser.new_tab(url)
+        import threading
+
+        result = {}
+
+        def worker():
+            try:
+                result['tab'] = self.browser.new_tab(url)
+            except BaseException as exc:  # 交回调用线程抛出
+                result['error'] = exc
+
+        thread = threading.Thread(target=worker, name='dp-new-tab', daemon=True)
+        thread.start()
+        thread.join(self.new_tab_timeout)
+        if thread.is_alive():
+            raise TimeoutError(f'DrissionPage 新建标签超时：{self.new_tab_timeout}s url={url}')
+        if 'error' in result:
+            raise result['error']
+        return result['tab']
 
     @staticmethod
     def _create_chromium():

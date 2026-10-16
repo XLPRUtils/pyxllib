@@ -50,11 +50,22 @@ def account_id_from_root(root: str | Path) -> str:
     return re.sub(r"_[0-9a-fA-F]{4}$", "", Path(root).name)
 
 
+def _db_storage_roots(paths) -> set[str]:
+    roots = set()
+    for item in paths:
+        parts = Path(item.path).parts
+        if "xwechat_files" in parts and "db_storage" in parts:
+            roots.add(str(Path(*parts[:parts.index("db_storage")])))
+    return roots
+
+
 def list_live_accounts() -> list[dict]:
     """按进程打开或映射的数据库路径识别账号，不读取数据库内容、不注入进程。
 
-    Windows 的已删除文件句柄可能使 psutil.open_files 在 stat($Extend/$Deleted)
-    时抛出 AccessDenied；此时只读进程映射路径取得相同的账号归属证据。
+    映射路径与打开句柄是同一账号归属证据。先读进程映射；只有映射中找不到
+    db_storage 时才回退 psutil.open_files。open_files 需枚举全系统句柄并在查询
+    超时时 TerminateThread，长驻监听每 30 秒调用时与原生内存持续增长强相关。
+    Windows 的已删除文件句柄还可能使 open_files 抛出 AccessDenied。
     """
     accounts = []
     for process in psutil.process_iter():
@@ -62,20 +73,16 @@ def list_live_accounts() -> list[dict]:
             if process.name().lower() != "weixin.exe":
                 continue
             roots = set()
-            try:
-                paths = process.open_files()
-            except (psutil.AccessDenied, OSError, RuntimeError):
-                # Windows may fail while sizing SystemExtendedHandleInformation
-                # with RuntimeError; mapped paths provide the same account
-                # ownership evidence without enumerating open handles.
+            for reader in (process.memory_maps, process.open_files):
                 try:
-                    paths = process.memory_maps()
-                except (psutil.Error, OSError, RuntimeError):
-                    paths = []
-            for item in paths:
-                parts = Path(item.path).parts
-                if "xwechat_files" in parts and "db_storage" in parts:
-                    roots.add(str(Path(*parts[:parts.index("db_storage")])))
+                    paths = reader()
+                except (psutil.AccessDenied, OSError, RuntimeError):
+                    # Windows may fail while sizing SystemExtendedHandleInformation
+                    # with RuntimeError; try the other evidence source.
+                    continue
+                roots = _db_storage_roots(paths)
+                if roots:
+                    break
             for root in sorted(roots):
                 accounts.append({"account_id": account_id_from_root(root), "account_root": root,
                                  "pid": process.pid, "create_time": process.create_time()})

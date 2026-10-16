@@ -207,6 +207,8 @@ class XiaoetongWeb(DpWebBase):
         '用户导出',
         '用户管理导出',
     )
+    # '用户列表' 会子串命中课次的“直播用户列表”导出；并发采集时曾把课次名单当作店铺用户入库。
+    用户列表导出排除关键词 = ('直播',)
 
     """ 网页版的小鹅通爬虫 """
 
@@ -232,6 +234,9 @@ class XiaoetongWeb(DpWebBase):
         'his_learning_time', 'his_learned_time', 'learning_progress', 'learned_progress_times',
         'max_learned_progress', 'is_finish', 'comment_num', 'user_total_price', 'equity_status',
     ]
+
+    # 考勤行为树依赖有界失败重试，不能卡在 DP 新标签挂载上。
+    new_tab_timeout = 180
 
     def __init__(self, name=None, passwd=None):
         super().__init__('https://admin.xiaoe-tech.com')
@@ -733,9 +738,10 @@ return fetch('/xe.merchant-service-admin.shop_list.get/2.0.0', {
 
             return task_names
 
-    def _列出下载中心任务记录(self, match_keywords=None):
+    def _列出下载中心任务记录(self, match_keywords=None, exclude_keywords=None):
         """读取下载中心任务记录，兼容处理中/成功两类状态判断。"""
         match_keywords = [self._标准化下载名(x) for x in (match_keywords or []) if x]
+        exclude_keywords = [self._标准化下载名(x) for x in (exclude_keywords or []) if x]
 
         with self.临时工作标签页(url='https://admin.xiaoe-tech.com/t/basic-platform/downloadCenter#/', wait_seconds=5) as tab:
             rows = []
@@ -751,6 +757,8 @@ return fetch('/xe.merchant-service-admin.shop_list.get/2.0.0', {
                 task_name = self._提取下载中心任务名(row)
                 normalized_name = self._标准化下载名(task_name)
                 if match_keywords and not any(x in normalized_name for x in match_keywords):
+                    continue
+                if any(x in normalized_name for x in exclude_keywords):
                     continue
 
                 status = (tds[-3].text or '').strip() if len(tds) >= 3 else ''
@@ -850,10 +858,14 @@ return fetch('/xe.merchant-service-admin.shop_list.get/2.0.0', {
 
     def iter_download_last_file(self, match_keywords=None, exclude_task_names=None, *,
                                 poll_seconds=60, max_wait_seconds=None, refresh_every_checks=5,
-                                download_wait_seconds=180):
-        """生成器版下载中心轮询，便于行为树逐步推进。"""
+                                download_wait_seconds=180, exclude_keywords=None):
+        """生成器版下载中心轮询，便于行为树逐步推进。
+
+        :param exclude_keywords: 任务名含任一关键词即忽略，防止宽关键词串到其他导出。
+        """
         tab = self.tab
         match_keywords = [self._标准化下载名(x) for x in (match_keywords or []) if x]
+        exclude_keywords = [self._标准化下载名(x) for x in (exclude_keywords or []) if x]
         exclude_task_counts = Counter(self._标准化下载名(x) for x in (exclude_task_names or []) if x)
 
         yield '下载中心轮询：打开页面'
@@ -877,6 +889,8 @@ return fetch('/xe.merchant-service-admin.shop_list.get/2.0.0', {
                 file1 = self._提取下载中心任务名(row)
                 normalized_name = self._标准化下载名(file1)
                 if match_keywords and not any(x in normalized_name for x in match_keywords):
+                    continue
+                if any(x in normalized_name for x in exclude_keywords):
                     continue
 
                 tds = row.eles('tag:td')
@@ -970,6 +984,7 @@ return fetch('/xe.merchant-service-admin.shop_list.get/2.0.0', {
         """生成器版导出用户清单，导出等待过程可逐步观察。"""
         tab = self.tab
         export_keywords = list(self.用户列表导出关键词)
+        exclude_keywords = list(self.用户列表导出排除关键词)
 
         yield '用户列表导出：打开用户列表页'
         tab.get('https://admin.xiaoe-tech.com/t/user_manage/index#/user_list/list')
@@ -979,7 +994,7 @@ return fetch('/xe.merchant-service-admin.shop_list.get/2.0.0', {
             tab('tag:input@@placeholder=请输入昵称/备注名搜索').input(str(search_name), clear=True)
             tab('tag:span@@text()=筛选').click()
 
-        task_records = self._列出下载中心任务记录(export_keywords) if download else []
+        task_records = self._列出下载中心任务记录(export_keywords, exclude_keywords) if download else []
         existing_exports = [x['name'] for x in task_records] if download else []
         existing_download_records = self._列出下载中心任务记录() if download else []
         existing_download_tasks = [x['name'] for x in existing_download_records] if download else []
@@ -988,7 +1003,8 @@ return fetch('/xe.merchant-service-admin.shop_list.get/2.0.0', {
             processing_tasks.sort(key=lambda x: x['apply_time'], reverse=True)
             task = processing_tasks[0]
             yield f"用户列表导出：复用处理中任务 task={task['name']} apply_time={task['apply_time']}"
-            return (yield from self.iter_download_last_file([task['name']], refresh_every_checks=5))
+            return (yield from self.iter_download_last_file(
+                [task['name']], refresh_every_checks=5, exclude_keywords=exclude_keywords))
 
         yield f'用户列表导出：已有下载任务数={len(existing_exports)}'
 
@@ -1010,6 +1026,7 @@ return fetch('/xe.merchant-service-admin.shop_list.get/2.0.0', {
                     exclude_task_names=existing_exports,
                     refresh_every_checks=5,
                     max_wait_seconds=20 * 60,
+                    exclude_keywords=exclude_keywords,
                 ))
             except RuntimeError as exc:
                 # 小鹅通下载中心偶发调整任务名；优先按历史关键词匹配，失效时退回“新增可下载任务”识别。
@@ -1024,6 +1041,7 @@ return fetch('/xe.merchant-service-admin.shop_list.get/2.0.0', {
                     exclude_task_names=existing_download_tasks,
                     refresh_every_checks=5,
                     max_wait_seconds=10 * 60,
+                    exclude_keywords=exclude_keywords,
                 ))
 
     def export_clockin_data(self, url, download=True, start_date=None, end_date=None,
