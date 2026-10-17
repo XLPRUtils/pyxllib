@@ -520,7 +520,13 @@ def _parse_appmsg(text: str) -> dict[str, Any] | None:
 
 
 def _parse_forwarded_items(text: str) -> list[dict[str, Any]]:
-    record_xml = html.unescape(_extract_xml_tag(text, "recorditem")).strip()
+    # CDATA already contains XML. Unescaping it before parsing turns valid
+    # URL query separators (&amp;) into bare ampersands and drops the whole record.
+    record_xml = _extract_xml_block(text, "recorditem")
+    if record_xml.startswith("<![CDATA[") and record_xml.endswith("]]>"):
+        record_xml = record_xml[9:-3].strip()
+    elif record_xml.startswith("&lt;"):
+        record_xml = html.unescape(record_xml).strip()
     if not record_xml:
         return []
     try:
@@ -549,6 +555,7 @@ def _parse_forwarded_items(text: str) -> list[dict[str, Any]]:
             "source_timestamp": node_int("srcMsgCreateTime"),
             "source_message_id": node_text("fromnewmsgid"),
             "text": node_text("datadesc"),
+            "file_name": node_text("datatitle"),
             "data_format": node_text("datafmt"),
             "data_size": node_int("datasize"),
             "full_md5": node_text("fullmd5"),
@@ -1147,7 +1154,7 @@ class WeChatDbStorage:
         Merged forwards are bound by the message's cache record ID and entry
         index, never by file size alone. Opening the desktop record/attachment
         can trigger WeChat's download; this API exports already cached bytes.
-        Forwarded videos must match the embedded expected size and checksum.
+        Forwarded videos and files must match embedded sizes/checksums when present.
         An empty result does not prove the original message had no attachment.
         """
         from filelock import FileLock
@@ -1193,6 +1200,10 @@ class WeChatDbStorage:
             if not readable:
                 exported["read_error"] = "资源尚未成功解码；不能把原始加密文件当作可读图片"
         if not result.get('items'):
+            from pyxllib.autogui.wechat_emoji import read_emoji_message
+            emoji = read_emoji_message(self, chat_id, local_id)
+            if emoji.get('items'):
+                return emoji
             from pyxllib.autogui.wechat_voice import read_voice_message
             try:
                 voice = read_voice_message(self, chat_id, local_id)
@@ -1612,17 +1623,21 @@ class WeChatDbStorage:
                       if hint.get("forward_record_id")}
         if attach_root.exists():
             forward_pattern = "*/*/Rec/*/*/*" if resource_hints is None else "*/Rec/*/*/*"
-            for source in attach_root.glob(forward_pattern):
+            # Files use Rec/<record>/F/<entry>/<original name>, unlike images
+            # and videos, whose entry index is their immediate filename.
+            from itertools import chain
+            for source in chain(attach_root.glob(forward_pattern), attach_root.glob(forward_pattern + "/*")):
                 if not source.is_file():
                     continue
-                record_id = source.parent.parent.name
+                nested_file = source.parent.parent.name == "F"
+                record_id = source.parents[2].name if nested_file else source.parent.parent.name
                 if resource_hints is not None and record_id not in record_ids:
                     continue
-                folder = source.parent.name
-                media_kind = {"Img": "image", "V": "video"}.get(folder)
+                folder = "F" if nested_file else source.parent.name
+                media_kind = {"Img": "image", "V": "video", "File": "file", "F": "file"}.get(folder)
                 if media_kind is None:
                     continue
-                data_index = re.sub(r"_[ht]$", "", source.stem)
+                data_index = source.parent.name if nested_file else re.sub(r"_[ht]$", "", source.stem)
                 if not data_index.isdigit():
                     continue
                 if resource_hints is not None and not any(
@@ -1633,7 +1648,8 @@ class WeChatDbStorage:
                 relative = source.relative_to(account_root).as_posix()
                 digest = hashlib.sha256(relative.encode("utf-8")).hexdigest()[:16]
                 stem = f"forward_{digest}_{source.stem}"
-                variant = "thumbnail" if source.stem.endswith("_t") else "high" if source.stem.endswith("_h") else "standard"
+                variant = ("standard" if media_kind == "file" else
+                           "thumbnail" if source.stem.endswith("_t") else "high" if source.stem.endswith("_h") else "standard")
                 if media_kind == "image":
                     target = self._existing_exported_image(export_root / "image", "", stem)
                     if target is None and decode_missing:
@@ -2032,16 +2048,18 @@ class WeChatDbStorage:
                 if meta.get("forwarded"):
                     record_id = meta.get("record_id")
                     resource_type = int(row["type"] or 0)
-                    media_kind = "video" if resource_type == 131074 else "image"
+                    entry = meta.get("items", {}).get(str(row["data_index"]), {})
+                    media_kind = {2: "image", 4: "video", 8: "file"}.get(entry.get("datatype"))
                     variant = "thumbnail" if resource_type in {262145, 196610} else "standard"
                     exported = exported_files.get(f"record:{record_id}:{row['data_index']}:{media_kind}:{variant}")
-                    entry = meta.get("items", {}).get(str(row["data_index"]), {})
                     if exported and media_kind != "image":
                         expected_md5 = entry.get("full_md5")
                         expected_size = entry.get("data_size")
                         if ((expected_md5 and exported.get("md5") != expected_md5)
                                 or (expected_size and exported.get("size") != expected_size)):
                             exported = None
+                    if exported and media_kind == "file":
+                        exported = {**exported, "attachment_name": entry.get("file_name", "")}
                 else:
                     for key, value in exported_files.items():
                         if key and key in packed_text:
@@ -2056,6 +2074,9 @@ class WeChatDbStorage:
                     "data_index": row["data_index"],
                     "packed_text": packed_text,
                 }
+                if meta.get("forwarded"):
+                    resource_item.update({key: entry[key] for key in
+                                          ("datatype", "file_name", "data_size", "full_md5") if key in entry})
                 if exported:
                     resource_item["export"] = exported
                 elif meta.get("forwarded"):
