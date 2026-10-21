@@ -152,3 +152,48 @@ def test_wait_after_merchant_selection_is_not_skipped(monkeypatch):
     wechat_runtime._等待微信支付商户选择生效()
 
     assert sleeps == [2.5]
+
+
+def test_sms_code_prefers_wechat_db(monkeypatch):
+    from pyxllib.autogui import wechat_sms
+
+    calls = {}
+
+    def fake_wait(after, timeout, interval, contains):
+        calls.update(timeout=timeout, contains=contains)
+        return {'code': '123456'}
+
+    monkeypatch.setattr(wechat_sms, 'wait_sms_code', fake_wait)
+    monkeypatch.setattr(wechat_runtime.KqWechat, '创建微信实例', staticmethod(lambda: pytest.fail('不应操作界面')))
+    assert wechat_runtime.KqWechat.从懒人转发获得短信内容(timeout=30) == '123456'
+    assert calls == {'timeout': 30, 'contains': '验证码【'}
+
+
+def test_sms_code_db_timeout_does_not_fall_back(monkeypatch):
+    from pyxllib.autogui import wechat_sms
+
+    monkeypatch.setattr(wechat_sms, 'wait_sms_code', lambda *a, **k: (_ for _ in ()).throw(TimeoutError('超时')))
+    monkeypatch.setattr(wechat_runtime.KqWechat, '创建微信实例', staticmethod(lambda: pytest.fail('不应操作界面')))
+    with pytest.raises(TimeoutError):
+        wechat_runtime.KqWechat.从懒人转发获得短信内容(timeout=1)
+
+
+def test_sms_code_falls_back_to_ui_when_db_unavailable(monkeypatch):
+    from pyxllib.autogui import wechat_sms
+
+    class FakeMessage:
+        info = '来电号码：验证码【654321】95017\n来电时间：' + __import__('datetime').datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+
+    class FakeWx:
+        def ChatWith(self, *args, **kwargs):
+            pass
+
+        def GetAllMessage(self):
+            return [FakeMessage()]
+
+    def unavailable(*args, **kwargs):
+        raise wechat_sms.WeChatSmsUnavailable('无 key')
+
+    monkeypatch.setattr(wechat_sms, 'wait_sms_code', unavailable)
+    monkeypatch.setattr(wechat_runtime.KqWechat, '创建微信实例', staticmethod(lambda: FakeWx()))
+    assert wechat_runtime.KqWechat.从懒人转发获得短信内容(timeout=5) == '654321'

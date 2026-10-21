@@ -1980,6 +1980,22 @@ class KqWechat:
                     texts.append(text)
             return texts
 
+        # 优先直接读微信数据库，不抢界面；无 key、库读不到或超时前异常时回退到界面方式。
+        db_started_at = time.monotonic()
+        try:
+            from pyxllib.autogui.wechat_sms import wait_sms_code
+
+            sms = wait_sms_code(datetime.now() - timedelta(minutes=time_window), timeout=timeout,
+                                interval=check_interval, contains='验证码【')
+            logger.info('微信支付短信验证码已从微信数据库获取')
+            return sms['code']
+        except TimeoutError:
+            raise
+        except Exception as exc:
+            logger.warning(f'从微信数据库读取短信验证码失败，回退界面方式：{exc!r}')
+            if timeout is not None:
+                timeout = max(0, timeout - (time.monotonic() - db_started_at))
+
         wx = KqWechat.创建微信实例()
         chat_opened = False
         last_error = None
