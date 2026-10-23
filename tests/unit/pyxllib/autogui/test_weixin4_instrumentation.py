@@ -14,6 +14,49 @@ WEIXIN_BYTES = WEIXIN_DLL.read_bytes() if WEIXIN_DLL.exists() else None
 requires_weixin = pytest.mark.skipif(WEIXIN_BYTES is None, reason="缺少 4.1.13.65 Weixin.dll")
 
 
+def account_process(mapped, opened=()):
+    def paths(values):
+        return [SimpleNamespace(path=f"C:/xwechat_files/{value}") for value in values]
+    return SimpleNamespace(pid=42, name=lambda: "Weixin.exe", create_time=lambda: 123,
+                           memory_maps=lambda: paths(mapped), open_files=lambda: paths(opened))
+
+
+def test_live_sender_ignores_previous_account_mmkv(monkeypatch):
+    process = account_process([
+        "wxid_active_abcd/db_storage/message/message_0.db-shm",
+        "wxid_active_abcd/db_storage/contact/contact.db-shm",
+        "wxid_old_1234/db_storage/MMKV/brandprivatemsg@hardcode",
+        "wxid_old_1234/db_storage/MMKV/f2541f00tinfo.mmkv",
+        "wxid_old_1234/db_storage/MMKV/f2541f00tinfo.mmkv.crc",
+    ])
+    process.open_files = lambda: pytest.fail("业务库映射足够时不应枚举全系统句柄")
+    monkeypatch.setattr(weixin4_instrumentation.psutil, "process_iter", lambda: [process])
+    assert [a["account_id"] for a in weixin4_instrumentation.list_live_accounts()] == ["wxid_active"]
+    assert weixin4_instrumentation.resolve_sender("wxid_active")["pid"] == 42
+    with pytest.raises(weixin4_instrumentation.WeixinInstrumentationUnavailable, match="实际 0 个"):
+        weixin4_instrumentation.resolve_sender("wxid_old")
+
+
+def test_mmkv_only_mapping_falls_back_to_business_database_handles(monkeypatch):
+    process = account_process(["wxid_old_1234/db_storage/MMKV/storage_common"], [
+        "wxid_active_abcd/db_storage/session/session.db",
+        "wxid_active_abcd/db_storage/message/message_0.kvdb-wal",
+        "wxid_old_1234/db_storage/MMKV/storage_common",
+    ])
+    monkeypatch.setattr(weixin4_instrumentation.psutil, "process_iter", lambda: [process])
+    assert weixin4_instrumentation.resolve_sender("wxid_active")["pid"] == 42
+
+
+def test_multiple_business_accounts_in_same_process_still_rejected(monkeypatch):
+    process = account_process([
+        "wxid_active_abcd/db_storage/message/message_0.db-shm",
+        "wxid_other_1234/db_storage/contact/contact.db-shm",
+    ])
+    monkeypatch.setattr(weixin4_instrumentation.psutil, "process_iter", lambda: [process])
+    with pytest.raises(weixin4_instrumentation.WeixinInstrumentationUnavailable, match="关联多个业务数据库账号"):
+        weixin4_instrumentation.resolve_sender("wxid_active")
+
+
 def make_db(tmp_path, rows):
     path = tmp_path / "contact.db"
     conn = sqlite3.connect(path)

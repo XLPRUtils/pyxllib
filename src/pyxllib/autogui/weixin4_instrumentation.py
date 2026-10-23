@@ -51,10 +51,19 @@ def account_id_from_root(root: str | Path) -> str:
 
 
 def _db_storage_roots(paths) -> set[str]:
+    """只以业务数据库及其共享内存/日志为在线证据，忽略切号残留 MMKV。
+
+    微信切号后仍可能映射旧号的 MMKV 配置；目录位于 db_storage 下并不
+    代表账号在线。SQLite/KV 数据库句柄或映射才参与发信账号归属判断。
+    """
     roots = set()
     for item in paths:
         parts = Path(item.path).parts
         if "xwechat_files" in parts and "db_storage" in parts:
+            relative = parts[parts.index("db_storage") + 1:]
+            if (not relative or any(part.lower() == "mmkv" for part in relative)
+                    or not re.fullmatch(r".+\.(?:db|kvdb)(?:-(?:shm|wal|journal))?", relative[-1], re.IGNORECASE)):
+                continue
             roots.add(str(Path(*parts[:parts.index("db_storage")])))
     return roots
 
@@ -62,8 +71,9 @@ def _db_storage_roots(paths) -> set[str]:
 def list_live_accounts() -> list[dict]:
     """按进程打开或映射的数据库路径识别账号，不读取数据库内容、不注入进程。
 
-    映射路径与打开句柄是同一账号归属证据。先读进程映射；只有映射中找不到
-    db_storage 时才回退 psutil.open_files。open_files 需枚举全系统句柄并在查询
+    业务数据库映射与打开句柄是同一账号归属证据，MMKV 缓存不参与判断。
+    先读进程映射；只有找不到业务数据库时才回退 psutil.open_files。
+    open_files 需枚举全系统句柄并在查询
     超时时 TerminateThread，长驻监听每 30 秒调用时与原生内存持续增长强相关。
     Windows 的已删除文件句柄还可能使 open_files 抛出 AccessDenied。
     """
@@ -95,8 +105,12 @@ def resolve_sender(account_id: str) -> dict:
     """指定账号必须唯一在线；主号离线时绝不改用其他账号。"""
     accounts = list_live_accounts()
     matches = [item for item in accounts if item["account_id"] == account_id]
-    if len(matches) != 1 or sum(item["pid"] == matches[0]["pid"] for item in accounts) != 1:
+    if len(matches) != 1:
         raise WeixinInstrumentationUnavailable(f"发信账号 {account_id!r} 必须唯一在线，实际 {len(matches)} 个")
+    process_accounts = [item["account_id"] for item in accounts if item["pid"] == matches[0]["pid"]]
+    if len(process_accounts) != 1:
+        raise WeixinInstrumentationUnavailable(
+            f"发信进程 {matches[0]['pid']} 关联多个业务数据库账号：{process_accounts}，无法确定当前发信账号")
     return matches[0]
 
 
