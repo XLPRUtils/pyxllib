@@ -78,3 +78,29 @@ def test_missing_self_is_not_an_empty_nickname(monkeypatch):
         group_members=lambda *a: [{"username": "wxid_other", "display_name": "管家"}]))
     with pytest.raises(profile.WeixinInstrumentationUnavailable):
         profile.get_group_nickname(ACCOUNT, ROOM, refresh=False)
+
+
+def announcement_storage(tmp_path, rows):
+    directory = tmp_path / "contact"
+    directory.mkdir()
+    conn = sqlite3.connect(directory / "contact.db")
+    conn.execute("CREATE TABLE chat_room_info_detail(room_id_ INTEGER,username_ TEXT,announcement_ TEXT,"
+                 "announcement_editor_ TEXT,announcement_publish_time_ INTEGER,chat_room_status_ INTEGER,"
+                 "xml_announcement_ TEXT,ext_buffer_ BLOB)")
+    conn.executemany("INSERT INTO chat_room_info_detail VALUES (1,?,?,?,?,0,?,NULL)", rows)
+    conn.commit()
+    conn.close()
+    return WeChatDbStorage(tmp_path)
+
+
+def test_group_announcement_reads_text_unset_and_missing(tmp_path):
+    xml = "<group_notice_item><announcement_id>a_1</announcement_id></group_notice_item>"
+    source = announcement_storage(tmp_path, [(ROOM, "仙府升级\n1、先升10级", ACCOUNT, 1759460063, xml),
+                                             ("222@chatroom", "", "", 0, "")])
+    assert source.group_announcement(ROOM) == {
+        "chat_id": ROOM, "text": "仙府升级\n1、先升10级", "editor": ACCOUNT,
+        "published_at": 1759460063, "announcement_id": "a_1", "source": "db"}
+    assert source.group_announcement("222@chatroom")["text"] == ""
+    assert source.group_announcement("333@chatroom") is None
+    with pytest.raises(ValueError):
+        source.group_announcement("三机互联")

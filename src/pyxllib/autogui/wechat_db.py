@@ -2220,6 +2220,34 @@ class WeChatDbStorage:
         finally:
             conn.close()
 
+    def group_announcement(self, chat_id: str) -> dict[str, Any] | None:
+        """Read one group's announcement from the account snapshot, read-only.
+
+        Returns None when the snapshot has no detail row for the group (callers
+        may then fall back to GUI); text "" means the owner set no announcement.
+        published_at is the Unix edit time, 0 when unset.
+        """
+        if not re.fullmatch(r"[0-9]+@chatroom", chat_id):
+            raise ValueError("必须使用精确的微信群 ID")
+        conn = _connect_readonly(self.paths.contact)
+        try:
+            row = conn.execute(
+                "SELECT announcement_, announcement_editor_, announcement_publish_time_, xml_announcement_"
+                " FROM chat_room_info_detail WHERE username_ = ?", (chat_id,)).fetchone()
+        finally:
+            conn.close()
+        if row is None:
+            return None
+        text, editor, published, xml = row
+        announcement_id = ""
+        if xml:
+            try:
+                announcement_id = ET.fromstring(xml).findtext("announcement_id") or ""
+            except ET.ParseError:
+                pass
+        return {"chat_id": chat_id, "text": text or "", "editor": editor or "",
+                "published_at": int(published or 0), "announcement_id": announcement_id, "source": "db"}
+
     def browse_table(
         self,
         database: str,
