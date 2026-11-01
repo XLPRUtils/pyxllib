@@ -97,6 +97,18 @@ def mention_ids(source: str) -> list[str]:
     return [value.strip() for value in text.split(",") if value.strip()]
 
 
+RECALL_TYPES = (10000, 10002)
+# WeChat rewrites a recalled message in place (same local_id, type 10000/10002
+# revokemsg) instead of appending. Recalls are only allowed for ~2 minutes, so
+# only chats with new rows inside this window need a bounded rescan.
+RECALL_WINDOW_SECONDS = 600
+RECALL_RESCAN_ROWS = 200
+
+
+def is_recall_text(message_type: int, text: str) -> bool:
+    return message_type in RECALL_TYPES and "revokemsg" in (text or "")
+
+
 def poll_storage_updates(storage, cursor: dict | None, *, limit: int = 1000) -> dict:
     from filelock import FileLock
     from pyxllib.autogui.wechat_diagnostics import sync_stage
@@ -141,6 +153,18 @@ def poll_storage_updates(storage, cursor: dict | None, *, limit: int = 1000) -> 
             raise ValueError("Unsupported message cursor version")
         positions = dict((cursor or {}).get("positions") or {})
         started_at = (cursor or {}).get("started_at", int(time.time()))
+        now = int(time.time())
+        # Cursors from before recall tracking get one bounded rescan of every
+        # chat, so recalls that already happened are still reported once.
+        bootstrap = cursor is not None and "recall" not in cursor
+        recall = (cursor or {}).get("recall") or {}
+        active = {k: t for k, t in (recall.get("active") or {}).items() if now - t < RECALL_WINDOW_SECONDS}
+        recalled = {k: list(v) for k, v in (recall.get("recalled") or {}).items() if k in active}
+        # Snapshot shards are rewritten only when their WAL committed frames
+        # change; an unchanged shard cannot contain a new in-place recall.
+        # Signatures live in the cursor so a retried cursor rescans again.
+        signatures = {k: tuple(v) for k, v in (recall.get("shards") or {}).items()}
+        changed_shards = set()
         contacts = None
         events, has_more = [], False
         connections = []
@@ -153,10 +177,30 @@ def poll_storage_updates(storage, cursor: dict | None, *, limit: int = 1000) -> 
             paths = sorted(p for p in storage.paths.message.parent.glob("*.db")
                            if re.fullmatch(r"(?:biz_)?message_\d+\.db", p.name))
             for path in paths:
+                stat = path.stat()
+                if signatures.get(path.name) != (stat.st_mtime_ns, stat.st_size):
+                    changed_shards.add(path.name)
+                    signatures[path.name] = (stat.st_mtime_ns, stat.st_size)
                 conn = _connect_readonly(path)
                 connections.append(conn)
                 if _table_exists(conn, "Name2Id"):
                     names.extend((conn, row, path.name) for row in conn.execute("SELECT user_name FROM Name2Id"))
+            def make_event(row, chat, shard, **extra):
+                nonlocal contacts
+                if contacts is None:
+                    with sync_stage("updates.contacts"):
+                        contacts = storage._contact_map(include_avatar=False)
+                sender = row["sender_username"] or ""
+                contact = contacts.get(sender) or {}
+                source = _decode_text_value(row["source"])
+                text = _decode_text_value(row["message_content"]) or _decode_text_value(row["compress_content"])
+                identity = f"{chat}:{row['local_id']}" if shard == storage.paths.message.name else f"{shard}/{chat}:{row['local_id']}"
+                return dict(message_id=identity, chat_id=chat, source_db=shard,
+                            local_id=int(row["local_id"]), server_id=str(row["server_id"] or ""),
+                            sender_id=sender, sender_name=contact.get("remark") or contact.get("nick_name") or sender,
+                            timestamp=int(row["create_time"] or 0), text=text, source=source,
+                            mentions=mention_ids(source), message_type=normalize_message_type(row["local_type"]), **extra)
+
             for conn, entry, shard in names:
                 chat = entry["user_name"]
                 if not chat:
@@ -170,6 +214,23 @@ def poll_storage_updates(storage, cursor: dict | None, *, limit: int = 1000) -> 
                 if cursor is None:
                     positions[position_key] = conn.execute(f'SELECT COALESCE(MAX(local_id),0) FROM "{table}"').fetchone()[0]
                     continue
+                position = positions.get(position_key)
+                if position and (bootstrap or (position_key in active and shard in changed_shards)):
+                    # Recall revisions: rows we already passed that became revokemsg.
+                    seen = recalled.setdefault(position_key, [])
+                    for row in conn.execute(f'SELECT msg.*, sender.user_name AS sender_username FROM "{table}" msg '
+                                            'LEFT JOIN Name2Id sender ON sender.rowid=msg.real_sender_id '
+                                            'WHERE msg.local_id>? AND msg.local_id<=? AND msg.local_type IN (?,?) '
+                                            'ORDER BY msg.local_id',
+                                            (max(position - RECALL_RESCAN_ROWS, 0), position, *RECALL_TYPES)):
+                        if int(row["local_id"]) in seen:
+                            continue
+                        event = make_event(row, chat, shard, revision="recalled")
+                        if is_recall_text(event["message_type"], event["text"]):
+                            seen.append(event["local_id"])
+                            events.append(event)
+                    if not seen:
+                        recalled.pop(position_key, None)
                 remaining = limit - len(events)
                 if remaining <= 0:
                     has_more = True
@@ -185,21 +246,19 @@ def poll_storage_updates(storage, cursor: dict | None, *, limit: int = 1000) -> 
                     # A newly discovered table may contain imported history.
                     if newly_discovered and int(row["create_time"] or 0) < started_at:
                         continue
-                    if contacts is None:
-                        with sync_stage("updates.contacts"):
-                            contacts = storage._contact_map(include_avatar=False)
-                    sender = row["sender_username"] or ""
-                    contact = contacts.get(sender) or {}
-                    source = _decode_text_value(row["source"])
-                    text = _decode_text_value(row["message_content"]) or _decode_text_value(row["compress_content"])
-                    identity = f"{chat}:{row['local_id']}" if shard == storage.paths.message.name else f"{shard}/{chat}:{row['local_id']}"
-                    events.append(dict(message_id=identity, chat_id=chat, source_db=shard,
-                                       local_id=int(row["local_id"]), server_id=str(row["server_id"] or ""),
-                                       sender_id=sender, sender_name=contact.get("remark") or contact.get("nick_name") or sender,
-                                       timestamp=int(row["create_time"] or 0), text=text, source=source,
-                                       mentions=mention_ids(source), message_type=normalize_message_type(row["local_type"])))
+                    event = make_event(row, chat, shard)
+                    active[position_key] = now
+                    if is_recall_text(event["message_type"], event["text"]):
+                        # Already a recall when first seen: never re-report it.
+                        recalled.setdefault(position_key, []).append(event["local_id"])
+                    events.append(event)
+            for key, ids in recalled.items():
+                floor = positions.get(key, 0) - RECALL_RESCAN_ROWS
+                recalled[key] = [i for i in ids if i > floor]
+            recall = dict(active=active, recalled={k: v for k, v in recalled.items() if v and k in active},
+                          shards={k: list(v) for k, v in signatures.items()})
             return dict(events=events, cursor=dict(version=2, root=str(storage.root.resolve()),
-                                                  started_at=started_at, positions=positions),
+                                                  started_at=started_at, positions=positions, recall=recall),
                         has_more=has_more, sync=sync)
         finally:
             for conn in connections:

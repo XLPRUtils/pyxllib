@@ -1792,6 +1792,11 @@ class WeChatDbStorage:
         finally:
             conn.close()
 
+    def session_unread(self) -> dict[str, int]:
+        """Unread count per session row, folder entries included (@placeholder_foldgroup,
+        brandsessionholder/brandservicesessionholder) and gh_ accounts without a chat row."""
+        return {name: int(row.get("unread_count") or 0) for name, row in self._session_map().items()}
+
     def count_chats(self, q: str | None = None, folded: bool | None = None, include_folded_entry: bool = False) -> int:
         return len(
             self.list_chats(
@@ -2110,6 +2115,76 @@ class WeChatDbStorage:
             }
         finally:
             conn.close()
+
+    def list_biz_sessions(self) -> list[dict[str, Any]]:
+        """Official-account (gh_/brand) sessions stored in ``biz_message_0.db``, newest first.
+
+        WeChat 4 keeps subscription pushes there instead of ``message_0.db``.
+        Each row: username, name, message_count, last_time (epoch seconds).
+        """
+        if not self.paths.biz_message.exists():
+            return []
+        contacts = self._contact_map()
+        conn = self._message_conn("biz")
+        try:
+            sessions = []
+            for row in conn.execute("SELECT user_name FROM Name2Id WHERE is_session = 1").fetchall():
+                username = row["user_name"]
+                table = message_table_name(username)
+                if not username or not _table_exists(conn, table):
+                    continue
+                count, last_time = conn.execute(f'SELECT COUNT(*), MAX(create_time) FROM "{table}"').fetchone()
+                sessions.append({"username": username, "name": _display_name(username, contacts),
+                                 "message_count": int(count or 0), "last_time": int(last_time or 0)})
+            sessions.sort(key=lambda item: item["last_time"], reverse=True)
+            return sessions
+        finally:
+            conn.close()
+
+    def list_biz_messages(
+        self,
+        username: str | None = None,
+        *,
+        since: int = 0,
+        message_type: int | None = None,
+        limit: int = MAX_PAGE_SIZE,
+    ) -> list[dict[str, Any]]:
+        """Official-account pushes newer than ``since``, newest first, with decoded ``message_text``.
+
+        ``username`` limits to one gh_ session; ``message_type`` filters by the
+        normalized type (49 for article cards). Content is zstd-decompressed.
+        """
+        sessions = self.list_biz_sessions()
+        if username is not None:
+            sessions = [item for item in sessions if item["username"] == username]
+        limit = min(max(1, int(limit)), MAX_PAGE_SIZE)
+        conn = self._message_conn("biz") if sessions else None
+        items: list[dict[str, Any]] = []
+        try:
+            for session in sessions:
+                rows = conn.execute(
+                    f"""
+                    SELECT local_id, server_id, local_type, create_time, message_content
+                    FROM "{message_table_name(session["username"])}"
+                    WHERE create_time > ? ORDER BY create_time DESC, local_id DESC LIMIT ?
+                    """,
+                    (int(since), limit),
+                ).fetchall()
+                for row in rows:
+                    normalized = normalize_message_type(row["local_type"])
+                    if message_type is not None and normalized != int(message_type):
+                        continue
+                    items.append({
+                        "username": session["username"], "name": session["name"],
+                        "local_id": int(row["local_id"]), "server_id": int(row["server_id"] or 0),
+                        "local_type": normalized, "create_time": int(row["create_time"] or 0),
+                        "message_text": _decode_text_value(row["message_content"]),
+                    })
+        finally:
+            if conn is not None:
+                conn.close()
+        items.sort(key=lambda item: (item["create_time"], item["local_id"]), reverse=True)
+        return items[:limit]
 
     def message_types(self, chat_username: str | None = None) -> list[dict[str, Any]]:
         conn = self._message_conn("message")
