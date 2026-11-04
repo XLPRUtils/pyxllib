@@ -1829,6 +1829,7 @@ class WeChatDbStorage:
         order: str = "desc",
         include_resources: bool = True,
         local_id: int | None = None,
+        server_id: int | None = None,
     ) -> dict[str, Any]:
         limit = min(max(1, int(limit)), MAX_PAGE_SIZE)
         offset = max(0, int(offset))
@@ -1848,6 +1849,9 @@ class WeChatDbStorage:
             if local_id is not None:
                 clauses.append("msg.local_id = ?")
                 params.append(int(local_id))
+            if server_id is not None:
+                clauses.append("msg.server_id = ?")
+                params.append(int(server_id))
             if q:
                 clauses.append("(" + " OR ".join(_literal_like_clause(column) for column in
                                ("msg.message_content", "sender.user_name", "msg.source")) + ")")
