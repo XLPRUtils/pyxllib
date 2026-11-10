@@ -741,3 +741,144 @@ def test_timeout_is_handled_as_retryable_error(tmp_path):
     retry_state = next(v for k, v in runner.memory_state["nodes"].items() if "Retry" in k)
     assert "TimeoutError" in retry_state["last_error"]
 
+
+
+def test_log_retention_uses_dates_and_runs_on_monday_startup(tmp_path, monkeypatch):
+    import pyxllib.prog.behavior_tree as bt
+
+    class Monday(datetime.date):
+        @classmethod
+        def today(cls):
+            return cls(2026, 11, 9)
+
+    monkeypatch.setattr(bt.datetime, "date", Monday)
+    today = datetime.date.today()
+    log_path = tmp_path / 'runner.log'
+    expired = tmp_path / f'runner.log.{today - datetime.timedelta(days=91)}'
+    recent = tmp_path / f'runner.log.{today - datetime.timedelta(days=1)}'
+    unrelated = tmp_path / 'runner.log.evidence'
+    for path in (expired, recent, unrelated):
+        path.write_text('evidence', encoding='utf-8')
+    log_path.write_text('existing log\n', encoding='utf-8')
+    runner = BehaviorTreeRunner(Root(Action(lambda: None)), trace=1, log_path=log_path)
+    try:
+        assert not expired.exists()
+        assert recent.exists() and unrelated.exists()
+        assert log_path.read_text(encoding='utf-8') == 'existing log\n'
+    finally:
+        runner.close()
+
+
+def test_runner_logging_is_isolated_and_closed(tmp_path):
+    from loguru import logger
+    first_path, second_path = tmp_path / 'first.log', tmp_path / 'second.log'
+    first = BehaviorTreeRunner(Root(Action(lambda: None)), trace=1, log_path=first_path)
+    second = BehaviorTreeRunner(Root(Action(lambda: None)), trace=1, log_path=second_path)
+    first.logger.info('first-only')
+    second.logger.info('second-only')
+    logger.info('unrelated-global-message')
+    first.close()
+    second.close()
+    first.close()
+    assert first_path.read_text(encoding='utf-8').count('first-only') == 1
+    assert 'second-only' not in first_path.read_text(encoding='utf-8')
+    assert 'unrelated-global-message' not in first_path.read_text(encoding='utf-8')
+    assert 'first-only' not in second_path.read_text(encoding='utf-8')
+    assert not first.logger.handlers and not second.logger.handlers
+
+
+def test_runner_log_daily_rotation(tmp_path):
+    import time
+    from logging.handlers import TimedRotatingFileHandler
+    path = tmp_path / 'runner.log'
+    runner = BehaviorTreeRunner(Root(Action(lambda: None)), trace=1, log_path=path)
+    try:
+        runner.logger.info('before-midnight')
+        handler = next(h for h in runner.logger.handlers if isinstance(h, TimedRotatingFileHandler))
+        handler.rolloverAt = int(time.time()) - 1
+        runner.logger.info('after-midnight')
+        assert 'before-midnight' not in path.read_text(encoding='utf-8')
+        assert 'after-midnight' in path.read_text(encoding='utf-8')
+        assert any('before-midnight' in p.read_text(encoding='utf-8') for p in tmp_path.glob('runner.log.*'))
+    finally:
+        runner.close()
+
+
+
+def test_log_cleanup_waits_until_monday_and_catches_up(tmp_path, monkeypatch):
+    import pyxllib.prog.behavior_tree as bt
+    from logging.handlers import TimedRotatingFileHandler
+
+    class ClockDate(datetime.date):
+        current = (2026, 11, 10)  # Tuesday
+
+        @classmethod
+        def today(cls):
+            return cls(*cls.current)
+
+    monkeypatch.setattr(bt.datetime, "date", ClockDate)
+    path = tmp_path / "weekly.log"
+    expired = tmp_path / "weekly.log.2026-01-01"
+    expired.write_text("old", encoding="utf-8")
+    runner = BehaviorTreeRunner(Root(Action(lambda: None)), trace=1, log_path=path)
+    try:
+        handler = next(h for h in runner.logger.handlers if isinstance(h, TimedRotatingFileHandler))
+        assert expired.exists()
+        ClockDate.current = (2026, 11, 15)  # Sunday
+        assert handler.getFilesToDelete() == []
+        ClockDate.current = (2026, 11, 17)  # missed Monday: catch up Tuesday
+        assert handler.getFilesToDelete() == [str(expired)]
+        assert handler.getFilesToDelete() == []  # only once this week
+        ClockDate.current = (2026, 11, 23)  # next Monday
+        assert handler.getFilesToDelete() == [str(expired)]
+    finally:
+        runner.close()
+
+
+
+def test_manual_cleanup_ignores_weekday_and_preserves_current_log(tmp_path):
+    from pyxllib.prog.behavior_tree import cleanup_expired_logs
+    today = datetime.date.today()
+    current = tmp_path / "manual.log"
+    expired = tmp_path / f"manual.log.{today - datetime.timedelta(days=91)}"
+    boundary = tmp_path / f"manual.log.{today - datetime.timedelta(days=90)}"
+    unrelated = tmp_path / "manual.log.old"
+    for path in (current, expired, boundary, unrelated):
+        path.write_bytes(b"evidence")
+    result = cleanup_expired_logs(current)
+    assert result == {"deleted_files": 1, "freed_bytes": 8, "errors": []}
+    assert current.exists() and boundary.exists() and unrelated.exists()
+    assert not expired.exists()
+    assert cleanup_expired_logs(current)["deleted_files"] == 0
+
+
+def test_legacy_large_log_is_compacted_into_expiring_archive(tmp_path):
+    from pyxllib.prog.behavior_tree import migrate_legacy_log, expired_log_files
+    path = tmp_path / 'legacy.log'
+    with path.open('wb') as f:
+        f.write(b'first error evidence\n')
+        f.seek(32 * 1024**2)
+        f.write(b'last error evidence\n')
+    original_size = path.stat().st_size
+    result = migrate_legacy_log(path)
+    archive = Path(result['archive'])
+    assert not path.exists()
+    assert archive.stat().st_size < 5 * 1024**2
+    text = archive.read_bytes()
+    assert b'first error evidence' in text and b'last error evidence' in text
+    assert b'NOT a full archive' in text
+    assert result['freed_bytes'] == original_size - archive.stat().st_size
+    assert archive in expired_log_files(path, today=datetime.date.today() + datetime.timedelta(days=91))
+
+
+def test_legacy_small_old_log_is_kept_completely(tmp_path):
+    from pyxllib.prog.behavior_tree import migrate_legacy_log
+    import time
+    path = tmp_path / 'legacy.log'
+    path.write_bytes(b'complete historical evidence')
+    yesterday = time.time() - 86400
+    os.utime(path, (yesterday, yesterday))
+    result = migrate_legacy_log(path)
+    assert Path(result['archive']).read_bytes() == b'complete historical evidence'
+    assert result['freed_bytes'] == 0
+    assert not path.exists()

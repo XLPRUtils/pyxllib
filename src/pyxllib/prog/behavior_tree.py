@@ -28,6 +28,7 @@ import datetime
 import inspect
 import json
 import logging
+from logging.handlers import TimedRotatingFileHandler
 import os
 import re
 import sys
@@ -42,6 +43,9 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 __all__ = [
     "Action",
     "BehaviorTreeRunner",
+    "expired_log_files",
+    "migrate_legacy_log",
+    "cleanup_expired_logs",
     "BTreeRunner",
     "Daily",
     "DynamicTime",
@@ -1317,8 +1321,127 @@ class IdleUntilNextWake(Node):
         return self._record(Status.RUNNING)
 
 
+def migrate_legacy_log(log_path, *, retention_days: int = 90) -> dict:
+    """将旧活动日志纳入日期归档。调用方必须先关闭写入者；启动处理器前自动调用。
+
+    过期文件直接删除；大于 16 MiB 的历史异常日志保留 8 个分布样本及末尾
+    4 MiB，标明省略字节数，不再复制数十 GB 的重复堆栈。正常小日志完整归档。
+    归档日期按最后修改时间保守计算，之后统一受日期保留策略管理。
+    """
+    path = Path(log_path).absolute()
+    if not path.exists() or path.is_symlink():
+        return {"freed_bytes": 0, "migrated": False}
+    stat = path.stat()
+    day = datetime.datetime.fromtimestamp(stat.st_mtime).date()
+    today = datetime.date.today()
+    if not stat.st_size or (day >= today and stat.st_size <= 16 * 1024**2):
+        return {"freed_bytes": 0, "migrated": False}
+    archive = path.with_name(path.name + "." + day.isoformat())
+    if day < today - datetime.timedelta(days=retention_days):
+        path.unlink()
+        return {"freed_bytes": stat.st_size, "migrated": True}
+    # 先制作并落盘小归档，再删除旧文件。若旧文件仍被占用，删除失败并保留原件。
+    temporary = archive.with_name(archive.name + ".migration.tmp")
+    try:
+        with path.open("rb") as source, temporary.open("wb") as target:
+            if stat.st_size <= 16 * 1024**2:
+                target.write(source.read())
+            else:
+                target.write((f"Legacy log compacted: original_bytes={stat.st_size}; "
+                              "sampled evidence follows; omitted content is NOT a full archive.\n").encode())
+                for index in range(8):
+                    offset = int(stat.st_size * index / 8)
+                    source.seek(offset)
+                    target.write(f"\n--- sample offset={offset} ---\n".encode())
+                    target.write(source.read(64 * 1024))
+                target.write(b"\n--- latest 4 MiB ---\n")
+                source.seek(max(0, stat.st_size - 4 * 1024**2))
+                target.write(source.read())
+            target.flush()
+            os.fsync(target.fileno())
+        if path.stat().st_size != stat.st_size or path.stat().st_mtime_ns != stat.st_mtime_ns:
+            raise RuntimeError("log changed during migration; close its writer first")
+        if archive.exists():
+            # 不覆盖已有同日归档；当前文件保留，等待正式维护处理。
+            raise FileExistsError(f"log archive already exists: {archive}")
+        os.replace(temporary, archive)
+        try:
+            path.unlink()
+        except OSError:
+            archive.unlink()  # 回滚本次归档，避免后续无法重试。
+            raise
+        return {"freed_bytes": stat.st_size - archive.stat().st_size,
+                "migrated": True, "archive": str(archive)}
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def expired_log_files(log_path, *, retention_days: int = 90, today=None) -> list[Path]:
+    """列出该日志超过保留期的 YYYY-MM-DD 分片，不处理当前文件、软链接或其他后缀。"""
+    if int(retention_days) < 1:
+        raise ValueError("retention_days must be positive")
+    cutoff = (today or datetime.date.today()) - datetime.timedelta(days=int(retention_days))
+    path = Path(log_path).absolute()
+    expired = []
+    for candidate in path.parent.glob(path.name + ".*"):
+        suffix = candidate.name[len(path.name) + 1:]
+        try:
+            day = datetime.date.fromisoformat(suffix)
+        except ValueError:
+            continue
+        if suffix == day.isoformat() and day < cutoff and not candidate.is_symlink() and candidate.is_file():
+            expired.append(candidate)
+    return sorted(expired)
+
+
+def cleanup_expired_logs(log_path, *, retention_days: int = 90) -> dict:
+    """立即执行一次日志保留策略，返回删除数、释放字节及失败项；不受每周自动频率限制。
+
+    历史未分片文件可能混有保留期内记录，因此不根据文件年龄整份删除。
+    """
+    deleted, freed, errors = 0, 0, []
+    for candidate in expired_log_files(log_path, retention_days=retention_days):
+        try:
+            size = candidate.stat().st_size
+            candidate.unlink()
+        except OSError as exc:
+            errors.append({"path": str(candidate), "error": str(exc)})
+        else:
+            deleted += 1
+            freed += size
+    return {"deleted_files": deleted, "freed_bytes": freed, "errors": errors}
+
+
+class _DailyLogHandler(TimedRotatingFileHandler):
+    """按天分片、每周一清理过期分片；写入/启动触发检查，无独立轮询。"""
+
+    def __init__(self, path, retention_days):
+        self.retention_days = retention_days
+        today = datetime.date.today()
+        self.next_cleanup_date = today + datetime.timedelta(days=(-today.weekday()) % 7)
+        migrate_legacy_log(path, retention_days=retention_days)
+        super().__init__(path, when="midnight", backupCount=retention_days,
+                         encoding="utf-8", delay=True)
+        # 周一启动时也清理；其他日期启动不执行过期扫描。
+        for expired in self.getFilesToDelete():
+            Path(expired).unlink(missing_ok=True)
+
+    def getFilesToDelete(self):
+        today = datetime.date.today()
+        if today < self.next_cleanup_date:
+            return []
+        # 周一无写入时，在随后首次轮转时补做，再等下周一。
+        self.next_cleanup_date = today + datetime.timedelta(days=7 - today.weekday())
+        return [str(path) for path in expired_log_files(
+            self.baseFilename, retention_days=self.retention_days, today=today)]
+
+
 class BehaviorTreeRunner:
-    """行为树运行器。"""
+    """行为树运行器。log_retention_days 控制日志保留天数，默认 90 天。
+
+    日志按天轮转、每周一清理过期分片；退出时调用 close() 释放句柄。
+    轮转由写入触发；错过周一则在下次轮转补做。历史大日志启动时精简为采样证据并迁入日期归档。
+    """
 
     def __init__(
         self,
@@ -1327,6 +1450,7 @@ class BehaviorTreeRunner:
         *,
         trace=0,
         log_path=None,
+        log_retention_days: int = 90,
         now_func=None,
         on_error=None,
         action_budget: float = 1.0,
@@ -1339,6 +1463,9 @@ class BehaviorTreeRunner:
         self.action_budget = max(0.0, float(action_budget))
         self.state = self.load_state()
         self.memory_state = {"nodes": {}, "blackboard": {}}
+        if int(log_retention_days) < 1:
+            raise ValueError("log_retention_days must be positive")
+        self.log_retention_days = int(log_retention_days)
         self.logger = self._create_logger(log_path)
         self._last_generator_return_locations = []
         self.last_trace_interrupt = None
@@ -1483,54 +1610,24 @@ class BehaviorTreeRunner:
             }
         self.logger.debug("tree %s: %s -> %s", interrupt.kind, location_text, status.value, extra=extra)
 
+    def close(self) -> None:
+        """释放本运行器的日志句柄；重建或停止运行器时调用，可重复调用。"""
+        for handler in list(self.logger.handlers):
+            self.logger.removeHandler(handler)
+            handler.close()
+
     def _create_logger(self, log_path) -> logging.Logger:
+        # 每个运行器独立输出，禁止注册全局 loguru sink：否则会收集所有业务
+        # 日志，且每次重建都会叠加一份全局输出，造成重复写入和句柄泄漏。
         logger = logging.getLogger(f"{__name__}.{id(self)}")
-        logger.handlers.clear()
+        for handler in list(logger.handlers):
+            logger.removeHandler(handler)
+            handler.close()
         logger.propagate = False
         logger.setLevel(logging.DEBUG)
-
         if self.trace <= 0:
             logger.addHandler(logging.NullHandler())
             return logger
-
-        try:
-            from loguru import logger as loguru_logger
-            
-            # 使用 loguru
-            class LoguruHandler(logging.Handler):
-                def emit(self, record):
-                    try:
-                        level = loguru_logger.level(record.levelname).name
-                    except ValueError:
-                        level = record.levelno
-
-                    frame, depth = inspect.currentframe(), 0
-                    while frame is not None:
-                        if frame.f_code.co_filename == record.pathname and frame.f_code.co_name == record.funcName:
-                            break
-                        frame = frame.f_back
-                        depth += 1
-
-                    if frame is None:
-                        depth = 2
-
-                    source = {
-                        "source_path": getattr(record, "source_path", record.pathname),
-                        "source_line": getattr(record, "source_line", record.lineno),
-                        "source_function": getattr(record, "source_function", record.funcName),
-                    }
-                    loguru_logger.bind(**source).opt(depth=depth, exception=record.exc_info).log(level, record.getMessage())
-                    
-            handler = LoguruHandler()
-            logger.addHandler(handler)
-            
-            if log_path:
-                Path(log_path).parent.mkdir(parents=True, exist_ok=True)
-                loguru_logger.add(log_path, level="DEBUG", encoding="utf-8")
-                
-            return logger
-        except ImportError:
-            pass
 
         formatter = logging.Formatter("%(asctime)s %(levelname)s %(message)s")
         stream_handler = logging.StreamHandler()
@@ -1538,7 +1635,7 @@ class BehaviorTreeRunner:
         logger.addHandler(stream_handler)
         if log_path:
             Path(log_path).parent.mkdir(parents=True, exist_ok=True)
-            file_handler = logging.FileHandler(log_path, encoding="utf-8")
+            file_handler = _DailyLogHandler(log_path, self.log_retention_days)
             file_handler.setFormatter(formatter)
             logger.addHandler(file_handler)
         return logger
