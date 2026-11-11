@@ -1336,7 +1336,7 @@ def migrate_legacy_log(log_path, *, retention_days: int = 90) -> dict:
     today = datetime.date.today()
     if not stat.st_size or (day >= today and stat.st_size <= 16 * 1024**2):
         return {"freed_bytes": 0, "migrated": False}
-    archive = path.with_name(path.name + "." + day.isoformat())
+    archive = path.with_name(path.name + "." + day.isoformat() + ".legacy")
     if day < today - datetime.timedelta(days=retention_days):
         path.unlink()
         return {"freed_bytes": stat.st_size, "migrated": True}
@@ -1377,7 +1377,7 @@ def migrate_legacy_log(log_path, *, retention_days: int = 90) -> dict:
 
 
 def expired_log_files(log_path, *, retention_days: int = 90, today=None) -> list[Path]:
-    """列出该日志超过保留期的 YYYY-MM-DD 分片，不处理当前文件、软链接或其他后缀。"""
+    """列出该日志超过保留期的 YYYY-MM-DD 分片（含 .legacy 迁移归档），不处理当前文件、软链接或其他后缀。"""
     if int(retention_days) < 1:
         raise ValueError("retention_days must be positive")
     cutoff = (today or datetime.date.today()) - datetime.timedelta(days=int(retention_days))
@@ -1385,11 +1385,12 @@ def expired_log_files(log_path, *, retention_days: int = 90, today=None) -> list
     expired = []
     for candidate in path.parent.glob(path.name + ".*"):
         suffix = candidate.name[len(path.name) + 1:]
+        date_text = suffix.removesuffix(".legacy")
         try:
-            day = datetime.date.fromisoformat(suffix)
+            day = datetime.date.fromisoformat(date_text)
         except ValueError:
             continue
-        if suffix == day.isoformat() and day < cutoff and not candidate.is_symlink() and candidate.is_file():
+        if date_text == day.isoformat() and day < cutoff and not candidate.is_symlink() and candidate.is_file():
             expired.append(candidate)
     return sorted(expired)
 
