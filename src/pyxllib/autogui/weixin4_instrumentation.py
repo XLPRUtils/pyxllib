@@ -43,6 +43,9 @@ class WeixinInstrumentationError(RuntimeError):
 
 class WeixinInstrumentationUnavailable(WeixinInstrumentationError):
     """API 不可用；调用方必须失败关闭，禁止降级 GUI。"""
+    # This exception denotes rejection before native sendtext. Exceptions from
+    # sendtext itself are wrapped as WeixinInstrumentationError (unknown).
+    committed = False
 
 
 def account_id_from_root(root: str | Path) -> str:
@@ -56,16 +59,49 @@ def _db_storage_roots(paths) -> set[str]:
     微信切号后仍可能映射旧号的 MMKV 配置；目录位于 db_storage 下并不
     代表账号在线。SQLite/KV 数据库句柄或映射才参与发信账号归属判断。
     """
-    roots = set()
+    roots = {}
     for item in paths:
         parts = Path(item.path).parts
-        if "xwechat_files" in parts and "db_storage" in parts:
-            relative = parts[parts.index("db_storage") + 1:]
+        # Native mapping paths may change case; Windows identity does not.
+        folded = tuple(part.casefold() for part in parts)
+        if "xwechat_files" in folded and "db_storage" in folded:
+            db_index = folded.index("db_storage")
+            if db_index <= folded.index('xwechat_files'):
+                continue
+            relative = parts[db_index + 1:]
             if (not relative or any(part.lower() == "mmkv" for part in relative)
                     or not re.fullmatch(r".+\.(?:db|kvdb)(?:-(?:shm|wal|journal))?", relative[-1], re.IGNORECASE)):
                 continue
-            roots.add(str(Path(*parts[:parts.index("db_storage")])))
-    return roots
+            root = str(Path(*parts[:db_index]))
+            roots.setdefault(root.casefold(), root)
+    return set(roots.values())
+
+
+def observe_live_accounts() -> dict:
+    """Read account evidence from memory mappings only; never enumerate handles.
+
+    An empty mapping is unverified, not proof of logout. Callers may use the
+    explicit resolve_sender preflight when stronger verification is required.
+    """
+    accounts, processes, errors, evidence = [], [], [], []
+    for process in psutil.process_iter():
+        try:
+            if process.name().lower() != 'weixin.exe':
+                continue
+            processes.append(process.pid)
+            mappings = process.memory_maps()
+            roots = _db_storage_roots(mappings)
+            evidence.append({'pid': process.pid, 'mapped_regions': len(mappings),
+                             'profile_mappings': sum('xwechat_files' in item.path.lower() for item in mappings),
+                             'business_database_roots': len(roots)})
+            for root in sorted(roots):
+                accounts.append({'account_id': account_id_from_root(root), 'pid': process.pid,
+                                 'account_root': root, 'create_time': process.create_time()})
+        except psutil.NoSuchProcess:
+            continue
+        except (psutil.AccessDenied, OSError, RuntimeError) as exc:
+            errors.append({'pid': process.pid, 'error': type(exc).__name__})
+    return {'accounts': accounts, 'pids': processes, 'errors': errors, 'mapping_evidence': evidence}
 
 
 def list_live_accounts() -> list[dict]:

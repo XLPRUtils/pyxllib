@@ -32,14 +32,20 @@ def test_reject_contact_snapshot_from_other_account(monkeypatch):
 
 
 @pytest.mark.parametrize("change_account", [False, True])
-def test_send_attaches_only_selected_account_and_rechecks(monkeypatch, change_account):
+def test_send_attaches_only_selected_account_and_rechecks(monkeypatch, change_account, tmp_path):
     calls = []
-    snapshots = iter([[MAIN, SECOND], [SECOND] if change_account else [MAIN, SECOND]])
+    # Before/after the process lock, before attach, immediately before send.
+    snapshots = iter([[MAIN, SECOND]] * 3 + [[SECOND] if change_account else [MAIN, SECOND]])
     monkeypatch.setattr(api, "list_live_accounts", lambda: next(snapshots))
-    monkeypatch.setattr(api, "load_layout", lambda: None)
+    # DLL identity is now validated before and after attaching. Keep those
+    # probes local so the account snapshots test only the intended race.
+    dll = tmp_path / 'Weixin.dll'
+    monkeypatch.setattr(api, "running_weixin_dll", lambda account: dll)
+    monkeypatch.setattr(api, "load_layout", lambda path: None)
     monkeypatch.setattr(api, "_ensure_native_adapter", lambda: None)
     monkeypatch.setattr(api, "_script_source", lambda *args: "")
-    exports = SimpleNamespace(probe=lambda: {"pid": 10}, sendtext=lambda *args: calls.append("send") or {"result": 1})
+    exports = SimpleNamespace(probe=lambda: {"pid": 10, "path": str(dll)},
+                              sendtext=lambda *args: calls.append("send") or {"result": 1})
     script = SimpleNamespace(on=lambda *args: None, load=lambda: None, exports_sync=exports)
     session = SimpleNamespace(create_script=lambda _: script, detach=lambda: calls.append("detach"))
     processes = [SimpleNamespace(pid=20, name="Weixin.exe"), SimpleNamespace(pid=10, name="Weixin.exe")]
@@ -60,6 +66,16 @@ def test_missing_bound_archive_never_rebinds(monkeypatch, tmp_path):
     monkeypatch.setattr(storage, "_load_sync_state", lambda: {"live_account_root": str(tmp_path / "missing")})
     with pytest.raises(WeChatDbError, match="拒绝自动切换"):
         storage.sync_from_live(export_media=False)
+
+
+def test_account_changed_while_waiting_for_lock_never_attaches(monkeypatch):
+    snapshots = iter([[MAIN, SECOND], [SECOND]])
+    monkeypatch.setattr(api, 'list_live_accounts', lambda: next(snapshots))
+    monkeypatch.setattr(api, 'running_weixin_dll', lambda *a: pytest.fail('must stop before native inspection'))
+    monkeypatch.setitem(sys.modules, 'frida', SimpleNamespace(
+        attach=lambda *a: pytest.fail('must not attach after identity changes')))
+    with pytest.raises(api.WeixinInstrumentationUnavailable):
+        api.send_text('filehelper', 'mock only')
 
 
 def test_enumerate_accounts_by_open_paths(monkeypatch, tmp_path):

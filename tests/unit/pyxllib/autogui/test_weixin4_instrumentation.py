@@ -37,6 +37,20 @@ def test_live_sender_ignores_previous_account_mmkv(monkeypatch):
         weixin4_instrumentation.resolve_sender("wxid_old")
 
 
+def test_windows_mapping_case_variants_are_one_business_account(monkeypatch):
+    process = account_process([])
+    process.memory_maps = lambda: [SimpleNamespace(path=path) for path in [
+        'C:/Data/XWECHAT_FILES/wxid_active_abcd/DB_STORAGE/contact/contact.DB-SHM',
+        'c:/data/xwechat_files/wxid_active_abcd/db_storage/message/message_0.db',
+        'C:/Data/XWECHAT_FILES/wxid_old_1234/DB_STORAGE/mmkv/cache.db',
+    ]]
+    process.open_files = lambda: pytest.fail('case variants must not trigger handle scans')
+    monkeypatch.setattr(weixin4_instrumentation.psutil, 'process_iter', lambda: [process])
+    accounts = weixin4_instrumentation.list_live_accounts()
+    assert len(accounts) == 1 and accounts[0]['account_id'] == 'wxid_active'
+    assert weixin4_instrumentation.resolve_sender('wxid_active')['pid'] == 42
+
+
 def test_mmkv_only_mapping_falls_back_to_business_database_handles(monkeypatch):
     process = account_process(["wxid_old_1234/db_storage/MMKV/storage_common"], [
         "wxid_active_abcd/db_storage/session/session.db",
