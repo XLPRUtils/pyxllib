@@ -4,11 +4,27 @@ import sys
 import pytest
 
 from pyxllib.autogui import weixin4_instrumentation as api
+from pyxllib.autogui import wechat_accounts as accounts
 from pyxllib.autogui.wechat_db import WeChatDbStorage, WeChatDbError
 
 
 MAIN = {"account_id": api.DEFAULT_SENDER_ACCOUNT_ID, "pid": 10, "create_time": 1, "account_root": "main"}
 SECOND = {"account_id": "wxid_second", "pid": 20, "create_time": 2, "account_root": "second"}
+
+
+def test_check_account_preflights_the_selected_account(monkeypatch, tmp_path):
+    archive = SimpleNamespace(root=tmp_path, status=lambda: {"ready": True})
+    dll = tmp_path / "Weixin.dll"
+    calls = []
+    monkeypatch.setattr(accounts, "resolve_sender", lambda account_id: SECOND)
+    monkeypatch.setattr(accounts, "get_account_storage", lambda account_id: archive)
+    monkeypatch.setattr(accounts, "running_weixin_dll", lambda account_id: calls.append(("dll", account_id)) or dll)
+    monkeypatch.setitem(sys.modules, "pyxllib.autogui.weixin4_instrumentation",
+                        SimpleNamespace(resolve_recipient_id=lambda name, path: name, preflight=lambda path: {
+                            "ok": path == dll, "dll": str(path)}))
+    result = accounts.check_account(SECOND["account_id"], ["group"])
+    assert result["layout"] == {"ok": True, "dll": str(dll)}
+    assert calls == [("dll", SECOND["account_id"])]
 
 
 def test_select_main_with_two_accounts(monkeypatch):

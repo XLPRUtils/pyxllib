@@ -4,7 +4,7 @@ import re
 
 from pyxllib.autogui.weixin4_instrumentation import (
     DEFAULT_CONTACT_DB, DEFAULT_SENDER_ACCOUNT_ID, WeixinInstrumentationUnavailable,
-    account_id_from_root, resolve_sender,
+    account_id_from_root, resolve_sender, running_weixin_dll,
 )
 from pyxllib.autogui.wechat_db import WeChatDbStorage
 
@@ -54,5 +54,6 @@ def check_account(account_id: str, recipients: list[str]) -> dict:
 
     sender = resolve_sender(account_id)
     storage = get_account_storage(account_id)
-    return {"sender": sender, "archive": storage.status(), "layout": preflight(),
+    return {"sender": sender, "archive": storage.status(),
+            "layout": preflight(running_weixin_dll(account_id)),
             "recipients": {name: resolve_recipient_id(name, storage.root / "contact" / "contact.db") for name in recipients}}
