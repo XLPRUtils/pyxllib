@@ -1044,6 +1044,11 @@ return fetch('/xe.merchant-service-admin.shop_list.get/2.0.0', {
                     exclude_keywords=exclude_keywords,
                 ))
 
+    def query_community_dynamics(self, url, *, start_at, end_at, max_pages=200):
+        """Read ordinary community posts with exact time bounds and stable IDs."""
+        from .community_dynamics import query_community_dynamics
+        return query_community_dynamics(self, url, start_at=start_at, end_at=end_at, max_pages=max_pages)
+
     def export_clockin_data(self, url, download=True, start_date=None, end_date=None,
                             expected_download_name=None, exclude_existing_download_tasks=True):
         """ 导出指定的打卡数据文件 """
