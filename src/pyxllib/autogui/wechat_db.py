@@ -939,7 +939,7 @@ class WeChatDbStorage:
         payload = json.loads(secret.read_text(encoding="utf-8"))
         return payload.get("matches") or {}
 
-    def _copy_live_db_storage(self, live_account_root: Path) -> dict[str, Any]:
+    def _copy_live_db_storage(self, live_account_root: Path, *, databases: set[str] | None = None) -> dict[str, Any]:
         source_root = live_account_root / "db_storage"
         if not source_root.exists():
             raise WeChatDbError(f"本机微信 db_storage 不存在：{source_root}")
@@ -950,11 +950,15 @@ class WeChatDbStorage:
         unchanged = 0
         removed = 0
         errors: list[str] = []
+        selected = {name + suffix for name in (databases or ()) for suffix in ('', '-wal', '-shm')}
+        def sources():
+            candidates = (source_root / name for name in selected) if databases is not None else source_root.rglob('*')
+            return [path for path in candidates if path.is_file()]
         # Treat DB and its WAL as one source generation. A checkpoint during
         # copying must not publish a mixture of two generations.
         before = {p.relative_to(source_root).as_posix(): self._file_fingerprint(p)
-                  for p in source_root.rglob("*") if p.is_file()}
-        for source in source_root.rglob("*"):
+                  for p in sources()}
+        for source in sources():
             if not source.is_file():
                 continue
             rel = source.relative_to(source_root)
@@ -990,12 +994,14 @@ class WeChatDbStorage:
             except Exception as exc:
                 errors.append(f"{rel}: {type(exc).__name__}: {exc}")
         after = {p.relative_to(source_root).as_posix(): self._file_fingerprint(p)
-                 for p in source_root.rglob("*") if p.is_file()}
+                 for p in sources()}
         if before != after:
             errors.append("Source generation changed while copying; retry before publishing")
         if target_root.exists():
-            source_rels = {path.relative_to(source_root).as_posix() for path in source_root.rglob("*") if path.is_file()}
+            source_rels = set(after)
             for rel_key in list(live_db_files):
+                if databases is not None and rel_key not in selected:
+                    continue
                 if rel_key not in source_rels:
                     live_db_files.pop(rel_key, None)
                     removed += 1
@@ -1014,7 +1020,7 @@ class WeChatDbStorage:
             "error_count": len(errors),
         }
 
-    def _decrypt_snapshot_dbs(self, live_account_root: Path) -> dict[str, Any]:
+    def _decrypt_snapshot_dbs(self, live_account_root: Path, *, databases: set[str] | None = None) -> dict[str, Any]:
         source_root = self._raw_snapshot_db_storage(live_account_root)
         matches = self._db_key_matches()
         state = self._load_sync_state()
@@ -1027,6 +1033,8 @@ class WeChatDbStorage:
         for source in sorted(source_root.rglob("*.db")):
             rel = source.relative_to(source_root)
             rel_key = rel.as_posix()
+            if databases is not None and rel_key not in databases:
+                continue
             key_info = matches.get(str(rel)) or matches.get(rel_key) or matches.get(rel_key.replace("/", "\\"))
             if not key_info:
                 skipped += 1
@@ -1792,9 +1800,49 @@ class WeChatDbStorage:
         finally:
             conn.close()
 
-    def session_unread(self) -> dict[str, int]:
+    def list_sessions(self, *, unread_only: bool = False) -> list[dict[str, Any]]:
+        """Session identities independent of chat-history shards, including biz accounts.
+
+        list_chats is a history index and cannot enumerate every visible session:
+        service accounts and newly received conversations may have no ordinary
+        message table. Use this identity list with session_unread(refresh=True)
+        when maintaining the native session UI.
+        """
+        contacts = self._contact_map()
+        rows = []
+        for username, session in self._session_map().items():
+            unread = int(session.get('unread_count') or 0)
+            if unread_only and not unread:
+                continue
+            contact = contacts.get(username) or {}
+            rows.append({'username': username, 'name': _display_name(username, contacts),
+                'unread_count': unread, 'is_folded': bool(int(contact.get('flag') or 0) & 0x10000000),
+                'session_type': session.get('type'), 'last_time': session.get('last_timestamp'),
+                'sort_timestamp': session.get('sort_timestamp'), 'summary': session.get('summary')})
+        return sorted(rows, key=lambda row: row.get('sort_timestamp') or row.get('last_time') or 0, reverse=True)
+
+    def session_unread(self, *, refresh: bool = False) -> dict[str, int]:
         """Unread count per session row, folder entries included (@placeholder_foldgroup,
-        brandsessionholder/brandservicesessionholder) and gh_ accounts without a chat row."""
+        brandsessionholder/brandservicesessionholder) and gh_ accounts without a chat row.
+
+        refresh publishes only the session shard under the account sync lock.
+        Badge maintenance must not rewrite message shards held open by listeners.
+        Missing keys, incomplete copies and publication failures raise instead of
+        returning a stale count that could falsely confirm a GUI action.
+        """
+        if refresh:
+            from filelock import FileLock
+            with FileLock(str(self.root.parent / 'live-sync.lock'), timeout=120):
+                live_root = self._wechat_account_root()
+                if not live_root:
+                    raise WeChatDbError('未找到本机微信账号目录')
+                copied = self._copy_live_db_storage(live_root, databases={'session/session.db'})
+                if copied.get('error_count'):
+                    raise WeChatDbError(f'微信会话快照复制失败：{copied["errors"]}')
+                decrypted = self._decrypt_snapshot_dbs(live_root, databases={'session/session.db'})
+                if (decrypted.get('failed_count') or decrypted.get('skipped') or
+                        decrypted.get('decrypted', 0) + decrypted.get('unchanged', 0) != 1):
+                    raise WeChatDbError(f'微信会话快照发布失败：{decrypted}')
         return {name: int(row.get("unread_count") or 0) for name, row in self._session_map().items()}
 
     def count_chats(self, q: str | None = None, folded: bool | None = None, include_folded_entry: bool = False) -> int:
