@@ -1,6 +1,27 @@
 from pyxllib.autogui.wechat_db import _parse_appmsg
 
 
+def test_group_names_are_keyed_by_id_and_ignore_personal_remarks(tmp_path):
+    import sqlite3
+    import pytest
+    from pyxllib.autogui.wechat_db import WeChatDbStorage
+    folder = tmp_path / 'contact'
+    folder.mkdir()
+    with sqlite3.connect(folder / 'contact.db') as conn:
+        conn.execute('CREATE TABLE contact(username TEXT,nick_name TEXT,remark TEXT)')
+        conn.executemany('INSERT INTO contact VALUES(?,?,?)', [
+            ('123@chatroom', '新群名', '旧备注'), ('456@chatroom', '', '不能代替群名'),
+            ('789@chatroom', '同名群', '')])
+    storage = WeChatDbStorage(tmp_path)
+    assert storage.group_names(['123@chatroom', '456@chatroom', '999@chatroom']) == {'123@chatroom': '新群名'}
+    with sqlite3.connect(folder / 'contact.db') as conn:
+        conn.execute("UPDATE contact SET nick_name='再次改名' WHERE username='123@chatroom'")
+    assert storage.group_names(['123@chatroom']) == {'123@chatroom': '再次改名'}
+    assert storage.group_names([]) == {}
+    with pytest.raises(ValueError):
+        storage.group_names(['任意群名'])
+
+
 def test_literal_like_escape_matches_reserved_and_multiline_text(tmp_path):
     import sqlite3
     from pyxllib.autogui.wechat_db import _safe_like, _literal_like_clause

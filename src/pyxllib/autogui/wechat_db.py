@@ -1800,6 +1800,34 @@ class WeChatDbStorage:
         finally:
             conn.close()
 
+    def group_names(self, chat_ids: list[str]) -> dict[str, str]:
+        """Current canonical group names keyed by stable ``<id>@chatroom``.
+
+        Reads only requested contact metadata from the existing snapshot. A
+        personal remark is not a group rename; missing names are omitted, never
+        replaced with an ID. No GUI, unread-state query or process injection.
+        """
+        ids = list(dict.fromkeys(chat_ids))
+        if any(not re.fullmatch(r'\d+@chatroom', value) for value in ids):
+            raise ValueError('group_names requires stable group chat IDs')
+        if not ids or not self.paths.contact.exists():
+            return {}
+        conn = _connect_readonly(self.paths.contact)
+        try:
+            if not _table_exists(conn, 'contact'):
+                return {}
+            result = {}
+            for start in range(0, len(ids), 500):
+                batch = ids[start:start + 500]
+                rows = conn.execute('SELECT username,nick_name FROM contact WHERE username IN (' +
+                                    ','.join('?' for _ in batch) + ')', batch)
+                for row in rows:
+                    if isinstance(row['nick_name'], str) and row['nick_name'].strip():
+                        result[row['username']] = row['nick_name'].strip()
+            return result
+        finally:
+            conn.close()
+
     def list_sessions(self, *, unread_only: bool = False) -> list[dict[str, Any]]:
         """Session identities independent of chat-history shards, including biz accounts.
 
